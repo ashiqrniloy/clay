@@ -64,7 +64,7 @@ console.log(reloaded.metadata.version);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverReloadDocument` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverReloadDocument` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 

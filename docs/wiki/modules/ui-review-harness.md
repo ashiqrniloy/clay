@@ -26,7 +26,7 @@ scripts/capture-ui-review.sh --fixture ui-review-default --output <artifact-dir>
 Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`). The script:
 
 1. Creates a mode-700 `mktemp` root with isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `TMPDIR`.
-2. Copies the fixture `init.js` to `$home/.config/clay/init.js` and, for document-bearing fixtures, writes `layout.json` v2 with an explicit leaf-form `splitTree` (`{"leaf":{"paneId":1}}` — a null `splitTree` degrades to the default single-pane layout and never reopens documents).
+2. Copies the fixture `init.js` to `$home/.clay/init.js` and, for document-bearing fixtures, writes `layout.json` v2 with an explicit leaf-form `splitTree` (`{"leaf":{"paneId":1}}` — a null `splitTree` degrades to the default single-pane layout and never reopens documents).
 3. Spawns `clay server <socket>` (no `--config-fixture`; that flag is bypassed because fixtures depend on the watcher path) from the private fixture workspace, then `clay client <socket>`. The workspace cwd keeps bootstrap document IDs aligned with the loading SDUI binding. Fixture `init.js` is copied before launch, and the script touches it only after the client shell/handshake is observable so the runtime snapshot is delivered through the live connection.
 4. Polls an embedded python3 GI-Atspi probe for the named state, then records `metadata.txt`, `instructions.md`, `accessibility.txt`, `screenshot.png`, and `review.status` into `--output`. The loading fixture additionally waits for exact `Loading review` / `Loading workspace…` fields in the delivered `RuntimeStateSnapshot` and writes `runtime-tree.txt`; it does not pass on a welcome-only tree.
 
@@ -247,7 +247,7 @@ budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
 
 ## Invariants and Constraints
 
-- Every run uses a fresh mode-700 root: no ambient `~/.config/clay`, no default socket, no ambient server/config.
+- Every run uses a fresh mode-700 root: no ambient `~/.clay`, no default socket, no ambient server/config.
 - Server and client are killed and the root removed on every exit path (timeout included).
 - A missing accessibility bus or unreachable state yields `UNRESOLVED` with a reason (exit 2), never `PASS`.
 - Clay AT-SPI dumps must contain no document secrets or host paths; fixture

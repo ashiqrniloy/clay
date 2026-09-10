@@ -48,7 +48,7 @@ The gates are run once serially (never as concurrent Cargo invocations). `script
 
 ### Bounded configuration and Control Center tests (plan 086 task 7)
 
-Green baseline recorded 2026-08-14 (all serial): `example_configuration_loads_cleanly_and_applies_effects` (0.06 s), `control_center_opens_filters_activates_and_cancels` (0.03 s), `runtime_generation_replacement_cancels_open_control_center` (0.03 s). Each runs under a 5 s whole-workflow `tokio::time::timeout` whose message names pending session/runtime cleanup instead of waiting indefinitely, uses mode-700 hermetic config/workspace roots (never ambient `~/.config/clay`), and asserts cleanup (`drain_bounded` + `close`) plus a sentinel-typography check proving the reloaded generation came from the hermetic root.
+Green baseline recorded 2026-08-14 (all serial): `example_configuration_loads_cleanly_and_applies_effects` (0.06 s), `control_center_opens_filters_activates_and_cancels` (0.03 s), `runtime_generation_replacement_cancels_open_control_center` (0.03 s). Each runs under a 5 s whole-workflow `tokio::time::timeout` whose message names pending session/runtime cleanup instead of waiting indefinitely, uses mode-700 hermetic config/workspace roots (never ambient `~/.clay`), and asserts cleanup (`drain_bounded` + `close`) plus a sentinel-typography check proving the reloaded generation came from the hermetic root.
 
 The watcher-reload tests in `runtime_generation_tests` share the `wait_until` poll helper (10 ms poll, 5 s bound); on timeout its panic reports the scenario plus the live generation id and diagnostic codes so a stalled watcher points at pending session/runtime-replacement cleanup instead of a bare `Elapsed`. `wait_until_panics_with_scenario_and_server_state_on_timeout` pins the diagnostic message.
 
@@ -83,7 +83,7 @@ Without the WebKit/GTK/dbus headers, workspace-wide Cargo commands fail inside
 ### Local build and run (no CI needed)
 
 ```bash
-scripts/build.sh           # frontend/dist + debug clay and clay-desktop
+scripts/build.sh           # stop any running clay, then frontend/dist + debug clay and clay-desktop
 scripts/build.sh run       # same, then target/debug/clay (GUI)
 # equivalent: cd frontend && npm run build && cd .. && cargo build -p clay -p clay-desktop
 cargo run                  # kill leftover default-endpoint servers, then open GUI
@@ -91,6 +91,13 @@ cargo run -- restart       # replace the server, no GUI
 cargo run -- client        # extra GUI against a running server
 CLAY_SERVER_BIN=/path/to/clay-server target/debug/clay-desktop   # explicit override
 ```
+
+`scripts/build.sh` first stops any Clay it finds — the launcher, `clay-desktop`,
+`clay-server`, and the `clay-agent` daemon — because a live desktop keeps
+supervising its own (old) server and would otherwise still be what you saw after
+the rebuild. The match is anchored to this checkout's `target/`, so `cargo`/`rustc`
+(whose argv mentions `target/debug/deps`) and unrelated processes are never hit;
+SIGTERM first, SIGKILL after a 4 s grace.
 
 Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). `src-tauri/build.rs` watches that directory, and `scripts/build.sh` explicitly builds `clay-desktop` after `npm run build`, so production-renderer changes cannot leave a stale embedded GUI. Hot-reload uses Vite instead: `cd frontend && npm run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
 

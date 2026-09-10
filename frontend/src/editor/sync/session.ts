@@ -23,6 +23,8 @@ import {
   editPayload,
   getStatusPayload,
   openPayload,
+  listAgentSettingsPayload,
+  openAgentSettingsPayload,
   reloadPayload,
   requestResyncPayload,
   savePayload,
@@ -35,6 +37,7 @@ export type SendFn = (payload: string) => Promise<void>;
 
 const FEATURE_EVENT_KINDS = new Set([
   "behaviorManifestInstalled",
+  "agentSettingsFiles",
   "decorationSet",
   "decorationBatch",
   "viewportRenderPatch",
@@ -58,6 +61,12 @@ export interface DocumentSession {
   clientId(): number;
   behaviorManifest(): BootstrapDto["behaviorManifest"];
   request(payload: string): Promise<void>;
+  /** Agent settings page (plan 117): request the delivered-file listing;
+   *  the reply arrives as an `agentSettingsFiles` feature event. */
+  listAgentSettings(): void;
+  /** Agent settings page (plan 117): open one listed file by name into the
+   *  normal document pipeline (this session's pane becomes its editor). */
+  openAgentSettings(name: string): void;
   featureSnapshot(): readonly BridgeEnvelope[];
   subscribeFeatures(listener: (envelope: BridgeEnvelope) => void): () => void;
   attachView(view: EditorView): void;
@@ -495,6 +504,12 @@ export function createDocumentSession(options: Options): DocumentSession {
       send(closePayload(meta.documentId, force));
     },
     open: openDocument,
+    listAgentSettings() {
+      send(listAgentSettingsPayload());
+    },
+    openAgentSettings(name: string) {
+      send(openAgentSettingsPayload(name));
+    },
     inFlightOpenPath() {
       return inFlightOpenPath;
     },

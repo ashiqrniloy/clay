@@ -85,7 +85,7 @@ const command = serverRegisterCommand(manifest, { commandId: "markdown.togglePre
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `commands.serverRegisterCommand` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `commands.serverRegisterCommand` in `~/.clay/init.js`.
 
 ## Custom properties
 
@@ -174,7 +174,7 @@ All diagnostics are sanitized — they contain no raw source text, file paths, p
 
 ### Authority
 
-Reload does not broaden package source trust, process grants, filesystem access, network access, shell authority, extension loading, AI mutation, workspace expansion, WASM, raw-op, native-widget, client-side JavaScript, or package-manager authority. It reruns the same `~/.config/clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache. See `docs/reference/clay-js-api/configuration.md#phase-19-persistent-runtime-hot-reload-configuration-review` for the compiled budget table and rejected hidden keys.
+Reload does not broaden package source trust, process grants, filesystem access, network access, shell authority, extension loading, AI mutation, workspace expansion, WASM, raw-op, native-widget, client-side JavaScript, or package-manager authority. It reruns the same `~/.clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache. See `docs/reference/clay-js-api/configuration.md#phase-19-persistent-runtime-hot-reload-configuration-review` for the compiled budget table and rejected hidden keys.
 
 ## Lookup metadata
 

@@ -28,5 +28,18 @@ serveStdio(() => {
     }),
   );
 
+  server.registerTool(
+    "sleep",
+    {
+      title: "Sleep",
+      description: "Sleep for one second (timeout testing).",
+      inputSchema: undefined,
+    },
+    async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return { content: [{ type: "text", text: "slept" }] };
+    },
+  );
+
   return server;
 });

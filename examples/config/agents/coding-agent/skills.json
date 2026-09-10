@@ -1,0 +1,12 @@
+{
+  "roots": {
+    "workspace": { "enabled": true },
+    "configRoot": { "enabled": true },
+    "home": { "enabled": true, "path": "~/.agents" }
+  },
+  "agentSkills": {
+    "wikiSearcher": true,
+    "wikiMaintainer": true,
+    "graft": true
+  }
+}

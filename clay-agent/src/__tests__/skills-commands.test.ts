@@ -63,6 +63,148 @@ test("skill.register stores on kernel; skill.list is catalog-only until load_ski
   host.close();
 });
 
+test("disk skills from workspace, agent config root, and home activate with tool filtering", async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const workspaceRoot = await tempDir();
+  const agentConfigRoot = await tempDir();
+  const homeSkillsRoot = await tempDir();
+  // Workspace keeps the npx skills layout; agent config + home roots scan
+  // `<root>/skills/` (decision 2026-09-09-1420).
+  const skillDir = (root: string, name: string) => join(root, "skills", name);
+  const workspaceSkillDir = (name: string) => join(workspaceRoot, ".agents", "skills", name);
+  const writeSkill = async (dir: string, name: string, frontmatter: string) => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "SKILL.md"), `---\n${frontmatter}\n---\n
+Body instructions for ${name}.`, "utf8");
+  };
+  await writeSkill(workspaceSkillDir("repo-skill"), "repo-skill", `name: repo-skill
+description: Repo-level skill.`);
+  await writeSkill(skillDir(agentConfigRoot, "config-skill"), "config-skill", `name: config-skill
+description: Agent config skill.`);
+  await writeSkill(skillDir(homeSkillsRoot, "home-skill"), "home-skill", `name: home-skill
+description: Home skill.`);
+  // Names an inactive tool for a tool-less profile: must be skipped, not fatal.
+  await writeSkill(workspaceSkillDir("needs-missing-tool"), "needs-missing-tool", `name: needs-missing-tool
+description: Wants tools.
+tools:
+  - repo_search`);
+
+  const host = await ClayAgentHost.create({
+    dataDir: await tempDir(),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    agentConfigRoot,
+    homeSkillsRoot,
+  });
+  await host.handle("agentProfile.register", { name: "chat" });
+  const created = (await host.handle("session.new", {
+    profile: "chat",
+    provider: "mock",
+    model: "demo",
+    workspaceRoot,
+  })) as { sessionId: string; tools: string[] };
+  assert.ok(created.tools.includes("load_skill"), "discovered skills host load_skill");
+
+  const catalog = (await host.handle("skill.list", {})) as {
+    skills: Array<{ name: string; toolNames?: string[]; instructions?: string }>;
+  };
+  const names = catalog.skills.map((skill) => skill.name);
+  assert.ok(names.includes("repo-skill"), "workspace .agents/skills discovered");
+  assert.ok(names.includes("config-skill"), "agent config root skills/ discovered");
+  assert.ok(names.includes("home-skill"), "home skills/ discovered");
+  // needs-missing-tool registers too, but its repo_search toolName is
+  // inactive for the tool-less chat profile — proven by session.new NOT
+  // throwing "requires inactive tool" (fail-closed would brick the session).
+  assert.ok(names.includes("needs-missing-tool"), "inactive-tool skill still catalogued");
+  for (const skill of catalog.skills) {
+    assert.equal(skill.instructions, undefined, "catalog stays progressive for discovered skills");
+  }
+
+  // load_skill pulls the discovered body.
+  const registry = createSkillRegistry(
+    catalog.skills.map((skill) => ({
+      name: skill.name,
+      ...(skill.toolNames ? { toolNames: skill.toolNames } : {}),
+      instructions: `Body of ${skill.name}`,
+    })),
+  );
+  const loaded = createLoadedSkillSet();
+  const tool = createLoadSkillTool({ registry, tools: [] });
+  const result = await tool.execute(
+    { name: "repo-skill" },
+    { ...context(), metadata: { loadedSkills: loaded, activeToolNames: [] } },
+  );
+  assert.equal((result.value as { ok?: boolean }).ok, true);
+  host.close();
+});
+
+test("skills.json gates discovery roots; malformed file falls back to defaults", async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const workspaceRoot = await tempDir();
+  const agentConfigRoot = await tempDir();
+  const homeSkillsRoot = await tempDir();
+  const writeSkill = async (dir: string, name: string, description: string) => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "SKILL.md"),
+      `---\nname: ${name}\ndescription: ${description}\n---\nBody of ${name}.`,
+      "utf8",
+    );
+  };
+  const configSkillDir = join(agentConfigRoot, "skills", "config-skill");
+  const homeSkillDir = join(homeSkillsRoot, "skills", "home-skill");
+  const workspaceSkillDir = join(workspaceRoot, ".agents", "skills", "repo-skill");
+  await writeSkill(configSkillDir, "config-skill", "Agent config skill.");
+  await writeSkill(homeSkillDir, "home-skill", "Home skill.");
+  await writeSkill(workspaceSkillDir, "repo-skill", "Repo skill.");
+  // Reserved agent-delivered name never comes from disk discovery.
+  await writeSkill(join(agentConfigRoot, "skills", "graft"), "graft", "Should be skipped.");
+
+  // Root gates + relative home path rejected fail-closed; unknown key warned.
+  await writeFile(
+    join(agentConfigRoot, "skills.json"),
+    JSON.stringify({
+      roots: { configRoot: { enabled: false }, home: { enabled: true, path: "relative/path" } },
+      agentSkills: { graft: false },
+      bogusKey: 1,
+    }),
+    "utf8",
+  );
+  const gated = await ClayAgentHost.create({
+    dataDir: await tempDir(),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    agentConfigRoot,
+    homeSkillsRoot,
+  });
+  await gated.handle("agentProfile.register", { name: "chat" });
+  await gated.handle("session.new", { profile: "chat", provider: "mock", model: "demo", workspaceRoot });
+  const gatedCatalog = (await gated.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  const gatedNames = gatedCatalog.skills.map((skill) => skill.name);
+  assert.ok(!gatedNames.includes("config-skill"), "disabled config root not scanned");
+  assert.ok(!gatedNames.includes("home-skill"), "relative home path disables home root");
+  assert.ok(gatedNames.includes("repo-skill"), "workspace discovery unaffected by gates");
+  assert.ok(!gatedNames.includes("graft"), "reserved agent-delivered name skipped");
+  gated.close();
+
+  // Malformed skills.json = all roots on with defaults, never a broken boot.
+  await writeFile(join(agentConfigRoot, "skills.json"), "{ not json", "utf8");
+  const fallback = await ClayAgentHost.create({
+    dataDir: await tempDir(),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    agentConfigRoot,
+    homeSkillsRoot,
+  });
+  await fallback.handle("agentProfile.register", { name: "chat" });
+  await fallback.handle("session.new", { profile: "chat", provider: "mock", model: "demo", workspaceRoot });
+  const fallbackCatalog = (await fallback.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  const fallbackNames = fallbackCatalog.skills.map((skill) => skill.name);
+  assert.ok(fallbackNames.includes("config-skill"), "malformed config falls back to enabled roots");
+  assert.ok(fallbackNames.includes("home-skill"), "malformed config falls back to enabled home root");
+  fallback.close();
+});
+
 test("skill.register duplicate name fails closed", async () => {
   const host = await ClayAgentHost.create({
     dataDir: await tempDir(),
@@ -583,5 +725,32 @@ test("create-plan skill run writes a plans/ doc with parseable todos and a check
   assert.equal(checkpoint.todos.length, 2);
 
   await rm(workspaceRoot, { recursive: true, force: true });
+  host.close();
+});
+
+test("shipped example skills.json activates cleanly under the real loader", async () => {
+  // The canonical example a new user copies (examples/config/) must stay
+  // valid against the actual loader, not just the README prose (plan 117
+  // config task). Run against a TEMP COPY: create() seeds the config root,
+  // and the repo's example tree must never gain user-state files.
+  const { fileURLToPath } = await import("node:url");
+  const { cp, mkdtemp } = await import("node:fs/promises");
+  const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
+  const agentConfigRoot = join(await mkdtemp(join(tmpdir(), "clay-example-")), "coding-agent");
+  await cp(join(repoRoot, "examples", "config", "agents", "coding-agent"), agentConfigRoot, {
+    recursive: true,
+  });
+  const workspaceRoot = await tempDir();
+  const host = await ClayAgentHost.create({
+    dataDir: await tempDir(),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    agentConfigRoot,
+  });
+  await host.handle("agentProfile.register", { name: "chat" });
+  await host.handle("session.new", { profile: "chat", provider: "mock", model: "demo", workspaceRoot });
+  const catalog = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  // All defaults on: nothing threw, discovery ran with every root enabled.
+  assert.ok(Array.isArray(catalog.skills), "example config boots the agent cleanly");
   host.close();
 });

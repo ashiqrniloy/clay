@@ -71,7 +71,7 @@ What it verifies against the real desktop accessibility stack:
 - Node identities stay stable across a second query (no per-pass virtual
   node churn).
 - Every run uses a mode-700 temporary IPC/config home — never the ambient
-  `~/.config/clay`, `~/.local/share/clay`, or default socket — and kills
+  `~/.clay`, `~/.local/share/clay`, or default socket — and kills
   both child processes and removes the temp directory on every exit path.
 
 The pre-cutover native accessibility unit tests (plan 086 task 3,
@@ -151,7 +151,7 @@ fixtures live under
 | `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
 
 Each run copies its named `init.js` into a mode-700 temporary
-`HOME/.config/clay`, uses a mode-700 temporary XDG config/data/socket root,
+`HOME/.clay`, uses a mode-700 temporary XDG config/data/socket root,
 creates only bounded fixture documents, and removes the launch root and raw
 process logs on exit. The script writes `instructions.md`, `metadata.txt`,
 `screenshot.png`, `accessibility.txt`, and `review.status` under the caller's
@@ -182,7 +182,7 @@ both the image and the AT-SPI dump before recording a visual result.
 
 ## Default End-User Configuration
 
-The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.config/clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:
+The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -194,7 +194,7 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 
 This is the Markdown product baseline. It is deliberately distinct from the smoke fixtures under `tests/fixtures/configuration/`:
 
-- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, and `serverPublishDecorations`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported and is not the documented setup.
+- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, and `serverPublishDecorations`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.clay/init.js` is not supported and is not the documented setup.
 - **End-user (product baseline):** the one-line `loadPackage("@clay/markdown")` plus the explicit `Ctrl+O` `bindKey`. No inline manifest object, no per-facade registration imports, no `publishTree` panel publication.
 
 Markdown end-user baseline invariants:
@@ -273,7 +273,7 @@ Phase 18.8 adds the server-owned `CommandExecutor` validation boundary, the gene
 
 Manual Control Center smoke:
 
-1. Create or extend `~/.config/clay/init.js` to bind a key to the built-in command:
+1. Create or extend `~/.clay/init.js` to bind a key to the built-in command:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -296,15 +296,15 @@ What the manual smoke adds on top of automated tests: the rendered bottom-pane o
 
 ### Phase 18.9 built-in fallback mode smoke (no `init.js`)
 
-Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `core.code` (registered at server startup through `ModeRegistry::new()`), so any file opens into a predictable, editable mode even when no language package is installed, disabled, or invalid — and first open needs no JavaScript round trip for fallback editing because the built-in modes are registered before any configuration/package evaluation runs. No `~/.config/clay/init.js` line and no `loadPackage` step are required for fallback editing.
+Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `core.code` (registered at server startup through `ModeRegistry::new()`), so any file opens into a predictable, editable mode even when no language package is installed, disabled, or invalid — and first open needs no JavaScript round trip for fallback editing because the built-in modes are registered before any configuration/package evaluation runs. No `~/.clay/init.js` line and no `loadPackage` step are required for fallback editing.
 
 Manual fallback smoke:
 
-1. Launch Clay with **no `~/.config/clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
+1. Launch Clay with **no `~/.clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
 2. Open a plain-text file such as a `README.txt` (or any file whose extension no package claims). Confirm the document opens editable with generic Tab/Enter/backspace behavior — its active major mode is the built-in `core.text` universal fallback (`modes.explainActiveMode` reports `fallbackUsed: true`).
 3. Open a code-like file such as `main.rs` (or any file with one of the curated built-in `core.code` extensions). Confirm the document opens editable with code-oriented behavior — its active major mode is the built-in `core.code` fallback, and closing braces/brackets/parens reflow via electric outdent rules shipped by the `core_code_editing` manifest.
 4. Confirm ordinary typing stays local and optimistic and that no synchronous JavaScript round trip occurs before local paint (built-in mode manifests are inert `ClientFirstPredictable` data executed by Rust-known engines).
-5. (Optional) Add the one-line default loader to `~/.config/clay/init.js` and relaunch:
+5. (Optional) Add the one-line default loader to `~/.clay/init.js` and relaunch:
    ```js
    import { loadPackage } from "clay:packages";
    await loadPackage("@clay/markdown");
@@ -330,7 +330,7 @@ await loadPackage("@clay/markdown");
 
 Manual syntax smoke:
 
-1. Put the four `loadPackage` lines above in `~/.config/clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
+1. Put the four `loadPackage` lines above in `~/.clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
 2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
 3. Open small `.rs`, `.ts`, `.tsx`, `.js`, and `.md` files similar to `tests/fixtures/syntax/rust.rs`, `tests/fixtures/syntax/typescript.ts`, `tests/fixtures/syntax/typescript.tsx`, `tests/fixtures/syntax/javascript.js`, and `tests/fixtures/syntax/markdown.md`.
 4. Confirm each file renders text immediately and remains editable under its active `core.code`/`core.text` fallback behavior while syntax decorations arrive asynchronously from the background parse/decor path.
@@ -352,7 +352,7 @@ await loadPackage("@clay/javascript");
 await loadPackage("@clay/markdown");
 ```
 
-To exercise explicit engine selection from `~/.config/clay/init.js`, set the preference before loading the package:
+To exercise explicit engine selection from `~/.clay/init.js`, set the preference before loading the package:
 
 ```js
 import { setSyntaxEnginePreference } from "clay:syntax";
@@ -387,7 +387,7 @@ Automated coverage: `first_party_language_fixtures_produce_themed_vocabulary_dec
 
 ### Phase 18.16.5 typography smoke
 
-Use one complete `setTypography` call in `~/.config/clay/init.js`, then launch with `cargo run`. Repeat with Gruvbox Material dark and light themes and UI/document sizes 6 px, defaults, and 40 px.
+Use one complete `setTypography` call in `~/.clay/init.js`, then launch with `cargo run`. Repeat with Gruvbox Material dark and light themes and UI/document sizes 6 px, defaults, and 40 px.
 
 Manual matrix:
 
@@ -406,7 +406,7 @@ Phase 18.17 adds viewport-bounded `DiagnosticSet` transport for explicit analyze
 
 Manual matrix:
 
-1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.config/clay/init.js`).
+1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.clay/init.js`).
 2. Open valid and incomplete `.rs`, `.ts`, `.tsx`, `.js`, and `.md` snippets. Confirm syntax highlighting appears without red squiggles from Tree-sitter.
 3. Type and scroll while a slow reparse is outstanding. Local typing/scroll remain responsive and no parser-recovery diagnostics appear.
 4. If testing an explicit analyzer package, confirm only its validated `DiagnosticSet` produces themed squiggles and that a status-level runtime diagnostic does not become an inline mark.
@@ -546,11 +546,11 @@ bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 
 #### Product `cargo run` configuration path
 
-The smoke fixture above is the checked-in equivalent of the real end-user configuration path. To exercise the actual product workflow without a fixture, place the same shape in `~/.config/clay/init.js` and run a bare `cargo run`:
+The smoke fixture above is the checked-in equivalent of the real end-user configuration path. To exercise the actual product workflow without a fixture, place the same shape in `~/.clay/init.js` and run a bare `cargo run`:
 
 ```bash
 cargo run
-# with ~/.config/clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
+# with ~/.clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
 # Ctrl+B to workspace.toggleFileBrowser, and native Ctrl+C / Ctrl+Shift+C to copy
 ```
 
@@ -681,7 +681,7 @@ Phase 19 starts from this baseline:
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
 
-1. Load the first-party Markdown package and configure the key binding through `~/.config/clay/init.js`, or use the repository fixture with `cargo run -- smoke-gui --config-fixture windows-markdown-open`:
+1. Load the first-party Markdown package and configure the key binding through `~/.clay/init.js`, or use the repository fixture with `cargo run -- smoke-gui --config-fixture windows-markdown-open`:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -708,7 +708,7 @@ Phase 18.11 adds the `CompletionTriggerAndResult` primitive, the server-side com
 
 Manual completion smoke:
 
-1. Configure the manual completion trigger key binding through `~/.config/clay/init.js`:
+1. Configure the manual completion trigger key binding through `~/.clay/init.js`:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -744,7 +744,7 @@ Phase 18.20 discoverable commands (empty default key bindings):
 
 Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 
-1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings accept single strokes and space-separated multi-stroke chords (for example `bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" })`); function keys remain unsupported.
+1. Bind one command in `~/.clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings accept single strokes and space-separated multi-stroke chords (for example `bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" })`); function keys remain unsupported.
 2. Launch Clay and place the caret in an editable document.
 3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
 4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
@@ -756,7 +756,7 @@ Phase 18.21 compatibility markers: `authorizeLanguageServer`, `@clay/lsp-rust`, 
 Manual Phase 18.21 bridge smoke (host tools required):
 
 1. Install the host language servers you want to exercise (`rust-analyzer` via `rustup`, `typescript-language-server` + compatible `typescript@5.9.x`, and/or `marksman`).
-2. For bare `cargo run`, create the directory root before authorization in `~/.config/clay/init.js`; `workspaceRootIds` must identify roots that already exist when configuration evaluates:
+2. For bare `cargo run`, create the directory root before authorization in `~/.clay/init.js`; `workspaceRootIds` must identify roots that already exist when configuration evaluates:
    ```js
    import { serverAddWorkspaceRoot } from "clay:workspace";
    import { authorizeLanguageServer } from "clay:language-server";
@@ -815,7 +815,7 @@ The first client should show `Connected — Editable`; the second should show `C
 
 ## Runtime Diagnostic Smoke Expectations
 
-To manually validate runtime diagnostics, temporarily use an invalid local configuration such as a syntax error in `~/.config/clay/init.js` or an unauthorized import. Start the foreground server and GUI client:
+To manually validate runtime diagnostics, temporarily use an invalid local configuration such as a syntax error in `~/.clay/init.js` or an unauthorized import. Start the foreground server and GUI client:
 
 ```bash
 cargo run -- server
@@ -835,7 +835,7 @@ Phase 20.1 expanded the typed token catalog, typography hierarchy, and token-bac
 
 Manual matrix (no pixel goldens):
 
-1. Launch with no `~/.config/clay/init.js` (empty defaults). Confirm editor renders with core fallback tokens (sidebar 240px, spacing scale 1.0). Open a file and type; status/shared-ui chrome must render without re-resolution artifacts.
+1. Launch with no `~/.clay/init.js` (empty defaults). Confirm editor renders with core fallback tokens (sidebar 240px, spacing scale 1.0). Open a file and type; status/shared-ui chrome must render without re-resolution artifacts.
 2. Set Gruvbox Material dark theme plus default typography:
    ```js
    import { setTheme, setTypography } from "clay:theme";

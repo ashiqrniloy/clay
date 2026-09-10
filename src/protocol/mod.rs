@@ -256,6 +256,32 @@ pub fn bounded_document_chunk_bytes(max_bytes: u32) -> Result<usize, DocumentChu
     Ok((max_bytes as usize).min(crate::perf::budgets::MAX_CHUNK_BYTES))
 }
 
+/// One agent-delivered settings file (plan 117): bounded metadata for the
+/// settings page listing. Inert: names + provenance only, never content.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSettingsFileInfo {
+    /// Canonical layout name: `SYSTEM.md` or `skills/<dir>/SKILL.md`.
+    pub name: String,
+    /// Absolute display path (server-resolved; the client never supplies one).
+    pub display_path: String,
+    pub size_bytes: u64,
+    pub modified_ms: Option<u64>,
+    /// False when the file still matches the daemon's seed stamp
+    /// (`.seed-manifest.json`), true on any mismatch or missing stamp.
+    pub edited: bool,
+}
+
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -1966,6 +1992,18 @@ pub enum ClientMessage {
         capability: String,
         selected_path: String,
     },
+    /// Agent settings page (plan 117): list the daemon-delivered config files
+    /// (SYSTEM.md + seeded skills/<name>/SKILL.md). Paths are built server-side
+    /// from the configuration root; the client supplies no path.
+    ListAgentSettingsFiles {
+        client_id: ClientId,
+    },
+    /// Agent settings page (plan 117): open one listed file into the normal
+    /// document pipeline by server-validated name (no webview-supplied paths).
+    OpenAgentSettingsFile {
+        client_id: ClientId,
+        name: String,
+    },
     AddSelectedWorkspaceRoot {
         client_id: ClientId,
         /// Server-issued single-use selected-path capability token. Required so
@@ -2935,6 +2973,12 @@ pub enum ServerMessage {
         message: String,
         workspace_root_id: Option<WorkspaceRootId>,
         document_id: Option<DocumentId>,
+    },
+    /// Agent settings page (plan 117): the bounded listing for
+    /// ListAgentSettingsFiles. Empty when no config root exists.
+    AgentSettingsFiles {
+        client_id: ClientId,
+        files: Vec<AgentSettingsFileInfo>,
     },
     RuntimeDiagnostic(RuntimeDiagnostic),
     /// Phase 18.11 completion result set. Bounded, versioned, provenance-bearing

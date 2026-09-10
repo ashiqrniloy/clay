@@ -68,7 +68,7 @@ console.log(result.entryId, result.strategy);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `agent.compact` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `agent.compact` in `~/.clay/init.js`.
 
 ## Custom properties
 

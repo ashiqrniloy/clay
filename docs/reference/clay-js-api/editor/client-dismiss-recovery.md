@@ -53,7 +53,7 @@ bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientDismissRecovery, clientRequestResync } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 

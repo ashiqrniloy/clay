@@ -30,7 +30,7 @@ Decision source: `decision-logs/2026-07-21-0001-two-package-runtime-trust-domain
 
 Each Clay phase plan that implements or materially changes a JS package, package runtime capability, editor mode package, package loader, or package configuration surface must include acceptance criteria and/or a dedicated task for the end-user `init.js` loading experience. It must require:
 
-- The package is explicitly loaded from `~/.config/clay/init.js`; packages never become behavior-changing defaults silently. Preferred setup: one-line explicit load (`loadPackage("@clay/markdown")` or equivalent).
+- The package is explicitly loaded from `~/.clay/init.js`; packages never become behavior-changing defaults silently. Preferred setup: one-line explicit load (`loadPackage("@clay/markdown")` or equivalent).
 - Normal package defaults work after the one-line load without copied manifests, low-level facade plumbing, manual primitive registration, test-only SDUI, or representative decoration publication in user config.
 - Customization may use documented Clay/package JS APIs but stays optional for common use unless a package has a documented reason.
 - If one-line default loading is impossible, the plan identifies the generic Clay primitive/API gap and documents longer setup as temporary fallback/limitation, not preferred convention.
@@ -91,7 +91,7 @@ Recommended title: `- [ ] Create or verify Clay JS APIs for public programmatic 
 Each Clay plan document that adds or changes user-visible behavior, commands, key bindings, customization, extension points, server APIs, protocol capabilities, or public programmatic surfaces must include a separate configuration task, requiring:
 
 - Review the phase implementation and propose configuration APIs for extensibility, customization, key binding, user/agent discovery; treat every configuration option as a Clay JS API, not an undocumented key.
-- `~/.config/clay/init.js` is the user configuration entry point; `init.js` may load other local configuration files for modular configuration when implemented.
+- `~/.clay/init.js` is the user configuration entry point; `init.js` may load other local configuration files for modular configuration when implemented.
 - Add or update Clay JS API docs for configuration APIs (user-facing name, key bindings, custom properties, examples, permissions/security notes, lookup tags); link from `docs/index.md`; update generated registry artifacts.
 - Add tests/coverage gates that fail for undocumented configuration APIs or behavior-changing settings missing from `custom_properties`.
 - Preserve security boundaries: configuration never implicitly grants filesystem, network, shell, extension loading, AI mutation, or workspace authority.
@@ -113,7 +113,7 @@ Recommended title: `- [ ] Update the canonical example configuration (examples/c
 
 Each Clay plan that includes an Example Configuration Maintenance Task must also include a separate task that launch-tests the real app against a copy of the canonical example config — updating the file without running the app is not sufficient. The task should require:
 
-- Copy `examples/config/init.js` (plus `examples/config/packages/` when present) to an isolated scratch config root (e.g. temp `HOME`/`.config/clay`); never launch against the developer's real profile.
+- Copy `examples/config/init.js` (plus `examples/config/packages/` when present) to an isolated scratch config root (e.g. temp `HOME`/`.clay`); never launch against the developer's real profile.
 - Launch a real Linux GUI build (server + client) with that config and verify healthy startup: client reaches Connected, configuration evaluation commits a generation with no `configuration failed` diagnostics, shell responds to interaction (open a pane, run a command, open a menu).
 - Exercise the surfaces the plan changed as loaded from the example config: theme/appearance/typography apply visually, `bindKey` commands fire, `loadPackage`'d packages register contributions (profiles, commands, language modes), new option values take effect. Verify design-system/theme selections render as the selected system (e.g. `setDesignSystem("@clay/design-glass")` shows glass recipes — rounded 1px-border controls — not the neobrutal fallback; a failed activation silently falls back and users report it as "the wrong design system").
 - Record the launch command, scratch config path, and observed results in the task evidence. A broken or degraded app under the example config is a product defect (or an explicitly prioritized follow-up), never a docs-only fix.

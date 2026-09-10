@@ -136,6 +136,10 @@ fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
     if !snapshot.extensions.is_empty() {
         state_value["extensions"] = serde_json::json!(snapshot.extensions);
     }
+    if !snapshot.skills.is_empty() {
+        state_value["skills"] =
+            serde_json::to_value(&snapshot.skills).unwrap_or(serde_json::Value::Null);
+    }
     let state = AgUiEvent::StateSnapshot {
         snapshot: state_value,
     };
@@ -237,6 +241,13 @@ fn adapt_wire_event(session_id: &str, event: &AgentWireEvent) -> Vec<AgUiEvent> 
             run_id: run_id.clone(),
             result: Some(serde_json::json!({ "usage": usage })),
         }],
+        // Plan 117 token meter: the meter numerator rides a custom event so
+        // the strip updates live per provider turn (snapshots only flow on
+        // bind/switch/settle). Counters only — never content.
+        AgentWireEvent::ContextTokens { tokens, .. } => vec![AgUiEvent::Custom {
+            name: "clay.contextTokens".into(),
+            value: serde_json::json!({ "tokens": tokens }),
+        }],
         AgentWireEvent::MessageDelta { run_id, text, .. } => vec![AgUiEvent::TextMessageChunk {
             message_id: text_message_id(run_id),
             delta: text.clone(),
@@ -313,7 +324,7 @@ pub fn diagnostic_is_terminal(code: &str, message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::protocol::AgentSlashCommand;
+    use crate::protocol::{AgentMcpServerInfo, AgentSkillInfo, AgentSlashCommand};
 
     use super::*;
     use crate::protocol::{
@@ -341,6 +352,7 @@ mod tests {
             commands: Vec::new(),
             branch: String::new(),
             extensions: Vec::new(),
+            skills: Vec::new(),
         }
     }
 
@@ -378,18 +390,37 @@ mod tests {
     }
 
     #[test]
-    fn state_snapshot_carries_mcp_server_names_for_extension_strip() {
-        // Plan 108 task 8: the extension strip shows the configured MCP
-        // servers. Names only — commands/args/env never reach the client.
+    fn state_snapshot_carries_mcp_server_outcomes() {
+        // Plan 117: the MCP card + composer section read per-server connect
+        // outcomes. Ids/counts/errors only — commands/args/env never reach
+        // the client.
         let mut snapshot = sample_snapshot();
-        snapshot.mcp_servers = vec!["files".into(), "search".into()];
+        snapshot.mcp_servers = vec![
+            AgentMcpServerInfo {
+                server_id: "files".into(),
+                connected: true,
+                tools: 3,
+                error: String::new(),
+            },
+            AgentMcpServerInfo {
+                server_id: "search".into(),
+                connected: false,
+                tools: 0,
+                error: "spawn failed".into(),
+            },
+        ];
         let events = snapshot_events(&snapshot);
         let AgUiEvent::StateSnapshot { snapshot } = &events[1] else {
             panic!("state snapshot expected");
         };
         assert_eq!(
             snapshot["mcpServers"],
-            serde_json::json!(["files", "search"])
+            serde_json::json!(
+                [
+                    {"serverId": "files", "connected": true, "tools": 3, "error": ""},
+                    {"serverId": "search", "connected": false, "tools": 0, "error": "spawn failed"}
+                ]
+            )
         );
     }
 
@@ -619,6 +650,7 @@ mod tests {
                 profile: "chat".into(),
                 updated_at: "2026-08-23T00:00:00Z".into(),
                 label: String::new(),
+                updated_at_label: String::new(),
             }],
             provider: "mock".into(),
             model: "mock-mini".into(),
@@ -650,6 +682,27 @@ mod tests {
     }
 
     #[test]
+    fn context_tokens_rides_a_custom_event() {
+        // Plan 117 token meter: the per-turn occupancy reaches the client
+        // live as a bounded-counter custom event (no transcript row).
+        let events = adapt_agent_message(&AgentServerMessage::Event {
+            session_id: "sess-1".into(),
+            event: AgentWireEvent::ContextTokens {
+                session_id: "sess-1".into(),
+                run_id: "run-9".into(),
+                tokens: 220_000,
+            },
+        });
+        assert_eq!(
+            events,
+            vec![AgUiEvent::Custom {
+                name: "clay.contextTokens".into(),
+                value: serde_json::json!({ "tokens": 220_000 }),
+            }]
+        );
+    }
+
+    #[test]
     fn snapshot_state_carries_environment_only_when_known() {
         // Plan 109 R1/R2/R3: completion commands, the git branch, and the
         // extension list ride STATE when present; empty values are omitted
@@ -666,6 +719,7 @@ mod tests {
         assert!(state.get("commands").is_none());
         assert!(state.get("branch").is_none());
         assert!(state.get("extensions").is_none());
+        assert!(state.get("skills").is_none());
 
         let full = AgentSessionSnapshot {
             commands: vec![AgentSlashCommand {
@@ -674,6 +728,10 @@ mod tests {
             }],
             branch: "main".into(),
             extensions: vec!["wiki".into()],
+            skills: vec![AgentSkillInfo {
+                name: "create-plan".into(),
+                description: "Numbered plan documents.".into(),
+            }],
             ..sample_snapshot()
         };
         let events = adapt_agent_message(&AgentServerMessage::Snapshot(full));
@@ -691,6 +749,11 @@ mod tests {
         );
         assert_eq!(state["branch"], "main");
         assert_eq!(state["extensions"][0], "wiki");
+        assert_eq!(state["skills"][0]["name"], "create-plan");
+        assert_eq!(
+            state["skills"][0]["description"],
+            "Numbered plan documents."
+        );
     }
 
     #[test]

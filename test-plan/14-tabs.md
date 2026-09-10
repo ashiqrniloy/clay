@@ -137,7 +137,7 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 
 ## Window-state persistence (Phase 22.5)
 
-Client-owned `layout.json` v2 (in `~/.config/clay/` or `$XDG_CONFIG_HOME`)
+Client-owned `layout.json` v2 (in `~/.clay/layout.json`; legacy `$XDG_CONFIG_HOME/clay/layout.json` still loads)
 persists tab order, the active tab, each tab's workspace root + split tree,
 and each pane's open document; a full quit/relaunch (client AND server)
 restores the window. Deep reference:

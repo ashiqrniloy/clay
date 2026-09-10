@@ -41,7 +41,7 @@ Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-clien
 
 ## When to use
 
-Use this API when a user wants to bind a direction-named pane-management chord in `~/.config/clay/init.js`. New configuration should prefer the canonical `shell.clientSplitPaneVertical`; the alias exists for direction-named bindings and help discovery.
+Use this API when a user wants to bind a direction-named pane-management chord in `~/.clay/init.js`. New configuration should prefer the canonical `shell.clientSplitPaneVertical`; the alias exists for direction-named bindings and help discovery.
 
 ## JavaScript usage
 
@@ -61,7 +61,7 @@ bindKey("Ctrl+Shift+Right", "shell.clientSplitPaneRight", { scope: "global" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientSplitPaneRight } from "clay:shell";
 import { bindKey } from "clay:keybindings";
 

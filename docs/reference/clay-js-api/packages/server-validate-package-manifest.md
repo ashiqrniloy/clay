@@ -80,7 +80,7 @@ const validated = serverValidatePackageManifest({ name: "@clay/markdown", versio
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `packages.serverValidatePackageManifest` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `packages.serverValidatePackageManifest` in `~/.clay/init.js`.
 
 ## Custom properties
 

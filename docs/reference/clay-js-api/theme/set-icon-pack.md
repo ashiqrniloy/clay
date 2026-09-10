@@ -43,7 +43,7 @@ Icon selection is independent of theme, appearance, and design-system selections
 
 ## When to use
 
-Use from `~/.config/clay/init.js` (or a local configuration module) to select the icon style at startup. Omit the call entirely for the zero-configuration default: the bundled Regular subset is active with no init.js icon lines and no package load entry. The recommended explicit path for third-party packs is `loadPackage` then `setIconPack` — the same load-versus-select split as packages and design systems, not a missing one-line primitive:
+Use from `~/.clay/init.js` (or a local configuration module) to select the icon style at startup. Omit the call entirely for the zero-configuration default: the bundled Regular subset is active with no init.js icon lines and no package load entry. The recommended explicit path for third-party packs is `loadPackage` then `setIconPack` — the same load-versus-select split as packages and design systems, not a missing one-line primitive:
 
 ```ts
 import { loadPackage } from "clay:packages";

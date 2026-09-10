@@ -464,16 +464,30 @@ impl AgentPicker {
                 })
                 .collect(),
             AgentPickerKind::Agent => self.agent_items(),
+            // Plan 117 follow-up: the row's identity is the store label (the
+            // session's opening prompt), not the profile — every session of a
+            // workspace shares one profile, so `profile` rendered six
+            // identical rows. The second line is the last-active local stamp.
             AgentPickerKind::Session => self
                 .inventory
                 .sessions
                 .iter()
                 .map(|session| {
-                    item(
-                        &format!("session:{}", session.id),
-                        &session.profile,
-                        &session.updated_at,
-                    )
+                    let label = if session.label.is_empty() {
+                        if session.profile.is_empty() {
+                            "Untitled session".to_string()
+                        } else {
+                            session.profile.clone()
+                        }
+                    } else {
+                        session.label.clone()
+                    };
+                    let detail = if session.updated_at_label.is_empty() {
+                        session.updated_at.clone()
+                    } else {
+                        session.updated_at_label.clone()
+                    };
+                    item(&format!("session:{}", session.id), &label, &detail)
                 })
                 .collect(),
             AgentPickerKind::SessionSearch => {
@@ -719,6 +733,7 @@ mod tests {
                 profile: "Chat".into(),
                 updated_at: "now".into(),
                 label: String::new(),
+                updated_at_label: String::new(),
             }],
         }
     }
@@ -1044,6 +1059,58 @@ mod tests {
             Some(AgentPickerKind::Session)
         );
         assert_eq!(picker_kind_for_command("coding-agent.new"), None);
+    }
+
+    #[test]
+    fn session_picker_rows_show_the_label_and_the_local_stamp() {
+        // Plan 117 follow-up: the session picker printed `profile` as the
+        // primary line (empty for the resumable list, "Chat" for every row of
+        // the inventory path) and the raw UTC ISO stamp as the detail — six
+        // indistinguishable rows. The label identifies the session; the stamp
+        // says when it was last active.
+        let mut rows = inventory();
+        rows.sessions = vec![
+            AgentSessionInfo {
+                id: "s1".into(),
+                profile: String::new(),
+                updated_at: "2026-09-10T20:17:29.681Z".into(),
+                label: "How does the resume list".into(),
+                updated_at_label: "2026-09-10 22:17".into(),
+            },
+            // A session the daemon never labelled (written before the stamp
+            // existed, or never prompted): honest placeholder, not a blank row.
+            AgentSessionInfo {
+                id: "s2".into(),
+                profile: String::new(),
+                updated_at: "2026-09-10T20:15:34.596Z".into(),
+                label: String::new(),
+                updated_at_label: "2026-09-10 22:15".into(),
+            },
+        ];
+        let picker = AgentPicker::open(1, AgentPickerKind::Session, rows, Vec::new());
+        let session = picker.session();
+        assert_eq!(session.items()[0].label, "How does the resume list");
+        assert_eq!(
+            session.items()[0].detail.as_deref(),
+            Some("2026-09-10 22:17")
+        );
+        assert_eq!(session.items()[1].label, "Untitled session");
+        // No display stamp from the daemon: keep the raw value rather than an
+        // empty second line.
+        let mut bare = inventory();
+        bare.sessions = vec![AgentSessionInfo {
+            id: "s3".into(),
+            profile: "Chat".into(),
+            updated_at: "2026-09-10T20:15:34.596Z".into(),
+            label: String::new(),
+            updated_at_label: String::new(),
+        }];
+        let picker = AgentPicker::open(1, AgentPickerKind::Session, bare, Vec::new());
+        assert_eq!(
+            picker.session().items()[0].detail.as_deref(),
+            Some("2026-09-10T20:15:34.596Z")
+        );
+        assert_eq!(picker.session().items()[0].label, "Chat");
     }
 
     #[test]

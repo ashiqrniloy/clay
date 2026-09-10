@@ -119,7 +119,7 @@ Schema metadata records authority requirements only; it does not grant permissio
 
 ## Agent guidance
 
-Use `editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API or `~/.config/clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSetCursorStyle` when the user asks for set cursor style through the Clay JS API or `~/.clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 

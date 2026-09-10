@@ -138,13 +138,17 @@
                   "kind": "label",
                   "id": "coding-agent.transcriptTitle",
                   "text": "Coding Agent",
-                  "style": { "typography": "typography.title" }
+                  "style": {
+                    "typography": "typography.title"
+                  }
                 },
                 {
                   "kind": "label",
                   "id": "coding-agent.emptyHint",
                   "text": "No conversation yet.",
-                  "style": { "typography": "typography.caption" }
+                  "style": {
+                    "typography": "typography.caption"
+                  }
                 },
                 {
                   "kind": "textInput",

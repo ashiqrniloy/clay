@@ -48,7 +48,7 @@ The package does not request filesystem, network, shell, AI, WASM-authority, raw
 ## Default Load Path
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/rust");

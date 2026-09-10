@@ -75,7 +75,7 @@ const node = definePanel({ title: "Workspace", children: [defineEditorView({ doc
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `sdui.definePanel` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
+No default key binding is assigned. Users may bind a key to `sdui.definePanel` in `~/.clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
 
 ## Custom properties
 

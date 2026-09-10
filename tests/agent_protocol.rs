@@ -90,7 +90,7 @@ for line in sys.stdin:
         first_text = "Hi"
         if params.get("entryId"):
             first_text = "opened:" + str(params.get("entryId"))
-        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":params.get("sessionId"),"profile":"chat","metadata":{"provider":"mock","model":"demo"},"entries":[{"role":"user","content":{"text":first_text}},{"role":"assistant","content":{"text":"hello"}}]}}), flush=True)
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":params.get("sessionId"),"profile":"chat","metadata":{"provider":"mock","model":"demo"},"entries":[{"id":"entry_1","sessionId":params.get("sessionId"),"timestamp":"2026-09-03T00:00:00.000Z","kind":"message","message":{"role":"user","content":[{"type":"text","text":first_text}]}},{"id":"entry_2","parentId":"entry_1","sessionId":params.get("sessionId"),"timestamp":"2026-09-03T00:00:01.000Z","kind":"message","message":{"role":"assistant","content":[{"type":"thinking","text":"weighing options"},{"type":"tool_call","id":"call_1","name":"read_file","arguments":{"path":"a.rs"}}]}},{"id":"entry_3","parentId":"entry_2","sessionId":params.get("sessionId"),"timestamp":"2026-09-03T00:00:02.000Z","kind":"message","message":{"role":"tool","content":[{"type":"tool_result","toolCallId":"call_1","name":"read_file","result":{"content":[{"type":"text","text":"file body"}]}}]}},{"id":"entry_4","parentId":"entry_3","sessionId":params.get("sessionId"),"timestamp":"2026-09-03T00:00:03.000Z","kind":"message","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]}}]}}), flush=True)
     elif method == "knowledge.setOptions":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"workspaceRoot":params.get("workspaceRoot"),"wiki":params.get("wiki")}}), flush=True)
     elif method == "run.setOptions":
@@ -298,6 +298,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
             commands: Vec::new(),
             branch: String::new(),
             extensions: Vec::new(),
+            skills: Vec::new(),
         }),
         AgentServerMessage::Event {
             session_id: "s1".into(),
@@ -601,17 +602,47 @@ async fn unconfigured_prompt_is_instructional_snapshot() {
 #[cfg(unix)]
 #[tokio::test]
 async fn resume_after_daemon_load_restores_bounded_history() {
+    // Plan 117 follow-up: `session.load` answers with persisted `SessionEntry`
+    // records (`{kind, message: {role, content: [blocks]}}`), not the flat
+    // `{role, content}` shape this parser used to assume. Reading the flat
+    // shape found nothing, so every resume restored an empty transcript and
+    // the click looked like it did nothing — the mock daemon spoke the same
+    // fictional shape, which is why the suite stayed green.
     let host = host_for(mock_daemon());
     let loaded = host.resume_tab(3, "s1", None).await;
     match loaded {
         AgentServerMessage::Snapshot(snapshot) => {
             assert_eq!(snapshot.session_id, "s1");
-            assert_eq!(snapshot.entries.len(), 2);
+            assert_eq!(snapshot.entries.len(), 4);
             assert_eq!(
                 snapshot.entries[0].kind,
                 clay::protocol::AgentTranscriptKind::User
             );
-            assert_eq!(snapshot.entries[1].text, "hello");
+            assert_eq!(snapshot.entries[0].text, "Hi");
+            // Assistant turn: thinking block then the tool call, one row each.
+            assert_eq!(
+                snapshot.entries[1].kind,
+                clay::protocol::AgentTranscriptKind::Thinking
+            );
+            assert_eq!(snapshot.entries[1].text, "weighing options");
+            assert_eq!(
+                snapshot.entries[2].kind,
+                clay::protocol::AgentTranscriptKind::Tool
+            );
+            assert_eq!(snapshot.entries[2].tool_call_id, "call_1");
+            assert!(
+                snapshot.entries[2].text.starts_with("read_file {"),
+                "the call row carries its arguments: {}",
+                snapshot.entries[2].text
+            );
+            // The tool result settles that same row (no second row).
+            assert_eq!(snapshot.entries.len(), 4);
+            assert!(
+                snapshot.entries[2].text.ends_with("-> file body"),
+                "the result excerpt settles the call row: {}",
+                snapshot.entries[2].text
+            );
+            assert_eq!(snapshot.entries[3].text, "hello");
         }
         other => panic!("expected snapshot, got {other:?}"),
     }
@@ -1007,7 +1038,7 @@ async fn session_search_picker_hits_parse_and_selection_opens_at_entry() {
                 snapshot.entries[0].text.contains("opened:entry_9"),
                 "the entry id reaches the daemon load"
             );
-            assert_eq!(snapshot.entries.len(), 2);
+            assert_eq!(snapshot.entries.len(), 4);
         }
         other => panic!("expected snapshot, got {other:?}"),
     }
@@ -1050,4 +1081,83 @@ async fn run_set_options_forwards_to_daemon() {
         Some(500_000)
     );
     assert_eq!(result.get("compaction").and_then(Value::as_str), Some("om"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn initialize_handshake_carries_the_built_mcp_allow_list() {
+    // Hand-built entry: the parser (PATH resolution included) is covered by
+    // agent_mcp_config unit tests; build_mcp_allow_list is pub(crate) so the
+    // integration suite can't call it. This test's job is the HANDSHAKE.
+    let allow_list = vec![clay::server::agent::AgentMcpAllowListEntry {
+        server_id: "sh".into(),
+        command: "sh".into(),
+        args: vec!["-c".into(), "echo hi".into()],
+        env: Vec::new(),
+        cwd: None,
+        timeout_ms: None,
+    }];
+    let dir = temp_dir("mcp-config");
+
+    // Scripted daemon: capture the initialize params, echo the allow list
+    // back as the session id so the test can assert the handshake content.
+    let script = dir.join("echo-agent");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import json, sys
+captured = []
+for line in sys.stdin:
+    msg = json.loads(line)
+    ident = msg.get("id")
+    method = msg.get("method")
+    params = msg.get("params") or {}
+    if method == "initialize":
+        captured = params.get("mcpAllowList") or []
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"ok":True}}), flush=True)
+    elif method == "session.new":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":json.dumps(captured),"profile":"p","provider":"pv","model":"m"}}), flush=True)
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let host = AgentHost::new(AgentHostConfig {
+        program: script,
+        args: Vec::new(),
+        data_dir: temp_dir("mcp-data"),
+        inherit_environment: Vec::new(),
+        inert: false,
+        mcp_allow_list: allow_list.clone(),
+    });
+    let snapshot = host
+        .run(AgentClientCommand::NewSession {
+            profile: "coding".into(),
+            provider: "mock".into(),
+            model: "demo".into(),
+            workspace_root: None,
+            full_autonomy: None,
+            om_observation: None,
+            om_reflection: None,
+        })
+        .await;
+    let AgentServerMessage::Snapshot(snapshot) = snapshot else {
+        panic!("expected snapshot, got {snapshot:?}");
+    };
+    let echoed: Value =
+        serde_json::from_str(&snapshot.session_id).expect("sessionId echoes the allow-list JSON");
+    assert_eq!(
+        echoed[0].get("serverId").and_then(Value::as_str),
+        Some("sh"),
+        "handshake initialize params carry the built allow-list entry"
+    );
+    assert_eq!(
+        echoed[0].get("command").and_then(Value::as_str),
+        Some(allow_list[0].command.as_str())
+    );
+    // Plan 117 regression: absent optionals must be OMITTED, never `null` —
+    // the daemon rejects a literal null cwd/timeoutMs, which failed the whole
+    // allow-list and with it every session.new (no session -> no branch).
+    assert!(!echoed[0].as_object().unwrap().contains_key("cwd"));
+    assert!(!echoed[0].as_object().unwrap().contains_key("timeoutMs"));
+    host.shutdown().await;
 }

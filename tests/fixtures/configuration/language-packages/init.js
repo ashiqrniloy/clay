@@ -1,5 +1,5 @@
 // First-party language package smoke fixture.
-// ~/.config/clay/init.js equivalent: opt in to Rust/TypeScript/JavaScript
+// ~/.clay/init.js equivalent: opt in to Rust/TypeScript/JavaScript
 // major modes, commands, completion providers, and status items, plus the
 // Markdown mode, commands, and decoration/preview parse handler — all through
 // one-line `loadPackage("@clay/<lang>")` calls with no per-facade plumbing.

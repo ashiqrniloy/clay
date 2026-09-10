@@ -3,7 +3,7 @@
 // view renders declared copy, AG-UI-driven transcript, and session controls.
 
 import { EventType } from "@ag-ui/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentStreamEvent } from "../agent/events";
@@ -168,8 +168,13 @@ describe("ChatPanel", () => {
         snapshot: { provider: "mock" },
         clientId: 1,
       } as never);
-      const input = await screen.findByLabelText("Message");
-      expect(input).toBeEnabled();
+      // The panel renders through a rAF-coalesced notify(): the state is
+      // applied synchronously but the paint lands on the next frame, so
+      // asserting straight after findByLabelText reads a stale disabled
+      // input (the element already exists in the unconfigured form).
+      await waitFor(() =>
+        expect(screen.getByLabelText("Message")).toBeEnabled(),
+      );
 
       emit({
         type: EventType.RUN_STARTED,
@@ -182,7 +187,9 @@ describe("ChatPanel", () => {
       expect(
         screen.getByRole("button", { name: "Cancel" }),
       ).toBeInTheDocument();
-      expect(screen.getByLabelText("Message")).toBeDisabled();
+      await waitFor(() =>
+        expect(screen.getByLabelText("Message")).toBeDisabled(),
+      );
     } finally {
       release();
     }

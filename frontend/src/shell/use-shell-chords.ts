@@ -15,6 +15,16 @@ function strokeKey(stroke: ServerKeyStroke | undefined): string {
   return raw.toLowerCase();
 }
 
+/** Modifier keydowns and held-key auto-repeats never advance or cancel a
+ *  pending chord: holding Ctrl across `Ctrl+X Ctrl+P` delivers Control
+ *  keydowns, and a held first stroke repeats — both must leave the pending
+ *  chord alone or the chord can never resolve. */
+const MODIFIER_KEYS = new Set(["control", "shift", "alt", "meta"]);
+
+function isChordNoise(event: KeyboardEvent): boolean {
+  return event.repeat || MODIFIER_KEYS.has(event.key.toLowerCase());
+}
+
 function eventMatchesStroke(
   event: KeyboardEvent,
   stroke: ServerKeyStroke | undefined,
@@ -50,6 +60,7 @@ export function useShellChords(
       window.clearTimeout(chordTimer);
     };
     const onKey = (event: KeyboardEvent) => {
+      if (isChordNoise(event)) return;
       if (!event.ctrlKey) {
         resetChord();
         return;

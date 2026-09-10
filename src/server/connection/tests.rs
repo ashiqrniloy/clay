@@ -3586,10 +3586,10 @@ async fn control_center_opens_filters_activates_and_cancels() {
 async fn control_center_opens_filters_activates_and_cancels_scenario() {
     let root = temp_workspace("control-center");
     // Hermetic configuration root (Phase 24.5, task 8): without an
-    // explicit root this test fell back to the real ~/.config/clay and
+    // explicit root this test fell back to the real ~/.clay and
     // hung whenever that directory contains an init.js (reload evaluates
     // the live user config). The sentinel typography proves the hermetic
-    // root — not ambient ~/.config/clay — is the generation source: an
+    // root — not ambient ~/.clay — is the generation source: an
     // ambient fallback would load the default 20px monospace, not 21px.
     let config_root = temp_workspace("control-center-config");
     fs::write(
@@ -3715,7 +3715,7 @@ async fn control_center_opens_filters_activates_and_cancels_scenario() {
         saw_reload_diagnostic && saw_runtime_snapshot,
         "reload fanout must deliver the diagnostic and snapshot"
     );
-    // The hermetic root (not ambient ~/.config/clay) was the reload
+    // The hermetic root (not ambient ~/.clay) was the reload
     // source: the sentinel typography from its init.js is now live.
     assert_eq!(
         server
@@ -3948,7 +3948,7 @@ async fn runtime_generation_replacement_cancels_open_control_center_scenario() {
     // Hermetic configuration root (Phase 24.5, task 8): same real-config
     // fallback hazard as control_center_opens_filters_activates_and_cancels.
     // Sentinel typography proves the hermetic root is the generation
-    // source (ambient ~/.config/clay must never load).
+    // source (ambient ~/.clay must never load).
     let config_root = temp_workspace("control-center-generation-config");
     fs::write(
         config_root.join("init.js"),
@@ -4018,7 +4018,7 @@ async fn runtime_generation_replacement_cancels_open_control_center_scenario() {
         saw_reload_diagnostic && saw_menu_close && saw_runtime_snapshot,
         "generation replacement must close the open menu and replay state"
     );
-    // The hermetic root (not ambient ~/.config/clay) was the reload
+    // The hermetic root (not ambient ~/.clay) was the reload
     // source: the sentinel typography from its init.js is now live.
     assert_eq!(
         server
@@ -5317,6 +5317,117 @@ async fn control_center_lists_and_activates_loaded_package_commands() {
         .is_err(),
         "no frame after validated package activation"
     );
+
+    drop(client);
+    server_task.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn control_center_opens_even_when_the_client_version_lags_the_manifest() {
+    // Regression (plan 117 follow-up): the mode-layer publish bumps the
+    // behavior version after the client bootstrapped; a lagging client's
+    // Ctrl+X Ctrl+P intent used to die on the stale-version gate with a
+    // silent wire error — the Command Centre never opened. Server-owned
+    // catalogue commands re-resolve everything at open time, so they skip
+    // the gate; manifest-coupled commands keep it.
+    let (client, server) = duplex(65536);
+    let codec = Codec::default();
+    let document = Arc::new(Mutex::new(DocumentState::new(
+        1,
+        "stale version chord".to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    )));
+    let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+    let sdui = sdui_state();
+    let runtime = js_runtime();
+    let coordinator = parse_coordinator();
+    load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+    let server_task = tokio::spawn(handle_connection(
+        server,
+        99,
+        document,
+        Arc::clone(&behavior),
+        workspace_state(),
+        Arc::clone(&sdui),
+        active_theme_state(),
+        runtime_diagnostics(),
+        runtime_generation_from(runtime),
+        coordinator,
+        language_intelligence_coordinator(),
+        codec,
+    ));
+    let mut client = client;
+
+    codec
+        .write_client_message(
+            &mut client,
+            &ClientMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                client_name: "test-client".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let mut stale_version = 0;
+    loop {
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::BehaviorManifest(manifest) => {
+                stale_version = manifest.behavior_version.saturating_sub(1);
+            }
+            ServerMessage::FileOpenCapabilityIssued { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(stale_version >= 1, "mode layer publish bumped the version");
+
+    codec
+        .write_client_message(
+            &mut client,
+            &ClientMessage::CommandIntent {
+                client_id: 99,
+                document_id: 1,
+                behavior_version: stale_version,
+                command_id: "controlCenter.open".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let opened = loop {
+        if let ServerMessage::TransientMenuSnapshot(snapshot) =
+            codec.read_server_message(&mut client).await.unwrap()
+        {
+            break snapshot;
+        }
+    };
+    assert!(
+        !opened.items.is_empty(),
+        "the control centre opens despite the lagging client version"
+    );
+
+    // The gate survives for manifest-coupled commands: a stale version on a
+    // generic server command is still rejected instead of executing.
+    codec
+        .write_client_message(
+            &mut client,
+            &ClientMessage::CommandIntent {
+                client_id: 99,
+                document_id: 1,
+                behavior_version: stale_version,
+                command_id: "workspace.refresh".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+    let rejected = loop {
+        match codec.read_server_message(&mut client).await.unwrap() {
+            ServerMessage::Error { message, .. } => break message,
+            ServerMessage::TransientMenuClosed { .. } | ServerMessage::TransientMenuSnapshot(_) => {
+                continue;
+            }
+            _ => continue,
+        }
+    };
+    assert_eq!(rejected, "command intent behavior version is stale");
 
     drop(client);
     server_task.await.unwrap().unwrap();
@@ -8148,12 +8259,18 @@ async fn agent_surface_commands_project_client_toggle_without_server_state() {
     // user-authorized presentation toggles. The dispatcher answers with the
     // narrow shell-client request (the client re-parses deny-by-default);
     // no runtime generation advances and no server state changes.
+    // Plan 117: the agent settings page toggle rides the same lane.
     let workspace = workspace_state();
     let document = document_state();
     let sdui = sdui_state();
     let empty_registry = CommandRegistry::new();
 
-    for command_id in ["coding-agent.profile", "coding-agent.close"] {
+    for command_id in [
+        "coding-agent.profile",
+        "coding-agent.close",
+        "coding-agent.agentSettings.open",
+        "coding-agent.agentSettings.close",
+    ] {
         let response = execute_command_intent(
             CommandExecutionRequest {
                 command_id: command_id.to_string(),

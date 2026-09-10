@@ -64,7 +64,7 @@ for (const hit of page.hits) {
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `agent.searchSessions` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `agent.searchSessions` in `~/.clay/init.js`.
 
 ## Custom properties
 

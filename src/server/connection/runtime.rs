@@ -136,12 +136,21 @@ pub(super) async fn execute_command_intent(
         if request.command_id == "coding-agent.profile"
             && let Some(server) = reload_server
         {
+            // Resolve the connection's tab so the selection broadcast lands on
+            // this tab's session instead of a session-less snapshot (which
+            // wiped a live panel's transcript + branch).
+            let tab = server
+                .tab_registry
+                .lock()
+                .await
+                .tab_for_client(client_id)
+                .unwrap_or(client_id);
             server
                 .agent
                 .select_picker(
                     crate::protocol::AgentPickerKind::Agent,
                     "agent:coding",
-                    None,
+                    Some(tab),
                 )
                 .await;
         }
@@ -829,25 +838,13 @@ pub(super) async fn handle_command_intent<S>(
 where
     S: AsyncWrite + Unpin,
 {
-    // Commands never receive previous-generation grace.
-    if behavior.lock().await.version() != behavior_version {
-        codec
-            .write_server_message(
-                stream,
-                &ServerMessage::Error {
-                    code: ProtocolErrorCode::InvalidMessage,
-                    message: "command intent behavior version is stale".to_string(),
-                },
-            )
-            .await?;
-        return Ok(());
-    }
-    // Phase 24.1-24.3: the built-in Command Centre commands are a
-    // command-lane special case mirroring the workspace-command precedent —
-    // the bounded snapshot IS the response. Generic execution of these ids
-    // yields nothing on the wire, so bare `Accepted` accounting (the JS op
-    // path) is unchanged. Opening replaces any active server session; the
-    // client is told about the closed one.
+    // Commands never receive previous-generation grace. The gate protects
+    // manifest-coupled routing below (client-UI + document commands): the
+    // client must not act on a stale manifest view. Server-owned catalogue
+    // commands (Control Centre, Path Browser, agent pickers) re-resolve
+    // everything server-side at open time, so a stale client version is
+    // harmless there — and rejecting them silently bricked the chord
+    // whenever the client's version lagged a manifest publish.
     if command_id == CONTROL_CENTER_COMMAND_ID
         || command_id == OPEN_PATH_BROWSER_COMMAND_ID
         || picker_kind_for_command(&command_id).is_some()
@@ -895,6 +892,20 @@ where
                     .await?;
             }
         }
+        return Ok(());
+    }
+    // Everything below couples to the client's manifest view — previous-
+    // generation intents are rejected (the client surfaces the error).
+    if behavior.lock().await.version() != behavior_version {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::Error {
+                    code: ProtocolErrorCode::InvalidMessage,
+                    message: "command intent behavior version is stale".to_string(),
+                },
+            )
+            .await?;
         return Ok(());
     }
     let is_client_ui =

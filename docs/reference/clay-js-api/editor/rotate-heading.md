@@ -57,7 +57,7 @@ bindKey("Ctrl+Alt+1", "editor.rotateHeading", { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { rotateHeading } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 

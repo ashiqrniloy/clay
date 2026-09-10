@@ -50,7 +50,7 @@ fn manual_file_browser_workflow_bug_contract_locks_reported_failures() {
     for expected in [
         "Manual File Browser Workflow Bug Contract",
         "cargo run",
-        "~/.config/clay/init.js",
+        "~/.clay/init.js",
         "do not use `cargo run -- smoke-gui --config-fixture file-browser-workflow`",
         "Ctrl+Shift+O",
         "clientOpenFolderDialog()",
@@ -518,14 +518,14 @@ fn end_to_end_file_browser_workflow_smoke_covers_cargo_run_config_path() {
     let launch_doc = launch_smoke_doc();
 
     // The real product workflow path must be documented alongside the
-    // fixture: a bare `cargo run` driven by `~/.config/clay/init.js`, with
+    // fixture: a bare `cargo run` driven by `~/.clay/init.js`, with
     // the Plan 044/Phase 20 regressions (shifted folder picker, nested `.rs` open,
     // multi-document retain/switch, dirty/save/conflict UX, file browser surviving
     // Markdown activation, file-browser scroll, editor scroller, copy) as a manual checklist.
     for expected in [
         "Product `cargo run` configuration path",
         "cargo run",
-        "~/.config/clay/init.js",
+        "~/.clay/init.js",
         "Ctrl+Shift+O",
         "src/main.rs",
         "Opening a second file retains the prior document session",
@@ -734,7 +734,7 @@ fn phase20_end_user_markdown_setup_is_one_line_load_plus_bind_key() {
         "Smoke-only (dev validation, never the product path)",
         "End-user (product baseline)",
         "inline a full `markdownPackage` manifest object",
-        "Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported",
+        "Pasting the smoke fixture manifest block into `~/.clay/init.js` is not supported",
     ] {
         assert!(
             launch_doc.contains(required),

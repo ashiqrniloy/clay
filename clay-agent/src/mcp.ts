@@ -5,7 +5,7 @@
  * resolved from package JavaScript. An empty allow-list connects nothing and
  * yields no tools (deny by default).
  */
-import { connectMcpTools, type McpToolBridge } from "@arnilo/prism-mcp";
+import { connectMcpTools, HARD_CALL_TIMEOUT_MS, type McpToolBridge } from "@arnilo/prism-mcp";
 import type { ToolDefinition } from "@arnilo/prism";
 
 /** Maximum allow-listed servers per connect (matches Prism ACP bounds spirit). */
@@ -21,11 +21,24 @@ export interface McpAllowListEntry {
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly cwd?: string;
+  /** Per-server tool-call/connect ceiling in ms (config source only; absent = Prism default 60s). */
+  readonly timeoutMs?: number;
+}
+
+/** Per-server connect outcome, published for the UI connection surfaces. */
+export interface McpServerOutcome {
+  readonly serverId: string;
+  readonly connected: boolean;
+  readonly tools: number;
+  /** Why the server's tools are hidden (connection failures only). */
+  readonly error?: string;
 }
 
 export interface ConnectedMcpServers {
   /** Prefixed Prism ToolDefinitions (`mcp:<serverId>:<name>`). */
   readonly tools: ToolDefinition[];
+  /** One outcome per allow-list entry; failed servers report `connected: false`. */
+  readonly outcomes: readonly McpServerOutcome[];
   close(): Promise<void>;
 }
 
@@ -76,7 +89,7 @@ function parseEntry(raw: unknown, index: number): McpAllowListEntry & { command:
     fail(`mcpAllowList[${index}] must be an object`);
   }
   const entry = raw as Record<string, unknown> & Partial<McpAllowListEntry>;
-  const known = new Set(["serverId", "command", "args", "env", "cwd"]);
+  const known = new Set(["serverId", "command", "args", "env", "cwd", "timeoutMs"]);
   for (const key of Object.keys(entry)) {
     if (!known.has(key)) fail(`mcpAllowList[${index}].${key} is not a recognized field`);
   }
@@ -89,8 +102,17 @@ function parseEntry(raw: unknown, index: number): McpAllowListEntry & { command:
     fail(`mcpAllowList[${index}].serverId must match [a-z0-9][a-z0-9._-]{0,63}`);
   }
   const cwd = entry.cwd;
-  if (cwd !== undefined && (typeof cwd !== "string" || !cwd.startsWith("/"))) {
+  if (cwd !== undefined && cwd !== null && (typeof cwd !== "string" || !cwd.startsWith("/"))) {
     fail(`mcpAllowList[${index}].cwd must be an absolute path`);
+  }
+  const timeoutMs = entry.timeoutMs;
+  if (timeoutMs !== undefined && timeoutMs !== null) {
+    if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+      fail(`mcpAllowList[${index}].timeoutMs must be a positive integer`);
+    }
+    if (timeoutMs > HARD_CALL_TIMEOUT_MS) {
+      fail(`mcpAllowList[${index}].timeoutMs exceeds the Prism hard ceiling of ${HARD_CALL_TIMEOUT_MS}ms`);
+    }
   }
   return {
     serverId,
@@ -98,13 +120,16 @@ function parseEntry(raw: unknown, index: number): McpAllowListEntry & { command:
     args: literalArgv(entry as McpAllowListEntry, index),
     env: explicitEnv(entry as McpAllowListEntry, index),
     ...(typeof cwd === "string" ? { cwd } : {}),
+    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
   };
 }
 
 /**
- * Connect every allow-listed server; one failure fails the whole connect
- * closed (no partial tool surface). Empty allow-list resolves immediately
- * with zero tools and a no-op close.
+ * Validate the whole allow-list (fail-closed: a malformed list means the
+ * server sent broken config — rpcCode -32602, nothing connects), then connect
+ * every entry independently: one failing or over-cap server hides only its
+ * own tools (connection failures hide the tools; healthy servers stay).
+ * Empty allow-list resolves immediately with zero tools and a no-op close.
  */
 export async function connectAllowListedMcpServers(
   allowList: readonly unknown[],
@@ -113,31 +138,45 @@ export async function connectAllowListedMcpServers(
     fail(`mcpAllowList exceeds ${MAX_MCP_SERVERS} servers`);
   }
   const entries = allowList.map(parseEntry);
-  const bridges: McpToolBridge[] = [];
-  try {
-    for (const entry of entries) {
-      bridges.push(
-        await connectMcpTools({
-          serverId: entry.serverId,
-          transport: {
-            type: "stdio",
-            command: entry.command,
-            args: entry.args,
-            ...(entry.env ? { env: entry.env } : {}),
-            ...(entry.cwd ? { cwd: entry.cwd } : {}),
-            // Bounded stderr capture; the host drains/limits it, not the model.
-            stderr: "pipe",
-          },
-        }),
-      );
-    }
-  } catch (error) {
-    // Fail closed: close anything already connected before propagating.
-    for (const bridge of bridges) await bridge.close().catch(() => {});
-    throw error;
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.serverId)) fail(`mcpAllowList has duplicate serverId "${entry.serverId}"`);
+    seen.add(entry.serverId);
   }
+  // Per-server fault isolation: each entry connects independently; a
+  // rejected connect (crashed binary, over-cap tools, timeout) hides only
+  // that server's tools — never the healthy ones.
+  const settled = await Promise.allSettled(
+    entries.map((entry) =>
+      connectMcpTools({
+        serverId: entry.serverId,
+        transport: {
+          type: "stdio",
+          command: entry.command,
+          args: entry.args,
+          ...(entry.env ? { env: entry.env } : {}),
+          ...(entry.cwd ? { cwd: entry.cwd } : {}),
+          // Bounded stderr capture; the host drains/limits it, not the model.
+          stderr: "pipe",
+        },
+        ...(entry.timeoutMs === undefined ? {} : { callTimeoutMs: entry.timeoutMs }),
+      }),
+    ),
+  );
+  const bridges: McpToolBridge[] = [];
+  const outcomes: McpServerOutcome[] = entries.map((entry, index) => {
+    const result = settled[index];
+    if (result.status === "fulfilled") {
+      bridges.push(result.value);
+      return { serverId: entry.serverId, connected: true, tools: result.value.tools.length };
+    }
+    const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
+    console.error(`[mcp] server "${entry.serverId}" failed to connect: ${error} (its tools are hidden)`);
+    return { serverId: entry.serverId, connected: false, tools: 0, error };
+  });
   return {
     tools: bridges.flatMap((bridge) => [...bridge.tools]),
+    outcomes,
     close: async () => {
       for (const bridge of bridges) await bridge.close().catch(() => {});
     },

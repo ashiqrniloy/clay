@@ -26,11 +26,24 @@ grants no execution authority.
 | Piece | Where |
 |-------|-------|
 | Coding profile + system prompt layer | `dist/load.js` → `agent.profileRegister` |
-| Plan-file skill (`coding-agent.createPlan`) | `dist/load.js` → `agent.skillRegister` |
 | Slash command surface (nine commands) | `dist/load.js` → `agent.commandRegister` |
 | Agent split surface (`coding-agent.surface`, activation `pane`) | `dist/load.js` → `ui.serverRegisterPaneContentContribution` |
 | Chrome commands (`coding-agent.profile`, `coding-agent.close`) | `clay.contributions.commands` |
 | UI pane contents / surface extension points | this package (launch via the Coding Agent command) |
+
+Skills are not hardcoded here: the clay-agent daemon discovers them from
+three roots (decision 2026-09-09-1420): the workspace (`npx skills` layout
+`<root>/.agents/skills/<name>/SKILL.md`), the per-agent config dir
+(`~/.clay/agents/coding-agent/skills/`, which also holds the seeded
+agent-delivered skills), and the home dir (`~/.agents/skills/`). Roots and
+agent-skill toggles are configured in
+`~/.clay/agents/coding-agent/skills.json`.
+
+Prompt layers compose per session in a locked order: the profile's base
+instructions, then the user's global `SYSTEM.md`
+(`~/.clay/agents/coding-agent/SYSTEM.md`, seeded empty), then the
+workspace `AGENTS.md` app layer (repo-root project prompt; symlink-escape
+excluded, 64 KiB cap, silently absent-safe).
 
 The working-area empty tab stays `@clay/chat`: only one empty-tab
 pane-content contribution may exist, and the agent's 50/50 split surface is
@@ -40,7 +53,7 @@ landing.
 
 ## Activation
 
-One line in `~/.config/clay/init.js` (or the canonical
+One line in `~/.clay/init.js` (or the canonical
 `examples/packages/first-party.js`, loaded via `loadConfigurationModule`):
 
 ```js
@@ -49,8 +62,8 @@ await loadPackage("@clay/coding-agent");
 ```
 
 That line applies the manifest contributions (command, chrome extension
-point) and runs `dist/load.js`, which registers the skill then the coding
-profile. No copied manifests, no manual primitive registration, no raw
+point) and runs `dist/load.js`, which registers the coding profile. No
+copied manifests, no manual primitive registration, no raw
 facade plumbing. Loading is explicit — without the line nothing
 coding-agent-shaped registers and the Chat landing stays untouched.
 Load entries never spawn or block on the daemon: while the daemon is down,

@@ -20,7 +20,7 @@ ligature glyphs, IME feel, native dialogs, focus, timing.
 ## Prerequisites (all modules)
 
 - Linux host (primary platform), Rust toolchain, `cargo`.
-- Optional: `~/.config/clay/` config tree (canonical example: `examples/` — copy with `cp -r examples/. ~/.config/clay/`).
+- Optional: `~/.clay/` config tree (canonical example: `examples/` — copy with `cp -r examples/. ~/.clay/`).
 - Scratch workspace: `mkdir -p /tmp/clay-manual` with sample files (each
   module file lists the files it needs, or points at a shared setup).
 - Font for ligature checks: Fira Code (`FiraCode Nerd Font Mono` works).
@@ -117,6 +117,30 @@ line reload semantics + startup budget). Coverage matrix row added.
 No existing manual step was deleted or weakened. Developer profile untouched;
 all scratch state removed after the drill.
 
+## Plan 117 manual-test-plan execution record (2026-09-10)
+
+Module 17 gained steps C24–C37 and negative checks C-N5–C-N11 covering every
+user-visible plan 117 behavior: skill discovery from three roots with the
+skills card, MCP stdio wiring (user + repo config, per-server fault
+isolation) with the MCP card + composer connections section, the agent
+settings page (delivered files + provenance + editor round-trip), @ mentions
+(skills + files, keyboard-driven), the token meter (occupancy/ceiling,
+threshold tones, live per-turn updates, heuristic fallback), wiki-init and
+default-on graft, labeled /resume with rich restore, branch at creation,
+effort active from session start, and the composed system-prompt layers in
+the context inspector (SYSTEM.md + AGENTS.md + base instructions).
+
+| Check | Result | Evidence/notes |
+|---|---|---|
+| Automated legs C24–C37, C-N5–C-N11 | PASS | cargo test green (lib 1307, protocol 210, security 152); clay-agent 138 (137 pass / 0 fail / 1 skip); frontend 294/294; per-step suite citations in the module 17 record |
+| Live launch gate (isolated scratch config from `examples/config/`) | PASS | `test-plan/artifacts/117-coding-agent/launch-gate/`; scratch isolation verified on disk (daemon seeded + read the scratch per-agent config root, never the real home); zero wire errors after the dist+binary rebuild |
+| MCP fixture + skills discovery through the real daemon | PASS | Scratch-config daemon session: `mcpServers: [{serverId: "fixture", connected: true, tools: 2}]`; workspace + home skills discovered (module 17 record) |
+| Interactive GUI legs | UNRESOLVED | Standing host ceiling (no input-synthesis path); server-side halves + card rendering verified by the suites above |
+| Two defects found by the launch test, both fixed | FIXED | Tauri `stamp_client_id` non-exhaustive match (new agent-settings messages broke the desktop build); daemon ignored the server configuration root (config-root leak to the real home + MCP bare commands unresolvable — fixed via `--agent-config-root` + inheriting `HOME`/`USERPROFILE`/`PATH`) |
+
+No existing manual step was deleted or weakened; the module 17 ceiling notes
+were updated to name the plan 117 seams they supersede.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -137,7 +161,7 @@ all scratch state removed after the drill.
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
 | 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
 | 16 | [Agent host (clay-agent)](16-agent-host.md) | `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing, Chat UI chrome unchanged; coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
-| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort) | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108 |
+| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort); plan 117 C24–C37 + C-N5–C-N11: skills card from three discovery roots + skills.json gating, MCP card + composer connections (user/repo config, per-server isolation), agent settings page with provenance, @ mentions, token meter with threshold tones + heuristic fallback, /wiki-init flow, graft default-on, labeled /resume with rich restore, branch at creation, effort from session start, and composed system-prompt layers (SYSTEM.md/AGENTS.md/base) in the context inspector | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108, plans/117 |
 | 18 | [Icon packs (Plan 112)](18-icon-packs.md) | zero-config bundled Regular fallback, `setIconPack` Regular/Duotone selection (load ≠ select), watcher swap/fail-closed break + restore recovery, unloaded/unknown selection bounded diagnostics, third-party own-prefix + hostile-fixture rejection (live adoption blocked: no pnpm), file-browser/git/markdown semantic icons, icon-only control contract (names, tooltips, hit targets, retained text labels), AT-SPI a11y pass, no-network inlined-geometry rendering, responsive/large-typography scaling and pack-swap feel | `docs/reference/clay-js-api/theme/set-icon-pack.md`, `docs/reference/icon-packs.md`, `test-plan/artifacts/112-icons/` |
 
 ## Coverage matrix (what to run when)

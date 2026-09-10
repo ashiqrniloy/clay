@@ -26,7 +26,7 @@ ship colors, CSS, scripts, or URLs.
 
 Icons render from the active pack only; no extra setup beyond a scratch
 config. For isolation use the task 15 recipe (mode-700 scratch roots,
-`$HOME/.config/clay` copy of `examples/`), or run the developer profile with
+`$HOME/.clay` copy of `examples/`), or run the developer profile with
 the canonical example. Never adopt packages on a real profile for these steps.
 
 ---

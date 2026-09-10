@@ -25,7 +25,7 @@ custom_properties:
     default: optional
     description: Package apiPrefix whose every registered completion provider should be disabled. Mutually exclusive with provider.
 security: Suppresses registered completion providers from selection, stale-drops in-flight results, and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw-op, native-widget, or package-manager authority. Does not remove registered metadata.
-agent_guidance: Use from ~/.config/clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.
+agent_guidance: Use from ~/.clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.
 lookup_tags: [js-api, completion, provider, disable, phase18.19]
 app_visible: true
 help_visible: true
@@ -47,7 +47,7 @@ The API follows the `server*` naming convention of sibling completion APIs `serv
 
 ## When to use
 
-Use from `~/.config/clay/init.js` to suppress a completion provider you do not want active. For package-level suppression, prefer `packagePrefix` so all providers from that package are disabled together. Use `provider` for fine-grained targeting of a single built-in or package-owned provider.
+Use from `~/.clay/init.js` to suppress a completion provider you do not want active. For package-level suppression, prefer `packagePrefix` so all providers from that package are disabled together. Use `provider` for fine-grained targeting of a single built-in or package-owned provider.
 
 ## JavaScript usage
 
@@ -64,7 +64,7 @@ serverDisableCompletion({ packagePrefix: "rust" });
 ## Example
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 import { serverDisableCompletion } from "clay:completion";
 

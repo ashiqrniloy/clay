@@ -4,7 +4,7 @@
 
 ## End-User Setup
 
-Default `~/.config/clay/init.js` loading is one explicit line:
+Default `~/.clay/init.js` loading is one explicit line:
 
 ```js
 import { loadPackage } from "clay:packages";

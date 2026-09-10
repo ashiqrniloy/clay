@@ -39,7 +39,7 @@ Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-clien
 
 ## When to use
 
-Use this API from `~/.config/clay/init.js` when a user wants a key binding for selecting a workspace folder.
+Use this API from `~/.clay/init.js` when a user wants a key binding for selecting a workspace folder.
 
 ## JavaScript usage
 
@@ -59,7 +59,7 @@ bindKey("Ctrl+Shift+O", "workspace.clientOpenFolderDialog", { scope: "editor" })
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { bindKey } from "clay:keybindings";
 import { clientOpenFolderDialog } from "clay:workspace";
 

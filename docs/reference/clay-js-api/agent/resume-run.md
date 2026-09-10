@@ -69,7 +69,7 @@ console.log(result.status);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `agent.resumeRun` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `agent.resumeRun` in `~/.clay/init.js`.
 
 ## Custom properties
 

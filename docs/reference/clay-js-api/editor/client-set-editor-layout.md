@@ -41,7 +41,7 @@ Set the user-owned document wrap-policy override through the `clay:editor` Clay 
 
 ## Description
 
-`clientSetEditorLayout` is the public API for **Set Editor Layout**. The `op_clay_editor_set_editor_layout` deno op validates typed arguments (deny-by-default enum, clamped column cap), publishes the override to every connected client editor surface, and returns the validated descriptor. The client applies it through CodeMirror wrap/editor-layout configuration (`frontend/src/editor/extensions/behavior.ts`), which takes precedence over the per-mode manifest `editorRules.layout.wrap` and the `WrapPolicy::from_font_role` default. Packages cannot forge this override: the op is registered in the trusted runtime extension only, so third-party package code cannot resolve it; the `editor-control` trust gate additionally allows trusted-domain user configuration (`~/.config/clay/init.js`) outside any package activation.
+`clientSetEditorLayout` is the public API for **Set Editor Layout**. The `op_clay_editor_set_editor_layout` deno op validates typed arguments (deny-by-default enum, clamped column cap), publishes the override to every connected client editor surface, and returns the validated descriptor. The client applies it through CodeMirror wrap/editor-layout configuration (`frontend/src/editor/extensions/behavior.ts`), which takes precedence over the per-mode manifest `editorRules.layout.wrap` and the `WrapPolicy::from_font_role` default. Packages cannot forge this override: the op is registered in the trusted runtime extension only, so third-party package code cannot resolve it; the `editor-control` trust gate additionally allows trusted-domain user configuration (`~/.clay/init.js`) outside any package activation.
 
 Authority: `configuration-driven-client-ui-state`. Runtime path: `configuration-api-to-client-ui`. Wrap policy is layout-affecting geometry; changing it invalidates the layout cache key and repaints, but does not route ordinary keypresses through JavaScript or block paint/input on server work. The override survives configuration reload (the channel and current-value store are shared across runtime generations).
 
@@ -96,7 +96,7 @@ The op is registered in the trusted runtime extension only; third-party package 
 
 ## Agent guidance
 
-Use `editor.clientSetEditorLayout` when the user asks to set the editor wrap policy through the Clay JS API or `~/.config/clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
+Use `editor.clientSetEditorLayout` when the user asks to set the editor wrap policy through the Clay JS API or `~/.clay/init.js` customization. Avoid inventing direct Rust calls, raw op names, document mutation, filesystem effects, network effects, shell commands, AI mutation, workspace access, package loading, WASM, or client-side JavaScript execution for this operation.
 
 ## Backing implementation
 

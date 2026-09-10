@@ -24,7 +24,7 @@ No default Rust-level shortcuts are hardcoded. Every key binding above is config
 Opens the native OS file picker. After the user selects a file, the client sends the path to the server with a single-use capability token. The server canonicalizes and validates the path, creates a single-file grant (not a workspace root), streams the UTF-8 file into its canonical rope under the resident-memory budget, and sends back a bounded `DocumentOpened` head; remaining bytes use versioned chunk requests.
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientOpenFileDialog } from "clay:documents";
 import { bindKey } from "clay:keybindings";
 import { loadPackage } from "clay:packages";

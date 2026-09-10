@@ -827,7 +827,11 @@ where
         }
         AgentPickerActivate::Select { kind, id } => {
             if let Some(host) = host {
-                host.select_picker(kind, &id, bound_tab_id).await;
+                // Index 871 and the menu-session helpers all resolve the tab
+                // as `bound_tab_id.unwrap_or(client_id)`; a bare `None` here
+                // published a session-less snapshot over a live panel.
+                host.select_picker(kind, &id, Some(bound_tab_id.unwrap_or(client_id)))
+                    .await;
                 // Visible confirmation: without this, choosing a model or
                 // provider just closes the modal with no shell-visible
                 // change (silent-success reads as a dead button).

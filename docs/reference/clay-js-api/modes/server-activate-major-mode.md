@@ -84,7 +84,7 @@ const activation = serverActivateMajorMode(manifest, { documentId: 5, path: "REA
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `modes.serverActivateMajorMode` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverActivateMajorMode` in `~/.clay/init.js`.
 
 ## Custom properties
 

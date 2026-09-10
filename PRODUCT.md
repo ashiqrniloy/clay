@@ -15,7 +15,7 @@ web
 
 Clay is a high-performance, hackable desktop text and code editor combining Emacs-grade user configurability, sub-millisecond local input latency, and a safe, modern, accessible architecture.
 
-Success means users can operate without cognitive distraction for hours, configure every aspect of their workflow via `~/.config/clay/init.js` and typed Clay JS APIs, and install third-party packages without compromising renderer security or editor performance.
+Success means users can operate without cognitive distraction for hours, configure every aspect of their workflow via `~/.clay/init.js` and typed Clay JS APIs, and install third-party packages without compromising renderer security or editor performance.
 
 ## Positioning
 
@@ -27,7 +27,7 @@ Extensibility is achieved through inert declarative manifests and typed IPC APIs
 
 - **Surface Mode:** Operate. The user's focus is on completing technical tasks, writing code, reading documentation, and navigating project trees.
 - **Environment:** Desktop application. Primary development and CI host is Linux (with Windows/macOS compatibility long-term).
-- **Workflows:** Long continuous editing sessions, keyboard-driven navigation, multi-pane split layouts, file and workspace exploration, git status inspection, syntax-aware diagnostics, and user-driven configuration through `~/.config/clay/init.js`.
+- **Workflows:** Long continuous editing sessions, keyboard-driven navigation, multi-pane split layouts, file and workspace exploration, git status inspection, syntax-aware diagnostics, and user-driven configuration through `~/.clay/init.js`.
 
 ## Capabilities and Constraints
 

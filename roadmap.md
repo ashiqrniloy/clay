@@ -574,10 +574,208 @@ Mid-execution: I1–I3 landed (workspace bind, per-workspace model auto-load,
   108 ship; 109 adds Session Info and stops duplicating the workspace tree.
 - Image support: still deferred (not in plan 109).
 
-### Phase 2.2 Prism update
+### Phase 2.2 Skill Discovery, Wiki/Graft Wiring, Project Prompt, MCP, Context Inspector
 
-Absorbed into Phase 2.1 / plan 109 (Prism 0.5.0 lockstep). Do not schedule
-a second Prism-update phase for 0.5.0.
+The prior Phase 2.2 (Prism 0.5.0 lockstep) was absorbed into Phase 2.1 /
+plan 109. This section reuses the number for the next daemon work package:
+skill-discovery configuration, wiki/graft opt-in wiring, the repo project
+prompt, MCP stdio wiring, and two context visibility fixes found while
+tracing prompt assembly. All open decisions are locked (2026-09-09);
+plan document is next.
+
+Locked changes:
+
+- **Configurable skill discovery.** The daemon's disk skill discovery
+  (currently hardcoded: `<workspaceRoot>/.agents/skills` +
+  `<configRoot>/.agents/skills`) becomes user-configurable and gains a
+  third default root, `~/.agents/skills` (user home). Per decision
+  2026-09-09-1420 the config-root skills live in the per-agent layout:
+  `~/.clay/agents/coding-agent/skills/` (seeded agent-delivered
+  skills + user-added skills share one directory). All three roots get
+  enable/disable + home path override through configuration, following the
+  existing `tool-caps.json` pattern: a new
+  `~/.clay/agents/coding-agent/skills.json` read at host creation
+  (`clay-agent/src/host.ts`), shipped as a starter file under
+  `examples/config/agents/coding-agent/`, with defaults matching the shipped behavior.
+- **AGENTS.md as system layer.** `<workspaceRoot>/AGENTS.md` is read at
+  session build and injected into the system message block. Prism already
+  ranks this exact layer (`source: "app"`, repo project prompt) for bundle
+  resolution — Clay bypasses bundle resolution, so the daemon reads the
+  file directly with the same trust/size discipline as skill discovery
+  (symlink-escape excluded, bounded bytes, silent skip when absent).
+  Cache note: the file is session-stable, so it rides the stable leading
+  system prefix and does not churn per turn.
+- **Context inspector shows the real system prompt.** The inspector's
+  "System prompt" group renders only `systemPromptContributions`
+  (layered `def.systemPrompt`); the coding profile carries its behavior
+  text as `instructions` (base layer), which reaches the model but not
+  the inspector — the UI shows an empty System Prompt. Fix: render the
+  composed layers (base instructions + any `systemPrompt` contributions
+  + the new AGENTS.md layer) in `contextItems` / `contextItem`
+  (`clay-agent/src/host.ts`).
+- **MCP over stdio — wire up the last mile.** All three layers already
+  exist (`@arnilo/prism-mcp` bridge, daemon
+  `connectAllowListedMcpServers`, Rust `AgentMcpAllowListEntry` in the
+  `initialize` handshake) but every production call site builds an empty
+  allow-list, so nothing can ever connect. Add two configuration sources,
+  both connected **without an approval gate** (user decision — amends
+  decision 1758's untrusted-repo-content posture for `.mcp.json`):
+  user-owned `~/.clay/agents/coding-agent/mcp.json` (tool-caps.json pattern,
+  starter file under `examples/config/agents/coding-agent/`) and repo-root
+  `.mcp.json` (Claude Code convention). The server parses + validates
+  both and builds the allow-list; the daemon's fail-closed validation
+  (absolute executable, literal argv, explicit env) stays.
+  Connect loop is per-server fault-isolated: each entry connects
+  independently, so one failing or over-cap server (oversized schema,
+  >500 tools, crashed binary) hides only its own tools — never the
+  healthy ones (matching the "connection failures hide the tools"
+  contract). Prism's MCP caps (reject-not-truncate on `tools/list`,
+  truncate on call results) are confirmed sane at defaults; Clay
+  overrides none, and a per-server `timeoutMs` knob (default 60s) rides
+  the config schema.
+- **MCP UI surfaces (parity with the skills card).** (1) At session
+  start, a separate card pinned above the transcript — same slot as the
+  skills card — listing the MCP servers and tools connected to the
+  session; persists at the top once messages arrive, hidden when no
+  server connects. (2) Below the message input box, a section showing
+  the MCP connections (server + tool state), mirroring the status-line /
+  completion-strip area of the composer.
+- **Wiki — `/wiki-init` is the sole initiator.** Today the daemon RPC
+  `knowledge.setOptions {wiki:true}` gates everything and nothing in the
+  app calls it. Change: the daemon's slash-command intercept
+  (`host.ts:1703`) treats an unmatched `/wiki-init` as the initiator —
+  internally enable the wiki binding (idempotent, one per daemon) and
+  dispatch the extension's `/wiki-init`. Semantics: scan the workspace
+  for `.wiki/` — present ⇒ run the check/align pass (reconcile the
+  bundle against current sources; refresh + lint); absent ⇒ create the
+  wiki from the existing workspace information. All writes stay inside
+  `.wiki/` (already guaranteed: `autoDeploySkills: false`). The
+  wiki-searcher + wiki-maintainer skills activate simultaneously with a
+  successful init; without it they, the wiki commands, and the wiki
+  tools never appear (chat-safe prompt, as today's disabled default).
+  `knowledge.setOptions` stays as the internal mechanism and
+  programmatic surface.
+- **Graft — available by default.** Remove the RPC-first activation:
+  the daemon attempts the graft binding by default for the workspace
+  (pull mode). CLI resolution stays fail-closed (absent CLI ⇒ off,
+  tools hidden, agent unperturbed). `knowledge.setOptions` remains for
+  disable/mode override. The graft skill stays regardless of connection
+  path (native CLI tools or graft MCP) — it is the when/why workflow
+  guidance (orient → ask → verify at file:line → rebuild), not a
+  duplicate of the tools.
+- **Agent-delivered skills are config-gated.** Skills delivered by the
+  daemon rather than the filesystem scan — wiki-searcher,
+  wiki-maintainer, graft — get on/off switches in
+  `~/.clay/agents/coding-agent/skills.json` (`agentSkills` section). Off ⇒ the
+  skill never registers and its dependent slash commands never appear:
+  wiki off ⇒ `/wiki-init` stays a chat-safe prompt (the intercept
+  honors the gate); graft off ⇒ no binding, no tools. Filesystem-
+  discovered skills are unaffected by this gate.
+- **Agent-delivered skills are file-backed — disk is the source of
+  truth.** Installation/first launch seeds
+  `~/.clay/agents/coding-agent/skills/<name>/SKILL.md` for every agent-delivered
+  skill (`graft`, `wiki-searcher`, `wiki-maintainer`) from the built-in
+  definitions; the daemon always loads the skill content from that file
+  (frontmatter description + instructions body; `toolNames` stay
+  daemon-owned so edits can't break activation). The in-code objects are
+  generators, not the delivered payload. User edits take effect on next
+  daemon start; a deleted file is regenerated from the built-in seed.
+  Supersedes the optional-override pattern: the file is the delivery
+  format, always present, always loaded.
+- **User `SYSTEM.md` — global system-prompt layer.** Installation/first
+  launch seeds `~/.clay/agents/coding-agent/SYSTEM.md`; the daemon loads it as
+  the user-owned system-prompt layer at session build — the global
+  complement to the workspace `AGENTS.md` layer above, same trust/size
+  discipline, byte-stable per session so it rides the cached prefix.
+  Absent file ⇒ seed from built-in default; user edits apply on next
+  session build.
+- **Agent settings page in the UI.** A config/settings entry point
+  (button + page) listing all agent-delivered files: `SYSTEM.md` plus
+  each seeded skill `SKILL.md`, with effective built-in-vs-edited
+  provenance. Each file opens in the Clay editor view to view, edit,
+  and save. The page is the future home for agent configuration — for
+  now only these files.
+- **`@` mentions — manual skill trigger + file/image attachment (pi
+  parity).** Typing `@` in the composer opens a searchable dropdown
+  (type to filter, keyboard selection, selection embeds into the input),
+  listing two kinds of entries: (1) the session's active skill catalog —
+  selecting a skill embeds it into the message as an explicit user
+  instruction to use that skill; the daemon treats it as a manual
+  trigger, so the skill body is available without waiting for the
+  model's `load_skill` round-trip; (2) the workspace filesystem —
+  selecting a file attaches it to the user input (images as image
+  content), the same attach path as pi's `@` autocomplete. Plan-doc
+  detail: exact trigger state for the skill path — recommendation: the
+  @mention adds the skill to the session's loaded set (the same state
+  `load_skill` mutates), which keeps one mechanism.
+- **Session token meter (pi parity).** The coding-agent view shows
+  current context tokens against the loaded model's context ceiling,
+  formatted compact (e.g. `220k/270k`); the ceiling follows the active
+  model and updates on model switch. Source: provider-reported usage
+  from the last round (Prism run state) — the display tracks context
+  occupancy, not cumulative billing. Providers/models that don't report
+  usage get a state-of-the-art estimation heuristic keyed by model
+  family (plan doc picks the table: chars-per-token by tokenizer class
+  as the baseline). UX: text turns to the theme's warning token above
+  60% of ceiling and the theme's error token above 80% — theme tokens
+  only, nothing hardcoded; normal tone otherwise. Rides the composer
+  status strip next to the model label.
+- **Coding-agent fixes (user-reported).**
+  - *Git branch shows the placeholder.* The status row renders
+    `git {branch || "—"}` and the branch plumbing exists end-to-end
+    (Rust `refresh_branch` → STATE snapshot → frontend
+    `snapshot.state["branch"]`), yet the placeholder is what shows —
+    the branch state isn't landing in practice. Fix: make the real
+    current branch always visible (read at session bind + refresh on
+    branch change; diagnose where the state drop happens).
+  - *Reasoning-effort dropdown inactive before the first message.* The
+    effort dropdown should be visible and changeable at all times from
+    session start, and a changed level must take effect for the agent
+    from the next prompt.
+  - *`/resume` list is unusable and resuming doesn't load.* Session list
+    entries show only date/timestamp — add the first few words of the
+    user's first message as the identifying label. And selecting a past
+    session does not actually resume: fix resume to load the session's
+    full transcript, content, and model into the live view.
+
+Open decisions — locked (2026-09-09):
+
+- **`load_skill` progressive disclosure — keep or replace.** Mechanism:
+  when active skills exist, the daemon adds a `load_skill` tool; the
+  model calls it mid-conversation (model-driven, never automatic); the
+  call adds the skill to `session.loadedSkills`, and from the next
+  provider round that skill's catalog line `Skill X: <description>`
+  renders as the full body `Skill X:\n<instructions>` (≤32KB). Cache
+  impact: skills sit in the leading system block, before history, so a
+  body expansion changes bytes at that position and invalidates the
+  cached prefix from there onward (rest of catalog + full history) —
+  once per load event; the new prefix is byte-stable again afterwards,
+  and persisted `loadedSkillBodies` prevent a second invalidation on
+  resume. Cost per load ≈ re-reading the post-catalog prompt at full
+  input price once; benefit = the model actually follows the skill body
+  instead of improvising. Recommendation: keep progressive as default
+  (eager mode sends every body every turn — strictly more expensive;
+  pre-loading bodies at session start invalidates nothing but pays body
+  tokens on turns that don't need them). Decision: **keep progressive**
+  (locked 2026-09-09).
+- **`skills.json` schema — locked.** Per-root enable/disable + one path
+  override (`home`, default `~/.agents`); workspace root's path stays
+  fixed at `<workspaceRoot>/.agents` and `configRoot` at the resolved
+  config root; no ad-hoc extra roots (a symlink inside `~/.agents`
+  covers it). Paths: `~`-expanded or absolute only; relative rejected
+  fail-closed. Caps stay hardcoded (64 skills/root, 48/96-char
+  truncation) — not exposed. Unknown keys follow the `tool-caps.json`
+  precedent. Absent/unreadable file = all three roots on with defaults
+  + stderr warning; never a broken session. (Amended 2026-09-09: the
+  same file also gates agent-delivered skills via `agentSkills` —
+  see the config-gated locked change.)
+- **`.mcp.json` command semantics — locked.** Repo `.mcp.json` connects
+  with no approval gate, full Claude Code parity: bare command names
+  (`npx`, `uvx`) may PATH-resolve, amending decision 1758's "nothing is
+  searched" invariant for this source. Security posture is the user's:
+  they are responsible for the servers they connect; Clay takes no
+  responsibility here, as Claude Code does not. The user-owned
+  `agent/mcp.json` follows the same rules.
 
 ### Phase 2.3 Implementation review, refactor
 
@@ -608,7 +806,7 @@ pi model. Must land before any third-party package (`st`) is planned.
     decision); Clay does not become a registry.
 - **Install ≠ execute, but install does write the load line.** `clay install`
   fetches, records provenance, and appends an idempotent
-  `loadPackage("<name>")` to `~/.config/clay/init.js`. Enable, adopt, revoke,
+  `loadPackage("<name>")` to `~/.clay/init.js`. Enable, adopt, revoke,
   rollback stay Clay-owned (`clay package enable|disable|adopt|revoke|
   inspect|rollback`). Third-party JS still does not run until adopt; a load
   line without adopt is fail-closed. First-party `@clay/*` packages are
@@ -633,7 +831,25 @@ pi model. Must land before any third-party package (`st`) is planned.
 - Publish dry-run docs exist for `@arnilo/clay`; no requirement to actually
   publish in this phase.
 
-## Phase 4: Third-Party Agent Package Platform
+## Direction change: no `st` agent (2026-09-09)
+
+Supersedes the `st` layer without touching Phases 0–3 (frozen
+mid-Phase-2.2 implementation):
+
+- There is no `st` agent and no `@arnilo/st` package. Every `st`
+  workflow/loop documented below ships as native `@clay/coding-agent`
+  workflows started by `/` commands. Users who never invoke them see the
+  base agent unchanged; they can also disable built-in workflows or replace
+  them with their own packages.
+- Earlier `st` mentions (Product Shape layer 3, Phases 1–3, logged
+  2026-08-30 resolutions on `st` identity/channels) are historical. Where
+  they conflict with Phases 4–8 below, Phases 4–8 win.
+- The third-party package platform still ships (Phase 4), re-scoped:
+  packages contribute new **and** override/replace native coding-agent
+  workflows and commands through declared extension points with user
+  approval.
+
+## Phase 4: Third-Party Workflow/Command Package Platform
 
 ### Scope
 
@@ -642,31 +858,43 @@ pi model. Must land before any third-party package (`st`) is planned.
   bound to server-executed implementations, and workflow definitions; list
   and start workflows; subscribe to run/workflow event streams; surface
   ask-user decisions and approvals into Clay UI.
+- Native workflow/command override: a package can introduce new workflows
+  and commands into the coding agent **and** override or disable native
+  ones (including the built-in `/start`/`build`/`fix` workflows from
+  Phases 5–6) through declared extension points. Overrides are explicit,
+  user-approved, and reversible: at most one implementation wins per
+  command/workflow name, the winner and its provenance are visible in the
+  UI, and removing/disabling the package restores the native behavior.
 - Daemon-side enforcement: package contributions are inert data until the
   daemon activates them under trust/permission policy; no package code runs
   in the daemon; secret containment unchanged.
-- Authoring docs + conformance tests + a reference toy package (not `st`)
-  proving the extension path end to end.
+- Authoring docs + conformance tests + a reference toy package proving the
+  extension path end to end, including one contributed command and one
+  native-command override.
 
 ### Exit Gate
 
 - A test-only third-party package registers an agent, a skill, a command,
   and a durable workflow, and runs it through the public API with user
   approval, on Linux.
+- The same (or a second) test package overrides one native coding-agent
+  command (a Phase 2 base command): with the package adopted the override
+  wins and its provenance is shown; after remove/disable the native command
+  behaves as before, on Linux.
 
-## Phase 5: `st` Package — Orchestration Core
+## Phase 5: Built-in Orchestration Core (native workflows)
 
 ### Scope
 
-- `/start` command and `st start` entry: asks the workflow type via
+- `/start` command (native to the coding agent): asks the workflow type via
   `ask_user_decision` (durable suspend path after D1). Initial types: `build`
   and `fix`. Each is a registered loop implementation; more types are
   post-roadmap.
-- **Shared session search annotations.** `st` writes workflow type, run,
+- **Shared session search annotations.** Built-in workflows write workflow type, run,
   phase, task, checkpoint, and status labels into Clay's workspace-scoped
   session index. It uses the same `session.search` surface as the base coding
   agent — never a second session store.
-- **Linux desktop capability (`st` extension only).**
+- **Linux desktop capability (coding-agent extension, deny-by-default).**
   `@arnilo/prism-coding-tools/computer-use-linux` over a host-owned
   `computer-use-linux` MCP binary: accessibility-tree observation,
   screenshots, window targeting, input synthesis. DeviceAdapter admission
@@ -674,7 +902,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   approval/ExecutionPolicy (respecting the default acceptance policy:
   inside-workspace actions free; anything on the host outside the workspace
   follows the write-gate), results bounded and untrusted. Hidden when the
-  binary is absent. Enables `st` workflows that drive real GUI apps for
+  binary is absent. Enables built-in workflows that drive real GUI apps for
   testing/verification.
 - **Git for both loops.** Start of a run creates a dedicated branch. After a
   task passes test + validation, orchestrator auto-commits on that branch.
@@ -704,11 +932,11 @@ pi model. Must land before any third-party package (`st`) is planned.
   Approach. Execution is a sibling skill: general loop + **routing into
   project execution references grouped by unit** (UI, frontend, API,
   documentation, database, …) and current docs before editing. This repo's
-  combined create-plan is the principle source; `st` splits plan vs execute.
+  combined create-plan is the principle source; the built-in split here is plan vs execute.
 - **Project patterns are not a skill.** They are `execute-plan/references/`
   (and the matching execute-tests/validation refs). No generic base — always
   built from the project. This repo's old `project-patterns` skill is folded into `clay-execution`;
-  `st` folds that content into execution references.
+  that content folds into execution references here.
 - **`create-decision-log` is a skill and is embedded.** `create-plan` and
   `execute-plan` always run the decision gate (auto-prompted). Critical =
   architecture, security, or performance with real tradeoffs. Surface to the
@@ -752,7 +980,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   session position consistently; the loop continues from the checkpoint;
   OM records the dropped attempt.
 
-## Phase 6: `st` Sub-Agent Validation Loop and Delegation
+## Phase 6: Built-in Sub-Agent Validation Loop and Delegation
 
 ### Scope
 
@@ -782,7 +1010,7 @@ pi model. Must land before any third-party package (`st`) is planned.
 - **Validation always includes ponytail-review.** Not optional. Use
   `@arnilo/prism-coding-tools/ponytail`. Over-engineering review is part of
   every validation pass, alongside AC checks.
-- **Skills `st` ships.** Loop auto-prompts each. Generic `SKILL.md` + project
+- **Workflow skills (shipped with the coding agent).** Loop auto-prompts each. Generic `SKILL.md` + project
   `references/` except project execution refs (no generic base):
   - `create-plan` / `execute-plan` — impl plan and impl execution. Execution
     refs = project patterns by unit (UI, frontend, API, docs, database, …).
@@ -794,7 +1022,7 @@ pi model. Must land before any third-party package (`st`) is planned.
   model. External-agent execution is deliberately deferred to the direct
   runtime adapters in Phases 9–10; no Prism Antigravity adapter is added.
 - Optional: `@arnilo/prism-core/governance/evals` wired as a release gate for
-  `st` behavior regressions.
+  built-in workflow behavior regressions.
 
 ### Exit Gate
 
@@ -810,12 +1038,12 @@ pi model. Must land before any third-party package (`st`) is planned.
   with at least two providers/models in one run; and an unavailable external
   runtime is reported without a silent Prism or model-provider fallback.
 
-## Phase 7: `st` Memory Cadence and Autonomy Hardening
+## Phase 7: Memory Cadence and Autonomy Hardening (built-in workflows)
 
 ### Scope
 
-- `@arnilo/prism-memory/compaction/observational-memory` attached to the `st`
-  orchestrator session and each durable child session: per-task compaction
+- `@arnilo/prism-memory/compaction/observational-memory` attached to the built-in workflow orchestrator session
+  and each durable child session: per-task compaction
   (fast strategy), recall tool
   active, `om:status`/`om:view` surfaces in Clay UI, and the right-pane
   Observational Memory tab (Phase 2 UI spec) shows live observe/reflect/drop
@@ -843,9 +1071,10 @@ pi model. Must land before any third-party package (`st`) is planned.
 - `roadmap.md` (this file) finalized post-review; per-phase numbered plans
   in `plans/` (105+) created at phase start per `create-plan`; decision logs
   for remaining open decisions and any new ones.
-- Package authoring guide for agent packages; `@arnilo/st` published on npm
-  as the reference third-party agent package (install path is Phase 3);
-  base agent shipped with Clay unchanged for users who never install `st`.
+- Package authoring guide for workflow/command packages (contribute +
+  override), with the Phase 4 toy package as the conformance reference.
+  Built-in workflows ship with the coding agent, ignorable and disablable —
+  users who never invoke them see the base agent unchanged.
 - Code-wiki updates, manual test modules, registry/doc truth tests per
   project documentation-as-code rules.
 - Performance and security review: daemon event throughput, memory worker
@@ -854,8 +1083,9 @@ pi model. Must land before any third-party package (`st`) is planned.
 ### Exit Gate
 
 - Linux blocking gates, daemon tests, package conformance, and manual test
-  plan all pass; documentation is internally consistent; `st` install/
-  remove cycles leave no residue in the base agent.
+  plan all pass; documentation is internally consistent; installing/removing
+  a workflow/command package (including one that overrides a native command)
+  leaves no residue and restores native behavior.
 
 ## Phase 9: External Runtime Contract and Claude Code Delegation
 
@@ -935,6 +1165,9 @@ pi model. Must land before any third-party package (`st`) is planned.
   scraping as a structured adapter.
 
 ## Resolved this iteration (logged 2026-08-30)
+
+Historical record — `st` below means the now-native built-in workflows
+(see direction change); item 1 (`st` identity/channels) is superseded.
 
 1. **`st` identity and channels.** Product `st`. npm `@arnilo/st`. Clay npm
    `@arnilo/clay`. Homebrew skipped for now. Sources: npm + GitHub Releases.
@@ -1062,12 +1295,21 @@ pi model. Must land before any third-party package (`st`) is planned.
    `RunOptions.thinkingLevel`.~~ (Resolved:
    `decision-logs/2026-09-07-2149-prism-0.5.1-clay-agent-family-pins.md`;
    plan 113 executes.)
+9. **No-`st` direction log.** Log the 2026-09-09 direction change (no `st`
+   agent or `@arnilo/st` package; all documented workflows ship natively in
+   the coding agent; packages contribute and override workflows/commands)
+   in `decision-logs/` before Phase 4 is planned. The logged 2026-08-30
+   `st` identity/channel resolutions are superseded by that entry.
+10. **Native workflow/command override semantics.** Precedence when two
+    packages override the same name, per-workflow disable without a
+    package, and where override provenance renders in the UI. Log before
+    Phase 4 is planned.
 
 ## Post-Roadmap (not in scope)
 
 - Homebrew distribution of Clay (formula/cask).
-- Additional `st` workflow types and meta-agent packages (Personal, Work,
+- Additional built-in workflow types and meta-agent packages (Personal, Work,
   Research, Finance per the superseded roadmap's post-parity list).
 - Cross-session shared memory scopes (E5) if per-session composition proves
   insufficient.
-- Remote/distributed `st` runs over the Clay server protocol.
+- Remote/distributed built-in workflow runs over the Clay server protocol.

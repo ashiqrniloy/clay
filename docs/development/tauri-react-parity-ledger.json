@@ -271,7 +271,9 @@
           "ListDocuments",
           "RequestResync",
           "DocumentChunkRequest",
-          "CloseDocument"
+          "CloseDocument",
+          "ListAgentSettingsFiles",
+          "OpenAgentSettingsFile"
         ],
         "server": [
           "InitialDocument",
@@ -284,7 +286,8 @@
           "DocumentStatus",
           "DocumentList",
           "FileOperationFailed",
-          "DocumentClosed"
+          "DocumentClosed",
+          "AgentSettingsFiles"
         ],
         "agent": []
       },
@@ -1098,7 +1101,7 @@
         "ViewportRenderPatch"
       ],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build \u2014 boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build — boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
     },
     {
       "capability_id": "platform.windows",
@@ -1624,7 +1627,21 @@
             "C20",
             "C21",
             "C22",
-            "C23"
+            "C23",
+            "C24",
+            "C25",
+            "C26",
+            "C27",
+            "C28",
+            "C29",
+            "C30",
+            "C31",
+            "C32",
+            "C33",
+            "C34",
+            "C35",
+            "C36",
+            "C37"
           ]
         }
       ],
@@ -1641,8 +1658,8 @@
       },
       "target_owner": "unchanged server authority; daemon-owned session runtime; package surface is client-local presentation",
       "target_tests": "clay-agent node suites + CodingAgentPanel suites + Rust protocol/inventory gates + test-plan/17",
-      "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03",
-      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings)"
+      "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03; plan 117 legs C24-C37 + C-N5-C-N11 recorded 2026-09-10 (clay-agent 138: 137 pass/0 fail/1 skip; frontend 294/294; lib 1307/protocol 210/security 152; scratch-config launch gate + MCP fixture connect {connected: true, tools: 2} through the real daemon)",
+      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings); plan 117 live launch gate 2026-09-10 (isolated scratch config, window-cropped captures in test-plan/artifacts/117-coding-agent/, interactive surface legs per the standing input-injection ceiling)"
     }
   ]
 }

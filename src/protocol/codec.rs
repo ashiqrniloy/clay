@@ -281,8 +281,8 @@ mod tests {
             SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         },
         protocol::{
-            ActiveTheme, ActiveTypography, BehaviorManifest, ClientMessage, CompletionItem,
-            CompletionProvenance, CompletionRejection, CompletionReplacementRange,
+            ActiveTheme, ActiveTypography, AgentClientCommand, BehaviorManifest, ClientMessage,
+            CompletionItem, CompletionProvenance, CompletionRejection, CompletionReplacementRange,
             CompletionRequest, CompletionResultSet, CompletionStatus, CompletionTrigger,
             DocumentAccess, DocumentChunkRejection, DocumentMetadata, DocumentRuntimeRenderState,
             DocumentTextHead, EditOperation, EditRejection, FileErrorCode,
@@ -606,7 +606,22 @@ mod tests {
             force: true,
         };
 
-        for message in [open, selected, selected_folder, viewport, save, reload] {
+        let settings_list = ClientMessage::ListAgentSettingsFiles { client_id: 9 };
+        let settings_open = ClientMessage::OpenAgentSettingsFile {
+            client_id: 9,
+            name: "skills/graft/SKILL.md".to_string(),
+        };
+
+        for message in [
+            open,
+            selected,
+            selected_folder,
+            viewport,
+            save,
+            reload,
+            settings_list,
+            settings_open,
+        ] {
             let frame = codec.encode_client_message(&message).unwrap();
             let decoded = codec.decode_client_message(&frame).unwrap();
             assert_eq!(decoded, message);
@@ -753,6 +768,16 @@ mod tests {
                 message: "workspace file is not valid UTF-8 text".to_string(),
                 workspace_root_id: Some(2),
                 document_id: None,
+            },
+            ServerMessage::AgentSettingsFiles {
+                client_id: 9,
+                files: vec![crate::protocol::AgentSettingsFileInfo {
+                    name: "SYSTEM.md".to_string(),
+                    display_path: "/home/u/.clay/agents/coding-agent/SYSTEM.md".to_string(),
+                    size_bytes: 12,
+                    modified_ms: Some(1_700_000_000_000),
+                    edited: false,
+                }],
             },
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
                 "runtime.syntax_error",
@@ -1566,5 +1591,28 @@ mod tests {
                 CodecError::FrameTooLarge { len: 9, max: 8 }
             ));
         });
+    }
+
+    #[test]
+    fn agent_unit_commands_deserialize_from_the_bare_string_only() {
+        // Plan 117 wire contract: unit AgentClientCommand variants
+        // (ListSessions, ResumableSessions) deserialize from the bare
+        // variant name. The `{ variant: {} }` map form the webviews once
+        // sent fails serde with "invalid type: map, expected unit" — the
+        // request dies silently and the panel never sees a reply. The
+        // frontend's agentCommandPayload must pass the bare string.
+        let listed: AgentClientCommand =
+            serde_json::from_str("\"listSessions\"").expect("bare string form");
+        assert!(matches!(listed, AgentClientCommand::ListSessions));
+        let resumable: AgentClientCommand =
+            serde_json::from_str("\"resumableSessions\"").expect("bare string form");
+        assert!(matches!(resumable, AgentClientCommand::ResumableSessions));
+        // Plan 117 follow-up: the coding-agent pane's mount STATE request.
+        let tab_state: AgentClientCommand =
+            serde_json::from_str("\"tabState\"").expect("bare string form");
+        assert!(matches!(tab_state, AgentClientCommand::TabState));
+        let map_form: Result<AgentClientCommand, _> =
+            serde_json::from_str("{\"listSessions\": {}}");
+        assert!(map_form.is_err(), "map content must stay rejected");
     }
 }

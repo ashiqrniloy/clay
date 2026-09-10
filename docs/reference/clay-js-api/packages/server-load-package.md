@@ -94,7 +94,7 @@ const loaded = serverLoadPackage({
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `packages.serverLoadPackage` in `~/.config/clay/init.js`, but package loading itself is intended for package/load tooling rather than ordinary editor commands.
+No default key binding is assigned. Users may bind a key to `packages.serverLoadPackage` in `~/.clay/init.js`, but package loading itself is intended for package/load tooling rather than ordinary editor commands.
 
 ## Custom properties
 

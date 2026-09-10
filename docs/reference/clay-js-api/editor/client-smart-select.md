@@ -67,7 +67,7 @@ bindKey("Ctrl+Shift+Alt+\\", clientSmartSelect({ action: "shrink" }).commandId);
 
 ## Key bindings
 
-No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (`editor.clientSmartSelect.expand`, `editor.clientSmartSelect.shrink`).
+No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.clay/init.js` (`editor.clientSmartSelect.expand`, `editor.clientSmartSelect.shrink`).
 
 ## Custom properties
 

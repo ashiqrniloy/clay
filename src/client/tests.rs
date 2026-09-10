@@ -2390,7 +2390,7 @@ async fn windows_named_pipe_client_receives_initial_snapshot() {
         session.initial_state.access,
         DocumentAccess::Editable { lease_id: 1 }
     ));
-    // The ambient default configuration (e.g. ~/.config/clay/init.js) may
+    // The ambient default configuration (e.g. ~/.clay/init.js) may
     // publish a behavior manifest, so the exact version is not fixed.
     assert!(
         session.initial_state.behavior_manifest.behavior_version >= 1,

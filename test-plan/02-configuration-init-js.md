@@ -13,9 +13,9 @@ Back up your real config first, then copy the whole example tree (base
 config + package modules):
 
 ```bash
-cp ~/.config/clay/init.js ~/.config/clay/init.js.bak 2>/dev/null || true
-cp -r ~/.config/clay/packages ~/.config/clay/packages.bak 2>/dev/null || true
-cp -r examples/. ~/.config/clay/   # init.js + packages/first-party.js + packages/third-party.js
+cp ~/.clay/init.js ~/.clay/init.js.bak 2>/dev/null || true
+cp -r ~/.clay/packages ~/.clay/packages.bak 2>/dev/null || true
+cp -r examples/. ~/.clay/   # init.js + packages/first-party.js + packages/third-party.js
 ```
 
 ## Evaluation
@@ -33,9 +33,9 @@ cp -r examples/. ~/.config/clay/   # init.js + packages/first-party.js + package
 
 | # | Action | Expected |
 |---|--------|----------|
-| C7 | Split: move the `bindKey` calls into `~/.config/clay/keys.js`; in init.js: `await loadConfigurationModule({ path: "./keys.js" })` | Bindings from the module work identically |
+| C7 | Split: move the `bindKey` calls into `~/.clay/keys.js`; in init.js: `await loadConfigurationModule({ path: "./keys.js" })` | Bindings from the module work identically |
 | C8 | Point `path` at a file with a syntax error | Diagnostic from the module evaluation; rest of config still applied as documented |
-| C9 | Break `~/.config/clay/packages/first-party.js` (syntax error), reload | `configuration.module_failed` diagnostic; base config (theme/typography/bindings) still active; packages inactive |
+| C9 | Break `~/.clay/packages/first-party.js` (syntax error), reload | `configuration.module_failed` diagnostic; base config (theme/typography/bindings) still active; packages inactive |
 | C10 | Fix `packages/first-party.js`, reload (Ctrl+Shift+R or save-triggered auto-reload) | Diagnostic clears; packages load again; grants-before-loadPackage ordering intact |
 | C11 | Delete `packages/third-party.js` entirely, reload | No fatal failure: the missing optional module records a `configuration.module_failed` warning, then base config and first-party packages stay active |
 | C12 | Relaunch with `packages/first-party.js` already broken (boot-time isolation) | Server starts; `configuration.module_failed` for the module; base config (theme/typography) active; no launch failure |
@@ -122,7 +122,7 @@ log.
 ## Plan 115 install-appended load line steps (2026-09-08)
 
 `clay install npm:<spec>` appends an exact two-line block to
-`~/.config/clay/init.js` (marker comment + one `await loadPackage("<name>")`
+`~/.clay/init.js` (marker comment + one `await loadPackage("<name>")`
 call); `clay remove` strips exactly that block. Full CLI step coverage lives
 in module 09 (P43–P54); the steps here cover the configuration-reload side.
 
@@ -160,9 +160,9 @@ discovery pass at boot); see the module 09 execution record for gates.
 ## Cleanup
 
 ```bash
-mv ~/.config/clay/init.js.bak ~/.config/clay/init.js 2>/dev/null || rm ~/.config/clay/init.js
-rm -rf ~/.config/clay/packages
-mv ~/.config/clay/packages.bak ~/.config/clay/packages 2>/dev/null || true
+mv ~/.clay/init.js.bak ~/.clay/init.js 2>/dev/null || rm ~/.clay/init.js
+rm -rf ~/.clay/packages
+mv ~/.clay/packages.bak ~/.clay/packages 2>/dev/null || true
 ```
 
 ## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)

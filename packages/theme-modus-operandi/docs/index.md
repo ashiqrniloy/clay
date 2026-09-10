@@ -1,6 +1,6 @@
 # @clay/theme-modus-operandi
 
-A first-party **inert style-data** theme for Clay: the [Modus Operandi](https://protesilaos.com/emacs/modus-themes) palette — the canonical **light** Modus theme, white background, WCAG AAA contrast intent — mapped onto Clay's two-axis syntax vocabulary (`TokenType` + `Modifiers`) and base UI color keys. It is Clay's canonical light-mode default (selected via the `appearance` preference) and can also be pinned explicitly with `setTheme("@clay/theme-modus-operandi")` in `~/.config/clay/init.js`.
+A first-party **inert style-data** theme for Clay: the [Modus Operandi](https://protesilaos.com/emacs/modus-themes) palette — the canonical **light** Modus theme, white background, WCAG AAA contrast intent — mapped onto Clay's two-axis syntax vocabulary (`TokenType` + `Modifiers`) and base UI color keys. It is Clay's canonical light-mode default (selected via the `appearance` preference) and can also be pinned explicitly with `setTheme("@clay/theme-modus-operandi")` in `~/.clay/init.js`.
 
 This package carries **no executable authority**. All overrides are static `clay.contributions.textStyles` entries in [`package.json`](../package.json), parsed and validated by Clay at load and resolved into the single source of color (`StyleRegistry`). There is no runtime registration, no ops, no widgets, and no raw CSS — only hex colors + optional text-attribute flags (`bold`/`italic`/`underline`/`strike`).
 

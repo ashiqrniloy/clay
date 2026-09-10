@@ -68,6 +68,52 @@ function bootstrap(
 }
 
 describe("workspace controller", () => {
+  it("adopts the tab id from a pre-bootstrap registry so server-first chords route to the right tab", async () => {
+    const sent: Array<{ payload: string; tabId?: number }> = [];
+    const ws = createWorkspace({
+      send: async (payload, tabId) => {
+        sent.push({ payload, tabId });
+      },
+      loadLayout: async () => ({
+        version: 2,
+        activeTab: 0,
+        tabs: [{ clientId: 2, kind: "placeholder" }],
+      }),
+    });
+
+    // The server tab registry broadcasts during the handshake before
+    // mountRuntime sees the bootstrap — same race they already fixed for
+    // root ids. The remembered tab id must be adopted at mount time.
+    ws.handleEnvelope({
+      kind: "event",
+      data: {
+        kind: "tabRegistry",
+        data: {
+          tabs: [
+            {
+              tabId: 20,
+              clientId: 2,
+              workspaceRoot: "/tmp/ws2",
+              workspaceRootId: 4,
+            },
+          ],
+          active: 2,
+          revision: 1,
+        },
+      },
+    });
+
+    ws.installBootstrap(bootstrap({ clientId: 2 })); // bootstrap.tabId omitted
+    await ws.activate(2);
+
+    expect(ws.runtime(2)?.tabId).toBe(20);
+    expect(ws.dispatchServerCommand("controlCenter.open")).toBe(true);
+    await Promise.resolve();
+    const last = sent.at(-1);
+    expect(last).toBeDefined();
+    expect(last?.tabId).toBe(20);
+  });
+
   it("restore flushes a queued open when the handshake registry raced the bootstrap", async () => {
     const sent: string[] = [];
     const ws = createWorkspace({
@@ -616,8 +662,11 @@ describe("workspace controller", () => {
 
   it("executes only routed client workflow commands", async () => {
     const dialogs: string[] = [];
+    const sent: string[] = [];
     const ws = createWorkspace({
-      send: async () => undefined,
+      send: async (payload) => {
+        sent.push(payload);
+      },
       openFileDialog: async () => {
         dialogs.push("file");
         return true;

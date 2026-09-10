@@ -76,7 +76,7 @@ bindKey("Ctrl+]", clientSelectTextobject({ object: "function", around: true, dir
 
 ## Key bindings
 
-No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.config/clay/init.js` (for example `editor.clientSelectTextobject.function.inner`, `editor.clientSelectTextobject.function.around`, `editor.clientSelectTextobject.function.around.next`).
+No default key bindings. The command IDs are bindable through documented key binding APIs in `~/.clay/init.js` (for example `editor.clientSelectTextobject.function.inner`, `editor.clientSelectTextobject.function.around`, `editor.clientSelectTextobject.function.around.next`).
 
 ## Custom properties
 

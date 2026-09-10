@@ -160,6 +160,14 @@ pub enum AgentWireEvent {
         #[serde(default)]
         context_tokens: Option<u64>,
     },
+    /// Last provider round's context occupancy (plan 117 token meter):
+    /// prompt tokens (input + cache reads + writes) of the most recent
+    /// `provider_turn_finished`. Counters only — never content.
+    ContextTokens {
+        session_id: String,
+        run_id: String,
+        tokens: u64,
+    },
     MessageDelta {
         session_id: String,
         run_id: String,
@@ -291,6 +299,9 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
                 push_entry(entries, AgentTranscriptKind::Usage, usage);
             }
         }
+        // Meter numerator only; no transcript row (the usage box rides
+        // `Finished`).
+        AgentWireEvent::ContextTokens { .. } => {}
         AgentWireEvent::Overflow => {
             push_entry(entries, AgentTranscriptKind::Error, "event overflow");
         }
@@ -459,11 +470,12 @@ pub struct AgentSessionSnapshot {
     #[serde(default)]
     pub context_tokens: Option<u64>,
     pub entries: Vec<AgentTranscriptEntry>,
-    /// Server-built MCP allow-list server ids (decision 1758), for the
-    /// Coding Agent extension strip chrome. Names only — never commands,
-    /// args, or env.
+    /// Per-server MCP connect outcomes from the daemon's environment
+    /// (plan 117): connected servers + tool counts + hidden-because errors.
+    /// Empty on snapshots predating the first environment fetch (state
+    /// merges keep the list).
     #[serde(default)]
-    pub mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<AgentMcpServerInfo>,
     /// Declared portable thinking levels for the session's model, ascending
     /// (plan 109 I4). Empty for non-reasoning / undeclared models — no
     /// effort control.
@@ -488,6 +500,11 @@ pub struct AgentSessionSnapshot {
     /// (wiki, graft). Empty = none report; the strip omits the segment.
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// Catalog skills (disk-discovered + registered): bounded name and
+    /// description pairs for the pinned skills card. Empty on snapshots
+    /// predating the first environment fetch (state merges keep the list).
+    #[serde(default)]
+    pub skills: Vec<AgentSkillInfo>,
 }
 
 /// One daemon-registered slash command (plan 109 R1): bounded completion
@@ -508,6 +525,52 @@ pub struct AgentSlashCommand {
     pub name: String,
     #[serde(default)]
     pub description: String,
+}
+
+/// One catalog skill (disk-discovered or registered): bounded name +
+/// description for the skills card on the coding surface — never
+/// instructions, toolNames, or metadata.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkillInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// Per-server MCP connect outcome (plan 117): what the daemon actually
+/// connected, for the MCP card and composer section. Carries ids, counts,
+/// and hidden-because errors — never commands, args, or env.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMcpServerInfo {
+    pub server_id: String,
+    #[serde(default)]
+    pub connected: bool,
+    #[serde(default)]
+    pub tools: u32,
+    #[serde(default)]
+    pub error: String,
 }
 
 impl AgentSessionSnapshot {
@@ -597,6 +660,11 @@ pub struct AgentSessionInfo {
     /// pickers fall back to the profile name.
     #[serde(default)]
     pub label: String,
+    /// Plan 117 follow-up: `updated_at` rendered in the daemon's local time
+    /// (`YYYY-MM-DD HH:MM`) for the resume list's second line. Empty when the
+    /// daemon sent none — callers fall back to the raw ISO stamp.
+    #[serde(default)]
+    pub updated_at_label: String,
 }
 
 #[derive(
@@ -714,6 +782,23 @@ pub enum AgentClientCommand {
         session_id: String,
     },
     ListSessions,
+    /// Plan 117: the panel's recent-sessions list — the tab's
+    /// workspace-scoped, labeled resumable page. The root comes from the
+    /// server's tab registry (never webview input); the result rides the
+    /// generic `session.resumable` agent-RPC custom event.
+    ResumableSessions,
+    /// Plan 117 follow-up: the coding-agent pane's mount STATE. Nothing else
+    /// emits a snapshot before the first prompt, so the git branch, skills
+    /// card, and MCP card stayed empty on a freshly opened surface. Tab-
+    /// resolved server-side (the workspace root comes from the tab registry,
+    /// never webview input); the reply rides the normal agent broadcast as
+    /// `AgentServerMessage::Snapshot` (the view's relay applies it to STATE).
+    TabState,
+    /// Plan 117 @-mentions: bounded workspace file listing for the composer
+    /// dropdown (server-side walk inside the session's workspace root).
+    WorkspaceFiles {
+        session_id: String,
+    },
     OpenPicker {
         kind: AgentPickerKind,
     },

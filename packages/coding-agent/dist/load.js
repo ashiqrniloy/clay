@@ -1,10 +1,10 @@
 // @clay/coding-agent package load entry (Phase 2).
 //
 // Registers the coding profile (nine Prism coding tools + ask_user_decision,
-// coding system prompt layer, plan-file skill) on the daemon's validated
-// registries via the trusted-only `clay:agent` facade. Order matters: skills
-// register before the profile that references them — a profile naming an
-// unregistered skill fails closed at session start, before any provider turn.
+// coding system prompt layer) on the daemon's validated registries via the
+// trusted-only `clay:agent` facade. Disk skills (`.agents/skills/` at the
+// workspace root and under the clay config root) are discovered by the
+// daemon itself — nothing skill-shaped is hardcoded here anymore.
 //
 // Also registers the named pane surface (activation "pane"): the Coding
 // Agent split surface launched through the `coding-agent.profile` chrome
@@ -13,7 +13,7 @@
 // landing stays @clay/chat. Tool execution keeps the Phase 1 acceptance
 // policy; registration grants no execution authority. No raw ops, no client
 // JavaScript.
-import { profileRegister, skillRegister, commandRegister } from "clay:agent";
+import { profileRegister, commandRegister } from "clay:agent";
 import { serverRegisterPaneContentContribution } from "clay:ui";
 
 export const packageName = "@clay/coding-agent";
@@ -39,36 +39,13 @@ delete/move operations, and shell metacharacter commands require user
 approval; full autonomy stays off unless the user enables it.
 Inspect before editing (repo_list, repo_search, glob, read); keep edits
 inside the open workspace; surface destructive operations before running
-them. For multi-step work, maintain numbered plan documents under plans/
-using the coding-agent.createPlan skill.`;
-
-export const CREATE_PLAN_SKILL = Object.freeze({
-  name: "coding-agent.createPlan",
-  description:
-    "Create and maintain numbered plan documents for multi-step coding work.",
-  instructions: `Maintain numbered plan documents under plans/ in the open
-workspace — one plan per phase or initiative, named <number>-<Title>.md
-(e.g. plans/108-Phase2.md). Write plans with the write tool using the
-coding plan convention so hosts can parse them:
-
-# <Title>\n\n- Task ID: \`<taskId>\`\n- Status: \`planned|editing|checking|completed\`\n\n## Todos\n\n- [ ] [task-1] First task with acceptance criteria\n- [x] [task-2] Completed task\n\n## Notes\n\nDeviations, decisions, evidence.\n
-Rules: todo lines are exactly "- [ ] [id] text" (x when done); keep the
-numbered task list the source of truth; mark tasks complete only with dated
-evidence gathered from real verification runs (test names, command output);
-record compromises and further actions; never rewrite completed history —
-append updates instead. Re-read the plan file before each task and after
-each verification to keep it current. Session checkpoints capture the
-workspace at task boundaries — write the plan before starting work so the
-checkpoint references a real plan path.`,
-  toolNames: ["read", "write", "edit", "glob", "repo_list"]
-});
+them. For multi-step work, maintain numbered plan documents under plans/.`;
 
 export const CODING_PROFILE = Object.freeze({
   name: "coding",
   description: "Workspace coding agent",
   instructions: CODING_SYSTEM_PROMPT,
-  tools: CODING_TOOLS,
-  skills: [CREATE_PLAN_SKILL.name]
+  tools: CODING_TOOLS
 });
 
 // Slash commands (pi-parity surface). Names are the daemon dispatch keys;
@@ -93,7 +70,6 @@ export function codingAgentPackageContract() {
     packageName,
     apiPrefix,
     profile: CODING_PROFILE,
-    skill: CREATE_PLAN_SKILL,
     slashCommands: SLASH_COMMANDS
   };
 }
@@ -135,7 +111,6 @@ export const AGENT_SURFACE = Object.freeze({
 });
 
 export async function loadCodingAgentPackage(_options = {}) {
-  await skillRegister(CREATE_PLAN_SKILL);
   await profileRegister(CODING_PROFILE);
   for (const command of SLASH_COMMANDS) {
     await commandRegister(command);

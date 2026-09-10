@@ -33,7 +33,7 @@ async: false
 
 ## Summary
 
-Set the pane-focus policy (`click` | `cursor`) that controls how split panes are activated by the pointer. The default is `click`. The setting applies live (no restart) whenever `~/.config/clay/init.js` is evaluated or reloaded.
+Set the pane-focus policy (`click` | `cursor`) that controls how split panes are activated by the pointer. The default is `click`. The setting applies live (no restart) whenever `~/.clay/init.js` is evaluated or reloaded.
 
 ## Description
 
@@ -50,7 +50,7 @@ Phase 22.3 (tabs as independent client views): the policy is **per active tab** 
 
 ## When to use
 
-Use from `~/.config/clay/init.js` to switch pane activation between click-to-focus and focus-follows-cursor. Most users keep the default (`click`); `cursor` suits users who work with several panes and prefer tiling-window-manager focus behavior.
+Use from `~/.clay/init.js` to switch pane activation between click-to-focus and focus-follows-cursor. Most users keep the default (`click`); `cursor` suits users who work with several panes and prefer tiling-window-manager focus behavior.
 
 ## JavaScript usage
 
@@ -65,7 +65,7 @@ setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { setPaneFocusPolicy } from "clay:shell";
 
 // Focus follows the pointer across split panes.

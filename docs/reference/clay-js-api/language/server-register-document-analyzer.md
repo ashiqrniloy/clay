@@ -71,7 +71,7 @@ Worker lifecycle is lazy and bounded:
 
 ## When to use
 
-Use from `dist/load.js` inside a language-server bridge package. Never call from `~/.config/clay/init.js` directly — bridge packages own this registration. The package must have an exact current `authorizeLanguageServer` grant before registration.
+Use from `dist/load.js` inside a language-server bridge package. Never call from `~/.clay/init.js` directly — bridge packages own this registration. The package must have an exact current `authorizeLanguageServer` grant before registration.
 
 ## JavaScript usage
 

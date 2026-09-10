@@ -75,7 +75,7 @@ export function setConflictOverride(_options) {
  *
  * This is the one-line default end-user package loader (e.g.
  * `await loadPackage("@clay/markdown")`, `await loadPackage("@vendor/foo")`,
- * or `await loadPackage("github:user/repo")` from `~/.config/clay/init.js`). It
+ * or `await loadPackage("github:user/repo")` from `~/.clay/init.js`). It
  * resolves + validates + authorizes + enables the package through the
  * authoritative PackageService path. Third-party packages require prior CLI
  * adoption and execute through the Rust bridge in the shared third-party

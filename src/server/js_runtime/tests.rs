@@ -7600,7 +7600,7 @@ async fn runtime_syntax_error_reports_diagnostic() {
 #[tokio::test]
 async fn runtime_permission_error_reports_sanitized_diagnostic() {
     let error = ClayJsRuntimeService::default()
-        .evaluate_controlled_module(r#"import "file:///home/example/.config/clay/secret.js";"#)
+        .evaluate_controlled_module(r#"import "file:///home/example/.clay/secret.js";"#)
         .await
         .unwrap_err();
     let diagnostic = error.diagnostic();
@@ -7776,7 +7776,7 @@ async fn evaluate_with_seeded_package_adoption(
 /// Plan 035 task 8: prove the one-line `init.js` default loads an installed,
 /// authorized, *user-installed* (non-`@clay/*`) package the same way it
 /// loads `@clay/markdown`. Mirrors [`evaluate_with_seeded_package`] but
-/// evaluates a real `~/.config/clay/init.js`-shaped config root instead of
+/// evaluates a real `~/.clay/init.js`-shaped config root instead of
 /// a controlled module source, so the loadEntry import + default-export
 /// invocation is exercised through the configuration runtime path.
 async fn evaluate_init_js_with_seeded_package(
@@ -8974,23 +8974,29 @@ fn chat_load_entry_is_execute_only() {
 }
 
 #[test]
-fn coding_agent_load_entry_registers_skills_before_profile() {
+fn coding_agent_load_entry_registers_profile_without_hardcoded_skills() {
     let load = fs::read_to_string("packages/coding-agent/dist/load.js")
         .expect("read coding-agent load entry");
     assert!(!load.contains("Deno.core"), "no raw ops in package JS");
     assert!(
         load.contains("clay:agent"),
-        "profile/skill registration rides the documented facade"
+        "profile registration rides the documented facade"
     );
     assert!(
         load.contains("export default loadCodingAgentPackage"),
         "loadPackage must invoke the package-owned default export"
     );
-    // Skills resolve fail-closed: the skill registration must precede the
-    // profile that references it, and the slash commands register last.
-    let skill_at = load
-        .find("await skillRegister(")
-        .expect("skill registration call");
+    // No hardcoded skill ships with the package anymore: skills come from
+    // the daemon's `.agents/skills/` disk discovery, so the load entry must
+    // not register any skill and the profile must not name any.
+    assert!(
+        !load.contains("skillRegister"),
+        "no hardcoded skill registration; disk discovery owns skills"
+    );
+    assert!(
+        !load.contains("skills:"),
+        "the coding profile declares no skills"
+    );
     let profile_at = load
         .find("await profileRegister(")
         .expect("profile registration call");
@@ -8998,8 +9004,8 @@ fn coding_agent_load_entry_registers_skills_before_profile() {
         .find("await commandRegister(")
         .expect("command registration call");
     assert!(
-        skill_at < profile_at && profile_at < command_at,
-        "skills must register before the profile that names them, commands last"
+        profile_at < command_at,
+        "the profile registers before the slash commands"
     );
     assert!(
         load.contains("\"/compact\"") && load.contains("\"/open-session-as-fork\""),
@@ -10543,9 +10549,10 @@ async fn drain_all_pending_registrations() -> Vec<crate::server::agent::PackageR
 /// Clean-init drill (plan 108 task 6): a fresh `init.js` whose only statement
 /// is the one-line package load activates the Coding Agent's working defaults
 /// — manifest command + chrome extension point via the real loadPackage path,
-/// skill-then-profile registration declarations (queued hostless; applied
-/// when a host installs). Declarations are content-asserted: concurrent
-/// document-flow tests may queue identical entries at any time.
+/// profile registration declaration (queued hostless; applied when a host
+/// installs). Declarations are content-asserted: concurrent document-flow
+/// tests may queue identical entries at any time — cross-entry ordering is
+/// not observable, the load-entry source test owns per-load order.
 #[tokio::test]
 async fn coding_agent_clean_init_one_line_activates_working_defaults() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
@@ -10584,30 +10591,22 @@ await loadPackage("@clay/coding-agent");
         crate::protocol::RoutingPolicy::ServerFirst
     );
 
-    // Registration declarations queued in contract order: skills before the
-    // profile that names them, five skill tools, ten profile tools, and the
-    // profile referencing exactly the registered skill.
+    // Registration declarations queued in contract order: no skill
+    // declarations (skills come from disk discovery, not the package), the
+    // coding profile without a skills field, ten profile tools.
     let drained = drain_all_pending_registrations().await;
-    let skill_at = drained
-        .iter()
-        .position(|entry| {
-            entry.method == "skill.register"
-                && entry.params["name"] == "coding-agent.createPlan"
-                && entry.params["toolNames"].as_array().map(Vec::len) == Some(5)
-        })
-        .expect("skill declaration queued");
-    let profile_at = drained
-        .iter()
-        .position(|entry| {
+    assert!(
+        !drained.iter().any(|entry| entry.method == "skill.register"),
+        "no hardcoded skill declaration queues; disk discovery owns skills"
+    );
+    assert!(
+        drained.iter().any(|entry| {
             entry.method == "agentProfile.register"
                 && entry.params["name"] == "coding"
-                && entry.params["skills"] == serde_json::json!(["coding-agent.createPlan"])
+                && entry.params.get("skills").is_none()
                 && entry.params["tools"].as_array().map(Vec::len) == Some(10)
-        })
-        .expect("profile declaration queued");
-    assert!(
-        skill_at < profile_at,
-        "skills must queue before the profile that names them"
+        }),
+        "coding profile declaration queues without a skills field"
     );
     // The slash surface queues as inert command declarations after the
     // profile: nine distinct commands (concurrent document-flow tests may
@@ -10638,14 +10637,6 @@ await loadPackage("@clay/coding-agent");
         .find(|entry| entry.method == "command.register")
         .expect("commands queue");
     assert_eq!(first_command.params["handler"], "compact");
-    let first_command_at = drained
-        .iter()
-        .position(|entry| entry.method == "command.register")
-        .expect("commands queue");
-    assert!(
-        profile_at < first_command_at,
-        "commands queue after the profile declaration"
-    );
     // The named pane surface (activation "pane") registers in the UI
     // registry immediately (a process-local op, no daemon): the wire snapshot
     // carries it as a named pane surface, never as the empty-tab landing
@@ -10703,7 +10694,9 @@ await loadPackage("@clay/coding-agent");
         .filter(|command| command.package_name == "@clay/coding-agent")
         .count();
     // Fourteen manifest commands (profile + close + cycle-effort client
-    // command + resume + ten slash surface) register once.
+    // command + resume + ten slash surface) register once. The two
+    // agent-settings client commands were retired when the page moved into
+    // the coding agent's own Settings tab (plan 117 follow-up).
     assert_eq!(
         commands, 14,
         "double load must not duplicate the package commands"

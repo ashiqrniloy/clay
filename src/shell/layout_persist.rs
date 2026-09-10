@@ -2,7 +2,9 @@
 
 //! Layout persistence for the clay window.
 //!
-//! Serializes to `$XDG_CONFIG_HOME/clay/layout.json` (or `~/.config/clay/layout.json`).
+//! Serializes to `~/.clay/layout.json` (decision 2026-09-10-1526; the legacy
+//! `$XDG_CONFIG_HOME/clay/layout.json` location is still read when the new
+//! path is absent).
 //! v1 (no version key, Phase 20.3): user-modified split ratios and slot
 //! sizes for the single tab. v2 (`"version": 2`, Phase 22.5): whole-window
 //! state — tab order, active tab, per-tab workspace root, split-tree
@@ -348,7 +350,7 @@ fn tree_contains(node: &PaneSplitNode, pane_id: PaneId) -> bool {
     }
 }
 
-/// Write whole-window state to `$XDG_CONFIG_HOME/clay/layout.json` as the v2
+/// Write whole-window state to `~/.clay/layout.json` as the v2
 /// document. The only writer since Phase 22.5 (v1 files are read-only);
 /// missing parent dirs are created; write failures are silent.
 pub fn save_window_state(state: &PersistedWindowState) {
@@ -362,7 +364,7 @@ pub fn save_window_state(state: &PersistedWindowState) {
     }
 }
 
-/// Read layout state from `$XDG_CONFIG_HOME/clay/layout.json`.
+/// Read layout state from `~/.clay/layout.json`.
 /// Returns `None` if the file is missing or corrupt.
 /// Load and parse the whole-window state; `None` when the file is missing,
 /// corrupt, legacy (v1), or yields no tabs — the caller keeps today's
@@ -393,11 +395,24 @@ pub fn save_window_state_from_json(value: &serde_json::Value) -> Result<(), Stri
 /// Load the raw layout document (v1 or v2 shape); `None` on missing/corrupt.
 pub(crate) fn load_layout() -> Option<Value> {
     let path = config_path()?;
-    let contents = std::fs::read_to_string(&path).ok()?;
+    if let Ok(contents) = std::fs::read_to_string(&path) {
+        return serde_json::from_str(&contents).ok();
+    }
+    // Legacy pre-2026-09-10 location.
+    let legacy = legacy_config_path()?;
+    let contents = std::fs::read_to_string(&legacy).ok()?;
     serde_json::from_str(&contents).ok()
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))?;
+    Some(home.join(".clay").join("layout.json"))
+}
+
+/// Legacy pre-2026-09-10 location (`$XDG_CONFIG_HOME/clay/layout.json`).
+fn legacy_config_path() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| {

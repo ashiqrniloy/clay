@@ -70,7 +70,7 @@ Default key bindings:
 - `Shift+Alt+Down`, `Shift+Alt+Up` (grow the box one line)
 - `Shift+Alt+Left`, `Shift+Alt+Right` (move all carets)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js` using the direction-specific command IDs.
 
 ## Custom properties
 

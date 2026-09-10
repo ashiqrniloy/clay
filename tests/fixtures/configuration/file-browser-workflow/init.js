@@ -1,5 +1,5 @@
 // End-to-end file browser workflow smoke fixture.
-// ~/.config/clay/init.js equivalent: load first-party language packages and
+// ~/.clay/init.js equivalent: load first-party language packages and
 // bind only documented Clay command IDs needed for the six-step workflow plus
 // Phase 20 daily-editing chords that lack hard-coded native shortcuts.
 import { bindKey } from "clay:keybindings";

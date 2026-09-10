@@ -35,7 +35,7 @@ In adherence to Clay's core visual architecture:
 
 ## 4. Activation and Configuration
 
-To activate `@clay/design-glass` in your `~/.config/clay/init.js`:
+To activate `@clay/design-glass` in your `~/.clay/init.js`:
 
 ```javascript
 import { theme } from "clay:theme";

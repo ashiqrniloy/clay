@@ -804,7 +804,7 @@
         }
       ],
       "security": "Suppresses registered completion providers from selection, stale-drops in-flight results, and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw-op, native-widget, or package-manager authority. Does not remove registered metadata.",
-      "agent_guidance": "Use from ~/.config/clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.",
+      "agent_guidance": "Use from ~/.clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.",
       "lookup_tags": ["js-api", "completion", "provider", "disable", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
@@ -969,7 +969,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_get_state",
       "name": "getConfigurationState",
       "user_facing_name": "Get Configuration State",
-      "summary": "Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.",
+      "summary": "Inspect Clay configuration metadata for the `~/.clay/init.js` entry point and local modules.",
       "owner": "server",
       "phase": "Phase 13",
       "visibility": "public",
@@ -979,7 +979,7 @@
         {
           "name": "entryPoint",
           "type": "string",
-          "default": "~/.config/clay/init.js",
+          "default": "~/.clay/init.js",
           "description": "User configuration entry point path reported by configuration state."
         },
         {
@@ -1009,7 +1009,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_load_module",
       "name": "loadConfigurationModule",
       "user_facing_name": "Load Configuration Module",
-      "summary": "Load a local modular configuration file from the runtime-backed `~/.config/clay/init.js` server-side configuration runtime.",
+      "summary": "Load a local modular configuration file from the runtime-backed `~/.clay/init.js` server-side configuration runtime.",
       "owner": "server",
       "phase": "Phase 13",
       "visibility": "public",
@@ -1020,7 +1020,7 @@
           "name": "path",
           "type": "string",
           "default": "none",
-          "description": "Local configuration module path relative to the configuration root (e.g. `~/.config/clay/init.js`)."
+          "description": "Local configuration module path relative to the configuration root (e.g. `~/.clay/init.js`)."
         },
         {
           "name": "optional",
@@ -1030,7 +1030,7 @@
         }
       ],
       "security": "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -1049,7 +1049,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_set_package_option",
       "name": "setPackageOption",
       "user_facing_name": "Set Package Option",
-      "summary": "Register a validated package-owned configuration option from `~/.config/clay/init.js`.",
+      "summary": "Register a validated package-owned configuration option from `~/.clay/init.js`.",
       "owner": "server",
       "phase": "Phase 18.4",
       "visibility": "public",
@@ -3234,7 +3234,7 @@
         }
       ],
       "security": "The trusted-only packages facade cannot be imported by third-party code. Bundled trust requires an exact compiled inventory/provenance/integrity match; every other source remains third-party and must have a current durable user adoption record before enable or execution. Approved third-party load entries execute only in the shared third-party runtime, never the trusted runtime, and are not mutually isolated from sibling third-party packages. Graph relations and first-party mutations require declared extension scope plus durable user consent; stale/revoked approval fails closed. Root-confined loading grants no filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or implicit package-control authority.",
-      "agent_guidance": "Use as the one-line default for loading packages from ~/.config/clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.",
+      "agent_guidance": "Use as the one-line default for loading packages from ~/.clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.",
       "lookup_tags": ["packages", "js-api", "load", "source-aware", "init"],
       "app_visible": true,
       "help_visible": true,

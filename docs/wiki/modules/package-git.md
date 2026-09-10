@@ -61,7 +61,7 @@ authority — all Git execution stays inside the server's `GitDiscoveryService`.
 
 ## Code Examples
 
-Default user activation in `~/.config/clay/init.js`:
+Default user activation in `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";

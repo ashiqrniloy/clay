@@ -4,7 +4,7 @@
 //
 // Copy the whole tree to your configuration root and adjust it:
 //
-//   cp -r examples/. ~/.config/clay/
+//   cp -r examples/. ~/.clay/
 //
 // The example is split into three modules that mirror the three components of
 // a real configuration:
@@ -48,7 +48,7 @@
 // ----------------------------------------------------------------------------
 // init.js may split settings across local files next to init.js. Each module
 // is evaluated as part of the configuration root (same authority, same
-// diagnostics). Paths are relative to the config root (~/.config/clay).
+// diagnostics). Paths are relative to the config root (~/.clay).
 //
 // This example loads its package configuration from two modules at the end
 // of this file (section 11), both with optional: true so a broken or missing

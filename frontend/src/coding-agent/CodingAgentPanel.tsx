@@ -48,6 +48,10 @@ import type {
 } from "../sdui/types";
 import { ClayEditor } from "../editor/ClayEditor";
 import type { DocumentSession } from "../editor/sync/session";
+import {
+  AgentSettingsPanel,
+  type AgentSettingsFileInfo,
+} from "../agent-settings/AgentSettingsPanel";
 
 import styles from "./coding-agent.module.css";
 
@@ -76,11 +80,56 @@ interface ModelInfo {
   provider?: unknown;
   model?: unknown;
   displayName?: unknown;
+  /** Bounded context ceiling in tokens when the registry reports one
+   *  (plan 117 token meter). */
+  contextWindow?: unknown;
+  /** Declared portable thinking levels, ascending (plan 109 I4). Empty =
+   *  no effort control for this model. */
+  thinkingLevels?: unknown;
 }
 
 interface ProviderInfo {
   id?: unknown;
   configured?: unknown;
+}
+
+/** Chars-per-token by model-family tokenizer class (plan 117): coarse
+ *  prose calibration picked from the model id; unlisted families read as
+ *  4. Ceiling: swap for a real tokenizer count if Clay ships one.
+ *  # ponytail: family table is calibration, not measurement
+ */
+const CHARS_PER_TOKEN_BY_FAMILY: ReadonlyArray<readonly [RegExp, number]> = [
+  [/claude/i, 3.6],
+  [/gpt|\bo[1345]/i, 4],
+  [/gemini/i, 4],
+  [/llama|mistral|qwen|deepseek/i, 3.8],
+];
+
+function charsPerToken(model: string): number {
+  return CHARS_PER_TOKEN_BY_FAMILY.find(([pattern]) => pattern.test(model))?.[1] ?? 4;
+}
+
+/** Occupancy estimate when no provider usage has been reported: total
+ *  transcript characters divided by the family's chars-per-token rate. */
+export function estimateContextTokens(
+  messages: ReadonlyArray<{ content?: unknown }>,
+  model: string,
+): number {
+  let chars = 0;
+  for (const message of messages) {
+    if (typeof message.content === "string") chars += message.content.length;
+  }
+  return Math.round(chars / charsPerToken(model));
+}
+
+/** Compact token count: 220000 → `220k`, 1250000 → `1.2m`, else digits. */
+export function compactTokens(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const millions = (tokens / 1_000_000).toFixed(1).replace(/\.0$/, "");
+    return `${millions}m`;
+  }
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
 }
 
 /** Group configured providers' models for the picker/dropdown surfaces
@@ -179,6 +228,68 @@ function toolMeta(message: unknown): { toolName: string; skillName: string } {
  * content type from typed theme tokens. Selection shows the full content in
  * the right pane.
  */
+/** Pinned skills card: catalog skills (name + description) discovered by
+ *  the daemon, rendered above the transcript — first card in the empty
+ *  state, persists at the top once the conversation starts. Non-
+ *  interactive (catalog is reference data, not a transcript box). */
+const SkillsCard = memo(function SkillsCard({
+  skills,
+}: {
+  skills: ReadonlyArray<{ name: string; description: string }>;
+}) {
+  if (skills.length === 0) return null;
+  return (
+    <div className={styles.skillsCard} aria-label="Skills loaded">
+      <span className={styles.boxLabel}>Skills loaded</span>
+      <ul className={styles.skillsList}>
+        {skills.map((skill) => (
+          <li key={skill.name} className={styles.skillsRow}>
+            <ClayText variant="caption">{skill.name}</ClayText>
+            {skill.description.length > 0 && (
+              <ClayText variant="caption" muted>
+                {skill.description}
+              </ClayText>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+});
+
+/** Pinned MCP card: per-server connect outcomes from the daemon's
+ *  environment, same slot as the skills card — hidden when no server is
+ *  configured/connected. Display-only (no restart/connect actions;
+ *  explicitly out of scope, plan 117). */
+const McpCard = memo(function McpCard({
+  servers,
+}: {
+  servers: ReadonlyArray<{ serverId: string; connected: boolean; tools: number; error: string }>;
+}) {
+  if (servers.length === 0) return null;
+  return (
+    <div className={styles.mcpCard} aria-label="MCP servers connected">
+      <span className={styles.boxLabel}>MCP servers</span>
+      <ul className={styles.mcpList}>
+        {servers.map((server) => (
+          <li key={server.serverId} className={styles.mcpRow}>
+            <ClayText variant="caption">{server.serverId}</ClayText>
+            {server.connected ? (
+              <ClayText variant="caption" muted>
+                {server.tools} {server.tools === 1 ? "tool" : "tools"}
+              </ClayText>
+            ) : (
+              <ClayText variant="caption" className={styles.mcpError}>
+                {server.error.length > 0 ? `hidden: ${server.error}` : "hidden"}
+              </ClayText>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+});
+
 const TranscriptBoxRow = memo(function TranscriptBoxRow({
   box,
   selected,
@@ -251,7 +362,12 @@ export function CodingAgentPanel({
   }, [send]);
   useEffect(() => chatAgent.start(), []);
   useEffect(() => {
-    void sendRequest(agentCommandPayload({ listSessions: {} }));
+    void sendRequest(agentCommandPayload("listSessions"));
+    // Plan 117 follow-up: ask for the tab's STATE at mount. Nothing else
+    // emits a snapshot before the first prompt, so without this the status
+    // row showed `git —` and the skills/MCP cards stayed empty until the
+    // first message (the daemon environment needs no session).
+    void sendRequest(agentCommandPayload("tabState"));
   }, []);
 
   const declared = surface.component;
@@ -269,6 +385,16 @@ export function CodingAgentPanel({
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   const [completionIndex, setCompletionIndex] = useState(0);
   const [completionDismissed, setCompletionDismissed] = useState(false);
+  // Session id of the bound agent run (STATE-carried; read early because
+  // the @-mention fetch and file-cache gate key off it).
+  const sessionId =
+    typeof snapshot.state["sessionId"] === "string"
+      ? (snapshot.state["sessionId"] as string)
+      : "";
+  // Plan 117 @-mentions: workspace file cache for the dropdown, one fetch
+  // per session (bounded server walk; client-side filtering). The parse is
+  // gated on the fetch guard so a previous session's list never renders.
+  const filesFetchedFor = useRef("");
   // Plan 109 I7: which detail tab is open — the Context fetch fires on tab
   // open and re-fires when the transcript length changes (event-driven
   // invalidation: every run finish / compaction / entry append lands a
@@ -307,12 +433,49 @@ export function CodingAgentPanel({
         (name): name is string => typeof name === "string" && name.length > 0,
       )
     : [];
-  const mcpServers = Array.isArray(snapshot.state["mcpServers"])
-    ? (snapshot.state["mcpServers"] as string[])
-    : [];
-  const effortLevels = Array.isArray(snapshot.state["effortLevels"])
-    ? (snapshot.state["effortLevels"] as string[])
-    : null;
+  // Per-server MCP connect outcomes (plan 117): {serverId, connected,
+  // tools, error} from the daemon's environment. The strip shows connected
+  // names only; the pinned card + composer section read the full list.
+  const mcpServers = useMemo(() => {
+    const stateList = Array.isArray(snapshot.state["mcpServers"])
+      ? (snapshot.state["mcpServers"] as Array<{
+          serverId?: unknown;
+          connected?: unknown;
+          tools?: unknown;
+          error?: unknown;
+        }>)
+      : [];
+    return stateList
+      .filter((server) => typeof server.serverId === "string" && server.serverId.length > 0)
+      .map((server) => ({
+        serverId: server.serverId as string,
+        connected: server.connected === true,
+        tools: typeof server.tools === "number" && Number.isInteger(server.tools) && server.tools >= 0 ? server.tools : 0,
+        error: typeof server.error === "string" ? server.error : "",
+      }));
+  }, [snapshot.state]);
+  const connectedMcpServers = mcpServers
+    .filter((server) => server.connected)
+    .map((server) => server.serverId);
+  // Plan 117: effort levels resolve from the models inventory the picker
+  // already holds (per-model thinkingLevels) — present from session start,
+  // updates on model switch. The old STATE `effortLevels` key only existed
+  // after the first prompt (book cache filled at session creation), which
+  // kept the dropdown hidden until then.
+  const effortLevels = useMemo(() => {
+    const models = Array.isArray(snapshot.state["models"])
+      ? (snapshot.state["models"] as ModelInfo[])
+      : [];
+    const active = models.find(
+      (candidate) => candidate.provider === provider && candidate.model === model,
+    );
+    const levels = Array.isArray(active?.thinkingLevels)
+      ? (active?.thinkingLevels as unknown[]).filter(
+          (level): level is string => typeof level === "string" && level.length > 0,
+        )
+      : [];
+    return levels.length > 0 ? levels : null;
+  }, [snapshot.state, provider, model]);
   const activeEffort =
     typeof snapshot.state["effort"] === "string"
       ? (snapshot.state["effort"] as string)
@@ -350,10 +513,23 @@ export function CodingAgentPanel({
     typeof snapshot.state["contextTokens"] === "number"
       ? (snapshot.state["contextTokens"] as number)
       : null;
-  const contextWindow =
-    typeof snapshot.state["contextWindow"] === "number"
-      ? (snapshot.state["contextWindow"] as number)
+  // Ceiling (plan 117 token meter): the active model's registry context
+  // window, resolved from the models inventory the picker already holds —
+  // present from session start, updates on model switch.
+  const contextWindow = useMemo(() => {
+    const models = Array.isArray(snapshot.state["models"])
+      ? (snapshot.state["models"] as ModelInfo[])
+      : [];
+    const active = models.find(
+      (candidate) => candidate.provider === provider && candidate.model === model,
+    );
+    return typeof active?.contextWindow === "number" && active.contextWindow > 0
+      ? active.contextWindow
       : null;
+  }, [snapshot.state, provider, model]);
+  // Usage unreported (no provider turn yet, or a provider that never
+  // reports): estimate occupancy from transcript size (plan 117).
+  const meterTokens = contextTokens ?? estimateContextTokens(snapshot.messages, model);
 
   const transcript = useMemo<TranscriptBox[]>(() => {
     const boxes: TranscriptBox[] = [];
@@ -385,6 +561,18 @@ export function CodingAgentPanel({
     return boxes;
   }, [snapshot.messages]);
 
+  // Session token meter (plan 117): compact occupancy vs the model's
+  // ceiling — `220k/270k`. Theme thresholds only: warning above 60%,
+  // error above 80%, normal otherwise.
+  const meter = useMemo(() => {
+    if (contextWindow === null) return null;
+    const ratio = meterTokens / contextWindow;
+    return {
+      text: `${compactTokens(meterTokens)}/${compactTokens(contextWindow)}`,
+      tone: ratio > 0.8 ? "error" : ratio > 0.6 ? "warning" : "normal",
+      percent: Math.round(ratio * 100),
+    };
+  }, [meterTokens, contextWindow]);
   const lastUsage = useMemo(() => {
     for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
       const message = snapshot.messages[index];
@@ -425,6 +613,23 @@ export function CodingAgentPanel({
     return [...merged.values()];
   }, [snapshot.state]);
 
+  // Catalog skills (disk-discovered + registered): pinned skills card on
+  // the transcript. Bounded parse, same discipline as the command list.
+  const skills = useMemo(() => {
+    const stateList = Array.isArray(snapshot.state["skills"])
+      ? (snapshot.state["skills"] as Array<{
+          name?: unknown;
+          description?: unknown;
+        }>)
+      : [];
+    return stateList
+      .filter((skill) => typeof skill.name === "string" && skill.name.length > 0)
+      .map((skill) => ({
+        name: skill.name as string,
+        description: typeof skill.description === "string" ? skill.description : "",
+      }));
+  }, [snapshot.state]);
+
   const slashMatches = useMemo(() => {
     if (completionDismissed) return null;
     if (!draft.startsWith("/") || draft.includes(" ")) return null;
@@ -432,6 +637,80 @@ export function CodingAgentPanel({
       .filter((command) => command.name.startsWith(draft))
       .slice(0, 8);
   }, [completionDismissed, draft, slashCommands]);
+
+  // Plan 117 @-mentions: a trailing `@token` in the draft opens the merged
+  // dropdown — the session's skill catalog plus the workspace file cache
+  // (both server-known; filter is client-side). `@skill:x` / `@file:x`
+  // narrow to one section; a bare token filters both.
+  const filesRaw = Array.isArray(snapshot.state["workspaceFiles"])
+    ? (snapshot.state["workspaceFiles"] as unknown[]).filter(
+        (file): file is string => typeof file === "string",
+      )
+    : [];
+  // ponytail: no display gate — a session switch refetches on the first @;
+  // the bounded stale list renders for one RPC round-trip at most.
+  const files = filesRaw;
+  const mentionToken = useMemo(() => {
+    if (completionDismissed) return null;
+    const match = /(?:^|\s)@([^\s]*)$/.exec(draft);
+    if (!match) return null;
+    return { query: match[1] ?? "", start: match.index + match[0].lastIndexOf("@") };
+  }, [completionDismissed, draft]);
+  const mentionMatches = useMemo(() => {
+    if (!mentionToken) return null;
+    const raw = mentionToken.query;
+    const skillQuery = raw.startsWith("skill:")
+      ? raw.slice(6)
+      : raw.startsWith("file:")
+        ? null
+        : raw;
+    const fileQuery = raw.startsWith("file:")
+      ? raw.slice(5)
+      : raw.startsWith("skill:")
+        ? null
+        : raw;
+    const section = (
+      label: string,
+      items: string[],
+      kind: "skill" | "file",
+      query: string,
+    ) => ({
+      label,
+      items: items
+        .filter((item) => item.toLowerCase().includes(query.toLowerCase()))
+        .slice(0, 8)
+        .map((name) => ({ kind, name })),
+    });
+    const sections = [
+      ...(skillQuery !== null
+        ? [section("Skills", skills.map((skill) => skill.name), "skill", skillQuery)]
+        : []),
+      ...(fileQuery !== null && files.length > 0
+        ? [section("Files", files, "file", fileQuery)]
+        : []),
+    ];
+    const flat = sections.flatMap((entry) => entry.items);
+    return flat.length > 0 ? { sections, flat } : null;
+  }, [files, mentionToken, skills]);
+  // First @-token of a session fetches the bounded workspace listing once;
+  // the reply rides the clay.agentRpc custom event into agent state.
+  useEffect(() => {
+    if (!mentionToken || !sessionId || filesFetchedFor.current === sessionId) return;
+    filesFetchedFor.current = sessionId;
+    void sendRequest(agentCommandPayload({ workspaceFiles: { sessionId } }));
+  }, [mentionToken, sessionId]);
+  const embedMention = useCallback(
+    (kind: "skill" | "file", name: string) => {
+      setDraft((current) => {
+        const match = /(?:^|\s)@([^\s]*)$/.exec(current);
+        if (!match) return current;
+        const start = match.index + match[0].lastIndexOf("@");
+        return `${current.slice(0, start)}@${kind}:${name} `;
+      });
+      setCompletionDismissed(true);
+    },
+    [],
+  );
 
   const sendIntent = useCallback(
     (commandId: string) => {
@@ -530,7 +809,28 @@ export function CodingAgentPanel({
         }
         return;
       }
-      if (!slashMatches || slashMatches.length === 0) return;
+      if (!slashMatches || slashMatches.length === 0) {
+        // Plan 117 @-mention dropdown shares the completion index + dismiss
+        // state (slash and mention are mutually exclusive by construction).
+        if (mentionMatches && mentionMatches.flat.length > 0) {
+          const count = mentionMatches.flat.length;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setCompletionIndex((index) => (index + 1) % count);
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setCompletionIndex((index) => (index - 1 + count) % count);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            setCompletionDismissed(true);
+          } else if (event.key === "Tab") {
+            event.preventDefault();
+            const picked = mentionMatches.flat[completionIndex % count];
+            if (picked) embedMention(picked.kind, picked.name);
+          }
+        }
+        return;
+      }
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setCompletionIndex((index) => (index + 1) % slashMatches.length);
@@ -544,7 +844,7 @@ export function CodingAgentPanel({
         setCompletionDismissed(true);
       }
     },
-    [effortChord, effortLevels, shownEffort, slashMatches],
+    [effortChord, effortLevels, shownEffort, slashMatches, mentionMatches, completionIndex, embedMention],
   );
 
   const onComposerSubmit = useCallback(
@@ -591,21 +891,17 @@ export function CodingAgentPanel({
     },
     [pendingApproval],
   );
-  // Session list/resume (plan 108 task 9): the same bounded listSessions
-  // inventory Chat uses; Resume rebinds this tab's session server-side.
-  const sessions = Array.isArray(snapshot.state["sessions"])
-    ? (snapshot.state["sessions"] as Array<Record<string, unknown>>)
+  // Session list/resume (plan 117): the workspace-scoped, labeled
+  // resumable list (first words of the first user message — daemon
+  // `session.resumable`); resume rides the same rich load the picker uses.
+  const resumableSessions = Array.isArray(snapshot.state["resumableSessions"])
+    ? (snapshot.state["resumableSessions"] as Array<Record<string, unknown>>)
     : [];
-  const lastUsageText =
-    contextTokens !== null && contextWindow !== null
-      ? `context ${contextTokens}/${contextWindow} tok`
-      : lastUsage;
+  // Fallback readout when no model ceiling resolves (inventory absent):
+  // the raw usage box text, else nothing.
+  const lastUsageText = meter ? "" : lastUsage;
   // Plan 109 I7: the Context tab renders the server-authoritative view
   // (daemon `session.context`); the client-derived counters are gone.
-  const sessionId =
-    typeof snapshot.state["sessionId"] === "string"
-      ? (snapshot.state["sessionId"] as string)
-      : "";
   const contextView = isContextView(snapshot.state["contextView"])
     ? (snapshot.state["contextView"] as ContextView)
     : null;
@@ -655,6 +951,8 @@ export function CodingAgentPanel({
               aria-label="Transcript"
               aria-live="polite"
             >
+              <SkillsCard skills={skills} />
+              <McpCard servers={mcpServers} />
               {transcript.length > 0 ? (
                 transcript.map((box) => (
                   <TranscriptBoxRow
@@ -714,6 +1012,44 @@ export function CodingAgentPanel({
                   ))}
                 </ul>
               )}
+              {mentionMatches && (
+                <ul
+                  className={styles.completions}
+                  aria-label="Mentions"
+                  role="listbox"
+                >
+                  {mentionMatches.sections.map((section) => (
+                    <li key={section.label} role="presentation">
+                      <span
+                        className={styles.completionSection}
+                        role="presentation"
+                      >
+                        {section.label}
+                      </span>
+                      <ul role="group" aria-label={`${section.label} matches`}>
+                        {section.items.map((item) => (
+                          <li key={`${item.kind}:${item.name}`}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={
+                                mentionMatches.flat[completionIndex % mentionMatches.flat.length]
+                                  ?.name === item.name
+                              }
+                              className={styles.completionRow}
+                              onClick={() => embedMention(item.kind, item.name)}
+                            >
+                              <span className={styles.completionName}>
+                                @{item.kind}:{item.name}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <form
                 className={styles.composer}
                 onSubmit={(event) => {
@@ -735,7 +1071,7 @@ export function CodingAgentPanel({
                     configured
                       ? streaming
                         ? "Steer the agent, or wait"
-                        : "Ask, or type /"
+                        : "Ask, or type / or @"
                       : "Configure a provider first"
                   }
                   disabled={!configured}
@@ -765,6 +1101,26 @@ export function CodingAgentPanel({
                   />
                 </span>
               </form>
+              {mcpServers.length > 0 && (
+                <ul className={styles.mcpSection} aria-label="MCP connections">
+                  {mcpServers.map((server) => (
+                    <li key={server.serverId} className={styles.mcpSectionRow}>
+                      <ClayText variant="caption" muted>
+                        {server.serverId}
+                      </ClayText>
+                      {server.connected ? (
+                        <ClayText variant="caption" muted>
+                          {server.tools} {server.tools === 1 ? "tool" : "tools"}
+                        </ClayText>
+                      ) : (
+                        <ClayText variant="caption" className={styles.mcpError}>
+                          {server.error.length > 0 ? `hidden: ${server.error}` : "hidden"}
+                        </ClayText>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </footer>
 
             <div className={styles.statusRow} role="status">
@@ -779,7 +1135,29 @@ export function CodingAgentPanel({
               <span className={styles.statusRight}>
                 <ClayText variant="caption" muted>
                   {configured ? `${provider}/${model}` : "no provider"}
-                  {lastUsageText ? ` · ${lastUsageText}` : ""}
+                  {meter ? (
+                    <>
+                      {" · "}
+                      {/* Token meter (plan 117): occupancy vs ceiling;
+                       * threshold tones ride diagnostic tokens only. */}
+                      <span
+                        className={
+                          meter.tone === "error"
+                            ? styles.meterError
+                            : meter.tone === "warning"
+                              ? styles.meterWarning
+                              : undefined
+                        }
+                        title={`Context usage: ${meter.percent}% of ceiling`}
+                      >
+                        {meter.text}
+                      </span>
+                    </>
+                  ) : lastUsageText ? (
+                    ` · ${lastUsageText}`
+                  ) : (
+                    ""
+                  )}
                 </ClayText>
                 {/* Plan 109 I4: cataloged ClayDropdown for declared levels;
                  * plain caption readout otherwise. The selected level rides
@@ -813,7 +1191,7 @@ export function CodingAgentPanel({
                 </ClayText>
               )}
               <ClayText variant="caption" muted>
-                MCP: {mcpServers.length > 0 ? mcpServers.join(", ") : "none"}
+                MCP: {connectedMcpServers.length > 0 ? connectedMcpServers.join(", ") : "none"}
               </ClayText>
             </div>
           </div>
@@ -836,7 +1214,7 @@ export function CodingAgentPanel({
                     <FilesTab
                       session={session}
                       sendIntent={sendIntent}
-                      sessions={sessions}
+                      sessions={resumableSessions}
                     />
                   ),
                 },
@@ -884,12 +1262,81 @@ export function CodingAgentPanel({
                     />
                   ),
                 },
+                {
+                  // Plan 117 follow-up: the agent's delivered config files.
+                  // Replaces the shell-owned side panel — the listing rides
+                  // this pane's own document session, so the shell keeps no
+                  // agent-settings state.
+                  id: "settings",
+                  label: "Settings",
+                  content: (
+                    <SettingsTab
+                      session={session}
+                      open={activeTab === "settings"}
+                      sendIntent={sendIntent}
+                    />
+                  ),
+                },
               ]}
             />
           </div>
         </Panel>
       </Group>
     </section>
+  );
+}
+
+/**
+ * Settings tab (plan 117 follow-up): the agent's delivered config files
+ * (SYSTEM.md + seeded SKILL.md), with built-in-vs-edited provenance. The
+ * listing and the open both ride this pane's own document session, so the
+ * tab needs no shell state and no extra protocol surface: the reply arrives
+ * as an `agentSettingsFiles` feature event on that same session.
+ */
+function SettingsTab({
+  session,
+  open,
+  sendIntent,
+}: {
+  session: DocumentSession | null;
+  open: boolean;
+  sendIntent: (commandId: string) => void;
+}) {
+  const [files, setFiles] = useState<AgentSettingsFileInfo[] | null>(null);
+  useEffect(() => {
+    if (!open || !session) return;
+    const unsubscribe = session.subscribeFeatures((envelope) => {
+      const event = envelope.data as {
+        kind?: string;
+        data?: { files?: AgentSettingsFileInfo[] };
+      };
+      if (event.kind !== "agentSettingsFiles" || !event.data) return;
+      setFiles(event.data.files ?? []);
+    });
+    session.listAgentSettings();
+    return unsubscribe;
+  }, [open, session]);
+  if (!session) {
+    return (
+      <div className={styles.tabEmpty}>
+        <ClayText variant="body" muted>
+          No active agent session.
+        </ClayText>
+      </div>
+    );
+  }
+  return (
+    <AgentSettingsPanel
+      files={files}
+      loading={files == null}
+      onOpen={(name) => {
+        session.openAgentSettings(name);
+        // The opened file is an ordinary document: release the agent surface
+        // so the pane shows the editor instead of this panel (the same
+        // release the composer's Close button performs).
+        sendIntent("coding-agent.close");
+      }}
+    />
   );
 }
 
@@ -972,6 +1419,11 @@ function FilesTab({
   sendIntent: (commandId: string) => void;
   sessions: readonly Record<string, unknown>[];
 }) {
+  // Plan 117: fetch the labeled, workspace-scoped resumable list when the
+  // empty state mounts (bounded server walk, root from the tab registry).
+  useEffect(() => {
+    void sendRequest(agentCommandPayload("resumableSessions"));
+  }, []);
   const meta = useSyncExternalStore(
     session ? session.store.subscribe : () => () => undefined,
     session ? session.store.get : () => null,
@@ -1000,25 +1452,45 @@ function FilesTab({
         </ClayButton>
         {sessions.length > 0 && (
           <ul className={styles.sessionList} aria-label="Recent sessions">
-            {sessions.slice(0, 5).map((record) => (
-              <li key={String(record["id"])} className={styles.sessionRow}>
-                <ClayText variant="detail" muted>
-                  {String(record["id"]).slice(0, 12)}
-                </ClayText>
-                <ClayIconButton
-                  icon="session.resume"
-                  label={`Resume ${String(record["id"])}`}
-                  variant="muted"
-                  onPress={() =>
-                    void sendRequest(
-                      agentCommandPayload({
-                        resumeSession: { sessionId: String(record["id"]) },
-                      }),
-                    )
-                  }
-                />
-              </li>
-            ))}
+            {sessions.slice(0, 5).map((record) => {
+              const id = String(record["sessionId"] ?? record["id"] ?? "");
+              const label =
+                typeof record["label"] === "string" && record["label"].length > 0
+                  ? record["label"]
+                  : "Untitled session";
+              // Plan 117 follow-up: the row needs both halves of the identity —
+              // the opening prompt (label) and when the session was last
+              // active. The stamp is the daemon's local-time rendering, so the
+              // hour matches the user's clock rather than UTC.
+              const stamp =
+                typeof record["updatedAtLabel"] === "string"
+                  ? record["updatedAtLabel"]
+                  : "";
+              return (
+                <li key={id} className={styles.sessionRow}>
+                  <span className={styles.sessionLabel}>
+                    <ClayText variant="detail">{label}</ClayText>
+                    {stamp.length > 0 && (
+                      <ClayText variant="caption" muted>
+                        {stamp}
+                      </ClayText>
+                    )}
+                  </span>
+                  <ClayIconButton
+                    icon="session.resume"
+                    label={`Resume ${label} (${stamp || id.slice(0, 12)})`}
+                    variant="muted"
+                    onPress={() =>
+                      void sendRequest(
+                        agentCommandPayload({
+                          resumeSession: { sessionId: id },
+                        }),
+                      )
+                    }
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -1399,8 +1871,10 @@ function ContextTab({
   );
 }
 
-/** Typed agent-family request through the validated bridge path. */
-function agentCommandPayload(command: Record<string, unknown>): string {
+/** Typed agent-family request through the validated bridge path. Unit
+ *  variants ride the bare-string form — `{ listSessions: {} }` fails serde
+ *  deserialization (map content where a unit is expected). */
+function agentCommandPayload(command: Record<string, unknown> | string): string {
   return JSON.stringify({
     family: "agent",
     payload: { clientId: 0, command },

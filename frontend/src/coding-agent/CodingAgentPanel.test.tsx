@@ -5,7 +5,7 @@
 // Tauri bridge are the only outs.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 type StreamEvent = Record<string, unknown> & { type: string };
 
 const harness = vi.hoisted(() => {
@@ -14,8 +14,9 @@ const harness = vi.hoisted(() => {
     emit(event: StreamEvent): void {
       for (const listener of listeners) listener(event);
     },
-    subscribe(next: (event: StreamEvent) => void): void {
+    subscribe(next: (event: StreamEvent) => void): () => void {
       listeners.add(next);
+      return () => listeners.delete(next);
     },
   };
 });
@@ -29,8 +30,8 @@ vi.mock("../agent/events", () => ({
   agentStream: {
     events: {
       subscribe: (observer: { next: (event: StreamEvent) => void }) => {
-        harness.subscribe(observer.next);
-        return { unsubscribe: () => undefined };
+        const unsubscribe = harness.subscribe(observer.next);
+        return { unsubscribe };
       },
     },
     retain: () => () => undefined,
@@ -39,8 +40,8 @@ vi.mock("../agent/events", () => ({
     next: (event: StreamEvent) => void;
     error: (error: unknown) => void;
   }) => {
-    harness.subscribe(observer.next);
-    return { unsubscribe: () => undefined };
+    const unsubscribe = harness.subscribe(observer.next);
+    return { unsubscribe };
   },
 }));
 
@@ -67,7 +68,20 @@ afterEach(() => {
 
 const surface = {
   id: "coding-agent.surface",
-  actionTargets: ["coding-agent.profile", "coding-agent.close"],
+  // The shipped action targets (packages/coding-agent/package.json): a
+  // `sendIntent` with an id outside this list is not a valid surface intent
+  // and the server rejects it — a composer button was silently dead that way
+  // (plan 117 follow-up).
+  actionTargets: [
+    "coding-agent.profile",
+    "coding-agent.close",
+    "chat.submit",
+    "chat.cancel",
+    "chat.steer",
+    "agent.clientOpenModelPicker",
+    "agent.clientOpenSessionPicker",
+    "documents.clientOpenFileDialog",
+  ],
   provenance: {
     packageName: "@clay/coding-agent",
     packageVersion: "0.1.0",
@@ -150,7 +164,7 @@ describe("CodingAgentPanel", () => {
         snapshot: {
           provider: "mock",
           model: "mini",
-          mcpServers: ["files"],
+          mcpServers: [{ serverId: "files", connected: true, tools: 2, error: "" }],
         },
         clientId: 1,
       } as never);
@@ -331,6 +345,47 @@ describe("CodingAgentPanel", () => {
     }
   });
 
+  it("requests the tab's state at mount so branch + MCP are known before the first prompt (plan 117 follow-up)", async () => {
+    vi.mocked(sendRequest).mockClear();
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    // Nothing emits a snapshot before the first prompt, so the panel asks for
+    // the tab's STATE itself (tab-resolved server-side).
+    expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("listSessions"));
+    expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("tabState"));
+
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          sessionId: "",
+          branch: "feature/pane-open",
+          mcpServers: [{ serverId: "graft", connected: true, tools: 6 }],
+          skills: [],
+        },
+        clientId: 1,
+      } as never);
+      // The status row reports the tab's branch (server-side `.git` read on
+      // the mount snapshot) and the MCP card lists the connected server.
+      await waitFor(() => {
+        const rows = Array.from(document.querySelectorAll('[role="status"]'));
+        expect(
+          rows.some((row) => (row.textContent ?? "").includes("git feature/pane-open")),
+        ).toBe(true);
+      });
+      expect(await screen.findByLabelText(/MCP servers/)).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
   it("renders `git —` and omits the extension segment without daemon data (plan 109 R2/R3)", async () => {
     render(
       <CodingAgentPanel
@@ -400,7 +455,14 @@ describe("CodingAgentPanel", () => {
         snapshot: {
           provider: "mock",
           model: "mini",
-          effortLevels: ["low", "medium", "high"],
+          models: [
+            {
+              provider: "mock",
+              model: "mini",
+              displayName: "Mock demo",
+              thinkingLevels: ["low", "medium", "high"],
+            },
+          ],
           effort: "medium",
         },
         clientId: 1,
@@ -435,7 +497,14 @@ describe("CodingAgentPanel", () => {
         snapshot: {
           provider: "mock",
           model: "mini",
-          effortLevels: ["low", "high"],
+          models: [
+            {
+              provider: "mock",
+              model: "mini",
+              displayName: "Mock demo",
+              thinkingLevels: ["low", "high"],
+            },
+          ],
         },
         clientId: 1,
       } as never);
@@ -799,6 +868,31 @@ describe("CodingAgentPanel", () => {
     });
   });
 
+  it("composer intents are declared action targets (plan 117 follow-up)", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("sduiAction"));
+    });
+    const sent = vi.mocked(sendRequest).mock.calls.map(([payload]) => {
+      const parsed = JSON.parse(String(payload)) as {
+        payload?: { intent?: { commandId?: string } };
+      };
+      return parsed.payload?.intent?.commandId;
+    });
+    const intents = sent.filter((id): id is string => typeof id === "string");
+    expect(intents.length).toBeGreaterThan(0);
+    for (const intent of intents) {
+      expect(surface.actionTargets).toContain(intent);
+    }
+  });
+
   it("recent sessions compact Resume into distinct icon actions (plan 112 T8)", async () => {
     render(
       <CodingAgentPanel
@@ -815,18 +909,39 @@ describe("CodingAgentPanel", () => {
         snapshot: {
           provider: "mock",
           model: "mini",
-          sessions: [{ id: "abcdef123456" }, { id: "ffff00001111" }],
+          // Plan 117: the resumable list carries sessionId + label (first
+          // words of the first user message) + the daemon's local last-active
+          // stamp; a session the daemon never labelled reads "Untitled
+          // session" instead of a blank row.
+          resumableSessions: [
+            {
+              sessionId: "abcdef123456",
+              label: "Fix the login bug",
+              updatedAt: "2026-09-10T20:17:29.681Z",
+              updatedAtLabel: "2026-09-10 22:17",
+            },
+            {
+              sessionId: "ffff00001111",
+              label: "",
+              updatedAt: "2026-09-09T08:02:00.000Z",
+              updatedAtLabel: "2026-09-09 10:02",
+            },
+          ],
         },
         clientId: 1,
       } as never);
       fireEvent.click(screen.getByRole("tab", { name: "Files" }));
-      // Distinct accessible names per row; glyphs not text labels.
+      // Distinct accessible names per row; glyphs not text labels. The stamp
+      // disambiguates rows that share a label.
       const first = await screen.findByRole("button", {
-        name: "Resume abcdef123456",
+        name: "Resume Fix the login bug (2026-09-10 22:17)",
       });
       const second = await screen.findByRole("button", {
-        name: "Resume ffff00001111",
+        name: "Resume Untitled session (2026-09-09 10:02)",
       });
+      // Both halves of the identity are visible on the row.
+      expect(screen.getByText("Fix the login bug")).toBeInTheDocument();
+      expect(screen.getByText("2026-09-10 22:17")).toBeInTheDocument();
       expect(first.querySelector("svg")).not.toBeNull();
       expect(second.querySelector("svg")).not.toBeNull();
       // Empty-state discovery actions keep their visible labels.
@@ -940,3 +1055,405 @@ const bootstrapDto = {
     keymaps: [],
   },
 } as unknown as BootstrapDto;
+describe("Settings tab (plan 117 follow-up)", () => {
+  it("lists the agent's delivered files from the pane session and opens one", async () => {
+    const sent: string[] = [];
+    const session = createDocumentSession({
+      send: async (payload) => {
+        sent.push(String(payload));
+      },
+    });
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        session={session}
+      />,
+    );
+    // The listing is requested on this pane's own session — no shell state,
+    // no separate side panel.
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    await waitFor(() => {
+      expect(sent.some((raw) => raw.includes("listAgentSettingsFiles"))).toBe(
+        true,
+      );
+    });
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    // The reply arrives as an agentSettingsFiles feature event on that same
+    // session (the server's direct reply, plumbed through
+    // ClientConnectionEvent::AgentSettingsFiles).
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "agentSettingsFiles",
+          data: {
+            clientId: 1,
+            files: [
+              {
+                name: "SYSTEM.md",
+                displayPath: "/root/SYSTEM.md",
+                sizeBytes: 0,
+                modifiedMs: 1,
+                edited: false,
+              },
+              {
+                name: "skills/graft/SKILL.md",
+                displayPath: "/root/skills/graft/SKILL.md",
+                sizeBytes: 850,
+                modifiedMs: 2,
+                edited: false,
+              },
+            ],
+          },
+        },
+      } as never);
+    });
+    const list = await screen.findByLabelText("Agent files");
+    expect(list.textContent).toContain("SYSTEM.md");
+    expect(list.textContent).toContain("skills/graft/SKILL.md");
+    expect(list.textContent).toContain("built-in");
+    // Selecting a file rides the document pipeline, then releases the agent
+    // surface so the opened document is what the pane shows.
+    fireEvent.click(screen.getByText("skills/graft/SKILL.md"));
+    await waitFor(() => {
+      expect(sent.some((raw) => raw.includes("openAgentSettingsFile"))).toBe(
+        true,
+      );
+    });
+    await waitFor(() => {
+      expect(sendRequest).toHaveBeenCalledWith(
+        expect.stringContaining("coding-agent.close"),
+      );
+    });
+  });
+});
+
+describe("MCP UI surfaces (plan 117)", () => {
+  it("pinned card lists connected servers with tool counts and marks hidden ones", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          mcpServers: [
+            { serverId: "files", connected: true, tools: 2, error: "" },
+            { serverId: "search", connected: false, tools: 0, error: "spawn failed" },
+          ],
+        },
+        clientId: 1,
+      } as never);
+      const mcpCard = await screen.findByLabelText("MCP servers connected");
+      expect(within(mcpCard).getByText("files")).toBeInTheDocument();
+      expect(within(mcpCard).getByText("2 tools")).toBeInTheDocument();
+      expect(within(mcpCard).getByText("hidden: spawn failed")).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
+  it("card is hidden when no server is configured", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: { provider: "mock", model: "mini", mcpServers: [] },
+        clientId: 1,
+      } as never);
+      // Flush the coalesced state render, then assert absence: nothing
+      // will ever paint the card (no servers configured).
+      await waitFor(() => {
+        expect(screen.getByText(/MCP: none/)).toBeInTheDocument();
+      });
+      expect(screen.queryByLabelText("MCP servers connected")).not.toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
+  it("composer section shows server + tool state and persists across transcript growth", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          mcpServers: [
+            { serverId: "files", connected: true, tools: 3, error: "" },
+            { serverId: "ghost", connected: false, tools: 0, error: "connection closed" },
+          ],
+        },
+        clientId: 1,
+      } as never);
+      const section = await screen.findByLabelText("MCP connections");
+      expect(within(section).getByText("3 tools")).toBeInTheDocument();
+      expect(within(section).getByText("hidden: connection closed")).toBeInTheDocument();
+      expect(await screen.findByLabelText("MCP servers connected")).toBeInTheDocument();
+
+      // Messages arrive; both MCP surfaces persist (pinned card + section).
+      harness.emit({
+        type: "TEXT_MESSAGE_CONTENT",
+        delta: "hello",
+        messageId: "m1",
+      } as never);
+      expect(screen.getByLabelText("MCP servers connected")).toBeInTheDocument();
+      expect(screen.getByLabelText("MCP connections")).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
+  it("@-mentions: dropdown merges catalog + files, filter narrows, selection embeds (plan 117)", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          sessionId: "s1",
+          skills: [{ name: "brief", description: "Answer tersely." }],
+        },
+        clientId: 1,
+      } as never);
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.agentRpc",
+        value: { code: "workspace.files", result: { files: ["src/main.rs", "README.md"] } },
+      } as never);
+      const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
+
+      // Bare @ opens both sections.
+      fireEvent.change(composer, { target: { value: "@" } });
+      const dropdown = await screen.findByRole("listbox", { name: "Mentions" });
+      expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
+      expect(within(dropdown).getByText("@file:src/main.rs")).toBeInTheDocument();
+
+      // Typing narrows across both kinds.
+      fireEvent.change(composer, { target: { value: "@br" } });
+      expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
+      expect(within(dropdown).queryByText("@file:src/main.rs")).not.toBeInTheDocument();
+
+      // @file: narrows to files only.
+      fireEvent.change(composer, { target: { value: "@file:re" } });
+      expect(within(dropdown).getByText("@file:README.md")).toBeInTheDocument();
+      expect(within(dropdown).queryByText("@skill:brief")).not.toBeInTheDocument();
+
+      // Selection embeds the mention token into the draft.
+      fireEvent.click(within(dropdown).getByText("@file:README.md"));
+      expect(composer.value).toBe("@file:README.md ");
+      expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
+  it("@-mentions: Tab selects the highlighted match (plan 117)", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          sessionId: "s1",
+          skills: [{ name: "brief", description: "Answer tersely." }],
+        },
+        clientId: 1,
+      } as never);
+      const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
+      fireEvent.change(composer, { target: { value: "@" } });
+      await screen.findByRole("listbox", { name: "Mentions" });
+      fireEvent.keyDown(composer, { key: "Tab" });
+      expect(composer.value).toBe("@skill:brief ");
+    } finally {
+      release();
+    }
+  });
+
+  it("token meter: compact occupancy vs ceiling with diagnostic threshold tones (plan 117)", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    const emitState = (tokens: number | null, model = "mini", window = 100_000) => {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model,
+          models: [
+            { provider: "mock", model: "mini", contextWindow: window },
+            { provider: "mock", model: "big", contextWindow: 1_000_000 },
+          ],
+          ...(tokens === null ? {} : { contextTokens: tokens }),
+        },
+        clientId: 1,
+      } as never);
+    };
+    try {
+      const meter = () => screen.getByTitle(/Context usage/);
+
+      // Initial state carries the window; unreported usage estimates from
+      // the transcript (empty → 0) so the meter renders from the start.
+      emitState(null);
+      const initial = await screen.findByTitle(/Context usage/);
+      expect(initial).toHaveTextContent("0/100k");
+      expect(initial.className).not.toMatch(/meterWarning|meterError/);
+
+      // Thresholds: 59% normal, 61% warning, 79% warning, 81% error.
+      emitState(59_000);
+      await waitFor(() => expect(meter()).toHaveTextContent("59k/100k"));
+      expect(meter().className).not.toMatch(/meterWarning|meterError/);
+      emitState(61_000);
+      await waitFor(() => expect(meter().className).toMatch(/meterWarning/));
+      emitState(79_000);
+      await waitFor(() => expect(meter().className).toMatch(/meterWarning/));
+      emitState(81_000);
+      await waitFor(() => expect(meter().className).toMatch(/meterError/));
+
+      // Compact format: 220000/270000 → `220k/270k` (81% — error tone).
+      emitState(220_000, "mini", 270_000);
+      await waitFor(() => expect(meter()).toHaveTextContent("220k/270k"));
+
+      // Ceiling follows the active model.
+      emitState(220_000, "big", 1_000_000);
+      await waitFor(() => expect(meter()).toHaveTextContent("220k/1m"));
+    } finally {
+      release();
+    }
+  });
+
+  it("token meter: heuristic estimates occupancy when usage is unreported (plan 117)", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      // 7200 chars ÷ 3.6 chars/token (claude family) = 2000 tokens.
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "claude-x",
+          models: [{ provider: "mock", model: "claude-x", contextWindow: 270_000 }],
+        },
+        clientId: 1,
+      } as never);
+      harness.emit({
+        type: "MESSAGES_SNAPSHOT",
+        messages: [{ id: "m0", role: "user", content: "x".repeat(7200) }],
+        clientId: 1,
+      } as never);
+      await waitFor(() =>
+        expect(screen.getByTitle(/Context usage/)).toHaveTextContent("2k/270k"),
+      );
+    } finally {
+      release();
+    }
+  });
+
+  it("effort dropdown is active from session start (plan 117): levels resolve from the model inventory before any prompt", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      // Mount-time inventory STATE: trio + models inventory, NO session and
+      // no `effort` key — exactly what a fresh webview holds.
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: {
+          provider: "mock",
+          model: "mini",
+          models: [
+            {
+              provider: "mock",
+              model: "mini",
+              displayName: "Mock demo",
+              thinkingLevels: ["low", "medium", "high"],
+            },
+          ],
+        },
+        clientId: 1,
+      } as never);
+      // The cataloged dropdown renders pre-first-message (React Aria
+      // Select trigger labeled "Effort"); selecting a level rides the
+      // next prompt through the existing pendingEffort path.
+      expect(await screen.findByText("Effort")).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
+  it("recent sessions: labeled rows from the resumable list + rich resume (plan 117)", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
+    const store = (await import("../agent/state")).chatAgent;
+    const release = store.start();
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+      // The empty-state mount fetches the workspace-scoped list.
+      await waitFor(() =>
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining("resumableSessions"),
+        ),
+      );
+      // The daemon reply rides the generic agent-RPC custom event.
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.agentRpc",
+        value: {
+          code: "session.resumable",
+          result: {
+            sessions: [
+              {
+                sessionId: "abcdef123456",
+                label: "Fix the login bug",
+                updatedAt: "2026-09-10T20:17:29.681Z",
+                updatedAtLabel: "2026-09-10 22:17",
+              },
+              {
+                sessionId: "ffff00001111",
+                label: "",
+                updatedAt: "2026-09-09T08:02:00.000Z",
+                updatedAtLabel: "2026-09-09 10:02",
+              },
+            ],
+          },
+        },
+        clientId: 1,
+      } as never);
+      // Labels render with the last-active stamp; an unlabelled session says
+      // so rather than showing a bare id.
+      const first = await screen.findByRole("button", {
+        name: "Resume Fix the login bug (2026-09-10 22:17)",
+      });
+      expect(screen.getByText("Fix the login bug")).toBeInTheDocument();
+      expect(screen.getByText("Untitled session")).toBeInTheDocument();
+      expect(screen.getByText("2026-09-09 10:02")).toBeInTheDocument();
+      // Selecting a session resumes through the rich load path.
+      fireEvent.click(first);
+      await waitFor(() => {
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining("resumeSession"),
+        );
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining("abcdef123456"),
+        );
+      });
+    } finally {
+      release();
+    }
+  });
+});

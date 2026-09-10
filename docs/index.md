@@ -5,7 +5,8 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 ## Documentation Contract
 
 - [Clay JS API Markdown Schema](reference/clay-js-api/schema.md) — required frontmatter and body sections for public Clay JavaScript/TypeScript API documentation.
-- [Clay Configuration System](reference/clay-js-api/configuration.md) — `~/.config/clay/init.js`, modular user configuration, key bindings, and configuration as documented Clay JS APIs.
+- [Clay Configuration System](reference/clay-js-api/configuration.md) — `~/.clay/init.js`, modular user configuration, key bindings, and configuration as documented Clay JS APIs.
+- [Canonical Starter Configuration](../examples/config/README.md) — what a new user copies into `~/.clay/`: `init.js`, package loading, and the coding agent's declarative config (`agents/coding-agent/skills.json`, `mcp.json`, `SYSTEM.md`, seeded skills, `tool-caps.json`).
 - [Clay JS API Current Functionality Inventory](reference/clay-js-api/inventory.md) — Phase 7 public/internal API authority and runtime-path classifications.
 
 ## Developer Guides

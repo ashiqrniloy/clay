@@ -84,8 +84,8 @@ data_home=$root/data
 home=$root/home
 workspace=$root/workspace
 socket=$root/review.sock
-mkdir -p "$config_dir" "$data_home" "$home/.config/clay" "$workspace" "$root/tmp"
-chmod 700 "$config_home" "$config_dir" "$data_home" "$home" "$home/.config" "$home/.config/clay" "$workspace" "$root/tmp"
+mkdir -p "$config_dir" "$data_home" "$home/.clay" "$workspace" "$root/tmp"
+chmod 700 "$config_home" "$config_dir" "$data_home" "$home" "$home/.config" "$home/.clay" "$workspace" "$root/tmp"
 
 # The Rust fixture keeps Clay configuration/data isolated but lets the fixed
 # rustup language-server descriptor inherit the host HOME for its installed
@@ -374,7 +374,7 @@ case "$fixture" in
     ui-review-rust) document_name=src/main.rs ;;
 esac
 init_fixture="$repo/tests/fixtures/configuration/$fixture/init.js"
-cp "$init_fixture" "$home/.config/clay/init.js"
+cp "$init_fixture" "$home/.clay/init.js"
 
 if [[ -n "$document_name" ]]; then
     python3 - "$config_dir/layout.json" "$workspace" "$document_name" <<'PY'
@@ -543,11 +543,11 @@ wait_for_tree 'Clay workspace' || unresolved "Clay window/accessibility shell di
 # initial handshake, so runtime fixtures are delivered through the live
 # RuntimeStateSnapshot path instead of racing startup bootstrap.
 sleep 0.2
-touch "$home/.config/clay/init.js"
+touch "$home/.clay/init.js"
 if [[ "$fixture" == ui-review-error ]]; then
     # Exercise reload-time invalid selection while the client stays connected.
     sleep 0.2
-    cat > "$home/.config/clay/init.js" <<'EOF'
+    cat > "$home/.clay/init.js" <<'EOF'
 import { setTheme } from "clay:theme";
 setTheme("@clay/does-not-exist");
 EOF

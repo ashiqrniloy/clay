@@ -18,7 +18,10 @@ diagnostic, not a hang. Package runtimes never receive this type.
 
 - Resolve Node (`CLAY_NODE` or `PATH`) and `clay-agent/dist/main.js`
   (`CLAY_AGENT_MAIN` or next-to-exe / repo path).
-- `Command` + `env_clear` spawn. Never a shell string.
+- `Command` + `env_clear` spawn (plan 117: inherits exactly
+  `HOME`/`USERPROFILE`/`PATH` so the daemon's config root follows the
+  server's isolated profile and MCP bare commands can PATH-resolve
+  server-side). Never a shell string.
 - NDJSON JSON-RPC over stdin/stdout. 1 MiB line cap.
 - Map RPC results and `method: "event"` lines to `AgentServerMessage`.
 - Redact known secrets (vault passphrase, put secrets) from diagnostics.

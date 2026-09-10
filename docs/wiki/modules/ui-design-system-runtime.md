@@ -214,7 +214,7 @@ Settings dropdown / command centre: settings.setDesignSystem("@clay/design-neobr
   -> execute_settings validator   (src/server/command_execution.rs)
        accepts @clay/core or a bundled @clay/design-* contributor; else InvalidArguments
   -> persist_settings_change      (src/server/connection/runtime.rs)
-       designSystem preference -> ~/.config/clay/preferences.json + reload_runtime_generation()
+       designSystem preference -> ~/.clay/preferences.json + reload_runtime_generation()
   -> apply_persisted_preferences  (src/server/js_runtime/evaluation.rs)
        re-applies through apply_design_system on every reload (preference wins over init.js)
 ```

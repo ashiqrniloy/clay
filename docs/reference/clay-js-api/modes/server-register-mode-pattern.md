@@ -94,7 +94,7 @@ serverRegisterModePattern(manifest, { modeId: "markdown", displayName: "Markdown
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `modes.serverRegisterModePattern` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverRegisterModePattern` in `~/.clay/init.js`.
 
 ## Custom properties
 

@@ -1,11 +1,11 @@
 # Clay Configuration System
 
-Clay configuration is JavaScript loaded from `~/.config/clay/init.js`. The configuration system is part of the Clay JS API surface: every configurable option, command binding, and behavior-changing setting should be represented by a documented Clay JS API and included in the Markdown documentation registry.
+Clay configuration is JavaScript loaded from `~/.clay/init.js`. The configuration system is part of the Clay JS API surface: every configurable option, command binding, and behavior-changing setting should be represented by a documented Clay JS API and included in the Markdown documentation registry.
 
 ## Configuration Entry Point
 
-- Default file: `~/.config/clay/init.js`
-- Canonical example: the `examples/config/` tree in the Clay repository (`init.js` base config plus `packages/first-party.js` and `packages/third-party.js` modules plus `agent/tool-caps.json` coding-agent caps) demonstrates every supported configuration surface with all documented options annotated; copy the whole tree (`cp -r examples/config/. ~/.config/clay/`) and adjust. Plans that add configuration surfaces must keep it current.
+- Default file: `~/.clay/init.js`
+- Canonical example: the `examples/config/` tree in the Clay repository (`init.js` base config plus `packages/first-party.js` and `packages/third-party.js` modules plus `agents/coding-agent/tool-caps.json` coding-agent caps) demonstrates every supported configuration surface with all documented options annotated; copy the whole tree (`cp -r examples/config/. ~/.clay/`) and adjust. Plans that add configuration surfaces must keep it current. Its README is the reference for the coding agent's declarative config files (`agents/coding-agent/skills.json`, `agents/coding-agent/mcp.json`, `SYSTEM.md`, seeded `skills/<name>/SKILL.md`) — file-backed JSON/markdown configuration validated by the daemon loaders, deliberately not init.js knobs.
 - The file is loaded by Clay's server-side JavaScript runtime during server startup or explicit configuration reload work.
 - Phase 13 runtime-backs this entry point on the server: it evaluates supported local configuration JavaScript through documented `clay:*` facades while still never executing JavaScript in the Rust client.
 - `init.js` may load other local configuration files through [`loadConfigurationModule`](configuration/load-configuration-module.md) so users can keep settings modular.
@@ -60,7 +60,7 @@ setDesignSystem("@clay/design-glass");
 
 Selection resolves only during configuration evaluation and is validated against the package service's enabled records before the candidate generation commits: reload swaps atomically, an invalid or revoked selection preserves the previous generation and records a `theme.load_failed` diagnostic, and re-delivering an identical generation causes no frontend DOM writes. Selection installs nothing and grants no package, filesystem, network, shell, extension, raw-op, or client-side JavaScript authority; recipe data stays inert and color authority remains with the active theme.
 
-For interactive changes, [`settings.setDesignSystem`](settings/set-design-system.md) validates the specifier, persists the `designSystem` preference in `~/.config/clay/preferences.json` (accepted values: `@clay/core` or a bundled `@clay/design-*` contributor), and reloads the runtime; the persisted choice wins over an equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
+For interactive changes, [`settings.setDesignSystem`](settings/set-design-system.md) validates the specifier, persists the `designSystem` preference in `~/.clay/preferences.json` (accepted values: `@clay/core` or a bundled `@clay/design-*` contributor), and reloads the runtime; the persisted choice wins over an equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
 
 ## Plan 112 icon-pack selection configuration
 
@@ -180,7 +180,7 @@ Configuration remains startup/package-load/explicit setting-change work only. Or
 
 ## Phase 18.10 syntax grammar configuration review
 
-Phase 18.10 reviewed package-provided Tree-sitter syntax grammars and does **not** promote a new user-facing syntax configuration API. The only end-user configuration needed in this phase is explicit first-party package loading from `~/.config/clay/init.js`:
+Phase 18.10 reviewed package-provided Tree-sitter syntax grammars and does **not** promote a new user-facing syntax configuration API. The only end-user configuration needed in this phase is explicit first-party package loading from `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -198,7 +198,7 @@ This review adds no filesystem, network, shell, package-manager, AI, WASM, raw-o
 
 ## Phase 18.16 syntax engine configuration review
 
-Phase 18.16 promotes exactly one syntax-engine configuration API: [`syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md). No call is needed for normal use. The default end-user setup remains explicit package loading from `~/.config/clay/init.js`; no preference is required for normal first-party highlighting:
+Phase 18.16 promotes exactly one syntax-engine configuration API: [`syntax.setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md). No call is needed for normal use. The default end-user setup remains explicit package loading from `~/.clay/init.js`; no preference is required for normal first-party highlighting:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -376,11 +376,11 @@ No hidden JSON/TOML/ad hoc keys are valid for reload. Rejected examples include:
 - File-watcher paths, inotify/FSEvents flags, polling intervals
 - Auto-reload-on-save, reload-after-package-install, reload-after-config-change
 
-The `IpcServer::trigger_developer_hot_reload`, `RuntimeReloadOutcome`, and `ReloadedDocumentRefresh` Rust helpers remain `#[doc(hidden)]` test/developer surfaces; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.config/clay/init.js`. `pub(crate) async fn reload_runtime_generation` is the shared implementation, never directly invoked from package or configuration JavaScript.
+The `IpcServer::trigger_developer_hot_reload`, `RuntimeReloadOutcome`, and `ReloadedDocumentRefresh` Rust helpers remain `#[doc(hidden)]` test/developer surfaces; they are not exported from a Clay JS facade, not listed in the public API registry, and not callable from `~/.clay/init.js`. `pub(crate) async fn reload_runtime_generation` is the shared implementation, never directly invoked from package or configuration JavaScript.
 
 ### Security
 
-Reload reruns `~/.config/clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache and a rebuilt `PackageLoadEntryAllowlist`. Candidate evaluation happens outside the behavior lock; the lock is acquired only for the bounded compare-and-swap commit. Validation, snapshot construction, and document refresh preparation are internal to the server.
+Reload reruns `~/.clay/init.js` in a fresh generation with an empty `globalThis.__clayLoadedPackages` cache and a rebuilt `PackageLoadEntryAllowlist`. Candidate evaluation happens outside the behavior lock; the lock is acquired only for the bounded compare-and-swap commit. Validation, snapshot construction, and document refresh preparation are internal to the server.
 
 Reload does not broaden package source trust or permissions. Exact language-server grants must be re-declared through `authorizeLanguageServer` in the fresh generation. Old-generation workers, sessions, and child processes are cleaned after commit. A concurrent reload trigger returns `ReloadInProgress`; it does not queue another evaluation.
 
@@ -404,12 +404,12 @@ Configuration remains server startup/load-time work. Pressing the configured key
 
 ## Phase 18.20 language-server configuration review
 
-Phase 18.20 promotes exactly one configuration API: [`language-server.authorizeLanguageServer`](language-server/authorize-language-server.md). This is a configuration-only grant API callable only from `~/.config/clay/init.js` during configuration root evaluation **before** the first `loadPackage` call seals authority.
+Phase 18.20 promotes exactly one configuration API: [`language-server.authorizeLanguageServer`](language-server/authorize-language-server.md). This is a configuration-only grant API callable only from `~/.clay/init.js` during configuration root evaluation **before** the first `loadPackage` call seals authority.
 
 Default end-user configuration with a language-server bridge package:
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { authorizeLanguageServer } from "clay:language-server";
 import { loadPackage } from "clay:packages";
 
@@ -453,7 +453,7 @@ Phase 18.21 ships four first-party LSP bridge packages (`@clay/lsp-rust`, `@clay
 Configure all four LSP bridge packages:
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { authorizeLanguageServer } from "clay:language-server";
 import { loadPackage } from "clay:packages";
 
@@ -606,7 +606,7 @@ Configuration evaluation for Markdown end-user loading remains startup, package-
 ## Example Configuration
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadConfigurationModule } from "clay:configuration";
 import { bindKey } from "clay:keybindings";
 import { defineEditorView, defineFlex, definePanel, publishTree } from "clay:sdui";
@@ -729,7 +729,7 @@ Plan 030 (code-review remediation) hardened several server-side limits. These ar
 - **Document resident-memory budget** — `DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES` (derived from `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB`, 256 MiB). Open/reload reserves this server-owned budget while streaming UTF-8 into ropes; it is not configurable from `init.js`.
 - **Runtime SDUI tree budgets** — `RUNTIME_SDUI_TREE_PAYLOAD_BUDGET_BYTES` (16 KiB), `RUNTIME_SDUI_TREE_MAX_NODES` (128), `RUNTIME_SDUI_TREE_MAX_DEPTH` (16), `RUNTIME_SDUI_TREE_MAX_NODE_TEXT_CHARS` (4096). Enforced before/during `op_clay_sdui_publish_tree`; rejected with `sdui.invalid_tree`. Not configurable from `init.js`.
 - **Binary sniff boundary** — `BINARY_SNIFF_BYTES` (8 KiB). A NUL in this leading range rejects a file as binary; bytes after the boundary are not classified. Not configurable from `init.js`.
-- **Package install lifecycle-script suppression** — `pnpm add` runs with `--ignore-scripts` by default. The opt-in is a **CLI flag / env var**, not a Clay JS API: `clay package add --allow-scripts` or `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1`. This is a process-level supply-chain control, not an `init.js` configuration option, and is documented in `docs/reference/primitives/package-loading.md`.
+- **Package install lifecycle-script suppression** — the manager backend runs with `--ignore-scripts` by default. The opt-in is a **CLI flag / env var**, not a Clay JS API: `clay install --allow-scripts npm:<spec>` or `CLAY_ALLOW_LIFECYCLE_SCRIPTS=1`. This is a process-level supply-chain control, not an `init.js` configuration option, and is documented in `docs/reference/primitives/package-loading.md`.
 - **File-open capability gate** — `OpenSelectedFile` requires a server-minted single-use capability token issued after the `Hello` handshake; not a configuration option. See `docs/wiki/modules/server-ipc-skeleton.md`.
 - **IPC endpoint ownership/permissions** — Unix socket `0o600` + parent-directory ownership and Windows named-pipe current-user-only DACL are OS-level hardening, not Clay JS configuration.
 
@@ -762,7 +762,7 @@ User-visible Phase 18.8 configuration surfaces:
 | Control Center menu building | internal | `ControlCenter` (`src/server/control_center.rs`, `pub(crate)`) | Builds the bounded `TransientMenuSession` from the generation-stamped command catalogue; excludes client-first edit commands only; not user configuration |
 | Command execution validation | internal | `CommandExecutor` (`src/server/command_execution.rs`) | Validates command id, routing policy, provenance, permissions, argument budget, target context, and session/action freshness per request; internal Rust type, not user configuration |
 
-The expected end-user Control Center configuration is a normal `~/.config/clay/init.js` binding:
+The expected end-user Control Center configuration is a normal `~/.clay/init.js` binding:
 
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
@@ -828,7 +828,7 @@ User-visible Phase 18.11 configuration surfaces:
 | Completion coordinator/menu state | internal | `CompletionCoordinator` (`src/server/completion.rs`, `pub(crate)`), `TransientMenuSession` completion projection (`src/shell/transient_menu.rs`, `pub(crate)`) | Clay-owned scheduling/cancellation/stale-drop/menu state; not user configuration |
 | Completion acceptance | internal | `CompletionCoordinator::document_changed` (`src/server/completion.rs`, `pub(crate)`) and the document edit path (`src/server/document.rs::DocumentState::apply_edit`) | Commits a validated text replacement in the active document only; never executes a command, raw op, or provider code |
 
-The expected end-user manual completion configuration is a normal `~/.config/clay/init.js` binding:
+The expected end-user manual completion configuration is a normal `~/.clay/init.js` binding:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -870,7 +870,7 @@ User-visible Phase 18.12 configuration surfaces:
 | Marker file set | compiled workspace boundary | `KNOWN_PROJECT_MARKERS` in `src/server/workspace/mod.rs` | Closed Clay-owned marker table (`.git`, `Cargo.toml`, `package.json`); packages/users cannot extend it through `init.js` |
 | Ignore defaults and list budgets | compiled listing boundary | `DEFAULT_IGNORED_NAMES`, `MAX_LIST_DIRECTORY_DEPTH`, `MAX_LIST_DIRECTORY_ENTRIES`, `MAX_LEFT_PANEL_ENTRIES`, `MAX_FUZZY_ITEMS` | Bounded security/performance constants, not hidden `init.js` keys |
 
-The expected end-user fuzzy-open configuration is a normal `~/.config/clay/init.js` binding:
+The expected end-user fuzzy-open configuration is a normal `~/.clay/init.js` binding:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -927,7 +927,7 @@ Phase 20 (plan `plans/055-Phase20-Daily-Editing-Product-Hardening.md`) ships cli
 ### Recommended daily-editing `init.js` bindings
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { bindKey } from "clay:keybindings";
 import {
   clientCutSelection,
@@ -1001,7 +1001,7 @@ Plan 060 reviewed every user-visible behavior changed by the comprehensive remed
 | Bind built-in/package commands | [`keybindings.bindKey`](keybindings/bind-key.md) |
 | Select theme, typography, design system, or validated syntax tier | [`setTheme`](theme/set-theme.md), [`setTypography`](theme/set-typography.md), [`setDesignSystem`](theme/set-design-system.md) ([`settings.setDesignSystem`](settings/set-design-system.md) for persisted UI changes), [`setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) |
 | Set approved package UI defaults | [`setPackageOption`](configuration/set-package-option.md) and [`serverSetLayoutOverride`](ui/server-set-layout-override.md) |
-| Compose local configuration | [`loadConfigurationModule`](configuration/load-configuration-module.md), confined beneath `~/.config/clay/` |
+| Compose local configuration | [`loadConfigurationModule`](configuration/load-configuration-module.md), confined beneath `~/.clay/` |
 
 Third-party adoption and replacement approval remain host-owned durable decisions. JavaScript cannot approve itself, mint `PackageContext`, choose/promote `RuntimeDomain`, expand relation/replacement scope, disable consent checks, or move third-party code into the trusted runtime. `loadPackage` consumes an already-valid approval and routes execution by host provenance; it is not an authorization setting.
 
@@ -1034,15 +1034,15 @@ Configuration values for theme, appearance, and typography resolve in a single d
 
 | Rank | Source | Origin | Wins over |
 |------|--------|--------|-----------|
-| 1 (highest) | `ui-session` | `~/.config/clay/preferences.json`, written by `settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` / `settings.setTypography` (validated complete typography JSON) | everything below |
-| 2 | `init-js` | `~/.config/clay/init.js` calls to `setTheme` / `setAppearance` / `setDesignSystem` / `setTypography` | package / canonical defaults |
+| 1 (highest) | `ui-session` | `~/.clay/preferences.json`, written by `settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` / `settings.setTypography` (validated complete typography JSON) | everything below |
+| 2 | `init-js` | `~/.clay/init.js` calls to `setTheme` / `setAppearance` / `setDesignSystem` / `setTypography` | package / canonical defaults |
 | 3 (lowest) | canonical / package default | appearance-derived Modus default (`System` → dark → `@clay/theme-modus-vivendi`; `Light` → `@clay/theme-modus-operandi`), or the Clay core default | — |
 
 On every startup and reload, `init.js` evaluates first; persisted `ui-session` preferences apply immediately after so a UI choice always overrides the equivalent `init.js` call. An explicit `setTheme` always wins over the appearance-derived canonical default. Absent preference fields are no-ops: `init.js` (or the canonical default) stays in effect.
 
 ### Persistence store
 
-`~/.config/clay/preferences.json` is a closed JSON object with at most four keys: `theme` (a bundled first-party `@clay/theme-*` specifier), `appearance` (`light` | `dark` | `system`), `designSystem` (`@clay/core` or a bundled `@clay/design-*` `uiDesignSystem` contributor), and `typography` (the `setTypography` payload). The file is bounded (8 KiB), validated at load and persist time, and authority-rejecting (no raw ops, CSS, callbacks, client JavaScript, or state values). A corrupted, oversized, or manually-edited file is dropped field-by-field with a diagnostic so startup never breaks and no authority is granted. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values.
+`~/.clay/preferences.json` is a closed JSON object with at most four keys: `theme` (a bundled first-party `@clay/theme-*` specifier), `appearance` (`light` | `dark` | `system`), `designSystem` (`@clay/core` or a bundled `@clay/design-*` `uiDesignSystem` contributor), and `typography` (the `setTypography` payload). The file is bounded (8 KiB), validated at load and persist time, and authority-rejecting (no raw ops, CSS, callbacks, client JavaScript, or state values). A corrupted, oversized, or manually-edited file is dropped field-by-field with a diagnostic so startup never breaks and no authority is granted. The `setPackageOption` source taxonomy is extended with `ui-session` to label these persisted values.
 
 ### Settings command flow
 
@@ -1051,7 +1051,7 @@ On every startup and reload, `init.js` evaluates first; persisted `ui-session` p
 ### Example
 
 ```js
-// ~/.config/clay/init.js — package defaults overridden by init.js
+// ~/.clay/init.js — package defaults overridden by init.js
 import { setTheme } from "clay:theme";
 setTheme("@clay/theme-gruvbox-material-light"); // source: init-js
 // A later UI choice of Modus Vivendi writes preferences.json (source: ui-session)
@@ -1069,7 +1069,7 @@ Phase 22.7 added two direction-named split aliases — `shell.clientSplitPaneRig
 The aliases are configuration through the documented Clay JS API convention only: string command IDs accepted by [`bindKey`](keybindings/bind-key.md). Bindability is enforced by the keybinding allowlist (`is_runtime_bindable_command` + the `ClientUiCommand` routing branch in `src/server/ops/keybindings.rs`), which the `bindKey` validation gate (`validate_command_id`) enforces for every `init.js` binding.
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { bindKey } from "clay:keybindings";
 
 bindKey("Ctrl+Shift+Right", "shell.clientSplitPaneRight", { scope: "global" });

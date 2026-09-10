@@ -1587,7 +1587,7 @@ fn configuration_entrypoint_is_documented_and_indexed() {
         std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
             .expect("read configuration overview");
     assert!(
-        config_overview.contains("~/.config/clay/init.js"),
+        config_overview.contains("~/.clay/init.js"),
         "configuration overview must document the init.js entry point"
     );
 
@@ -1679,7 +1679,7 @@ fn lookup_is_read_only() {
             .is_some()
     );
     assert!(
-        registry.by_id("~/.config/clay/init.js").is_none(),
+        registry.by_id("~/.clay/init.js").is_none(),
         "documentation lookup must not treat local configuration files as executable registry entries"
     );
     assert!(

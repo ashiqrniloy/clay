@@ -24,6 +24,9 @@
 - `clay-agent/src/__tests__/mcp-obscura.test.ts`
 - `src/server/agent_documents.rs`
 - `src/server/agent_checkpoints.rs`
+- `src/server/agent_mcp_config.rs`
+- `src/server/agent_settings.rs`
+- `frontend/src/coding-agent/CodingAgentPanel.tsx`
 
 ## Overview
 
@@ -113,6 +116,72 @@ spawn or speak to it.
   process (no leaked half-started harness). Browser egress containment:
   loopback/private hosts denied by default; external egress requires the
   contained-proxy attestation.
+- Filesystem skill discovery (plan 117): on the first session for a
+  workspace, the daemon discovers repo-level skills from three roots —
+  workspace `<root>/.agents/skills/`, the per-agent config root
+  `<agentConfigRoot>/skills/`, and the home root `<homePath>/skills/`
+  (default `~/.agents`) — via Prism's `discoverContributions` and merges
+  them into the kernel registry (duplicate names fail closed, so reserved
+  agent-delivered names `graft`/`wiki-searcher`/`wiki-maintainer` are
+  skipped by disk discovery). Gating + bounds live in
+  `<agentConfigRoot>/skills.json` (`loadSkillsConfig`): per-root enable
+  flags, a home path override (tilde-expanded, absolute only — a
+  relative path disables the home root fail-closed), per-agent-skill
+  toggles, `MAX_SKILLS_PER_ROOT = 64`; an absent or malformed file
+  defaults everything on with a bounded stderr warning. Discovered
+  skills whose `toolNames` are not a subset of the session's active
+  tools are skipped at activation (never brick a session); built-in
+  skills keep the fail-closed semantics.
+- Prompt layers (plan 117): at session build the daemon composes two
+  file-backed layers on top of the profile's base instructions — the
+  user-owned `SYSTEM.md` (per-agent config root, seeded EMPTY when
+  absent, source `user`, rank 0) and the workspace `AGENTS.md` (source
+  `app`), both through a shared `readPromptLayer` with a 64 KiB cap;
+  oversized/unreadable files are skipped with a warning (SYSTEM.md) or
+  silently (AGENTS.md, which additionally enforces realpath containment
+  so symlink escapes are excluded). Layers are byte-stable per session
+  so they ride the cached prompt prefix; edits apply on next session
+  build. The context inspector renders every layer by source rank with
+  friendly labels (plus a base-instructions item, so instruction-only
+  profiles never show an empty System Prompt group).
+- Seeded agent-delivered skill files (plan 117): `graft`,
+  `wiki-searcher`, and `wiki-maintainer` are file-backed — install/first
+  launch seeds `<agentConfigRoot>/skills/<name>/SKILL.md` from built-in
+  definitions and records `{sizeBytes, mtimeMs}` in
+  `.seed-manifest.json` (the settings page's provenance source).
+  Tool names stay daemon-owned (user edits cannot break activation);
+  content always loads from disk (256 KiB cap, oversized falls back to
+  the built-in seed, user file never clobbered); deletions regenerate
+  from the seed. Edits apply on next daemon start.
+- MCP configuration surface (plan 117, amending decision 1758's
+  posture): the allow list is CONFIG-BUILT, not empty. The server
+  merges `<configRoot>/agents/coding-agent/mcp.json` (user-owned) with
+  the repo-root `.mcp.json` (`src/server/agent_mcp_config.rs`):
+  user-file-wins on server-id collision, bare command names are
+  PATH-resolved canonically server-side (the daemon still rejects
+  anything non-absolute — two-layer design), relative paths rejected,
+  `MAX_MCP_SERVERS = 32`, `MAX_ARGS = 64`; malformed/unreadable files
+  warn and contribute nothing (never fail startup). Both files connect
+  WITHOUT an approval gate — the user's config and their repo are
+  trusted sources by decision (security posture is the user's
+  responsibility, as with Claude Code). Per-server fault isolation
+  (`Promise.allSettled` in `mcp.ts`): a failing/over-cap server hides
+  only its own tools; per-server outcomes (`{serverId, connected,
+  tools, error}`) ride `environment.list` → the panel's MCP card and
+  composer section. Call timeout: `timeoutMs` (positive, ≤ 30 min hard
+  ceiling), default 60 s.
+- Graft default-on (plan 117): the FIRST coding session for a workspace
+  root attempts the graft pull-mode binding once per root per daemon
+  (`graftBindAttempted`); CLI resolution is the plan 108 fail-closed
+  chain (explicit `HostOptions.graftCliPath` test seam → host package
+  root → `@nanonets/graft` peer) — absent CLI means no binding, no
+  tools, no error surface. The graft skill body registers from disk
+  regardless of tool availability (usage guidance independent of the
+  tools). The wiki counterpart stays opt-in: the daemon intercepts
+  `/wiki-init` as a prompt prefix, enables the binding internally, then
+  dispatches the extension command (with the Rust environment cache
+  invalidated for that prefix); `/wiki-init` with wiki gated off stays
+  a chat-safe prompt.
 
 ## Coding tools and document reverse-RPC (Phase 1)
 
@@ -121,7 +190,9 @@ Coding sessions register nine Prism tool factories from
 `repo_search`, `glob`, `delete`, `move` — plus `ask_user_decision`, all
 backed by Clay document operations instead of direct filesystem access.
 `withCapErrors` turns walk/scan truncation (`entries`/`files`/`depth`/`bytes`/`time`)
-into a tool-caps.json remedy error. Pagination (`results`/`matches`, including
+into a tool-caps.json remedy error (the caps file is per-agent config:
+`<agentConfigRoot>/tool-caps.json`, legacy data-dir path still honored).
+Pagination (`results`/`matches`, including
 per-call `maxResults`) stays a successful truncated result.
 `document-ops.ts` implements the tool side of a daemon-initiated reverse
 RPC: `document.read` (dirty buffer via server snapshot), `document.write`
@@ -151,6 +222,75 @@ skills/commands/drivers, durable runs, search/tree/checkpoints, MCP
 allow-list, Obscura). Phase boundaries: Phase 2 adds the Chat UI for these
 facades, Phase 4 package contribution feeding of skills/commands, Phase 5
 workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
+
+## Coding Agent panel surfaces (plan 117)
+
+`frontend/src/coding-agent/CodingAgentPanel.tsx` renders the plan 117
+user-visible surfaces, all state-driven from snapshot state / AG-UI custom
+events (never invented client-side):
+
+- **Skills card** — pinned at the top of the transcript from session start
+  (persists once messages arrive); lists the catalog skills
+  (name+description) that the daemon discovered from the three roots.
+- **MCP card + composer section** — per-server connection outcomes
+  (`{serverId, connected, tools, error}`) from snapshot state; failed
+  servers show their error, hidden when empty. Display-only (no
+  restart/connect actions).
+- **@ mentions** — trailing `@token` opens a sectioned dropdown (Skills +
+  Files, type-to-filter, ArrowUp/Down/Tab/Escape); `@skill:<name>` embeds
+  the skill as an explicit user instruction (body loaded for that run),
+  `@file:<path>` attaches file content (images as image blocks).
+  Workspace file list comes from the `workspace.files` daemon RPC
+  (bounded 200 paths, depth 8).
+- **Token meter** — status-row occupancy `used/ceiling` from the LAST
+  provider turn's prompt tokens (never the run-total `agent_finished`
+  usage, which double-counts) vs the model's context window (resolved
+  client-side from the models inventory); warning above 60%, error above
+  80%; live updates ride the `clay.contextTokens` AG-UI custom event;
+  when usage is unreported the meter estimates from transcript
+  chars-per-token (calibration, not measurement).
+- **Effort dropdown + branch from session start** — effort levels resolve
+  client-side from the models inventory's `thinkingLevels` (no longer
+  gated on the first prompt); the git branch is recorded at session
+  creation, not just on rebind.
+- **Labeled /resume** — Files-tab recent rows render human labels (first
+  user-message words) from the workspace-scoped `session.resumable` list;
+  selection resumes the full transcript without an entry-less snapshot
+  clobbering it. Unit-variant agent commands (`listSessions`,
+  `resumableSessions`) deserialize from the bare-string wire form ONLY —
+  the `{variant: {}}` map form is rejected by serde (protocol invariant,
+  pinned by a codec test).
+- **Resume row identity** — a `/resume` row is the session's opening prompt,
+  not its profile: every session in a workspace shares one profile, so the
+  picker rendered N identical rows. The daemon stamps that prompt (first five
+  words, bounded) on the session's **first** entry's `label` through the store
+  seam (`labelFirstPromptStore` in `clay-agent/src/host.ts`); Prism's session
+  search reads the *newest non-null* label, so one stamp keeps the identity
+  stable for the session's whole life and later prompts never re-label it.
+  Only entries with no `parentId` are eligible, which is stateless (no
+  in-memory "already labelled" set to lose on restart). Rows also carry the
+  last-active time as a local `YYYY-MM-DD HH:MM` (`updatedAtLabel`) beside the
+  raw ISO value — the daemon runs on the user's machine, so its timezone is
+  the user's, and the server-rendered picker has no timezone database (no
+  `chrono`/`time` dependency). Read paths (`session.list`, `session.load`,
+  search) stay on the unwrapped store. Sessions written before the stamp read
+  "Untitled session"; nothing is backfilled.
+- **Resume must restore the transcript** — `session.load` answers with
+  persisted `SessionEntry` records, `{ kind, message: { role, content:
+  [blocks] }, summary }`. `snapshot_from_load` parsed a flat `{ role, content }`
+  shape that no daemon ever sent: every entry found neither role nor text and
+  was dropped, so resume always restored an empty transcript and the click
+  looked inert. The parser now walks the real shape and maps blocks to the
+  same rows the live path builds (`apply_tool_event`): text → user/assistant,
+  `thinking` → thinking, `tool_call` → a tool row carrying its arguments and
+  call id, `tool_result` → the `"… -> output"` suffix on that same row (one row
+  per call, never a second). Image/video/file blocks carry no transcript text,
+  matching the live path.
+- **A resume binds the tab's root, not just its session** — `session_for_root`
+  *prunes* a tab whose recorded root does not match `current_root`, so
+  `resume_tab` recording `tab_session` without `tab_session_root` meant the
+  prompt after a resume started a brand-new session and silently abandoned the
+  one the user had just opened.
 
 ## How It Works
 
@@ -281,12 +421,20 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
     row), then copies the branch to a new session id with `workspaceRoot`
     metadata stamped. The Rust `SessionTree` client command forwards
     checkout/fork/clone/checkpoint to the daemon.
-14. MCP is allow-list-only (decision 1758): the server sends `mcpAllowList`
-    in `initialize` (`AgentMcpAllowListEntry` on `AgentHostConfig`); the
-    daemon validates every entry fail-closed (absolute executable, literal
-    argv, explicit env names) before any spawn, then connects via
-    `@arnilo/prism-mcp`. Empty list → no MCP tools; validation errors fail
-    closed; connection failures hide the tools.
+14. MCP is allow-list-only (decision 1758, config surface added plan 117):
+    the server builds `mcpAllowList` from the per-agent `mcp.json` + the
+    repo-root `.mcp.json` (see Responsibilities) and sends it in
+    `initialize` (`AgentMcpAllowListEntry` on `AgentHostConfig`); the
+    daemon validates every entry fail-closed (absolute executable,
+    literal argv, explicit env names) before any spawn, then connects
+    per-server with fault isolation via `@arnilo/prism-mcp`. Empty list
+    → no MCP tools; validation errors fail closed; per-server
+    connection failures hide only that server's tools. The daemon's
+    spawn inherits exactly `HOME`/`USERPROFILE`/`PATH` (config-root
+    isolation + bare-command PATH resolution happen server-side; the
+    launch test proved the isolation end-to-end). Per-server outcomes
+    ride `environment.list` as `mcpServers` for the panel's MCP card;
+    MCP is display-only in the UI (no restart/connect actions).
 15. Obscura is host-owned (decision 2159): binary resolves from
     `CLAY_OBSCURA_BIN` → `PATH` → `/usr/local/bin/obscura`; absent = hidden,
     never an error. Present: the daemon owns the `obscura serve` (CDP on
@@ -300,12 +448,27 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 ## Spawn
 
 ```text
-node clay-agent/dist/main.js --data-dir DIR [--mock]
+node clay-agent/dist/main.js --data-dir DIR [--agent-config-root DIR] [--mock]
 ```
 
-The data dir defaults to `<configuration-root>/agent` (the user's
-`~/.config/clay/agent`), falling back to the system temp dir only when no
-config root exists. It holds `sessions.sqlite`, `credentials.vault`,
+The data dir is `<configuration-root>/agents/coding-agent/data` (the
+user's `~/.clay/agents/coding-agent/data` — decision 2026-09-10-1526
+moved runtime data under the per-agent root), falling back to the system
+temp dir only when no config root exists. The per-agent root holds
+config and content (`skills.json`, `mcp.json`, `tool-caps.json`, the
+seeded `skills/` directory, `SYSTEM.md`, `.seed-manifest.json`) and the
+data subdir holds runtime state. A legacy `<config-root>/agent/` data
+dir is renamed into `agents/coding-agent/data` at server start (rename
+failure keeps the legacy dir serving — credentials never orphan).
+The SERVER passes `--agent-config-root
+<configuration-root>/agents/coding-agent` explicitly (plan 117); without
+it the daemon derives the root from the home directory — the launch test
+showed that path leaking the real home under the daemon's env-clear
+spawn, which is why the server always passes it. The spawn environment is
+cleared except `HOME`/`USERPROFILE`/`PATH` (`for_server`), so MCP bare
+commands resolve and homedir follows the isolated profile. The data dir
+holds
+`sessions.sqlite`, `credentials.vault`,
 `vault.passphrase`, and `book.json` (the server-side persisted
 provider/model/profile selection, reloaded at server boot so a configured
 book survives restarts). First request:
@@ -335,12 +498,33 @@ catalog is convenience, not authority; the provider rejects bad ids).
   lease/CAS path (`apply_edit`) regardless of caller.
 - Search hits are redacted metadata and never auto-injected into agent
   context.
+- MCP servers connect with no approval gate (plan 117 amendment to
+  decision 1758): the config surface is user-owned (`mcp.json`) or
+  repo-owned (`.mcp.json`) and both are trusted sources by decision —
+  the security posture is the user's responsibility, as with Claude
+  Code. What stays enforced: the daemon only accepts absolute commands
+  (the server canonicalizes bare names via PATH), argv/env stay
+  literal and bounded, servers cap at 32, and MCP children are
+  same-user subprocesses owned by the daemon.
+- Prompt layers and seeded skill files are size-capped (64 KiB /
+  256 KiB) and never execute anything — they are prompt text only;
+  symlink escapes for workspace `AGENTS.md` and `@file:` mentions are
+  excluded by realpath containment.
 
 ## Invariants
 
 - Frames > 1 MiB fail closed.
 - Secrets never appear in RPC results, events, or logs.
 - Omitted tools/skills activate none; unknown names throw before a provider turn.
+- `session.load` payloads are persisted `SessionEntry` records; the server
+  parses `entry.message.{role,content}` and never a flat `{role,content}` — a
+  mock that speaks the flat shape is lying about the contract (it hid an
+  always-empty resume).
+- A resumed tab records both `tab_session` and `tab_session_root`; recording
+  only the session makes the next `ensure_tab_session` prune the binding and
+  start a fresh session.
+- Only the session's first entry is labelled, so a session's `/resume`
+  identity never drifts to its latest prompt.
 - No ACP, AG-UI, or Antigravity dependencies. Phase 1 pins coding-tools,
   web-tools, memory, and mcp; import only `/compaction/llm` and
   `/compaction/observational-memory` from memory (no wiki/graft/rag).
@@ -371,23 +555,42 @@ session's `fullAutonomy` flag (default false, host-set only).
 cd clay-agent && npm test
 ```
 
-Nine suites, 49 tests: host (mock prompt/persist/resume, cancel, oversize
-frames, secret redaction, missing tools, unreadable-vault process exit),
-rpc framing, coding tools (dirty-buffer read, CAS write, lease fail-closed,
-acceptance policy, D1 smoke), compaction (strategies, active-run fail-closed,
-OM round-trip, threshold override), durable run (suspend/resume once, stale
-fail-closed, chat non-durable), skills/commands (duplicate fail-closed,
-progressive disclosure, driver injection denied), session search/tree
-(workspace scoping, no-injection, fork/clone, checkpoint capture/restore),
-and MCP/Obscura (allow-list validation order, missing-binary-hidden,
-no-vendor-imports). Rust side: `tests/protocol.rs` `agent_protocol::*`
-(protocol round-trips, deny list, reverse-RPC) and
-`src/server/agent_documents.rs` / `agent_checkpoints.rs` unit tests.
+Fourteen suites, 138 tests (2026-09-10): host (mock
+prompt/persist/resume, cancel, oversize frames, secret redaction, missing
+tools, unreadable-vault process exit), rpc framing, coding tools
+dirty-buffer read, CAS write, lease fail-closed, acceptance policy, D1
+smoke), compaction (strategies, active-run fail-closed, OM round-trip,
+threshold override), durable run (suspend/resume once, stale fail-closed,
+chat non-durable), skills/commands (duplicate fail-closed, progressive
+disclosure, driver injection denied, wiki intercept, three-root skill
+discovery + skills.json gating), mentions (@skill/@file parsing,
+containment, unavailable-tool skips), session search/tree (workspace
+scoping, no-injection, fork/clone, checkpoint capture/restore), and
+MCP/Obscura (allow-list validation order, per-server fault isolation,
+missing-binary-hidden, no-vendor-imports). Rust side:
+`tests/protocol.rs` `agent_protocol::*` (protocol round-trips, deny list,
+reverse-RPC, `resume_after_daemon_load_restores_bounded_history` against a
+mock daemon that speaks the real persisted entry shape),
+`src/server/agent_documents.rs` /
+`agent_checkpoints.rs` / `agent_mcp_config.rs` / `agent_settings.rs` unit
+tests, `src/server/agent.rs` `tab_workspace_tests::*`
+(`book_selection_broadcast_keeps_the_tab_session`,
+`resumed_tab_keeps_its_session_on_the_next_prompt`),
+`src/server/agent_picker.rs`
+`session_picker_rows_show_the_label_and_the_local_stamp`, and the frontend
+CodingAgentPanel suites (cards, mentions, token meter, effort/resume/branch —
+301 tests).
 
 ## Related
 
 - [Phase 25 Agent Host and Pane Content Primitive Review](../archive/phase25-agent-host-primitive-review.md)
 - [Agent Host project pattern](../../../.agents/skills/clay-execution/references/packages.md)
 - Reference docs (authoritative for public usage): `docs/reference/clay-js-api/agent/`
-- Manual test module: `test-plan/16-agent-host.md`
+- Configuration reference: `examples/config/README.md` (skills.json / mcp.json /
+  SYSTEM.md / SKILL.md schemas, defaults, apply semantics) and
+  `docs/reference/clay-js-api/configuration.md`
+- Manual test modules: `test-plan/16-agent-host.md`, `test-plan/17-coding-agent-parity.md`
 - `decision-logs/2026-08-21-1758-native-prism-host-no-acp-cli-parity.md`
+- `decision-logs/2026-09-10-1526-clay-root-home-datadir-per-agent.md` (root at
+  `~/.clay`, per-agent data dir, tool-caps.json as agent config)
+- `plans/117-Phase2.2-Skill-Discovery-Wiki-Graft-Prompt-MCP-Context-Inspector.md`

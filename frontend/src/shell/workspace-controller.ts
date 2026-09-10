@@ -69,6 +69,8 @@ export interface WorkspaceAdapters {
   openFileDialog?: (tabId?: number) => Promise<boolean>;
   openFolderDialog?: (tabId?: number) => Promise<boolean>;
   openTabDialog?: () => Promise<BootstrapDto | null>;
+  /** Agent settings page (plan 117): listen for the listing reply on the
+   *  given session, or tear down with `null`. */
 }
 
 export interface PaneRecord {
@@ -117,11 +119,19 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
   const tabs: TabStore = createTabStore();
   const runtimes = new Map<number, TabRuntime>();
   let pendingClose: PendingClose | null = null;
+  /** Feature-event subscription while the agent settings page listens for
+   *  its listing reply (plan 117); torn down on close or workspace drop. */
   // The server broadcasts the tab registry during handshake, before the
   // bootstrap command creates the runtime, so a fresh-boot restore would
   // otherwise queue document opens forever waiting for a root id that
   // already arrived. Remember the latest roots per client.
   const registryRootsByClient = new Map<number, number>();
+  /** Same race for tab ids: the registry carries each client's server tab id
+   *  but usually lands before its runtime mounts. Without adopting it here,
+   *  runtime.tabId stays null and every pane request falls back to the
+   *  bridge's active-client (the FIRST connection) — the Control Centre
+   *  chord opened on the wrong, hidden tab with two tabs up. */
+  const registryTabsByClient = new Map<number, number>();
   const persistListeners = new Set<() => void>();
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -204,7 +214,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
   ): TabRuntime => {
     const runtime: TabRuntime = {
       clientId: bootstrap.clientId,
-      tabId: bootstrap.tabId ?? null,
+      tabId: bootstrap.tabId ?? registryTabsByClient.get(bootstrap.clientId) ?? null,
       workspaceRoot: bootstrap.initialDocument.workspaceRoot,
       workspaceRootId: null,
       tree,
@@ -258,8 +268,11 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     notify();
   };
 
+  const commandAdapters = {
+    ...adapters,
+  };
   const commandContext: CommandContext = {
-    adapters,
+    adapters: commandAdapters,
     tabs,
     notify,
     setTree,
@@ -270,6 +283,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     runtimes,
     tabs,
     registryRootsByClient,
+    registryTabsByClient,
     notify,
     deliverRootId,
     ensurePane,
@@ -293,7 +307,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     return windowFromTabs(layouts, activeIndex >= 0 ? activeIndex : null);
   }
 
-  return {
+  const workspace = {
     tabs,
     subscribe: (listener: () => void) => {
       persistListeners.add(listener);
@@ -650,6 +664,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     serialize,
     emptyLayout,
   };
+  return workspace;
 }
 
 function runtimeDocuments(

@@ -70,7 +70,7 @@ const commands = serverListCommands();
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `commands.serverListCommands` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `commands.serverListCommands` in `~/.clay/init.js`.
 
 ## Custom properties
 

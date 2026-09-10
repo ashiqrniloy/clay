@@ -1000,6 +1000,13 @@ pub enum ClientConnectionEvent {
         command_id: String,
     },
     Agent(Box<crate::protocol::AgentServerMessage>),
+    /// Reply to `ListAgentSettingsFiles`: the server-resolved listing of the
+    /// agent's delivered config files. The webview renders it in the coding
+    /// agent's Settings tab; paths stay server-side (display only).
+    AgentSettingsFiles {
+        client_id: ClientId,
+        files: Vec<crate::protocol::AgentSettingsFileInfo>,
+    },
     ServerError {
         code: ProtocolErrorCode,
         message: String,
@@ -1909,6 +1916,14 @@ async fn run_connection<S>(
                     }
                     Ok(ServerMessage::Agent(payload)) => {
                         let _ = events.send(ClientConnectionEvent::Agent(payload)).await;
+                    }
+                    Ok(ServerMessage::AgentSettingsFiles { client_id, files }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::AgentSettingsFiles {
+                                client_id,
+                                files,
+                            })
+                            .await;
                     }
                     Ok(ServerMessage::TransientMenuSnapshot(snapshot)) => {
                         let _ = events

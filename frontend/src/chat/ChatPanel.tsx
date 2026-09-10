@@ -136,7 +136,7 @@ export function ChatPanel({ surface, uiVersion }: ChatPanelProps) {
 
   // Initial inventory: session list + provider configuration state.
   useEffect(() => {
-    void sendRequest(agentCommandPayload({ listSessions: {} }));
+    void sendRequest(agentCommandPayload("listSessions"));
   }, []);
 
   const [draft, setDraft] = useState("");
@@ -255,7 +255,7 @@ export function ChatPanel({ surface, uiVersion }: ChatPanelProps) {
                           deleteSession: { sessionId: String(session["id"]) },
                         }),
                       ).then(() =>
-                        sendRequest(agentCommandPayload({ listSessions: {} })),
+                        sendRequest(agentCommandPayload("listSessions")),
                       );
                     }}
                   >
@@ -359,8 +359,10 @@ function packageActionPayload(
   });
 }
 
-/** Typed agent-family request through the validated bridge path. */
-function agentCommandPayload(command: Record<string, unknown>): string {
+/** Typed agent-family request through the validated bridge path. Unit
+ *  variants ride the bare-string form — `{ listSessions: {} }` fails serde
+ *  deserialization (map content where a unit is expected). */
+function agentCommandPayload(command: Record<string, unknown> | string): string {
   return JSON.stringify({
     family: "agent",
     payload: { clientId: 0, command },

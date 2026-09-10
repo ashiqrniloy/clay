@@ -62,7 +62,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverListDocuments` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverListDocuments` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 

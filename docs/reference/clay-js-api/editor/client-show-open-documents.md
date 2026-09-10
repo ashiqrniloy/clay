@@ -43,7 +43,7 @@ Opening a second file through the normal `DocumentOpened` path retains the previ
 
 ## When to use
 
-Use this API when a user wants a bindable chord that opens the open-documents switcher in `~/.config/clay/init.js`.
+Use this API when a user wants a bindable chord that opens the open-documents switcher in `~/.clay/init.js`.
 
 ## JavaScript usage
 
@@ -57,7 +57,7 @@ bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientShowOpenDocuments } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 import { serverListDocuments } from "clay:documents";

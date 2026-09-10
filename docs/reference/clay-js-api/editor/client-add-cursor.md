@@ -69,7 +69,7 @@ Default key bindings:
 
 - `Ctrl+Alt+Down` (add cursor below), `Ctrl+Alt+Up` (add cursor above)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (`editor.clientAddCursor.below`, `editor.clientAddCursor.above`).
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js` using the direction-specific command IDs (`editor.clientAddCursor.below`, `editor.clientAddCursor.above`).
 
 ## Custom properties
 

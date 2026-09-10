@@ -73,7 +73,7 @@ async: false
 
 ## Summary
 
-Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party language packages such as `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`; ordinary users load those packages with `loadPackage(...)` from `~/.config/clay/init.js` rather than calling this registration API directly.
+Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party language packages such as `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`; ordinary users load those packages with `loadPackage(...)` from `~/.clay/init.js` rather than calling this registration API directly.
 
 ## Description
 

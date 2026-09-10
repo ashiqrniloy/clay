@@ -1,5 +1,7 @@
-import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   type Agent,
@@ -18,6 +20,8 @@ import {
   type ExtensionKernel,
   type JsonObject,
   type LoadedExtension,
+  type Message,
+  type ContentBlock,
   type ModelConfig,
   type OAuthAuthMethod,
   type OAuthCredentials,
@@ -57,6 +61,8 @@ import {
   type KeychainCredentialStore,
   CredentialStoreLockedError,
 } from "@arnilo/prism-core/credentials/node";
+import { discoverContributions } from "@arnilo/prism/node/contribution-discovery";
+import { parseSkillFile } from "@arnilo/prism";
 import { createSqlitePersistence, type SqlitePersistence } from "@arnilo/prism-core/sessions/sqlite";
 import { createJsonSchemaToolArgumentValidator } from "@arnilo/prism-core/validation/json-schema";
 import type { AskUserDecisionAnswer } from "@arnilo/prism-coding-tools/agent";
@@ -68,7 +74,12 @@ import type { SettingsProvider, SystemPromptConfig } from "@arnilo/prism";
 import type { AgentIdentity } from "@arnilo/prism";
 import { ownershipFromIdentity } from "@arnilo/prism";
 import { CODING_TOOL_NAMES, buildCodingTools, normalizeToolCaps, type RepositoryToolCaps } from "./coding-tools.js";
-import { connectAllowListedMcpServers, MAX_MCP_SERVERS, type ConnectedMcpServers } from "./mcp.js";
+import {
+  connectAllowListedMcpServers,
+  MAX_MCP_SERVERS,
+  type ConnectedMcpServers,
+  type McpServerOutcome,
+} from "./mcp.js";
 import { resolveObscuraBinary, spawnObscuraHarness, type ObscuraHarness } from "./obscura.js";
 import {
   DEFAULT_COMPACT_AFTER_TOKENS,
@@ -169,6 +180,197 @@ const graftSkill = {
   ].join("\n"),
 };
 
+/** Agent-delivered skills are file-backed (plan 117): the in-code objects
+ *  above are generators — `<agentConfigRoot>/skills/<name>/SKILL.md` is the
+ *  delivered payload. Seeded when absent (deleted ⇒ regenerated at every
+ *  start), parsed at every start (user edits apply on next daemon start),
+ *  and falling back to the built-in content on malformed/oversized files —
+ *  never a broken skill. `name` and `toolNames` stay daemon-owned: the file
+ *  cannot rename a skill, grant tools, or break the fail-closed toolName
+ *  check. Disk discovery skips these reserved names, so seeding + gated
+ *  activation is the only delivery path. */
+const MAX_AGENT_SKILL_FILE_BYTES = 256 * 1024;
+/** Plan 117 @-mentions: attached files cap at the same 256 KiB discipline as
+ *  agent skill files; the workspace listing for the mention dropdown is
+ *  bounded in entries and walk depth (client-side filter, debounced fetch). */
+const MAX_MENTION_FILE_BYTES = 256 * 1024;
+const MAX_LISTED_FILES = 200;
+const MAX_LIST_WALK_DEPTH = 8;
+const LIST_SKIPPED_DIRS = new Set([".git", "node_modules", "target", "dist", "build"]);
+const IMAGE_MIME_BY_EXT = new Map([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
+  [".bmp", "image/bmp"],
+]);
+const AGENT_DELIVERED_SKILLS: readonly { dir: string; skill: Skill }[] = [
+  { dir: "wiki-searcher", skill: wikiSearcherSkill },
+  { dir: "wiki-maintainer", skill: wikiMaintainerSkill },
+  { dir: "graft", skill: graftSkill },
+];
+
+/** Render a built-in skill as its seeded SKILL.md (frontmatter + body). */
+function skillToSeedMarkdown(skill: { name: string; description?: string; instructions?: string }): string {
+  return `---\nname: ${skill.name}\ndescription: ${skill.description ?? ""}\n---\n\n${skill.instructions ?? ""}\n`;
+}
+
+/** Seed provenance stamp (plan 117): after writing a seed file, record its
+ *  size + mtime in `<agentConfigRoot>/.seed-manifest.json` so the Rust
+ *  settings listing can badge built-in-vs-edited without knowing the built-in
+ *  content. A missing/stale stamp marks the file edited — honest fallback. */
+async function recordSeedStamp(agentConfigRoot: string, relName: string): Promise<void> {
+  const manifestFile = join(agentConfigRoot, ".seed-manifest.json");
+  let manifest: Record<string, { sizeBytes: number; mtimeMs: number }> = {};
+  try {
+    manifest = JSON.parse(await readFile(manifestFile, "utf8")) as typeof manifest;
+  } catch {
+    // Absent or malformed: start a fresh manifest (seeds are being rebuilt).
+  }
+  try {
+    const stats = await stat(join(agentConfigRoot, relName));
+    // Truncate, not round: the Rust listing derives the file's mtime with
+    // `as_millis()` (also truncating), so a rounded stamp is off by up to
+    // +1 ms and every untouched seed badges as "edited".
+    manifest[relName] = { sizeBytes: stats.size, mtimeMs: Math.trunc(stats.mtimeMs) };
+    await writeFile(manifestFile, JSON.stringify(manifest, null, 2), "utf8");
+  } catch {
+    // Unstamped seed: the settings page shows it as edited — acceptable.
+  }
+}
+
+/** Seed absent agent-delivered SKILL.md files; present files stay untouched
+ *  (the file is the source of truth — user edits are preserved). */
+async function seedAgentSkillFiles(agentConfigRoot: string): Promise<void> {
+  const skillsDir = join(agentConfigRoot, "skills");
+  for (const { dir, skill } of AGENT_DELIVERED_SKILLS) {
+    const file = join(skillsDir, dir, "SKILL.md");
+    try {
+      await access(file);
+      continue;
+    } catch {
+      // Absent: seed it (first launch or user deletion).
+    }
+    await mkdir(join(skillsDir, dir), { recursive: true });
+    await writeFile(file, skillToSeedMarkdown(skill), "utf8");
+    await recordSeedStamp(agentConfigRoot, `skills/${dir}/SKILL.md`);
+  }
+}
+
+/** Load the delivered skill content from disk. Every registration site
+ *  (wiki enable, graft bind) registers from this map, never the in-code
+ *  objects directly. Seeding runs first, so a deleted file is delivered
+ *  from its fresh seed in the same start. */
+async function loadAgentSkillFiles(agentConfigRoot: string): Promise<ReadonlyMap<string, Skill>> {
+  const skillsDir = join(agentConfigRoot, "skills");
+  try {
+    await seedAgentSkillFiles(agentConfigRoot);
+  } catch (error) {
+    process.stderr.write(
+      `[skills] seeding agent skill files failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  }
+  const files = new Map<string, Skill>();
+  for (const { dir, skill } of AGENT_DELIVERED_SKILLS) {
+    const file = join(skillsDir, dir, "SKILL.md");
+    let text: string;
+    try {
+      text = await readFile(file, "utf8");
+    } catch {
+      // Seeding failed (unwritable config root) — deliver the built-in content.
+      files.set(dir, skill);
+      continue;
+    }
+    try {
+      if (Buffer.byteLength(text, "utf8") > MAX_AGENT_SKILL_FILE_BYTES) {
+        throw new Error(`file exceeds ${MAX_AGENT_SKILL_FILE_BYTES} bytes`);
+      }
+      const parsed = parseSkillFile(text, file);
+      // Name and toolNames are daemon-owned; the file carries description + body.
+      files.set(dir, { ...parsed, name: dir, toolNames: skill.toolNames });
+    } catch (error) {
+      process.stderr.write(
+        `[skills] ${file} unusable (${error instanceof Error ? error.message : String(error)}); using built-in seed content\n`,
+      );
+      files.set(dir, skill);
+    }
+  }
+  return files;
+}
+
+/** User-owned global system-prompt layer (plan 117): seeded EMPTY at host
+ *  creation (a default body would pollute every session's prompt — the file
+ *  exists so the user has a stable home for global instructions), read per
+ *  session build (sync, bounded — edits apply on the next session), and
+ *  injected as a `user`-source system-prompt contribution so Prism's source
+ *  rank orders it right after the profile base instructions and before the
+ *  workspace AGENTS.md app layer. Byte-stable per session, so it rides the
+ *  cached prefix. Oversized/unreadable ⇒ skipped with a warning, never a
+ *  broken session. */
+const MAX_PROMPT_LAYER_BYTES = 64 * 1024;
+const USER_SYSTEM_PROMPT_FILE = "SYSTEM.md";
+const WORKSPACE_AGENTS_FILE = "AGENTS.md";
+
+async function seedUserSystemPrompt(agentConfigRoot: string): Promise<void> {
+  const file = join(agentConfigRoot, USER_SYSTEM_PROMPT_FILE);
+  try {
+    await access(file);
+    return;
+  } catch {
+    // Absent: seed it (first launch or user deletion).
+  }
+  await writeFile(file, "", "utf8");
+  await recordSeedStamp(agentConfigRoot, USER_SYSTEM_PROMPT_FILE);
+}
+
+/** Shared bounded prompt-layer reader (plan 117): trimmed text, "" when
+ *  absent, throws on unreadable/oversized so each caller applies its own
+ *  trust policy (user-owned SYSTEM.md warns; repo AGENTS.md skips). */
+function readPromptLayer(file: string, maxBytes: number): string {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw error;
+  }
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    throw new Error(`file exceeds ${maxBytes} bytes`);
+  }
+  return text.trim();
+}
+
+function loadUserSystemPrompt(agentConfigRoot: string): string {
+  const file = join(agentConfigRoot, USER_SYSTEM_PROMPT_FILE);
+  try {
+    return readPromptLayer(file, MAX_PROMPT_LAYER_BYTES);
+  } catch (error) {
+    process.stderr.write(
+      `[system] ${file} unusable (${error instanceof Error ? error.message : String(error)}); skipping user layer\n`,
+    );
+    return "";
+  }
+}
+
+/** Workspace `AGENTS.md` app layer (plan 117): repo content is untrusted
+ *  prompt text — bounded bytes, symlink-escape excluded (the file's
+ *  realpath must stay inside the workspace root), and a silent skip when
+ *  absent (most repos have none; ENOENT is not a warning). Byte-stable per
+ *  session; the `app` source rank composes it after the user SYSTEM.md
+ *  layer. */
+function loadWorkspaceAgentsPrompt(workspaceRoot: string): string {
+  const file = join(workspaceRoot, WORKSPACE_AGENTS_FILE);
+  try {
+    const realFile = realpathSync(file);
+    const realRoot = realpathSync(workspaceRoot);
+    if (!realFile.startsWith(realRoot + sep)) return "";
+    return readPromptLayer(realFile, MAX_PROMPT_LAYER_BYTES);
+  } catch {
+    return ""; // absent, unreadable, oversized, or escaped — all skip
+  }
+}
+
 function omSettingsProvider(sessionId: string): SettingsProvider {
   return {
     get<T = unknown>(key: string): T | undefined {
@@ -187,6 +389,13 @@ export const MAX_QUEUED_EVENTS = 256;
 const MAX_LIST = 50;
 const MAX_LOAD_ENTRIES = 200;
 const MAX_SESSION_SEARCH_LIMIT = 100;
+/** Plan 117 follow-up: `/resume` rows are identified by the session's opening
+ *  prompt, so the store gets one label per session — the first 5 words,
+ *  bounded. Prism's search query reads the newest non-null label, so a single
+ *  stamp on the opening entry keeps the session's identity stable for its
+ *  whole life. */
+const SESSION_LABEL_WORDS = 5;
+const SESSION_LABEL_MAX_BYTES = 120;
 const REVERSE_TIMEOUT_MS = 30_000;
 const TENANT = "clay";
 const KEYCHAIN_SERVICE = "clay-agent";
@@ -236,6 +445,19 @@ export interface HostOptions {
   readonly createKeychain?: () => KeychainCredentialStore;
   /** Test seam: replace Obscura binary resolution. */
   readonly resolveObscuraBinary?: () => string | undefined;
+  /** Coding-agent config root (decision 2026-09-09-1420):
+   *  `~/.clay/agents/coding-agent`. Holds `skills.json`, and the
+   *  `skills/` directory (seeded agent-delivered + user-added skills).
+   *  Test seam: tests point this at a temp dir. */
+  readonly agentConfigRoot?: string;
+  /** Home skill-discovery root (npx skills format). Default `~/.agents`;
+   *  scanned as `<root>/skills/`. Test seam. */
+  readonly homeSkillsRoot?: string;
+  /** Default graft CLI path for the daemon-initiated graft binding (plan
+   *  117: graft available by default). Absent ⇒ peer-package resolution
+   *  only, fail-closed. Test seam: point at a stub to exercise the
+   *  default bind deterministically. */
+  readonly graftCliPath?: string;
   /** Worker models stay off the session model (2158). Omit to skip workers. */
   readonly observationalMemory?: {
     readonly observation?: {
@@ -271,6 +493,10 @@ interface LiveSession {
   provider: string;
   model: string;
   readonly workspaceRoot: string;
+  /** Plan 117 @-mentions: skills manually triggered this session. They ride
+   *  every run's `skills` option (profile config union) so their loaded
+   *  bodies keep rendering across turns. */
+  readonly mentionSkills: Skill[];
   /** Host-settable: toggled via session.setAutonomy (decision 2157). */
   fullAutonomy: boolean;
   readonly observationalMemory: boolean;
@@ -310,22 +536,145 @@ export async function resolveKeychain(
 /** Persist the live book's provider/model onto the session record (plan 108
  *  task 9): a picker switch mid-session survives daemon restart and resume.
  *  Best-effort — a store without appendSession skips persistence. */
-/** Load user-configured repository scan caps from tool-caps.json in the
- *  agent data dir (beside book.json). Missing file = defaults; malformed
- *  file = warn and fall back to defaults (never blocks daemon boot). */
+/** Load user-configured repository scan caps from tool-caps.json. Since
+ *  decision 2026-09-10-1526 the file is per-agent CONFIGURATION living in
+ *  the agent config root (beside skills.json/mcp.json); the data-dir
+ *  location is the pre-decision legacy path, still honored when the
+ *  config-root file is absent (a migrated data dir carries the old file).
+ *  Missing everywhere = defaults; malformed = warn and fall back to
+ *  defaults (never blocks daemon boot). */
 async function loadToolCaps(
+  agentConfigRoot: string,
   dataDir: string,
 ): Promise<{ caps: RepositoryToolCaps; file: string }> {
-  const file = join(dataDir, "tool-caps.json");
-  try {
-    const raw = JSON.parse(await readFile(file, "utf8"));
-    return { caps: normalizeToolCaps(raw), file };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
+  for (const dir of [agentConfigRoot, dataDir]) {
+    const file = join(dir, "tool-caps.json");
+    try {
+      const raw = JSON.parse(await readFile(file, "utf8"));
+      return { caps: normalizeToolCaps(raw), file };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") continue;
       console.error(`[tool-caps] ignoring malformed ${file}: ${String(error)}`);
+      return { caps: {}, file };
     }
-    return { caps: {}, file };
   }
+  return { caps: {}, file: join(agentConfigRoot, "tool-caps.json") };
+}
+
+/** Per-agent config root (decision 2026-09-09-1420):
+ *  `~/.clay/agents/<agentId>/`. The coding agent is the first
+ *  occupant. Skills config + seeded skill files + SYSTEM.md + mcp.json
+ *  live under this root, keeping future agents isolated. */
+const CODING_AGENT_CONFIG_DIR = join("agents", "coding-agent");
+
+/** Skills discovered from disk never activate these names: they are
+ *  agent-delivered and gated (wiki behind `/wiki-init`, graft behind
+ *  binding). They seed into the agent skills dir (plan 117) but register
+ *  only through their own activation paths. */
+const RESERVED_AGENT_SKILL_NAMES: ReadonlySet<string> = new Set([
+  "graft",
+  "wiki-searcher",
+  "wiki-maintainer",
+]);
+
+/** Locked cap: at most 64 skills scanned per discovery root. */
+const MAX_SKILLS_PER_ROOT = 64;
+
+interface SkillsConfig {
+  workspaceEnabled: boolean;
+  configRootEnabled: boolean;
+  homeEnabled: boolean;
+  homePath: string;
+  agentSkills: { wikiSearcher: boolean; wikiMaintainer: boolean; graft: boolean };
+}
+
+const DEFAULT_SKILLS_CONFIG: SkillsConfig = {
+  workspaceEnabled: true,
+  configRootEnabled: true,
+  homeEnabled: true,
+  homePath: "",
+  agentSkills: { wikiSearcher: true, wikiMaintainer: true, graft: true },
+};
+
+function skillsWarn(message: string): void {
+  process.stderr.write(`[skills] ${message}\n`);
+}
+
+/** `~`/`~/` expansion; null when the path is relative (rejected
+ *  fail-closed per the locked skills.json schema). */
+function expandSkillsPath(value: string): string | null {
+  if (value === "~") return homedir();
+  if (value.startsWith("~/")) return join(homedir(), value.slice(2));
+  if (value.startsWith("/")) return value;
+  return null;
+}
+
+function skillsFlag(record: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = record[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") {
+    skillsWarn(`ignoring non-boolean "${key}": ${JSON.stringify(value)}`);
+    return fallback;
+  }
+  return value;
+}
+
+/** Load skills.json from the coding-agent config root. Absent/unreadable
+ *  file = all roots on with defaults (stderr note, per the locked schema);
+ *  unknown keys warned (tool-caps.json precedent); relative paths rejected
+ *  fail-closed (root disabled, never a broken boot). */
+async function loadSkillsConfig(
+  agentConfigRoot: string,
+  defaultHomePath: string,
+): Promise<{ config: SkillsConfig; file: string }> {
+  const file = join(agentConfigRoot, "skills.json");
+  let raw: unknown;
+  try {
+    raw = JSON.parse(await readFile(file, "utf8"));
+  } catch {
+    skillsWarn(`${file} absent or unreadable; using defaults (all roots enabled)`);
+    return {
+      config: { ...DEFAULT_SKILLS_CONFIG, homePath: defaultHomePath, agentSkills: { ...DEFAULT_SKILLS_CONFIG.agentSkills } },
+      file,
+    };
+  }
+  const config: SkillsConfig = {
+    ...DEFAULT_SKILLS_CONFIG,
+    homePath: defaultHomePath,
+    agentSkills: { ...DEFAULT_SKILLS_CONFIG.agentSkills },
+  };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    skillsWarn(`ignoring malformed ${file}: top level must be an object`);
+    return { config, file };
+  }
+  const root = raw as Record<string, unknown>;
+  for (const key of Object.keys(root)) {
+    if (key !== "roots" && key !== "agentSkills") skillsWarn(`ignoring unknown key "${key}"`);
+  }
+  const roots = typeof root.roots === "object" && root.roots !== null && !Array.isArray(root.roots)
+    ? (root.roots as Record<string, unknown>)
+    : {};
+  const workspace = typeof roots.workspace === "object" && roots.workspace !== null ? (roots.workspace as Record<string, unknown>) : {};
+  const configRootRecord = typeof roots.configRoot === "object" && roots.configRoot !== null ? (roots.configRoot as Record<string, unknown>) : {};
+  const home = typeof roots.home === "object" && roots.home !== null ? (roots.home as Record<string, unknown>) : {};
+  config.workspaceEnabled = skillsFlag(workspace, "enabled", true);
+  config.configRootEnabled = skillsFlag(configRootRecord, "enabled", true);
+  config.homeEnabled = skillsFlag(home, "enabled", true);
+  const homePathRaw = typeof home.path === "string" && home.path.length > 0 ? home.path : defaultHomePath;
+  const expanded = expandSkillsPath(homePathRaw);
+  if (expanded === null) {
+    skillsWarn(`ignoring relative roots.home.path ${JSON.stringify(homePathRaw)}; home root disabled`);
+    config.homeEnabled = false;
+  } else {
+    config.homePath = expanded;
+  }
+  const agentSkills = typeof root.agentSkills === "object" && root.agentSkills !== null && !Array.isArray(root.agentSkills)
+    ? (root.agentSkills as Record<string, unknown>)
+    : {};
+  config.agentSkills.wikiSearcher = skillsFlag(agentSkills, "wikiSearcher", true);
+  config.agentSkills.wikiMaintainer = skillsFlag(agentSkills, "wikiMaintainer", true);
+  config.agentSkills.graft = skillsFlag(agentSkills, "graft", true);
+  return { config, file };
 }
 
 async function persistProviderModel(
@@ -406,6 +755,53 @@ function derivedTotalTokens(input: PolicyCap, output: PolicyCap): PolicyCap {
   return Number.isSafeInteger(sum) && sum >= 1 ? sum : null;
 }
 
+/**
+ * Plan 117 follow-up: stamp the session's opening prompt onto its first
+ * entry's `label`, so `/resume` can identify a row by topic instead of by its
+ * profile (identical for every session in a workspace).
+ *
+ * Only the first entry is eligible (`parentId` unset, first user message):
+ * Prism's session search reads the newest non-null label, so one stamp gives
+ * the session a stable identity for its whole life, and a store written by an
+ * older daemon simply has no label (the picker falls back to "Untitled
+ * session").
+ */
+function labelFirstPromptEntry(entry: SessionEntry): SessionEntry {
+  if (entry.label !== undefined || entry.parentId !== undefined) return entry;
+  const message = entry.message;
+  if (!message || message.role !== "user") return entry;
+  const text = message.content
+    .filter((block): block is { type: "text"; text: string } => block.type === "text")
+    .map((block) => block.text)
+    .join(" ");
+  const words = text.split(/\s+/).filter(Boolean).slice(0, SESSION_LABEL_WORDS);
+  if (words.length === 0) return entry;
+  const label = words.join(" ").slice(0, SESSION_LABEL_MAX_BYTES);
+  return { ...entry, label };
+}
+
+/** The session store Prism writes through, with the resume label stamped on
+ *  the opening entry. Read paths stay on the underlying store. */
+function labelFirstPromptStore(store: SqlitePersistence): SqlitePersistence {
+  return new Proxy(store, {
+    get(target, property, receiver) {
+      if (property !== "append") return Reflect.get(target, property, receiver);
+      return (entry: SessionEntry, options?: unknown) =>
+        target.append(labelFirstPromptEntry(entry), options as never);
+    },
+  });
+}
+
+/** Local `YYYY-MM-DD HH:MM` for the resume list's second line. The daemon runs
+ *  on the user's machine, so its timezone is the user's; a raw ISO stamp in
+ *  UTC reads as the wrong hour. */
+function localStamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function isOauth(method: AuthMethod): method is OAuthAuthMethod {
   return method.kind === "oauth";
 }
@@ -447,8 +843,20 @@ export class ClayAgentHost {
   private readonly omProfiles = new Set<string>();
   /** Kernel skill registry; duplicate skill names fail closed (plan 107 Task 6). */
   private readonly skills = createSkillRegistry([], { duplicate: "error" });
+  /** Disk-discovered skill names. Config-root + home roots scanned once;
+   *  each workspace root cached on first session. `undefined` = not yet
+   *  scanned. Config/home roots scan `<root>/skills/`; workspace keeps the
+   *  npx skills `.agents/skills/` layout. */
+  private configSkillNames: readonly string[] | undefined;
+  private homeSkillNames: readonly string[] | undefined;
+  private readonly workspaceSkillNames = new Map<string, readonly string[]>();
+  private readonly agentConfigRoot: string;
+  private readonly homeSkillsRoot: string;
+  private readonly skillsConfig: SkillsConfig;
   /** Connected MCP bridges (empty allow-list = never populated). */
   private mcp: ConnectedMcpServers | undefined;
+  /** Per-server MCP connect outcomes (last connect), for the UI surfaces. */
+  private mcpOutcomes: readonly McpServerOutcome[] = [];
   /** Owned Obscura harness (undefined = binary absent, capability hidden). */
   private obscura: ObscuraHarness | undefined;
   /** Capabilities activated lazily on first coding session; serialized. */
@@ -462,6 +870,9 @@ export class ClayAgentHost {
    *  binding discipline as the wiki — one workspace, fail-closed CLI
    *  resolution, zero residue when disabled. */
   private graft: { workspaceRoot: string; loaded: LoadedExtension; mode: GraftMode } | undefined;
+  /** Workspace roots whose default graft bind was attempted (plan 117):
+   *  one attempt per root per daemon, success or fail-closed. */
+  private readonly graftBindAttempted = new Set<string>();
   /** Session of the run currently in flight — graft push state (patches,
    *  orientation freshness) persists against it. Ceiling: one binding; the
    *  extension API carries no session key on `getEntries`. Upgrade path:
@@ -469,13 +880,18 @@ export class ClayAgentHost {
   private activeGraftSessionId: string | undefined;
   /** Prism ollama ships no catalog; host must call listOllamaModels. */
   private ollamaDiscoveryAttempted = false;
-  /** User-configured repository scan caps (tool-caps.json beside book.json;
-   *  decision 2026-09-05). Empty = Prism defaults. */
+  /** User-configured repository scan caps (tool-caps.json in the agent
+   *  config root, legacy fallback beside book.json; decision 2026-09-05).
+   *  Empty = Prism defaults. */
   private readonly toolCaps: RepositoryToolCaps;
   /** Caps file path cited in truncation errors. */
   private readonly capsFile: string;
   /** Coding-run ceilings + default compact strategy (init.js run.setOptions). */
   private runConfig: RunConfig = { ...DEFAULT_RUN_CONFIG };
+  /** Plan 117 follow-up: the session store Prism writes through, with the
+   *  resume label stamped on each session's opening entry. Read paths
+   *  (`session.list` / `session.load` / search) keep using `persistence`. */
+  private readonly labeledStore: SqlitePersistence;
 
   private constructor(
     readonly dataDir: string,
@@ -488,11 +904,20 @@ export class ClayAgentHost {
     private readonly mcpAllowList: readonly unknown[],
     resolveObscura: () => string | undefined,
     toolCaps: { caps: RepositoryToolCaps; file: string },
+    agentConfigRoot: string,
+    homeSkillsRoot: string,
+    skillsConfig: SkillsConfig,
+    private readonly agentSkillFiles: ReadonlyMap<string, Skill>,
+    private readonly graftCliPath: string | undefined,
   ) {
     this.redactor = createSecretRedactor([]);
     this.resolveObscura = resolveObscura;
     this.toolCaps = toolCaps.caps;
     this.capsFile = toolCaps.file;
+    this.agentConfigRoot = agentConfigRoot;
+    this.homeSkillsRoot = homeSkillsRoot;
+    this.skillsConfig = skillsConfig;
+    this.labeledStore = labelFirstPromptStore(persistence);
   }
 
   static async create(options: HostOptions): Promise<ClayAgentHost> {
@@ -535,6 +960,19 @@ export class ClayAgentHost {
       const { loadProviderPackages } = await import("./providers.js");
       await loadProviderPackages(kernel, resolver);
     }
+    // Per-agent config root (decision 2026-09-09-1420, root moved to
+    // `~/.clay` by decision 2026-09-10-1526):
+    // `~/.clay/agents/coding-agent`.
+    const agentConfigRoot =
+      options.agentConfigRoot ?? join(homedir(), ".clay", CODING_AGENT_CONFIG_DIR);
+    const homeSkillsRoot = options.homeSkillsRoot ?? join(homedir(), ".agents");
+    // Seed the user SYSTEM.md (skills are seeded inside loadAgentSkillFiles)
+    // before the first session build reads it.
+    await seedUserSystemPrompt(agentConfigRoot).catch((error) => {
+      process.stderr.write(
+        `[system] seeding SYSTEM.md failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    });
     const host = new ClayAgentHost(
       options.dataDir,
       persistence,
@@ -545,7 +983,12 @@ export class ClayAgentHost {
       options.observationalMemory,
       Array.isArray(options.mcpAllowList) ? options.mcpAllowList : [],
       options.resolveObscuraBinary ?? resolveObscuraBinary,
-      await loadToolCaps(options.dataDir),
+      await loadToolCaps(agentConfigRoot, options.dataDir),
+      agentConfigRoot,
+      homeSkillsRoot,
+      (await loadSkillsConfig(agentConfigRoot, homeSkillsRoot)).config,
+      await loadAgentSkillFiles(agentConfigRoot),
+      options.graftCliPath,
     );
     const mockProvider = kernel.registries.providers.get("mock");
     options.registerModels?.(kernel.registries);
@@ -572,6 +1015,7 @@ export class ClayAgentHost {
     if (this.mcp) {
       const mcp = this.mcp;
       this.mcp = undefined;
+      this.mcpOutcomes = [];
       void mcp.close().catch(() => {});
     }
     if (this.obscura) {
@@ -593,7 +1037,9 @@ export class ClayAgentHost {
       this.capabilitiesPromise = (async () => {
         if (this.mcpAllowList.length > 0 && !this.mcp) {
           try {
-            this.mcp = await connectAllowListedMcpServers(this.mcpAllowList);
+            const connected = await connectAllowListedMcpServers(this.mcpAllowList);
+            this.mcp = connected;
+            this.mcpOutcomes = connected.outcomes;
           } catch (error) {
             if ((error as { rpcCode?: number }).rpcCode === -32602) throw error;
             this.mcp = undefined;
@@ -617,6 +1063,16 @@ export class ClayAgentHost {
   /** Capability tools for a coding session; undefined shapes stay allowed. */
   private capabilityTools(): ToolDefinition[] {
     return [...(this.mcp?.tools ?? []), ...(this.obscura?.tools ?? [])];
+  }
+
+  /** Per-server MCP connect outcomes for the environment/UI (bounded, trimmed). */
+  private mcpServerOutcomes(): JsonObject[] {
+    return this.mcpOutcomes.slice(0, MAX_MCP_SERVERS).map((outcome) => ({
+      serverId: outcome.serverId.slice(0, MAX_COMPLETION_NAME_CHARS),
+      connected: outcome.connected,
+      tools: outcome.tools,
+      ...(outcome.error === undefined ? {} : { error: outcome.error.slice(0, MAX_COMPLETION_DESCRIPTION_CHARS) }),
+    }));
   }
 
   /**
@@ -679,6 +1135,10 @@ export class ClayAgentHost {
         return this.sessionOmSet(asRecord(params));
       case "session.om.activity":
         return this.sessionOmActivity(asRecord(params));
+      // Plan 117: bounded workspace file listing for the @-mention
+      // dropdown (client-side filter, server-side walk inside the root).
+      case "workspace.files":
+        return this.workspaceListFiles(asRecord(params));
       case "session.resume":
         return this.sessionResume(asRecord(params));
       case "session.delete":
@@ -785,7 +1245,14 @@ export class ClayAgentHost {
     // Capabilities activate on the first session that declares coding tools
     // (never on import, never for Chat-only initialize).
     const wantsCoding = this.profileWantsCodingTools(profile);
-    if (wantsCoding) await this.ensureCapabilities();
+    if (wantsCoding) {
+      await this.ensureCapabilities();
+      // Graft is available by default (plan 117): first coding session for
+      // a workspace attempts the pull-mode binding once per root per
+      // daemon. Chat sessions never trigger it.
+      await this.ensureGraftBound(workspaceRoot);
+    }
+    await this.ensureSkillDiscovery(workspaceRoot);
     const created = this.createSession(id, profile, provider, modelId, {
       workspaceRoot,
       fullAutonomy,
@@ -823,6 +1290,7 @@ export class ClayAgentHost {
       fullAutonomy,
       observationalMemory,
       tools: created.tools,
+      mentionSkills: [],
     });
     return {
       sessionId: id,
@@ -852,6 +1320,27 @@ export class ClayAgentHost {
     if (!this.kernel.registries.providers.get(provider)) throw rpcError(-32000, `Unknown provider: ${provider}`);
     const tools = this.sessionTools(def, id, options);
     const skills = this.resolveSkills(def, tools, options);
+    // User-owned global system-prompt layer (plan 117): a `user`-source
+    // contribution composes after the profile base instructions and before
+    // the workspace AGENTS.md app layer (Prism source rank user < app).
+    // def.systemPrompt === false disables contributions entirely — the
+    // user layer is suppressed with them.
+    const userSystemText = loadUserSystemPrompt(this.agentConfigRoot);
+    const agentsText = loadWorkspaceAgentsPrompt(options.workspaceRoot);
+    // Locked layer order (plan 117): base instructions → SYSTEM.md (user)
+    // → AGENTS.md (app). Prism's composeSystemPrompt sorts contributions
+    // by source rank (user=0, app=2), so array order here is not load-
+    // bearing; def.systemPrompt === false suppresses both layers.
+    const layers: Array<{ id: string; source: "user" | "app"; text: string }> = [];
+    if (userSystemText) layers.push({ id: "user-system-md", source: "user", text: userSystemText });
+    if (agentsText) layers.push({ id: "agents-md", source: "app", text: agentsText });
+    const profileContributions =
+      def.systemPrompt === undefined || def.systemPrompt === false
+        ? []
+        : Array.isArray(def.systemPrompt)
+          ? [...def.systemPrompt]
+          : [def.systemPrompt];
+    const systemPrompt = [...layers, ...profileContributions];
     // Progressive disclosure: with active skills, host the `load_skill` tool so
     // the model can pull full instructions on demand (catalog-only by default).
     const runTools = skills && skills.length > 0 ? [...tools, createLoadSkillTool({ registry: this.skills, tools })] : tools;
@@ -860,7 +1349,7 @@ export class ClayAgentHost {
       id: profile,
       model,
       providerSource: createProviderResolver(this.kernel.registries.providers),
-      store: this.persistence,
+      store: this.labeledStore,
       runLedger: this.persistence,
       redactor: this.redactor,
       validator: createJsonSchemaToolArgumentValidator(),
@@ -893,13 +1382,13 @@ export class ClayAgentHost {
       // No providerRequestPolicies — Prism 0.5.1 kernel fills session/cache
       // keys (decision 2026-09-07-2149).
       ...(def.instructions !== undefined ? { instructions: def.instructions } : {}),
-      ...(def.systemPrompt !== undefined ? { systemPrompt: def.systemPrompt } : {}),
+      ...(systemPrompt.length > 0 ? { systemPrompt } : {}),
       ...(runTools.length > 0 ? { tools: runTools } : {}),
       ...(skills !== undefined ? { skills } : {}),
     });
     let session = agent.createSession({ id });
     if (options.observationalMemory) session = this.attachOm(session, model);
-    return { session, agent, tools: runTools, systemPrompt: def.systemPrompt };
+    return { session, agent, tools: runTools, systemPrompt: systemPrompt.length > 0 ? systemPrompt : undefined };
   }
 
   /** Rebuild the live session's agent with a new provider/model config
@@ -1137,8 +1626,116 @@ export class ClayAgentHost {
     if (options?.workspaceRoot !== undefined && this.graft?.workspaceRoot === options.workspaceRoot) {
       names.push(graftSkill.name);
     }
+    // Disk-discovered skills ride along when every declared toolName is
+    // active for this session. Profile-declared names keep fail-closed
+    // resolution; discovered ones are skipped instead of thrown so one bad
+    // SKILL.md cannot brick session start.
+    if (options?.workspaceRoot !== undefined) {
+      const activeToolNames = new Set(tools.map((tool) => tool.name));
+      const discovered = [
+        ...(this.configSkillNames ?? []),
+        ...(this.homeSkillNames ?? []),
+        ...(this.workspaceSkillNames.get(options.workspaceRoot) ?? []),
+      ];
+      for (const name of discovered) {
+        if (names.includes(name)) continue;
+        const skill = this.skills.get(name);
+        if (skill?.toolNames && !skill.toolNames.every((toolName) => activeToolNames.has(toolName))) continue;
+        names.push(name);
+      }
+    }
     if (names.length === 0) return undefined;
     return resolveActiveSkills({ registry: this.skills, names, tools });
+  }
+
+  /** Config-gated, per-root skill discovery. Config-root + home roots scan
+   *  `<root>/skills/<name>/SKILL.md` (decision 2026-09-09-1420); the
+   *  workspace keeps npx skills `<root>/.agents/skills/`. Each root is
+   *  scanned once (cached). Already-registered names win on collision
+   *  (registry is duplicate:"error"): built-ins and earlier roots shadow
+   *  later ones. Reserved agent-delivered names never come from disk —
+   *  they activate only through their own paths. A failing root logs and
+   *  yields nothing — discovery never fails a session. */
+  private async ensureSkillDiscovery(workspaceRoot: string): Promise<void> {
+    if (this.configSkillNames === undefined) {
+      this.configSkillNames = this.skillsConfig.configRootEnabled
+        ? await this.scanSkillsDir(join(this.agentConfigRoot, "skills"))
+        : [];
+    }
+    if (this.homeSkillNames === undefined) {
+      this.homeSkillNames = this.skillsConfig.homeEnabled
+        ? await this.scanSkillsDir(join(this.skillsConfig.homePath, "skills"))
+        : [];
+    }
+    if (!this.workspaceSkillNames.has(workspaceRoot)) {
+      this.workspaceSkillNames.set(
+        workspaceRoot,
+        this.skillsConfig.workspaceEnabled ? await this.discoverWorkspaceSkills(workspaceRoot) : [],
+      );
+    }
+  }
+
+  /** Workspace scan via Prism's discoverContributions (symlink-escape
+   *  safe, ENOENT-tolerant, npx skills layout). */
+  private async discoverWorkspaceSkills(workspaceRoot: string): Promise<readonly string[]> {
+    let discovered: readonly (Awaited<ReturnType<typeof discoverContributions>>)[number][];
+    try {
+      discovered = await discoverContributions({ kinds: ["skill"], workspaceRoot });
+    } catch (error) {
+      process.stderr.write(
+        `skill discovery failed for ${workspaceRoot}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return [];
+    }
+    const names: string[] = [];
+    for (const entry of discovered) {
+      const skill = entry.skill;
+      if (!skill || this.skills.get(skill.name)) continue;
+      this.skills.register(skill);
+      names.push(skill.name);
+    }
+    return names;
+  }
+
+  /** Scan `<skillsDir>/<name>/SKILL.md` (one level) and register each
+   *  parseable skill. Bounded; absent dir = no skills (not a warning);
+   *  a bad SKILL.md is skipped with a stderr note. */
+  private async scanSkillsDir(skillsDir: string): Promise<readonly string[]> {
+    let entries: string[];
+    try {
+      entries = await readdir(skillsDir);
+    } catch {
+      return [];
+    }
+    const names: string[] = [];
+    for (const entry of entries.slice(0, MAX_SKILLS_PER_ROOT)) {
+      if (RESERVED_AGENT_SKILL_NAMES.has(entry)) continue;
+      const file = join(skillsDir, entry, "SKILL.md");
+      let text: string;
+      try {
+        text = await readFile(file, "utf8");
+      } catch {
+        continue;
+      }
+      try {
+        const skill = parseSkillFile(text, file);
+        if (this.skills.get(skill.name)) continue;
+        this.skills.register(skill);
+        names.push(skill.name);
+      } catch (error) {
+        process.stderr.write(
+          `[skills] skipping ${file}: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    }
+    return names;
+  }
+
+  /** Whether an agent-delivered skill is enabled by skills.json
+   *  `agentSkills` (default true). Consumed by the wiki/graft activation
+   *  paths (plan 117). */
+  private agentSkillEnabled(name: "wikiSearcher" | "wikiMaintainer" | "graft"): boolean {
+    return this.skillsConfig.agentSkills[name];
   }
 
   private async sessionList(params: Record<string, unknown>): Promise<unknown> {
@@ -1234,11 +1831,22 @@ export class ClayAgentHost {
     const thinking: ContextItemRef[] = [];
     const agent: ContextItemRef[] = [];
     const summaries: ContextItemRef[] = [];
-    // Definition-owned system prompt (not transcript content).
-    for (const [index, contribution] of systemPromptContributions(live.systemPrompt).entries()) {
+    // The composed system prompt the model actually receives: base
+    // instructions first, then rank-ordered contributions (plan 117 —
+    // the group is no longer empty for profiles with only base
+    // instructions).
+    const baseInstructions = live.agent.config.instructions;
+    if (typeof baseInstructions === "string" && baseInstructions.length > 0) {
+      system.push({
+        id: "system-prompt-base",
+        title: "System prompt (base instructions)",
+        preview: clipUtf8(baseInstructions, MAX_CONTEXT_PREVIEW_CHARS),
+      });
+    }
+    for (const [index, contribution] of rankedSystemPromptContributions(live.systemPrompt).entries()) {
       system.push({
         id: `system-prompt-${index}`,
-        title: `System prompt (${contribution.id})`,
+        title: `System prompt (${promptLayerLabel(contribution.id)})`,
         preview: clipUtf8(contribution.text, MAX_CONTEXT_PREVIEW_CHARS),
       });
     }
@@ -1348,13 +1956,22 @@ export class ClayAgentHost {
     itemId: string,
   ): { kind: string; title: string; content: string } | undefined {
     // System-prompt items live outside the transcript.
+    if (itemId === "system-prompt-base") {
+      const base = live.agent.config.instructions;
+      if (typeof base !== "string" || base.length === 0) return undefined;
+      return {
+        kind: "systemPrompt",
+        title: "System prompt (base instructions)",
+        content: clipUtf8(base, MAX_CONTEXT_ITEM_BYTES),
+      };
+    }
     if (itemId.startsWith("system-prompt-")) {
       const index = Number(itemId.slice("system-prompt-".length));
-      const contribution = systemPromptContributions(live.systemPrompt)[index];
+      const contribution = rankedSystemPromptContributions(live.systemPrompt)[index];
       if (!contribution) return undefined;
       return {
         kind: "systemPrompt",
-        title: `System prompt (${contribution.id})`,
+        title: `System prompt (${promptLayerLabel(contribution.id)})`,
         content: clipUtf8(contribution.text, MAX_CONTEXT_ITEM_BYTES),
       };
     }
@@ -1585,6 +2202,7 @@ export class ClayAgentHost {
     const observationalMemory = this.resolveOmFlag(profile, metadata.observationalMemory);
     const restoredWorkers = this.parseOmWorkers(metadata.omWorkers);
     if (restoredWorkers) omWorkerModels.set(sessionId, restoredWorkers);
+    await this.ensureSkillDiscovery(process.cwd());
     const created = this.createSession(sessionId, profile, provider, model, {
       workspaceRoot: process.cwd(),
       fullAutonomy: metadata.fullAutonomy !== false,
@@ -1601,6 +2219,7 @@ export class ClayAgentHost {
       fullAutonomy: false,
       observationalMemory,
       tools: created.tools,
+      mentionSkills: [],
     };
     this.live.set(sessionId, live);
     return live;
@@ -1649,6 +2268,24 @@ export class ClayAgentHost {
         this.emitCommandFeedback(sessionId, slash.name, value, feedbackText);
         return value;
       }
+      // /wiki-init is the sole wiki initiator (plan 117): with the
+      // agentSkills gate on, an unmatched /wiki-init enables the binding
+      // (the exact enableWiki path knowledge.setOptions uses — idempotent
+      // per workspace) and then dispatches the now-registered extension
+      // command. Gate off ⇒ falls through to a normal prompt (chat-safe,
+      // zero residue). wiki-searcher gates the feature; wiki-maintainer's
+      // own flag filters its registration inside enableWiki.
+      if (slash.name === "/wiki-init" && this.agentSkillEnabled("wikiSearcher")) {
+        const live = await this.ensureLive(sessionId);
+        await this.enableWiki(live.workspaceRoot);
+        const value = await this.commandDispatch({
+          name: slash.name,
+          sessionId,
+          args: slashArgs(slash),
+        });
+        this.emitCommandFeedback(sessionId, slash.name, value, undefined);
+        return value;
+      }
     }
     let live = await this.ensureLive(sessionId);
     // Provider/model switching mid-session (pi parity): rebuild the session's
@@ -1695,9 +2332,35 @@ export class ClayAgentHost {
       thinkingLevel = typeof level === "string" ? level : level.opaque;
     }
     const runState = this.durableRunState(live);
+    // Plan 117 @-mentions: `@skill:<name>` is a manual skill trigger — the
+    // named skill joins the session's loaded set (the same state the
+    // load_skill tool mutates, restoreLoadedSkills is the public path) and
+    // rides every subsequent run's `skills` option, so its body renders
+    // from the first round with no tool round-trip. `@file:<relative path>`
+    // attaches a workspace file server-side (images as image content
+    // blocks). Tokens that do not resolve stay plain text (chat-safe);
+    // mention names validate against the registry with the same toolNames
+    // discipline activation applies.
+    const mentionedSkills = await this.resolveMentions(text, live);
+    const promptInput: string | Message =
+      mentionedSkills.attachments.length > 0
+        ? { role: "user", content: [{ type: "text", text: mentionedSkills.prompt }, ...mentionedSkills.attachments] }
+        : mentionedSkills.prompt;
+    // Run skills union: the profile's resolved active set (config default)
+    // plus manually triggered skills. Only overridden when a mention exists
+    // — untouched runs keep the config-provided catalog byte-identical.
+    let runSkills: readonly Skill[] | undefined;
+    if (live.mentionSkills.length > 0) {
+      const base = this.resolveSkills(
+        this.kernel.registries.agents.resolve(live.profile),
+        live.tools,
+        { workspaceRoot: live.workspaceRoot },
+      );
+      runSkills = [...(base ?? []), ...live.mentionSkills];
+    }
     // stream() (not subscribe()+run()) — durable runs keep the subscription
     // open past settlement, so only stream() both drains and resolves.
-    const stream = live.session.stream(text, {
+    const stream = live.session.stream(promptInput, {
       maxQueuedEvents: MAX_QUEUED_EVENTS,
       overflow: "drop_oldest",
       // Host-verified identity: the daemon is the trust boundary that owns the
@@ -1708,6 +2371,7 @@ export class ClayAgentHost {
       ...(compaction ? { compaction } : {}),
       ...(runState ? { runState } : {}),
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      ...(runSkills ? { skills: runSkills } : {}),
     });
     let lastType: string | undefined;
     let suspended:
@@ -1761,6 +2425,122 @@ export class ClayAgentHost {
       definitionRevision: RUN_STATE_REVISION,
       interruptBeforeTool: !live.fullAutonomy,
     };
+  }
+
+  /** Plan 117 @-mentions: parse `@skill:` / `@file:` tokens out of the raw
+   *  prompt. Valid skill mentions join the session's loaded set (the same
+   *  LoadedSkillSet the load_skill tool mutates — bodies re-resolve from
+   *  the registry, persistence rides the snapshot names-only), append to
+   *  the session's mention set (rides every run's skills option), and the
+   *  prompt gains one instruction line. Resolvable file mentions become
+   *  content blocks (images as base64 image content, text files as a
+   *  fenced text block) resolved server-side inside the workspace root.
+   *  Everything unresolvable stays plain text: chat-safe, no throw. */
+  private async resolveMentions(
+    text: string,
+    live: LiveSession,
+  ): Promise<{ prompt: string; attachments: ContentBlock[] }> {
+    const toolNames = new Set(live.tools.map((tool) => tool.name));
+    const loaded: Skill[] = [];
+    // Mention tokens are whitespace-delimited, so skill names with spaces
+    // cannot be mentioned (the dropdown embeds dir-form names; ceiling:
+    // add an escape syntax if space-y names ever need mentioning).
+    // # ponytail: no-space mention names; escape syntax if ever needed
+    let prompt = text.replace(/@skill:([A-Za-z0-9_-]+)/g, (token, raw) => {
+      const name = String(raw).trim();
+      const skill = this.skills.get(name);
+      // Same activation discipline as resolveActiveSkills: a skill whose
+      // tools are unavailable never loads (a hand-typed mention is still
+      // gated; catalog names already passed this filter).
+      if (skill === undefined) return token;
+      if (skill.toolNames && !skill.toolNames.every((tool) => toolNames.has(tool))) return token;
+      if (!loaded.some((entry) => entry.name === name)) loaded.push(skill);
+      return `\`${name}\``;
+    });
+    const attachments: ContentBlock[] = [];
+    const fileMatches = [...prompt.matchAll(/@file:([^\s@]+)/g)];
+    if (fileMatches.length > 0) {
+      const blocks = new Map<string, ContentBlock | undefined>();
+      for (const match of fileMatches) {
+        const relPath = String(match[1]);
+        if (!blocks.has(relPath)) blocks.set(relPath, await this.readMentionFile(relPath, live.workspaceRoot));
+      }
+      prompt = prompt.replace(/@file:([^\s@]+)/g, (token, raw) => {
+        const block = blocks.get(String(raw));
+        if (block === undefined) return token;
+        attachments.push(block);
+        return "";
+      });
+    }
+    if (loaded.length > 0) {
+      // RuntimeAgentSession exposes restoreLoadedSkills (public since plan 015
+      // task 4); the AgentSession interface predates it, hence the narrow cast.
+      (live.session as unknown as { restoreLoadedSkills(names: readonly string[]): void }).restoreLoadedSkills(
+        loaded.map((skill) => skill.name),
+      );
+      for (const skill of loaded) {
+        if (!live.mentionSkills.some((entry) => entry.name === skill.name)) live.mentionSkills.push(skill);
+      }
+      prompt = `[skills loaded by mention: ${loaded.map((skill) => skill.name).join(", ")}]
+
+${prompt}`;
+    }
+    return { prompt, attachments };
+  }
+
+  /** Read one @file mention inside the workspace root. Returns undefined
+   *  (token stays plain text) for paths that escape the root, are missing,
+   *  unreadable, or — for images — oversized. Images attach as base64
+   *  image content; other files as a bounded fenced text block. */
+  private async readMentionFile(relPath: string, workspaceRoot: string): Promise<ContentBlock | undefined> {
+    const full = join(workspaceRoot, relPath);
+    try {
+      const rootReal = realpathSync(workspaceRoot);
+      const fileReal = realpathSync(full);
+      if (!fileReal.startsWith(rootReal + sep)) return undefined;
+      const info = await stat(fileReal);
+      if (!info.isFile() || info.size > MAX_MENTION_FILE_BYTES) return undefined;
+      const ext = relPath.slice(relPath.lastIndexOf(".")).toLowerCase();
+      const mime = IMAGE_MIME_BY_EXT.get(ext);
+      if (mime) {
+        const data = (await readFile(fileReal)).toString("base64");
+        return { type: "image", mimeType: mime, data, name: relPath };
+      }
+      const body = (await readFile(fileReal, "utf8")).slice(0, MAX_MENTION_FILE_BYTES);
+      return { type: "text", text: `\n\n[attached file: ${relPath}]\n\`\`\`\n${body}\n\`\`\`` };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Plan 117: bounded workspace file list for the @-mention dropdown —
+   *  workspace-relative paths, dotfiles and build dirs skipped, capped in
+   *  entries and depth. Absent/unreachable root ⇒ empty list (never a
+   *  throw; the dropdown degrades to skills-only). */
+  private async workspaceListFiles(params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = reqString(params, "sessionId");
+    const live = await this.ensureLive(sessionId);
+    const files: string[] = [];
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > MAX_LIST_WALK_DEPTH || files.length >= MAX_LISTED_FILES) return;
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (files.length >= MAX_LISTED_FILES) return;
+        const rel = join(dir, entry.name).slice(live.workspaceRoot.length + 1);
+        if (entry.isDirectory()) {
+          if (!LIST_SKIPPED_DIRS.has(entry.name) && !entry.name.startsWith(".")) await walk(join(dir, entry.name), depth + 1);
+        } else if (entry.isFile() && !entry.name.startsWith(".")) {
+          files.push(rel);
+        }
+      }
+    };
+    await walk(live.workspaceRoot, 1);
+    return { files: files.slice(0, MAX_LISTED_FILES) };
   }
 
   private async sessionCancel(params: Record<string, unknown>): Promise<unknown> {
@@ -1879,6 +2659,9 @@ export class ClayAgentHost {
       sessions: page.items.map((hit) => ({
         sessionId: hit.sessionId,
         updatedAt: hit.updatedAt,
+        // Plan 117 follow-up: the resume list shows the last-active time, so
+        // it ships a local-time display stamp beside the raw ISO value.
+        ...(hit.updatedAt ? { updatedAtLabel: localStamp(hit.updatedAt) } : {}),
         label: hit.label,
         summary: hit.summary,
         ...(hit.snippet !== undefined ? { snippet: this.redactor.redact(hit.snippet) } : {}),
@@ -2410,19 +3193,25 @@ export class ClayAgentHost {
    *  Wiki skills appear only while the wiki option is bound (no residue when disabled). */
   private skillList(): unknown {
     return {
-      skills: this.skills
-        .list()
-        .filter(
-          (skill) =>
-            (this.wiki !== undefined || !skill.name.startsWith("wiki-")) &&
-            (this.graft !== undefined || skill.name !== graftSkill.name),
-        )
-        .map((skill) => ({
-        name: skill.name,
-        ...(skill.description !== undefined ? { description: skill.description } : {}),
-        ...(skill.toolNames !== undefined ? { toolNames: skill.toolNames } : {}),
-      })),
+      skills: this.visibleSkills(),
     };
+  }
+
+  /** Catalog-visible skills (wiki/graft skills hide while their option is
+   *  unbound). Bounded to the environment's wire caps. */
+  private visibleSkills(): Array<{ name: string; description: string }> {
+    return this.skills
+      .list()
+      .filter(
+        (skill) =>
+          (this.wiki !== undefined || !skill.name.startsWith("wiki-")) &&
+          (this.graft !== undefined || skill.name !== graftSkill.name),
+      )
+      .slice(0, MAX_COMPLETION_COMMANDS)
+      .map((skill) => ({
+        name: skill.name.slice(0, MAX_COMPLETION_NAME_CHARS),
+        description: (skill.description ?? "").slice(0, MAX_COMPLETION_DESCRIPTION_CHARS),
+      }));
   }
 
   /** Register a command definition (data + host-side handler name). Drivers are
@@ -2484,7 +3273,16 @@ export class ClayAgentHost {
     const extensions: string[] = [];
     if (this.wiki) extensions.push(this.wiki.loaded.name.slice(0, 48));
     if (this.graft) extensions.push(this.graft.loaded.name.slice(0, 48));
-    return { commands, extensions };
+    // Catalog skills ride the same snapshot (skills card on the coding
+    // surface): bounded name/description pairs, same caps as commands.
+    // Per-server MCP connect outcomes ride too (MCP card / composer
+    // section): id, connected, tool count, and the hidden-because error.
+    return {
+      commands,
+      extensions,
+      skills: this.visibleSkills(),
+      mcpServers: this.mcpServerOutcomes(),
+    };
   }
 
   private async commandDispatch(params: Record<string, unknown>): Promise<unknown> {
@@ -2627,8 +3425,18 @@ export class ClayAgentHost {
       throw rpcError(-32000, `wiki activation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.wiki = { workspaceRoot, loaded };
-    for (const skill of [wikiSearcherSkill, wikiMaintainerSkill]) {
-      if (!this.skills.get(skill.name)) this.skills.register(skill);
+    // Agent-delivered skills register from their file-backed content
+    // (loadAgentSkillFiles at host creation), gated per skill (decision
+    // 2026-09-09-1420). The feature gate (wiki-searcher) is checked by the
+    // /wiki-init initiator.
+    for (const [dir, key, fallback] of [
+      ["wiki-searcher", "wikiSearcher", wikiSearcherSkill],
+      ["wiki-maintainer", "wikiMaintainer", wikiMaintainerSkill],
+    ] as const) {
+      const delivered = this.agentSkillFiles.get(dir) ?? fallback;
+      if (!this.skills.get(dir) && this.agentSkillEnabled(key)) {
+        this.skills.register(delivered);
+      }
     }
   }
 
@@ -2661,12 +3469,18 @@ export class ClayAgentHost {
     workspaceRoot: string,
     options: { mode?: GraftMode; cliPath?: string },
   ): Promise<boolean> {
+    // agentSkills.graft=false ⇒ no binding attempt ever, on any path
+    // (default or explicit RPC) — the gate is authoritative (decision
+    // 2026-09-09-1420).
+    if (!this.agentSkillEnabled("graft")) return false;
     if (this.graft?.workspaceRoot === workspaceRoot) return true;
     const previous = this.graft;
     this.graft = undefined;
     previous?.loaded.dispose();
     try {
-      resolveGraftCli(options.cliPath ? { cliPath: options.cliPath } : {});
+      resolveGraftCli(
+        options.cliPath ? { cliPath: options.cliPath } : this.graftCliPath ? { cliPath: this.graftCliPath } : {},
+      );
     } catch {
       // GraftResolveError: no host-owned way to run the graft CLI. Fail
       // closed — tools stay hidden, nothing loads.
@@ -2689,7 +3503,8 @@ export class ClayAgentHost {
       throw rpcError(-32000, `graft activation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     this.graft = { workspaceRoot, loaded, mode: extensionOptions.mode ?? "pull" };
-    if (!this.skills.get(graftSkill.name)) this.skills.register(graftSkill);
+    const graftDelivered = this.agentSkillFiles.get("graft") ?? graftSkill;
+    if (!this.skills.get(graftDelivered.name)) this.skills.register(graftDelivered);
     return true;
   }
 
@@ -2699,6 +3514,30 @@ export class ClayAgentHost {
     this.graft = undefined;
     this.activeGraftSessionId = undefined;
     current.loaded.dispose();
+  }
+
+  /** Graft default-on trigger (plan 117): first coding session for a
+   *  workspace attempts the pull-mode binding, once per root per daemon —
+   *  no retry loops. Fail-closed: unresolvable CLI ⇒ off, tools hidden,
+   *  agent unperturbed. knowledge.setOptions stays the explicit
+   *  disable/mode-override surface and bypasses the attempt cache. */
+  private async ensureGraftBound(workspaceRoot: string): Promise<boolean> {
+    if (!this.agentSkillEnabled("graft")) return false;
+    if (this.graft?.workspaceRoot === workspaceRoot) return true;
+    if (this.graftBindAttempted.has(workspaceRoot)) return false;
+    this.graftBindAttempted.add(workspaceRoot);
+    try {
+      return await this.enableGraft(workspaceRoot, {
+        mode: "pull",
+        ...(this.graftCliPath ? { cliPath: this.graftCliPath } : {}),
+      });
+    } catch {
+      // Default bind never surfaces errors (agent unperturbed): a load
+      // failure (broken CLI binary, extension error) fails closed exactly
+      // like an unresolvable CLI. The explicit RPC path still throws for
+      // caller feedback.
+      return false;
+    }
   }
 
   /** Host-verified run identity. The daemon is the trust boundary: it owns
@@ -3108,13 +3947,44 @@ function branchTextForPrompt(
  *  no explicit prompt). */
 function systemPromptContributions(config: SystemPromptConfig | undefined): Array<{
   id: string;
+  source?: string;
   text: string;
 }> {
   if (!config) return [];
   const list = Array.isArray(config) ? config : [config];
   return list
-    .filter((entry): entry is { id: string; text: string } => typeof entry?.text === "string")
-    .map((entry, index) => ({ id: entry.id || `prompt-${index}`, text: entry.text }));
+    .filter((entry): entry is { id: string; source?: string; text: string } => typeof entry?.text === "string")
+    .map((entry, index) => ({ id: entry.id || `prompt-${index}`, source: entry.source, text: entry.text }));
+}
+
+/** Mirror of Prism's `composeSystemPrompt` source ranks (system-prompts.js):
+ *  the inspector lists system-prompt items in the order the model actually
+ *  receives them. Unknown/custom sources sit after package, before app. */
+const PROMPT_SOURCE_RANK: Readonly<Record<string, number>> = { user: 0, package: 1, app: 2, run: 3 };
+
+function rankedSystemPromptContributions(config: SystemPromptConfig | undefined): Array<{
+  id: string;
+  source?: string;
+  text: string;
+}> {
+  return systemPromptContributions(config)
+    .map((contribution, index) => ({ contribution, index }))
+    .sort(
+      (a, b) =>
+        (PROMPT_SOURCE_RANK[a.contribution.source ?? ""] ?? 1.5) -
+          (PROMPT_SOURCE_RANK[b.contribution.source ?? ""] ?? 1.5) || a.index - b.index,
+    )
+    .map(({ contribution }) => contribution);
+}
+
+/** Friendly source labels for host-owned prompt layers (plan 117). */
+const PROMPT_LAYER_LABELS: Readonly<Record<string, string>> = {
+  "user-system-md": "user SYSTEM.md",
+  "agents-md": "workspace AGENTS.md",
+};
+
+function promptLayerLabel(id: string): string {
+  return PROMPT_LAYER_LABELS[id] ?? id;
 }
 
 /** Wire shape of one bounded context-inspector item reference. */

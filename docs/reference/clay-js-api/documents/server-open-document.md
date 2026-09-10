@@ -65,7 +65,7 @@ console.log(opened.metadata.documentId, opened.text);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverOpenDocument` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverOpenDocument` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 

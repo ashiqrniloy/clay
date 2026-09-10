@@ -62,7 +62,7 @@ console.log(status.dirty, status.path);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentStatus` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentStatus` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 

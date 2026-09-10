@@ -18,7 +18,7 @@
 //        clay install npm:<spec>        e.g. npm:@arnilo/st or npm:@arnilo/st@1.2.3
 //
 //      `clay install` appends a commented, self-removing block to
-//      ~/.config/clay/init.js (idempotent — one block per package):
+//      ~/.clay/init.js (idempotent — one block per package):
 //
 //        // clay install npm:@scope/name — remove with `clay remove npm:@scope/name`
 //        await loadPackage("@scope/name");

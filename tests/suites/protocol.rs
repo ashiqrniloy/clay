@@ -1,5 +1,7 @@
 #[path = "../agent_protocol.rs"]
 mod agent_protocol;
+#[path = "../agent_settings_listing.rs"]
+mod agent_settings_listing;
 #[path = "../clay_js_api_inventory.rs"]
 mod clay_js_api_inventory;
 #[path = "../clay_js_doc_registry.rs"]
@@ -10,6 +12,8 @@ mod clay_js_facade_layout;
 mod documentation_coverage;
 #[path = "../editor_intelligence_protocol.rs"]
 mod editor_intelligence_protocol;
+#[path = "../example_config_control_center_chord.rs"]
+mod example_config_control_center_chord;
 #[path = "../manual_smoke_docs.rs"]
 mod manual_smoke_docs;
 #[path = "../package_loading_docs.rs"]

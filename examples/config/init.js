@@ -4,7 +4,7 @@
 //
 // Copy the whole tree to your configuration root and adjust it:
 //
-//   cp -r examples/config/. ~/.config/clay/
+//   cp -r examples/config/. ~/.clay/
 //
 // The example is split into three modules that mirror the three components of
 // a real configuration:
@@ -48,7 +48,7 @@
 // ----------------------------------------------------------------------------
 // init.js may split settings across local files next to init.js. Each module
 // is evaluated as part of the configuration root (same authority, same
-// diagnostics). Paths are relative to the config root (~/.config/clay).
+// diagnostics). Paths are relative to the config root (~/.clay).
 //
 // This example loads its package configuration from two modules at the end
 // of this file (section 11), both with optional: true so a broken or missing
@@ -620,7 +620,7 @@ import { clientExecuteEditorCommand } from "clay:editor";
 // Clay". The grant-before-loadPackage ordering constraint lives INSIDE
 // packages/first-party.js (see its header).
 //
-// `clay install npm:<spec>` appends its own block to ~/.config/clay/init.js
+// `clay install npm:<spec>` appends its own block to ~/.clay/init.js
 // (not this file):
 //
 //   // clay install npm:@scope/name — remove with `clay remove npm:@scope/name`
@@ -706,7 +706,8 @@ await loadConfigurationModule({
 //
 // Do not enable full autonomy uncommented in a shared config, do not paste
 // API keys, and do not add Obscura/MCP executable paths here — MCP servers
-// are server-allow-listed (data_dir/mcp.json) and the Obscura binary is
+// are declarative config files (agents/coding-agent/mcp.json plus the
+// repo-root .mcp.json), never a config string, and the Obscura binary is
 // host-resolved (CLAY_OBSCURA_BIN or PATH), never a config string.
 //   - LSP tooling setup (`authorizeLanguageServer`) is documented with the
 //     package loads in packages/first-party.js.

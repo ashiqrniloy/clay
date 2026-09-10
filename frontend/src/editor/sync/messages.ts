@@ -63,6 +63,25 @@ export function openPayload(workspaceRootId: number, path: string): string {
   });
 }
 
+/** Agent settings page (plan 117): request the server-built listing of
+ *  delivered config files. The reply (agentSettingsFiles) reaches feature
+ *  listeners; paths never cross the webview boundary. */
+export function listAgentSettingsPayload(): string {
+  return JSON.stringify({
+    family: "listAgentSettingsFiles",
+    payload: { clientId: 0 },
+  });
+}
+
+/** Agent settings page (plan 117): open one listed file into the normal
+ *  document pipeline by server-validated name. */
+export function openAgentSettingsPayload(name: string): string {
+  return JSON.stringify({
+    family: "openAgentSettingsFile",
+    payload: { clientId: 0, name },
+  });
+}
+
 export function getStatusPayload(documentId: number): string {
   return JSON.stringify({
     family: "getDocumentStatus",

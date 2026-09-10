@@ -24,7 +24,7 @@ Package authority in Clay is built on four layers:
 
 1. **Identity**: immutable bundled inventory (`BUNDLED_PACKAGES`) for Clay-shipped packages, everything else is third-party.
 2. **Provenance**: package name + version + canonical root + manifest fingerprint matched against the bundled inventory, or an installed provenance record for third-party packages.
-3. **Adoption**: durable user-approved `PackageApprovalRecord` stored at `~/.config/clay/packages` with exact identity/version/integrity/capabilities/processes/relations/replacements. No code executes before adoption.
+3. **Adoption**: durable user-approved `PackageApprovalRecord` stored at `~/.clay/packages` with exact identity/version/integrity/capabilities/processes/relations/replacements. No code executes before adoption.
 4. **Extension**: versioned extension points (`clay-extension-point-v1`) declared by package owners, combined with structured relation requests (`clay-package-relation-v1`) from consuming packages. Both owner consent (extension point declarations) and user consent (durable approval) are required before enable.
 
 ## Bundled Trust Inventory
@@ -72,7 +72,7 @@ Package manifests declare `graph.relations` with mixed string/object arrays. Str
 
 ## Durable Approval Store
 
-`PackageApprovalStore` (at `~/.config/clay/packages`) persists one JSON document per approved package. Each `PackageApprovalRecord` contains:
+`PackageApprovalStore` (at `~/.clay/packages`) persists one JSON document per approved package. Each `PackageApprovalRecord` contains:
 
 - Exact `package_name`, `package_version`, `api_prefix`, `integrity`.
 - `approved_permissions`: snapshot of approved capability strings at adoption time.

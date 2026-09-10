@@ -12,7 +12,7 @@ Use before writing or updating any Clay plan.
 - **Behavior manifest:** If a feature changes hot-path editor behavior, decide whether it belongs in a server-issued behavior manifest, a server-first command, or a later phase (`protocol-perf.md`).
 - **Documentation as code:** Public programmatic behavior is exposed and documented through Clay JS APIs; server-side Rust public functions must have Clay JS APIs or be private/`pub(crate)`; Clay JS APIs include user-facing names, key binding metadata, custom properties for behavior-changing settings, Markdown docs, generated registry coverage, lookup access. Internal implementation details belong in the wiki, not the public registry.
 - **Clay JS API naming:** Apply `js-api.md` when designing/documented APIs: concise behavior-oriented callable exports, distinct from stable registry IDs and `user_facing_name`, server/client authority markers for editor-core APIs, package API provenance prefixes.
-- **Configuration:** User configuration starts at `~/.config/clay/init.js`; each configuration option is a documented Clay JS API, not an undocumented config key.
+- **Configuration:** User configuration starts at `~/.clay/init.js`; each configuration option is a documented Clay JS API, not an undocumented config key.
 - **Security:** Say what authority is not introduced: file IO, network, script execution, WASM, AI mutation, remote listener, shell, etc.
 - **Performance:** Prefer deltas, bounded queues, per-document ordering, cancellable background work, viewport-bounded rendering, code-split heavy web renderers, explicit React render-count/bundle budgets.
 - **Phase boundary:** If enforcement is deferred, describe it as a scoped limitation of the approved architecture, not a competing model.

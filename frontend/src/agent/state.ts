@@ -26,6 +26,8 @@ interface ChatAgentModule {
   getSnapshot(): ChatSnapshot;
   /** Optimistic clear after the panel dispatches a resume decision. */
   clearPendingApproval(): void;
+  /** Test seam: clear the shared instance in place. */
+  resetForTests(): void;
   /** Starts relay processing; call once per surface mount. */
   start(): () => void;
   /** Runs one prompt turn: awaits the run pipeline, then flushes the
@@ -149,7 +151,6 @@ function createChatAgent(): ChatAgentModule {
           runScopedId(message.id) &&
           !represented.has(`${message.role}:${String(message.content ?? "")}`),
       );
-      console.log("SNAPHOOK", JSON.stringify({ incoming: incoming.map(m=>[m.id,m.role,m.content]), live: live.messages.map(m=>[m.id,m.role,m.content]), inFlight: inFlight.map(m=>m.id) }));
       return {
         messages: [...incoming, ...inFlight],
         stopPropagation: true,
@@ -288,6 +289,18 @@ function createChatAgent(): ChatAgentModule {
           }
           break;
         }
+        if (name === "clay.contextTokens") {
+          // Plan 117 token meter: the meter numerator rides a custom event
+          // per provider turn (bounded counter, never content); the ceiling
+          // resolves client-side from the models inventory.
+          const tokens = (event as { value?: { tokens?: unknown } }).value?.tokens;
+          if (typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0) {
+            const current = (agent.state ?? {}) as Record<string, unknown>;
+            agent.setState({ ...current, contextTokens: tokens });
+            notify();
+          }
+          break;
+        }
         if (name === "clay.agentRpc") {
           // Plan 109 I7: the daemon's context-inspector response rides the
           // generic agent-RPC custom event. The fetch is session-scoped and
@@ -333,6 +346,19 @@ function createChatAgent(): ChatAgentModule {
               });
               notify();
             }
+          }
+          // Plan 117 @-mentions: bounded workspace listing for the dropdown.
+          if (rpc?.code === "workspace.files" && result && Array.isArray(result.files)) {
+            const current = (agent.state ?? {}) as Record<string, unknown>;
+            agent.setState({ ...current, workspaceFiles: result.files });
+            notify();
+          }
+          // Plan 117 /resume: the panel's recent-sessions list — labeled,
+          // workspace-scoped, bounded server-side.
+          if (rpc?.code === "session.resumable" && result && Array.isArray(result.sessions)) {
+            const current = (agent.state ?? {}) as Record<string, unknown>;
+            agent.setState({ ...current, resumableSessions: result.sessions });
+            notify();
           }
           break;
         }
@@ -420,7 +446,19 @@ function createChatAgent(): ChatAgentModule {
         notify();
       }
     },
-    start: () => {
+    /** Test seam: clear the shared instance in place. The `chatAgent` export
+   *  binding is a const, so deleting the global below never gave importers
+   *  a fresh object — every test in a file shared one agent. */
+  resetForTests(): void {
+    agent.setMessages([]);
+    agent.setState({});
+    pendingServerMessages = null;
+    pendingApproval = null;
+    status = { streaming: false, status: null };
+    rebuild();
+    notify();
+  },
+  start: () => {
       const release = agentStream.retain();
       const subscription = pipeRelay({
         next: (event) => applyOutOfRun(event),
@@ -465,7 +503,8 @@ const globalScope = globalThis as typeof globalThis & {
 export const chatAgent: ChatAgentModule = (globalScope.__clayChatAgent ??=
   createChatAgent());
 
-/** Test seam: reset the singleton. */
+/** Test seam: reset the singleton in place (the const export binding keeps
+ *  one instance per module — deleting the global never refreshed importers). */
 export function resetChatAgentForTests(): void {
-  delete globalScope.__clayChatAgent;
+  chatAgent.resetForTests();
 }

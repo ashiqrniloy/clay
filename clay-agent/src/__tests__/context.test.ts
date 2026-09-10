@@ -9,7 +9,7 @@
 // compaction entry; `session.checkout` restores a pre-compaction branch.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { providerDone, providerTextDelta, providerThinkingDelta, providerToolCall, type ProviderEvent } from "@arnilo/prism";
@@ -214,5 +214,68 @@ test("compaction drill: active context shrinks and the summary appears; checkout
     assert.ok(category(before, "userMessage").count >= 1);
   } finally {
     await host.handle("session.delete", { sessionId });
+  }
+});
+
+test("system-prompt group renders base instructions plus prompt layers in composed order", async () => {
+  const configRoot = await mkdtemp(join(tmpdir(), "clay-context-config-"));
+  const workspaceRoot = await mkdtemp(join(tmpdir(), "clay-context-ws-"));
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(configRoot, "SYSTEM.md"), "USER-SYSTEM-LAYER-TEXT\n", "utf8");
+  await writeFile(join(workspaceRoot, "AGENTS.md"), "WORKSPACE-AGENTS-LAYER-TEXT\n", "utf8");
+  const dataDir = await mkdtemp(join(tmpdir(), "clay-context-data-"));
+  const host = await ClayAgentHost.create({
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+    agentConfigRoot: configRoot,
+    homeSkillsRoot: await mkdtemp(join(tmpdir(), "clay-context-home-")),
+  });
+  try {
+    await host.handle("agentProfile.register", {
+      name: "Prompted",
+      instructions: "BASE-INSTRUCTIONS-TEXT",
+      tools: [],
+    });
+    const created = (await host.handle("session.new", {
+      profile: "Prompted",
+      provider: "mock",
+      model: "demo",
+      workspaceRoot,
+    })) as { sessionId: string };
+    const response = (await host.handle("session.context", { sessionId: created.sessionId })) as ContextResponse;
+    const system = category(response, "systemPrompt");
+    assert.deepEqual(
+      system.items.map((item) => item.title),
+      [
+        "System prompt (base instructions)",
+        "System prompt (user SYSTEM.md)",
+        "System prompt (workspace AGENTS.md)",
+      ],
+      "real composed prompt: base → user layer → app layer, labeled by source",
+    );
+    assert.match(system.items[0]?.preview ?? "", /BASE-INSTRUCTIONS-TEXT/);
+    assert.match(system.items[1]?.preview ?? "", /USER-SYSTEM-LAYER-TEXT/);
+    assert.match(system.items[2]?.preview ?? "", /WORKSPACE-AGENTS-LAYER-TEXT/);
+
+    // Full content via the item-detail RPC (bounded like every group).
+    for (const [index, marker] of [
+      [0, "BASE-INSTRUCTIONS-TEXT"],
+      [1, "USER-SYSTEM-LAYER-TEXT"],
+      [2, "WORKSPACE-AGENTS-LAYER-TEXT"],
+    ] as const) {
+      const item = (await host.handle("session.context", {
+        sessionId: created.sessionId,
+        itemId: system.items[index]?.id,
+      })) as { kind: string; content: string };
+      assert.equal(item.kind, "systemPrompt");
+      assert.match(item.content, new RegExp(marker));
+    }
+  } finally {
+    host.close();
+    await rm(configRoot, { recursive: true, force: true });
+    await rm(workspaceRoot, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
   }
 });

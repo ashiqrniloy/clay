@@ -45,7 +45,7 @@ forwarding added in Phase 20.6.
 ## Activation
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 await loadPackage("@clay/settings");
 ```

@@ -26,7 +26,7 @@ fn open_package_service() -> Result<
     use clay::packages::manager::resolve_manager_backend;
     use clay::packages::service::PackageService;
 
-    // Default store: ~/.config/clay/packages. The durable approval store
+    // Default store: ~/.clay/packages. The durable approval store
     // under the same root fails closed on corruption/unsafe permissions.
     // Manager selection: pnpm when present on PATH, else npm (v1 policy);
     // fails closed with a typed message when neither is available.

@@ -61,7 +61,7 @@ const snapshot = await serverGetDocumentSnapshot("current");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentSnapshot` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentSnapshot` in `~/.clay/init.js`.
 
 ## Custom properties
 

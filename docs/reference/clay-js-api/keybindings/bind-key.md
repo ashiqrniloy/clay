@@ -147,15 +147,15 @@ hot-path allocation beyond the bounded pending buffer.
 ## Example
 
 ```ts
-// Configure the Phase 19 native file-open dialog route from ~/.config/clay/init.js.
+// Configure the Phase 19 native file-open dialog route from ~/.clay/init.js.
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
-// Configure the Phase 20 save route from ~/.config/clay/init.js.
+// Configure the Phase 20 save route from ~/.clay/init.js.
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
-// Configure the Phase 18.8 Control Center launch route from ~/.config/clay/init.js.
+// Configure the Phase 18.8 Control Center launch route from ~/.clay/init.js.
 bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
-// Configure the Phase 18.11 manual completion trigger route from ~/.config/clay/init.js.
+// Configure the Phase 18.11 manual completion trigger route from ~/.clay/init.js.
 bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
-// Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.config/clay/init.js.
+// Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.clay/init.js.
 bindKey("Ctrl+P", "workspace.openFuzzyFile", { scope: "editor" });
 // Ctrl+B ships as the Global default for the toggle (plan 109 I6); the
 // bindKey form overrides or restores it.
@@ -170,7 +170,7 @@ bindKey("Ctrl+Y", clientRedo(), { scope: "editor" });
 bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
-// Configure the Phase 19 runtime reload route from ~/.config/clay/init.js.
+// Configure the Phase 19 runtime reload route from ~/.clay/init.js.
 bindKey("Ctrl+Shift+R", "runtime.reloadConfiguration", { scope: "global" });
 ```
 
@@ -246,7 +246,7 @@ editor does not install the CodeMirror emacs keymap). Since plan 109 (Phase
 model's declared reasoning-effort levels from the composer (a `bindKey`
 rebind changes that chord on the coding-agent surface). The canonical
 `examples/init.js` re-declares these shipped defaults; users may copy, override,
-or unbind them in `~/.config/clay/init.js` (`bindKey("Ctrl+B",
+or unbind them in `~/.clay/init.js` (`bindKey("Ctrl+B",
 "workspace.toggleFileBrowser", { scope: "global" })` or another chord). The
 workspace tree renders only in the left workspace tab; the coding-agent Files
 tab hosts the selected document's editor view instead (plan 109 I6), so the

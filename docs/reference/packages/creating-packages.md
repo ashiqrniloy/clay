@@ -18,7 +18,7 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@clay/markdown");
 ```
 
-The one-line load path is the preferred default when Clay has the necessary generic primitives. Packages may expose optional customization APIs, but ordinary users should not have to copy package manifests, manually register every primitive, or paste smoke-fixture scripts into `~/.config/clay/init.js`.
+The one-line load path is the preferred default when Clay has the necessary generic primitives. Packages may expose optional customization APIs, but ordinary users should not have to copy package manifests, manually register every primitive, or paste smoke-fixture scripts into `~/.clay/init.js`.
 
 Current implemented package API status: `packages.loadPackage` / `loadPackage("@clay/markdown")` is the one-line end-user default. It resolves the specifier, validates the package metadata, enables the package, and imports and executes its `loadEntry`. `packages.serverLoadPackage` / `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and internal use; it is not an end-user install, enable/disable, package-manager, or package-code execution wrapper.
 
@@ -84,7 +84,7 @@ A complete package may declare or implement these surfaces:
 
 Clay currently has foundations for:
 
-- `~/.config/clay/init.js` configuration loading.
+- `~/.clay/init.js` configuration loading.
 - Server-side JavaScript runtime with curated `clay:*` facade imports.
 - Package manifest validation and package record assembly through `packages.serverLoadPackage` / `serverLoadPackage(packageJson)`; this validates metadata but does not install, enable/disable, execute package JavaScript, or run a package manager.
 - Package identity/prefix/permission validation.
@@ -156,7 +156,7 @@ Expected shell/layout/package guide updates by phase:
 | Phase 20.4 | Document the core component uplift: every implemented `ComponentKind` now honors the active theme (SDUI paint reads `ResolvedUiTheme`, not core fallbacks), is state-complete (`Rest`/`Hover`/`Active`/`Focus`/`Disabled` from state tokens), and follows the 4pt spacing rhythm scaled by `density`/`spacing_scale()`; the status bar uses token-driven insets; editor chrome (caret/selection/scrollbar/diagnostics) stays on the editor `StyleRegistry`. Compatibility guarantee: no `ComponentKind`, style-variable, or token-name change — packages require no manifest or style edit. |
 | Phase 22.2 | Document the pane document-view contract: each pane hosts at most one document of its tab's workspace (one document view per pane; the pane↔document mapping is client-local view state, server authority unchanged), duplicate opens focus the existing pane, all open flows target the focused pane, and major modes run concurrently per pane via per-document behavior-manifest layers. Packages gain no new surface: they still cannot own panes, open documents into panes, or contribute per-pane chrome (SDUI sidebar/panels/overlays remain window-scoped; per-pane package chrome stays planned). |
 | Phase 22.3 | Document the tab contract: tabs are independent client views — each tab owns its own server connection, workspace, split tree, chrome, and pending-open attribution; the server holds an in-memory server-authoritative tab registry (order, active tab, per-tab workspace + client binding) that survives client reconnects (disk persistence is 22.5); the tab bar is a shell-owned chrome row below the top fixed panel slot above the working area, hidden at ≤1 tab. Plan 088 Task 6 makes its geometry follow user UI typography and logical window bounds. Packages cannot own or contribute tab bar chrome and cannot open/close/move tabs (inert `serverRequestLayoutIntent` remains the only package layout surface); per-tab package chrome is still-planned (needs a later phase). |
-| Phase 22.4 | Document keyboard tab management: 24 Clay-owned `client_ui` tab command IDs (`clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus the numbered `clientTabActivate.1..9` and `clientTabMoveTo.1..9` families) with Global-scope default chords, server-registry reorder ops, explicit numbering/bounds/wraparound policies, and a driver-owned dirty-close confirm/save flow. Packages gain no surface: binding is a **user** configuration-time API (`keybindings.bindKey`/`unbindKey` in `~/.config/clay/init.js`), packages cannot bind or issue tab commands, cannot open/close/move/reorder tabs, and receive no new authority from the tab command IDs. The tab commands are `ClientUiCommand`-routed and — like the pane commands — are listed in the Control Center catalogue since Phase 24.2, with activation bridged back to the client shell driver through the server-approved `ShellClientCommandRequest` frame (packages still cannot emit that frame). |
+| Phase 22.4 | Document keyboard tab management: 24 Clay-owned `client_ui` tab command IDs (`clientTabNext`/`Prev`/`New`/`Close`/`MoveLeft`/`MoveRight` plus the numbered `clientTabActivate.1..9` and `clientTabMoveTo.1..9` families) with Global-scope default chords, server-registry reorder ops, explicit numbering/bounds/wraparound policies, and a driver-owned dirty-close confirm/save flow. Packages gain no surface: binding is a **user** configuration-time API (`keybindings.bindKey`/`unbindKey` in `~/.clay/init.js`), packages cannot bind or issue tab commands, cannot open/close/move/reorder tabs, and receive no new authority from the tab command IDs. The tab commands are `ClientUiCommand`-routed and — like the pane commands — are listed in the Control Center catalogue since Phase 24.2, with activation bridged back to the client shell driver through the server-approved `ShellClientCommandRequest` frame (packages still cannot emit that frame). |
 | Phase 24.2 | Document the Control Center catalogue contract: every validated registered command appears automatically in the menu when its package is loaded (built-ins, `shell.client*`, trusted/third-party registrations merged into one generation-stamped catalogue with effective keybindings and provenance detail); listing grants no authority; query/selection movement uses the shared bounded fuzzy subsequence matcher on the installed snapshot only; activation dispatches through the shared server execution path or the narrow server-approved `ShellClientCommandRequest` frame. Packages cannot open, drive, or intercept the menu session and cannot emit the shell-client frame. |
 | Phase 24.3 | Document the Path Browser contract (`controlCenter.openPath`, “Browse Filesystem”): a built-in session over the same transient-menu round trip with an editable path bar seeded from the active document's parent (then tab workspace root, then server cwd), bounded depth-1 listings, primary/secondary activation, and Backspace ascent. Browse authority is ephemeral and user-authorized by the built-in surface itself; navigation creates no grant, a file open converts it into one `SingleFile` grant, and Alt+Enter on a directory converts it into one `Directory` root grant for the bound tab only (other tabs untouched). Packages cannot open, populate, intercept, or receive paths from this built-in session, cannot emit its `MenuBackspace`/`MenuActivate` kind intents meaningfully (session ids are per-connection opaque), and gain no filesystem authority from it; the native file/folder dialogs remain the fallback. |
 | Phase 28 | Document the shared package key-routing grammar, manifest-driven line-prefix transforms, command-backing/fail-closed policy, `render-folding` publication, Link/Inlay decoration data, Clay-owned decoration intent and editor chrome, and opt-in `createLspBridge({ features: ["inlayHint"] })` refresh behavior. |
@@ -322,7 +322,7 @@ Boundary rules (enforced per call, deny-by-default):
 Package installation is a host CLI operation, not a JS API:
 `clay install npm:<spec>` fetches through the npm-compatible manager into
 the Clay-owned store and appends `await loadPackage("<name>")` to
-`~/.config/clay/init.js` (idempotent; `clay remove npm:<spec>` strips it).
+`~/.clay/init.js` (idempotent; `clay remove npm:<spec>` strips it).
 Install never enables, adopts, or executes the package.
 
 Configuration and `init.js` grant **no package-install authority**: config
@@ -336,7 +336,7 @@ adopts it (`clay package adopt`). See
 
 Package loading status:
 
-- **Implemented end-user default:** users explicitly load packages from `~/.config/clay/init.js` with `await loadPackage("@clay/markdown")` or another installed, authorized package specifier. The resolver validates the specifier, runs the package metadata through `PackageService`, checks capability grants, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the package-root boundary, runtime-generation hot reload behavior, and carried-forward durable state work.
+- **Implemented end-user default:** users explicitly load packages from `~/.clay/init.js` with `await loadPackage("@clay/markdown")` or another installed, authorized package specifier. The resolver validates the specifier, runs the package metadata through `PackageService`, checks capability grants, enables the package, and imports and executes its declared `loadEntry` under Clay's authority. No inline manifest, no per-primitive registration, and no manual `clay` facade plumbing are required in user config. See `docs/reference/primitives/package-loading.md` for the package-root boundary, runtime-generation hot reload behavior, and carried-forward durable state work.
 - **Implemented/runtime-backed today:** `loadPackage(specifier)` is the one-line end-user default for bundled and installed source-aware packages. `serverLoadPackage(packageJson)` remains a lower-level validation helper for fixtures and controlled configuration tests.
 - **Phase 18.4 customization status:** optional customization after the future one-line load uses documented `setPackageOption` and `serverSetLayoutOverride` APIs. These are startup/configuration-change/package-load/update-time validators, not hidden JSON/TOML/ad hoc keys and not package enable/disable authority.
 
@@ -379,7 +379,7 @@ await loadPackage("@clay/markdown");
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ```
 
-Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.config/clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, applies host-owned `package.json` contributions, runs the execute-only `loadEntry`, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime/source.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
+Phase 18.6 shipped the generic one-line loader. Phase 18.7 extends it through selected-file open-time activation: startup `~/.clay/init.js` evaluates on the persistent server runtime, `await loadPackage("@clay/markdown")` validates/enables the package once, applies host-owned `package.json` contributions, runs the execute-only `loadEntry`, and leaves those registrations resident for later opens. Opening `note.md` then classifies the path through the generic `clay:modes` registry, activates the matching mode for that document, and schedules the package parse handler through `ParseCoordinator`; user config does not copy package manifests, call raw ops, perform manual primitive registration, publish representative decoration publication payloads, or build per-open runtime roots. Plan 035 generalizes the resolver so `src/server/js_runtime/source.rs::ClayModuleLoader` accepts resolver-validated package `loadEntry` modules through a shared `PackageLoadEntryAllowlist` gate for bundled and installed source-aware packages. `loadPackage` is idempotent per runtime generation, so repeated startup/open-time calls reuse the first validated load; Phase 19 reload replaces the runtime generation, reruns `init.js`, rebuilds the package `loadEntry` allowlist, and starts the `globalThis.__clayLoadedPackages` cache empty. The `PackageService` resolve/enable/execute path (`src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier`) is implemented and wired into the `clay:packages` facade. The `packages.loadPackage` inventory entry is `status = "runtime-backed"` and `registry_public = true` with full Markdown documentation. The generic loader/API boundary is a package-root allowlist that does not grant filesystem, network, shell, AI, WASM, raw-op, native-widget, client-JS, or package-manager authority without separate user-approved capabilities. See `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` for the unified authority model. The package-owned `markdownLoadMode()` fallback remains a documented convenience alias for per-load options, but `loadPackage("@clay/markdown")` is the preferred end-user path.
 
 If a package supports one-line loading, that is the preferred path. The lower-level setup should be documented as a fallback for advanced use or per-load customization.
 
@@ -477,7 +477,7 @@ Never declare `fontFamily`, `fontFamilies`, `fontSize`, `fontStack`, font paths/
 
 ### Persistent runtime, open-time activation, and parse boundaries
 
-The end-user default stays one line in `~/.config/clay/init.js`:
+The end-user default stays one line in `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -530,7 +530,7 @@ await loadPackage("@clay/lsp-rust");
 
 The grant scopes Clay's launch API and audit identity, not host OS access. Once implemented, same-user child may access files outside selected roots, network, and other processes. Treat approved server as trusted subprocess, not sandboxed code. See `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
-`loadPackage` executes the package `loadEntry` once per runtime generation. The registered mode patterns, activation metadata, command declarations, and parse-handler token remain resident in that generation. Phase 19 hot reload replaces the runtime generation, reruns `~/.config/clay/init.js`, rebuilds package state, and reruns the same package `loadEntry` with an empty `globalThis.__clayLoadedPackages` cache. Package authors should rebuild all runtime state from `loadEntry`; they should not rely on mutable JavaScript globals surviving reload. Failed reloads keep the previous generation active and report sanitized diagnostics.
+`loadPackage` executes the package `loadEntry` once per runtime generation. The registered mode patterns, activation metadata, command declarations, and parse-handler token remain resident in that generation. Phase 19 hot reload replaces the runtime generation, reruns `~/.clay/init.js`, rebuilds package state, and reruns the same package `loadEntry` with an empty `globalThis.__clayLoadedPackages` cache. Package authors should rebuild all runtime state from `loadEntry`; they should not rely on mutable JavaScript globals surviving reload. Failed reloads keep the previous generation active and report sanitized diagnostics.
 
 On selected-file open or successful reload refresh, Clay classifies the path through the generic `clay:modes` registry, uses `serverActivateClassifiedMode` with the stored activation metadata to activate the matching major mode for that document, then schedules a bounded parse through `ParseCoordinator`. User config does not reload the package per open and does not manually register every primitive. Parse handler registrations are generation-scoped: a newer generation replaces old handler tokens, cancels old-generation parse work, and rejects late old-runtime-generation task results before publication.
 
@@ -562,7 +562,7 @@ Forbidden anti-patterns:
 
 ## Package Reload Lifecycle (Phase 19)
 
-Hot reload preserves the one-line end-user default. Users keep writing ordinary loads in `~/.config/clay/init.js`; Clay does not introduce `loadPackage(spec, { force: true })`, package-authored `onReload` callbacks, or copied manifests:
+Hot reload preserves the one-line end-user default. Users keep writing ordinary loads in `~/.clay/init.js`; Clay does not introduce `loadPackage(spec, { force: true })`, package-authored `onReload` callbacks, or copied manifests:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -775,7 +775,7 @@ The Phase 18.3 panel/component/overlay/token contribution APIs are runtime-backe
 5. Global package contributions
 6. Package fallback/defaults
 
-Clay validates every layer before it affects the shell. A user override can change a package/default layout request such as default panel visibility, preferred slot, panel order, or token mapping only through documented `~/.config/clay/init.js` Clay JS APIs. It cannot grant permissions, bypass slot safety, expose native widgets, accept raw CSS, or run package JavaScript in the client.
+Clay validates every layer before it affects the shell. A user override can change a package/default layout request such as default panel visibility, preferred slot, panel order, or token mapping only through documented `~/.clay/init.js` Clay JS APIs. It cannot grant permissions, bypass slot safety, expose native widgets, accept raw CSS, or run package JavaScript in the client.
 
 Package authors should expect deterministic diagnostics for:
 
@@ -1011,7 +1011,7 @@ Phase 18.8 adds a server-owned `CommandExecution` boundary. SDUI actions, packag
 Not every package owns a mode, parser, or command. A read-only package can compose display UI from a server-owned typed facade while declaring **no permissions at all**. The first-party `@clay/git` package is the reference shape:
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/git");
@@ -1130,7 +1130,7 @@ Target state scopes:
 
 ## Configuration
 
-Configuration lives in `~/.config/clay/init.js` and is expressed through documented Clay JS APIs. Historical Phase 18.3 package UI configuration surfaces are declarations only; Phase 18.4 promotes two user/package customization surfaces:
+Configuration lives in `~/.clay/init.js` and is expressed through documented Clay JS APIs. Historical Phase 18.3 package UI configuration surfaces are declarations only; Phase 18.4 promotes two user/package customization surfaces:
 
 - `configuration.setPackageOption` records typed package options for `layout.defaultVisibility`, `layout.defaultSlot`, `layout.splitRatio`, `input.default`, `action.default`, `themeTokenRemap`, and `fallback` with package-prefix validation and payload accounting.
 - `ui.serverSetLayoutOverride` records validated layout/theme/input/action overrides for `slot`, `visibility`, `splitRatio`, `themeToken`, `inputDefault`, `actionDefault`, and `fallback` with deterministic source precedence (`user-config`, active major mode, compatible minor mode, global package, package default).
@@ -1235,7 +1235,7 @@ Raw CSS is not supported as a package API. Unknown style tokens, duplicate packa
 
 ### Phase 18.15 theme authoring: `textStyles` and `setTheme`
 
-Implemented in Phase 18.15: editor text/chrome themes are first-party packages that declare inert `clay.contributions.textStyles` data and are activated from `~/.config/clay/init.js` with `theme.setTheme()`. This is separate from `serverRegisterThemeToken`: SDUI theme tokens style package components; `textStyles` resolves editor/syntax/prose/base UI colors through `StyleRegistry`.
+Implemented in Phase 18.15: editor text/chrome themes are first-party packages that declare inert `clay.contributions.textStyles` data and are activated from `~/.clay/init.js` with `theme.setTheme()`. This is separate from `serverRegisterThemeToken`: SDUI theme tokens style package components; `textStyles` resolves editor/syntax/prose/base UI colors through `StyleRegistry`.
 
 Authoritative vocabulary: [Text Vocabulary and Two-Axis Decoration Contract](../primitives/syntax-vocabulary.md).
 
@@ -1320,7 +1320,7 @@ Phase 20.6 segregates the default themes into dedicated packages and pins the de
 - **Trust classification preserved.** Canonical-default resolution reuses the same `ensure_first_party_record` path that validates bundled-inventory provenance, fingerprint, and first-party trust for explicit `setTheme` calls. Selecting a canonical default grants no authority that an explicit `setTheme` of the same package would not.
 
 ```js
-// ~/.config/clay/init.js — canonical default, no loadPackage needed
+// ~/.clay/init.js — canonical default, no loadPackage needed
 // (appearance: system → dark → Modus Vivendi by default)
 
 // Explicit one-line override of any bundled theme, no loadPackage needed:
@@ -1335,8 +1335,8 @@ See [Configuration: Phase 20.6 precedence and persistence](../clay-js-api/config
 
 Users override theme, appearance, and typography through three surfaces, all bounded and authority-rejecting:
 
-- **Programmatic — `clay:theme` facades in `~/.config/clay/init.js`.** `setTheme("@clay/theme-*")` selects the active theme; `setAppearance("light" | "dark" | "system")` sets the appearance preference that drives the canonical default (and is overridden by any explicit `setTheme`); `setTypography({...})` sets the monospace/proportional/ui font stacks, base sizes, and optional bounded hierarchy. These are init.js APIs (source `init-js` in the precedence model).
-- **UI session — `@clay/settings` panel.** A first-party catalog-composed SDUI panel (`packages/settings/`) lets users switch theme, appearance, and typography from the UI. Controls emit inert `settings.*` command intents (`settings.setTheme`, `settings.setAppearance`, `settings.setTypography`, `settings.reset`) that the server validates, persists to `~/.config/clay/preferences.json` (source `ui-session`), and applies live through a runtime reload (persist → reload → `init.js` re-eval + preferences apply → `RuntimeStateSnapshot` fanout). No restart required. The panel uses only implemented `ComponentKind` kinds (`panel`, `scroll`, `collapse`, `dropdown`, `textInput`, `label`, `button`, `flex`) — no native chrome, no client JavaScript, no raw CSS.
+- **Programmatic — `clay:theme` facades in `~/.clay/init.js`.** `setTheme("@clay/theme-*")` selects the active theme; `setAppearance("light" | "dark" | "system")` sets the appearance preference that drives the canonical default (and is overridden by any explicit `setTheme`); `setTypography({...})` sets the monospace/proportional/ui font stacks, base sizes, and optional bounded hierarchy. These are init.js APIs (source `init-js` in the precedence model).
+- **UI session — `@clay/settings` panel.** A first-party catalog-composed SDUI panel (`packages/settings/`) lets users switch theme, appearance, and typography from the UI. Controls emit inert `settings.*` command intents (`settings.setTheme`, `settings.setAppearance`, `settings.setTypography`, `settings.reset`) that the server validates, persists to `~/.clay/preferences.json` (source `ui-session`), and applies live through a runtime reload (persist → reload → `init.js` re-eval + preferences apply → `RuntimeStateSnapshot` fanout). No restart required. The panel uses only implemented `ComponentKind` kinds (`panel`, `scroll`, `collapse`, `dropdown`, `textInput`, `label`, `button`, `flex`) — no native chrome, no client JavaScript, no raw CSS.
 - **Persistence — `preferences.json`.** The closed `ui-session` store (theme, appearance, typography) overrides `init.js` on every reload, so a UI choice survives restart and beats the equivalent `init.js` call. See the package doc at `packages/settings/docs/index.md` for the catalog-composition table and command flow.
 
 Theme packages themselves declare **inert style data only** (`clay.contributions.textStyles` and optional `clay.contributions.designTokens`); they declare no permissions, no modes, and no override APIs. All override authority is user-owned through the three surfaces above. A theme package cannot promote itself, ship executable styling code, raw CSS, client JavaScript, or a third-party theme loader; `setTheme`/canonical-default resolution accepts only bundled first-party `@clay/*` specifiers.
@@ -1461,7 +1461,7 @@ Phase 20.3 implements user-facing layout primitives: draggable split dividers, f
 
 **Split dividers and resize handles** (user-facing, not package-facing): users drag split dividers on `PaneSplitTree` to adjust pane ratios (clamped 0.05–0.95) and drag fixed slot resize handles to adjust panel sizes (clamped to token-backed min/max). Double-clicking a slot resize handle toggles collapse/restore. All interaction is client-side; no package JavaScript runs during drag, paint, or layout.
 
-**Layout persistence**: user-modified split ratios (≠ 0.5) and slot sizes (resized or collapsed) persist to `~/.config/clay/layout.json` with ≥500ms debounce. Corrupt or missing files fall back to defaults. Packages cannot read or write this file.
+**Layout persistence**: user-modified split ratios (≠ 0.5) and slot sizes (resized or collapsed) persist to `~/.clay/layout.json` with ≥500ms debounce. Corrupt or missing files fall back to defaults. Packages cannot read or write this file.
 
 **Focus and input routing**: Tab/Shift+Tab moves focus across panes in reading order. The active pane is tracked in `PaneSplitTree.active_pane_id`. A focus ring paints on the active pane when multiple panes exist. Package `PackageInputRouting` declarations scoped to a pane only receive events when that pane is focused. Transient surfaces (overlays, menus, completion pop-ups) anchor to the focused pane's geometry via `WorkingAreaLayout::focused_pane_rect()`, not the full working area.
 
@@ -1560,7 +1560,7 @@ This is rejected at `assemble_package_record` with `InvalidContributionDescripto
 
 **Authority boundaries (security):**
 - No raw CSS, no client JavaScript, no native widget handles, no raw `Deno.core.ops` in package UI contributions.
-- No third-party theme loader: themes are first-party packages activated from `~/.config/clay/init.js`; a theme package below the AA contrast floor is not activated.
+- No third-party theme loader: themes are first-party packages activated from `~/.clay/init.js`; a theme package below the AA contrast floor is not activated.
 - Conformance is host authority, not package-facing: validation runs inside Clay's Rust host validator at parse/install/theme-apply time; no `ui.validate*` op or `clay:*` facade exposes it.
 - Trusted classification comes from the compiled bundled inventory and provenance/integrity, never package naming or `@clay/*` prefix.
 
@@ -2263,7 +2263,7 @@ Clay remains the owner of shell slots, the document switcher, status chrome, and
 
 ### What packages may observe and bind
 
-Packages and `~/.config/clay/init.js` may use documented Clay JS surfaces only:
+Packages and `~/.clay/init.js` may use documented Clay JS surfaces only:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -2457,7 +2457,7 @@ Tier 2/3 packages still declare grammar assets under `clay.contributions.syntaxG
 }
 ```
 
-Validation is load-time only and reuses the package metadata budget. Grammar contributions remain first-party-only here; arbitrary third-party native artifact loading is out of scope. Tier 1 native entries require a compiled source ID and reject an artifact path; Tier 2 WASM entries require a package-root-confined `.wasm` path. Query files must be confined `.scm` assets. Vocabulary styleMaps accept closed `TokenType` variant names and closed `Modifiers` names; known legacy style tokens remain compatible. Packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.config/clay/init.js`; they are not auto-loaded.
+Validation is load-time only and reuses the package metadata budget. Grammar contributions remain first-party-only here; arbitrary third-party native artifact loading is out of scope. Tier 1 native entries require a compiled source ID and reject an artifact path; Tier 2 WASM entries require a package-root-confined `.wasm` path. Query files must be confined `.scm` assets. Vocabulary styleMaps accept closed `TokenType` variant names and closed `Modifiers` names; known legacy style tokens remain compatible. Packages must declare both `parse-document` and `render-decorations`. Clay rejects non-`@clay/*` grammar packages, absolute paths, parent traversal, URLs/downloads, native libraries, package-manager/shell fields, raw ops, client JavaScript, CSS/raw colors, duplicate language IDs, and duplicate file-pattern claims. Parse/highlight work runs as `Background`, cancellable, viewport-prioritized server work bounded by `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, `DECORATION_PAYLOAD_BUDGET_BYTES`, and `SYNTAX_CACHE_BUDGET_BYTES`; it never runs in keypress, paint, layout, scroll, pointer, or text-event hot paths. First-party grammar packages are loaded explicitly from `~/.clay/init.js`; they are not auto-loaded.
 
 ### Text-object grammar contributions (`queries/textobjects.scm`, Plan 071 task 10)
 
@@ -2630,7 +2630,7 @@ A completion provider may set `exclusive: true` to suppress strictly lower-prior
 
 ### Disable-native (`serverDisableCompletion`)
 
-`completion.serverDisableCompletion` suppresses a registered completion provider by exact ID (`core.bufferWords`, `rust.snippets`) or package prefix (`rust`). Use from `~/.config/clay/init.js`:
+`completion.serverDisableCompletion` suppresses a registered completion provider by exact ID (`core.bufferWords`, `rust.snippets`) or package prefix (`rust`). Use from `~/.clay/init.js`:
 
 ```js
 import { serverDisableCompletion } from "clay:completion";
@@ -2950,7 +2950,7 @@ completion, syntax scheduling, and render state.
 | `ViewportRenderRequest` / `ViewportRenderPatch` | Clay-owned protocol v29 transport. Packages do not forge request IDs, complete patches, covered ranges, or terminal status; their validated decoration/diagnostic/fold output is aggregated by the server. |
 | `SyntaxSession` | Server-internal `(generation, document, grammar)` latest-wins worker. Packages use `parse.serverRegisterParseHandler` or `syntax.serverRegisterSyntaxGrammar`; they do not select executor threads, parser lifetimes, cache eviction, or request pacing. |
 
-A normal package continues to load explicitly from `~/.config/clay/init.js`:
+A normal package continues to load explicitly from `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -3049,7 +3049,7 @@ Recommended test categories:
 
 Phase 18.14 expands `@clay/rust`, `@clay/typescript`, and `@clay/javascript` from grammar-only syntax packages into full first-party language packages. The upgrade path keeps the existing `clay.contributions.syntaxGrammars` contribution unchanged, adds a `clay.modes` entry and mode-specific metadata, and registers additional surfaces from the package `loadEntry` using generic Clay primitives. A document's active syntax grammar remains selectable independently of its active major mode; loading the language package must not silently change the mode of already-open fallback documents.
 
-End-user default remains one explicit line per package in `~/.config/clay/init.js`:
+End-user default remains one explicit line per package in `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";

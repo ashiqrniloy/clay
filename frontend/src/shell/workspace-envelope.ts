@@ -23,6 +23,7 @@ export interface EnvelopeContext {
   runtimes: Map<number, TabRuntime>;
   tabs: TabStore;
   registryRootsByClient: Map<number, number>;
+  registryTabsByClient: Map<number, number>;
   notify: () => void;
   deliverRootId: (runtime: TabRuntime, rootId: number) => void;
   ensurePane: (runtime: TabRuntime, paneId: number) => PaneRecord;
@@ -37,6 +38,7 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
     ensurePane,
     notify,
     registryRootsByClient,
+    registryTabsByClient,
     runtimes,
     tabs,
   } = ctx;
@@ -178,6 +180,11 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
         }
       }
     }
+    // Remember tab ids even for clients whose runtime has not mounted yet
+    // (the registry broadcast races the bootstrap); mountRuntime adopts it.
+    for (const tab of tabs.get().tabs) {
+      if (tab.tabId != null) registryTabsByClient.set(tab.clientId, tab.tabId);
+    }
     notify();
     return;
   }
@@ -193,6 +200,7 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
     kind?: string;
     data?: Record<string, unknown>;
   };
+  if (!owners.length) return;
   for (const runtime of owners) {
     if (!runtime) continue;
     if (event.kind === "sduiSnapshot") {

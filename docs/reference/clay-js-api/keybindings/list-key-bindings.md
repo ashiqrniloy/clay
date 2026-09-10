@@ -65,7 +65,7 @@ const bindings = listKeyBindings("editor");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `keybindings.listKeyBindings` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `keybindings.listKeyBindings` in `~/.clay/init.js`.
 
 ## Custom properties
 

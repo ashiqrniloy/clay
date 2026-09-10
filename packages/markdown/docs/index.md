@@ -22,7 +22,7 @@
 - Status item: inert `markdown.status.mode` component
 - Documentation entry: `./docs/index.md`
 - Parse bounds: Tier 1 native contribution windows are capped at `4 KiB`; Tier 3 fallback policy uses `64 KiB` windows, `4 KiB` guards, a `30 MiB` retained syntax/decor budget, and `5000 ms` timeout with `plain-text-fallback` under budget pressure.
-- Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.config/clay/init.js` yet. The bounded parse-window values it passes to `parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
+- Configuration status: Phase 18.5 verifies these values as fixed package-owned defaults. `@clay/markdown` declares no `contributions.configuration` entries, does not request `package-configuration`, and does not expose Markdown large-file tuning through `~/.clay/init.js` yet. The bounded parse-window values it passes to `parse.serverRegisterParseHandler` are covered by that API's `custom_properties` and server validation; file-size thresholds and status labels remain package constants until a later configuration API is implemented.
 
 ## Permissions
 
@@ -55,7 +55,7 @@ Package installation remains separate from execution. Clay validates this metada
 
 ## Default Load Path
 
-The documented end-user default is one line from `~/.config/clay/init.js`:
+The documented end-user default is one line from `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";

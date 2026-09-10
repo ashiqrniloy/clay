@@ -4,7 +4,7 @@ This file locks the real `cargo run` regressions reported from Linux/GNOME manua
 
 ## Manual product path
 
-1. Put workflow config in `~/.config/clay/init.js` with `loadPackage("@clay/markdown")`, `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, `loadPackage("@clay/javascript")`, and `bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" })`.
+1. Put workflow config in `~/.clay/init.js` with `loadPackage("@clay/markdown")`, `loadPackage("@clay/rust")`, `loadPackage("@clay/typescript")`, `loadPackage("@clay/javascript")`, and `bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" })`.
 2. Run `cargo run` from the repository root.
 3. Use the native UI directly; do not use `cargo run -- smoke-gui --config-fixture file-browser-workflow` for this repro.
 

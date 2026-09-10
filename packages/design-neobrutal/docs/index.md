@@ -29,7 +29,7 @@ In adherence to Clay's core visual architecture:
 
 ## 3. Activation and Configuration
 
-To activate `@clay/design-neobrutal` in your `~/.config/clay/init.js`:
+To activate `@clay/design-neobrutal` in your `~/.clay/init.js`:
 
 ```javascript
 import { theme } from "clay:theme";

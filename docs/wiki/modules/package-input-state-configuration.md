@@ -50,7 +50,7 @@ These APIs are runtime-backed for declaration/override records. They do **not** 
 - Validate package input metadata for pointer/focus/selection behavior and component-scoped action routing.
 - Validate package UI state scope metadata as schema/lifecycle declarations only, not state values.
 - Validate package layout override records for fixed slot, visibility, split-ratio, theme-token, input-default, action-default, and fallback properties.
-- Validate package option records from `~/.config/clay/init.js`/configuration code with package-owned names, supported option keys, explicit source metadata, and deterministic precedence.
+- Validate package option records from `~/.clay/init.js`/configuration code with package-owned names, supported option keys, explicit source metadata, and deterministic precedence.
 - Keep package option and layout override work at package-load, startup, configuration-change, or explicit setting-change time; never run package JavaScript or configuration evaluation in Masonry hot paths.
 - Preserve behavior-manifest compatibility: key/text routing remains behavior-manifest/keybinding work, while package input declarations are inert metadata for UI component focus/action policy.
 - Preserve documentation-as-code coverage across Clay JS API Markdown, `api-inventory.toml`, generated registry freshness tests, package authoring docs, primitive docs, and wiki links.

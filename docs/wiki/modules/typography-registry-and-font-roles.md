@@ -111,7 +111,7 @@ The SDUI left-slot guard measures the configured UI body font and uses a bounded
 
 ## Code Examples
 
-User configuration in `~/.config/clay/init.js`:
+User configuration in `~/.clay/init.js`:
 
 ```ts
 import { setTypography } from "clay:theme";

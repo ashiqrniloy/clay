@@ -17,7 +17,7 @@ const MODULE_ERROR_CAPACITY: usize = 64;
 const MODULE_ERROR_MESSAGE_BUDGET_BYTES: usize = 1024;
 const PACKAGE_OPTION_SOURCES: &[&str] =
     &["init-js", "package-default", "clay-default", "ui-session"];
-/// Bounded persisted user preferences (`~/.config/clay/preferences.json`). The
+/// Bounded persisted user preferences (`~/.clay/preferences.json`). The
 /// file is a closed JSON object: only `theme`, `appearance`, and `typography`
 /// keys are recognized; unknown keys are dropped with a diagnostic. Values are
 /// validated at load and persist time so a corrupted/manually-edited file falls
@@ -60,6 +60,45 @@ pub(crate) struct RegisteredPackageOption {
     pub(crate) estimated_payload_bytes: usize,
 }
 
+/// One-time migration to the `~/.clay` root (decision 2026-09-10-1526):
+/// renames a legacy `~/.clay` tree to `~/.clay`. When the new root
+/// already exists, only the legacy runtime data dir (`agent/` —
+/// sessions.sqlite, credentials.vault, book.json, vault.passphrase) is
+/// moved into the new root, because a rename would strand credentials.
+/// Best-effort: failures warn and keep the legacy data in place.
+fn migrate_legacy_config_root(home: &Path) {
+    let legacy = home.join(".config").join("clay");
+    let new_root = home.join(".clay");
+    if !legacy.is_dir() {
+        return;
+    }
+    if !new_root.exists() {
+        if let Some(parent) = new_root.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match fs::rename(&legacy, &new_root) {
+            Ok(()) => return,
+            Err(error) => eprintln!(
+                "[config] migrating {} -> {} failed ({error}); the legacy tree stays in place",
+                legacy.display(),
+                new_root.display()
+            ),
+        }
+    }
+    let legacy_agent = legacy.join("agent");
+    let new_agent = new_root.join("agent");
+    if legacy_agent.is_dir()
+        && !new_agent.exists()
+        && let Err(error) = fs::rename(&legacy_agent, &new_agent)
+    {
+        eprintln!(
+            "[config] migrating {} -> {} failed ({error}); agent data stays in the legacy root",
+            legacy_agent.display(),
+            new_agent.display()
+        );
+    }
+}
+
 impl ConfigurationRuntime {
     pub(crate) fn from_config_root(
         config_root: impl AsRef<Path>,
@@ -83,11 +122,24 @@ impl ConfigurationRuntime {
         })
     }
 
+    /// Default config root: `~/.clay` (decision 2026-09-10-1526 — Clay keeps
+    /// data, not just config, so it no longer lives under `.config`).
+    /// One-time migration: a legacy `~/.clay` tree is renamed into
+    /// place when `~/.clay` does not exist yet; if both exist (user created
+    /// the new root first) only the legacy runtime data dir is salvaged so
+    /// credentials never orphan. Idempotent: once migrated, later calls no-op.
     pub(crate) fn default_config_root() -> Option<PathBuf> {
-        std::env::var_os("HOME")
+        let home = std::env::var_os("HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-            .map(|home| home.join(".config").join("clay"))
+            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))?;
+        Some(Self::default_config_root_for_home(&home))
+    }
+
+    /// `default_config_root` for an explicit home — the testable seam
+    /// (no env-var access).
+    pub(crate) fn default_config_root_for_home(home: &Path) -> PathBuf {
+        migrate_legacy_config_root(home);
+        home.join(".clay")
     }
 
     pub(crate) fn entry_specifier(&self) -> Result<ModuleSpecifier, ConfigurationError> {
@@ -1054,7 +1106,7 @@ mod tests {
         // Plan 080: the configuration-root watcher is fixed automatic server
         // behavior. Interval, debounce, and enable/disable stay compiled
         // constants; any `core.watch.*` style key a user tries from
-        // `~/.config/clay/init.js` is rejected by the closed package-option
+        // `~/.clay/init.js` is rejected by the closed package-option
         // allowlist — never a hidden configuration key.
         let runtime = runtime();
         for option in [
@@ -1157,7 +1209,7 @@ mod tests {
     /// insertion and comment continuation) rather than runtime-configurable
     /// Clay JS configuration settings. This test pins that contract: any
     /// behavior-changing Phase 18.9 key a user might try to set from
-    /// `~/.config/clay/init.js` is rejected by the closed package-option
+    /// `~/.clay/init.js` is rejected by the closed package-option
     /// allowlist (Plan 037 Task 10 Test Case 1) rather than silently accepted
     /// as an undocumented setting, and built-in mode defaults therefore
     /// cannot be overridden through configuration (Security criterion).
@@ -1391,5 +1443,81 @@ mod tests {
             )
             .expect_err("authority-bearing typography must be rejected");
         assert!(err.to_string().contains("prohibited"));
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch_home(label: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!(
+            "clay-root-migration-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).expect("scratch home");
+        home
+    }
+
+    #[test]
+    fn legacy_config_root_renames_wholesale_into_the_new_root() {
+        let home = scratch_home("rename");
+        let legacy = home.join(".config").join("clay");
+        fs::create_dir_all(legacy.join("agent")).expect("legacy tree");
+        fs::write(legacy.join("init.js"), "// user config\n").expect("init.js");
+        fs::write(legacy.join("agent").join("book.json"), "{}").expect("book");
+
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        assert!(!legacy.exists(), "legacy tree moved");
+        assert!(home.join(".clay/init.js").is_file());
+        assert!(home.join(".clay/agent/book.json").is_file());
+        // Idempotent: second run with no legacy tree keeps the new root.
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pre_existing_new_root_salvages_only_the_legacy_agent_data() {
+        let home = scratch_home("salvage");
+        let legacy = home.join(".config").join("clay");
+        fs::create_dir_all(legacy.join("agent")).expect("legacy tree");
+        fs::write(legacy.join("agent").join("sessions.sqlite"), "db").expect("sessions");
+        fs::write(legacy.join("init.js"), "// user config\n").expect("legacy init");
+        fs::create_dir_all(home.join(".clay")).expect("pre-existing new root");
+        fs::write(home.join(".clay/init.js"), "// fresh\n").expect("fresh init");
+
+        ConfigurationRuntime::default_config_root_for_home(&home);
+        assert!(legacy.join("init.js").exists(), "config files stay put");
+        assert!(
+            !legacy.join("agent").exists(),
+            "legacy agent data dir moved out"
+        );
+        assert!(home.join(".clay/agent/sessions.sqlite").is_file());
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn absent_legacy_root_is_a_no_op() {
+        let home = scratch_home("noop");
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        assert!(
+            !home.join(".clay").exists(),
+            "no tree created by resolution"
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 }

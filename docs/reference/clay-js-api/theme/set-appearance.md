@@ -39,11 +39,11 @@ Set the bounded appearance preference (`light` | `dark` | `system`) that drives 
 
 `setAppearance` stores the appearance preference and, when no explicit theme is active, resolves the canonical default theme for the resolved appearance: `light` → `@clay/theme-modus-operandi`, `dark` → `@clay/theme-modus-vivendi`, `system` → the observed OS color-scheme signal with a `dark` fallback when no signal is available. Canonical-default resolution is a bundled-inventory `ensure_first_party_record` lookup — no `loadPackage` call is required and there is no extra load cost. The Modus packages are regular first-party `@clay/theme-*` packages (identical manifest shape, inert `textStyles`) and remain explicitly selectable by `setTheme`.
 
-The appearance preference is a `clay:theme` Clay JS API usable from `~/.config/clay/init.js` (source `init-js`). A UI-session appearance choice made through the `@clay/settings` panel is persisted to `~/.config/clay/preferences.json` (source `ui-session`) and overrides `init.js` on every reload. See [Configuration: Phase 20.6 precedence and persistence](../configuration.md#phase-206-themetypographyappearance-precedence-and-persistence) for the full source-order model.
+The appearance preference is a `clay:theme` Clay JS API usable from `~/.clay/init.js` (source `init-js`). A UI-session appearance choice made through the `@clay/settings` panel is persisted to `~/.clay/preferences.json` (source `ui-session`) and overrides `init.js` on every reload. See [Configuration: Phase 20.6 precedence and persistence](../configuration.md#phase-206-themetypographyappearance-precedence-and-persistence) for the full source-order model.
 
 ## When to use
 
-Use from `~/.config/clay/init.js` to drive the canonical default theme from a light/dark/system preference without pinning a specific theme package. Use `setTheme` instead when you want a specific theme regardless of appearance.
+Use from `~/.clay/init.js` to drive the canonical default theme from a light/dark/system preference without pinning a specific theme package. Use `setTheme` instead when you want a specific theme regardless of appearance.
 
 ## JavaScript usage
 

@@ -57,7 +57,7 @@ bindKey("Ctrl+Shift+8", "editor.toggleListMarker", { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { toggleListMarker } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 

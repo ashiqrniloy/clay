@@ -70,7 +70,7 @@ const node = defineLabel({ text: "Ready" });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `sdui.defineLabel` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
+No default key binding is assigned. Users may bind a key to `sdui.defineLabel` in `~/.clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
 
 ## Custom properties
 

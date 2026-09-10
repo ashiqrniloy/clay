@@ -234,6 +234,7 @@ function chordKeymap(
         update() {},
         destroy: reset,
         handleKey(event: KeyboardEvent): boolean {
+          if (isChordNoise(event)) return false;
           const candidates = (pending.length ? pending : bindings).filter(
             (binding) => eventMatches(event, binding.sequence[index]),
           );
@@ -285,6 +286,16 @@ function eventMatches(
     event.shiftKey === stroke.modifiers.shift &&
     event.metaKey === stroke.modifiers.superKey
   );
+}
+
+/** Same chord-noise rule as the shell matcher: modifier keydowns (Ctrl held
+ *  across a chord) and held-key auto-repeats neither advance nor cancel a
+ *  pending chord. Returning false leaves the event to CodeMirror's own
+ *  keymap handling. */
+const EDITOR_MODIFIER_KEYS = new Set(["control", "shift", "alt", "meta"]);
+
+function isChordNoise(event: KeyboardEvent): boolean {
+  return event.repeat || EDITOR_MODIFIER_KEYS.has(event.key.toLowerCase());
 }
 
 function fontAndWrap(manifest: BehaviorManifestDto): Extension {

@@ -16,8 +16,13 @@ function fail(message: string, code = 1): never {
   process.exit(code);
 }
 
-function parseArgs(argv: string[]): { dataDir: string; mock: boolean } {
+function parseArgs(argv: string[]): {
+  dataDir: string;
+  mock: boolean;
+  agentConfigRoot?: string;
+} {
   let dataDir: string | undefined;
+  let agentConfigRoot: string | undefined;
   let mock = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -26,15 +31,22 @@ function parseArgs(argv: string[]): { dataDir: string; mock: boolean } {
       i += 1;
     } else if (arg.startsWith("--data-dir=")) {
       dataDir = arg.slice("--data-dir=".length);
+    } else if (arg === "--agent-config-root") {
+      agentConfigRoot = argv[i + 1];
+      i += 1;
+    } else if (arg.startsWith("--agent-config-root=")) {
+      agentConfigRoot = arg.slice("--agent-config-root=".length);
     } else if (arg === "--mock") {
       mock = true;
     } else if (arg === "--help" || arg === "-h") {
-      stdout.write("Usage: clay-agent --data-dir DIR [--mock]\n");
+      stdout.write(
+        "Usage: clay-agent --data-dir DIR [--agent-config-root DIR] [--mock]\n",
+      );
       process.exit(0);
     }
   }
   if (!dataDir) fail("clay-agent requires --data-dir");
-  return { dataDir, mock };
+  return { dataDir, mock, agentConfigRoot };
 }
 
 function write(value: unknown): void {
@@ -106,6 +118,7 @@ async function main(): Promise<void> {
         try {
           host = await ClayAgentHost.create({
             dataDir: args.dataDir,
+            agentConfigRoot: args.agentConfigRoot,
             passphrase,
             mock: args.mock,
             emit,

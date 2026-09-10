@@ -8,6 +8,23 @@ set -eu
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo"
 
+# A running Clay keeps serving the OLD build: the desktop supervises its own
+# server and the daemon is that server's child, so a rebuild alone is not what
+# you then see (and a live server still owns the endpoint socket). Stop them
+# first. The pattern is anchored to this checkout's target/ so cargo/rustc
+# (whose argv mentions target/debug/deps) and unrelated processes never match.
+clay_procs="^$repo/target/(debug|release)/clay(-server|-desktop)?( |$)|node [^ ]*clay-agent/dist/main\.js( |$)"
+if pgrep -f "$clay_procs" >/dev/null 2>&1; then
+  echo "== stopping running clay: $(pgrep -f "$clay_procs" | tr '\n' ' ')"
+  pkill -f "$clay_procs" 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    pgrep -f "$clay_procs" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  pkill -9 -f "$clay_procs" 2>/dev/null || true
+  sleep 0.2
+fi
+
 echo "== frontend"
 (cd frontend && npm run build)
 

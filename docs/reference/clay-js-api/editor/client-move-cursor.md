@@ -89,7 +89,7 @@ Default key bindings:
 - `Ctrl+Up` (previous paragraph), `Ctrl+Down` (next paragraph)
 - Add `Shift` to any of the above to extend the selection.
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `editor.clientMoveCursor.nextParagraph`).
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js` using the direction-specific command IDs (e.g. `editor.clientMoveCursor.nextParagraph`).
 
 ## Custom properties
 

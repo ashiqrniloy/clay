@@ -41,7 +41,7 @@ Select one first-party inert theme for editor syntax colors, base UI chrome colo
 
 ## When to use
 
-Use from `~/.config/clay/init.js` to choose the editor theme at startup.
+Use from `~/.clay/init.js` to choose the editor theme at startup.
 
 ## JavaScript usage
 

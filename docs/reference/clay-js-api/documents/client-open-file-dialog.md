@@ -59,7 +59,7 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientOpenFileDialog } from "clay:documents";
 import { bindKey } from "clay:keybindings";
 
@@ -74,7 +74,7 @@ No options are accepted by `clientOpenFileDialog`. Dialog filters, default direc
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.clientOpenFileDialog` in `~/.config/clay/init.js`, for example:
+No default key binding is assigned. Users may bind a key to `documents.clientOpenFileDialog` in `~/.clay/init.js`, for example:
 
 ```ts
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });

@@ -61,7 +61,7 @@ None. The facade takes no arguments and returns the stable command ID string.
 
 Default key bindings: "Ctrl+Shift+L".
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js`.
 
 ## Custom properties
 

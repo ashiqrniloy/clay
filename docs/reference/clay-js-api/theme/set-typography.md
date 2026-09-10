@@ -109,7 +109,7 @@ Modes and packages may choose semantic roles such as monospace or proportional. 
 
 ## When to use
 
-Use from `~/.config/clay/init.js` when Clay's default typography does not match your preferred fonts or sizes. No call is needed to use defaults.
+Use from `~/.clay/init.js` when Clay's default typography does not match your preferred fonts or sizes. No call is needed to use defaults.
 
 ## JavaScript usage
 
@@ -179,7 +179,7 @@ await loadConfigurationModule({ path: "./typography.js" });
 ```
 
 ```js
-// ~/.config/clay/typography.js
+// ~/.clay/typography.js
 import { setTypography } from "clay:theme";
 
 setTypography({

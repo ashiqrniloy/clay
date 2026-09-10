@@ -37,7 +37,7 @@ The facade is a synchronous command-ID helper. It does not edit text when called
 
 ## When to use
 
-Use this API to bind an alternate comment-toggle chord in `~/.config/clay/init.js` or to expose the command to help and agent discovery.
+Use this API to bind an alternate comment-toggle chord in `~/.clay/init.js` or to expose the command to help and agent discovery.
 
 ## JavaScript usage
 
@@ -57,7 +57,7 @@ bindKey("Ctrl+Shift+C", "editor.toggleComment", { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { toggleComment } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 

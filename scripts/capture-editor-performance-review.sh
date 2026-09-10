@@ -192,11 +192,11 @@ PY
 single='{"leaf": {"paneId": 1}}'
 four='{"split": {"orientation": "horizontal", "ratio": 0.5, "first": {"split": {"orientation": "vertical", "ratio": 0.5, "first": {"leaf": {"paneId": 1}}, "second": {"leaf": {"paneId": 2}}}}, "second": {"split": {"orientation": "vertical", "ratio": 0.5, "first": {"leaf": {"paneId": 3}}, "second": {"leaf": {"paneId": 4}}}}}}'
 
-# The server config runtime resolves init.js from $HOME/.config/clay while
+# The server config runtime resolves init.js from $HOME/.clay while
 # the desktop layout reader honors XDG_CONFIG_HOME; provide both.
-mkdir -p "$home/.config/clay"
+mkdir -p "$home/.clay"
 init_target="$config_home/clay/init.js"
-init_home_copy="$home/.config/clay/init.js"
+init_home_copy="$home/.clay/init.js"
 case "$state" in
     editor-light)
         cat >"$init_target" <<'JS'

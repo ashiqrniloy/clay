@@ -19,9 +19,62 @@ async function tempDir(): Promise<string> {
 interface ResumableSession {
   sessionId: string;
   updatedAt?: string;
+  updatedAtLabel?: string;
   label?: string;
   summary?: string;
 }
+
+// Plan 117 follow-up: `/resume` rows were unidentifiable — the picker printed
+// the profile (identical for every session in a workspace, empty for the
+// resumable list) and a raw UTC ISO stamp. The row identity is the session's
+// opening prompt (first five words, stamped on the first entry by the store
+// seam) plus a local-time last-active stamp.
+test("resumable rows carry the opening prompt label and a local last-active stamp", async () => {
+  const dataDir = await tempDir();
+  const host = await ClayAgentHost.create({
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+  });
+  try {
+    await host.handle("agentProfile.register", { name: "chat", instructions: "Be brief." });
+    const first = (await host.handle("session.new", {
+      profile: "chat",
+      provider: "mock",
+      model: "demo",
+      workspaceRoot: "/ws/label",
+    })) as { sessionId: string };
+    await host.handle("session.prompt", {
+      sessionId: first.sessionId,
+      text: "How does the resume list identify  a  session?",
+    });
+    // A second prompt must not re-label the session: the opening words are the
+    // session's identity, so the label stays put for its whole life.
+    await host.handle("session.prompt", { sessionId: first.sessionId, text: "And the stamp?" });
+    const untitled = (await host.handle("session.new", {
+      profile: "chat",
+      provider: "mock",
+      model: "demo",
+      workspaceRoot: "/ws/label",
+    })) as { sessionId: string };
+
+    const page = (await host.handle("session.resumable", {
+      workspaceRoot: "/ws/label",
+    })) as { sessions: ResumableSession[] };
+    const labelled = page.sessions.find((row) => row.sessionId === first.sessionId);
+    assert.equal(labelled?.label, "How does the resume list");
+    const row = page.sessions.find((entry) => entry.sessionId === untitled.sessionId);
+    assert.ok(!row?.label, "a never-prompted session has no label to show");
+    // Local `YYYY-MM-DD HH:MM` beside the raw ISO, so the picker can print a
+    // time that matches the user's clock instead of UTC.
+    assert.match(labelled?.updatedAtLabel ?? "", /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.ok(labelled?.updatedAt?.endsWith("Z"), "the ISO stamp is unchanged");
+  } finally {
+    host.close();
+    await rm(dataDir, { recursive: true, force: true });
+  }
+});
 
 test("resumable list is workspace-scoped, most-recent first, and bounded", async () => {
   const dataDir = await tempDir();

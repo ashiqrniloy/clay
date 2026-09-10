@@ -126,7 +126,7 @@ The helper is implemented in `runtime/js/behavior.js` and included directly by `
 
 ## Code Examples
 
-End-user `~/.config/clay/init.js`:
+End-user `~/.clay/init.js`:
 
 ```js
 import { loadPackage } from "clay:packages";

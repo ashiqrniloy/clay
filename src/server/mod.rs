@@ -3,7 +3,9 @@ pub mod agent;
 pub mod agent_agui;
 pub(crate) mod agent_checkpoints;
 pub(crate) mod agent_documents;
+pub mod agent_mcp_config;
 pub(crate) mod agent_picker;
+pub(crate) mod agent_settings;
 mod behavior;
 pub mod command_execution;
 pub mod completion;
@@ -706,6 +708,15 @@ impl IpcServer {
                 .clone()
                 .or_else(effective_agent_root)
                 .as_deref(),
+            // Repo-root .mcp.json rides the launch workspace (plan 117);
+            // the user mcp.json comes from the configuration root. The
+            // cwd fallback mirrors add_root_from_cwd below.
+            config
+                .workspace_roots
+                .first()
+                .cloned()
+                .or_else(|| std::env::current_dir().ok())
+                .as_deref(),
         );
         agent.set_reverse_handler(agent_documents::document_reverse_handler(
             Arc::clone(&bootstrap_state.workspace),
@@ -866,6 +877,13 @@ impl IpcServer {
             return None;
         }
         Some(self.bootstrap_state.clone())
+    }
+
+    /// Agent settings page (plan 117): the server-resolved daemon config
+    /// root (`<configuration root>/agents/coding-agent`). The webview never
+    /// supplies paths for this surface; the server owns the resolution.
+    pub(crate) fn agent_settings_root(&self) -> Option<PathBuf> {
+        agent_settings::agent_config_root(self.config.configuration_root.as_deref())
     }
 
     pub(crate) async fn state_for_client(&self, client_id: ClientId) -> Option<TabServerState> {
@@ -3029,8 +3047,8 @@ await loadPackage("@clay/typescript");"#,
         root
     }
 
-    /// Copy the canonical example tree (init.js + packages/) into a fresh
-    /// temp config root, mirroring the `cp -r examples/. ~/.config/clay/`
+    /// Copy the canonical example tree (init.js + packages/ + agents/) into
+    /// a fresh temp config root, mirroring the `cp -r examples/. ~/.clay/`
     /// setup from test-plan/02.
     fn temp_example_config_root(name: &str) -> std::path::PathBuf {
         let unique = SystemTime::now()
@@ -3043,20 +3061,23 @@ await loadPackage("@clay/typescript");"#,
         ));
         fs::create_dir(&root).unwrap();
         let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/config");
-        for entry in fs::read_dir(&examples).unwrap() {
+        copy_tree(&examples, &root);
+        root
+    }
+
+    /// Recursive copy mirroring `cp -r` (the example tree nests per-agent
+    /// config under `agents/coding-agent/`).
+    fn copy_tree(src: &std::path::Path, dst: &std::path::Path) {
+        for entry in fs::read_dir(src).unwrap() {
             let entry = entry.unwrap();
-            let target = root.join(entry.file_name());
+            let target = dst.join(entry.file_name());
             if entry.file_type().unwrap().is_dir() {
                 fs::create_dir(&target).unwrap();
-                for file in fs::read_dir(entry.path()).unwrap() {
-                    let file = file.unwrap();
-                    fs::copy(file.path(), target.join(file.file_name())).unwrap();
-                }
+                copy_tree(&entry.path(), &target);
             } else {
                 fs::copy(entry.path(), target).unwrap();
             }
         }
-        root
     }
 
     fn server_with_config(root: std::path::PathBuf) -> IpcServer {

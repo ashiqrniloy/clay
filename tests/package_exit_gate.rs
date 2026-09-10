@@ -109,9 +109,9 @@ fn scratch_home(label: &str) -> PathBuf {
             .expect("clock")
             .as_nanos()
     ));
-    std::fs::create_dir_all(root.join(".config/clay")).expect("scratch config dir");
+    std::fs::create_dir_all(root.join(".clay")).expect("scratch config dir");
     std::fs::write(
-        root.join(".config/clay/init.js"),
+        root.join(".clay/init.js"),
         "// user line one\nimport { loadPackage } from \"clay:packages\";\n",
     )
     .expect("seed init.js");
@@ -320,7 +320,7 @@ fn npm_shim_dir(home: &Path) -> PathBuf {
 }
 
 fn config_root(home: &Path) -> PathBuf {
-    home.join(".config/clay")
+    home.join(".clay")
 }
 
 fn init_js(home: &Path) -> PathBuf {

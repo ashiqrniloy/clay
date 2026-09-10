@@ -20,7 +20,7 @@ use crate::protocol::{
 };
 
 use super::{
-    RuntimeGenerationStore, TabServerState,
+    RuntimeGenerationStore, TabServerState, agent_settings,
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
     language_intelligence::LanguageIntelligenceCoordinator,
@@ -152,6 +152,8 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::ViewportRenderRequest { client_id, .. }
         | ClientMessage::OpenDocument { client_id, .. }
         | ClientMessage::OpenSelectedFile { client_id, .. }
+        | ClientMessage::ListAgentSettingsFiles { client_id }
+        | ClientMessage::OpenAgentSettingsFile { client_id, .. }
         | ClientMessage::AddSelectedWorkspaceRoot { client_id, .. }
         | ClientMessage::SaveDocument { client_id, .. }
         | ClientMessage::ReloadDocument { client_id, .. }
@@ -224,6 +226,7 @@ fn message_requires_tab_state(message: &ClientMessage) -> bool {
             | ClientMessage::ViewportRenderRequest { .. }
             | ClientMessage::OpenDocument { .. }
             | ClientMessage::OpenSelectedFile { .. }
+            | ClientMessage::OpenAgentSettingsFile { .. }
             | ClientMessage::AddSelectedWorkspaceRoot { .. }
             | ClientMessage::SaveDocument { .. }
             | ClientMessage::ReloadDocument { .. }
@@ -1141,6 +1144,68 @@ where
                 )
                 .await?;
             }
+            ClientMessage::ListAgentSettingsFiles { client_id } => {
+                // Agent settings page (plan 117): server-resolved listing;
+                // no config root ⇒ empty page, never an error.
+                let files = reload_server
+                    .as_ref()
+                    .and_then(|server| server.agent_settings_root())
+                    .map(|root| agent_settings::list_agent_settings_files(&root))
+                    .unwrap_or_default();
+                codec
+                    .write_server_message(
+                        &mut stream,
+                        &ServerMessage::AgentSettingsFiles { client_id, files },
+                    )
+                    .await?;
+            }
+            ClientMessage::OpenAgentSettingsFile { client_id, name } => {
+                // Agent settings page (plan 117): the name is validated
+                // against the fixed delivered-file layout and resolved
+                // server-side; the open/save path is the ordinary selected-
+                // file document pipeline (no extra capability — the name
+                // carries no path authority).
+                let root = reload_server
+                    .as_ref()
+                    .and_then(|server| server.agent_settings_root());
+                let response = match root
+                    .map(|root| agent_settings::resolve_agent_settings_file(&root, &name))
+                    .unwrap_or_else(|| Err("agent config root unavailable".to_string()))
+                {
+                    Ok(path) => {
+                        workspace::open_selected_file_response(
+                            &workspace,
+                            path.display().to_string(),
+                            client_id,
+                        )
+                        .await
+                    }
+                    Err(message) => file_operation_failed(
+                        WorkspaceError::FileUnavailable {
+                            path: std::path::PathBuf::from(&name),
+                            source: std::io::Error::new(
+                                std::io::ErrorKind::PermissionDenied,
+                                message,
+                            ),
+                        },
+                        None,
+                        None,
+                    ),
+                };
+                documents::write_document_open_response(
+                    &codec,
+                    &mut stream,
+                    response,
+                    &behavior,
+                    &runtime_generation,
+                    &workspace,
+                    &sdui,
+                    &parse_coordinator,
+                    &document_analysis,
+                    client_id,
+                )
+                .await?;
+            }
             ClientMessage::AddSelectedWorkspaceRoot {
                 client_id,
                 capability,
@@ -1469,8 +1534,16 @@ where
                                     | AgentPickerKind::Agent
                             ) =>
                         {
-                            let tab = server.tab_registry.lock().await.tab_for_client(client_id);
-                            server.agent.select_picker(*kind, id, tab).await;
+                            // `unwrap_or(client_id)` is the same tab the
+                            // panel's own mount (TabState) resolves, so the
+                            // selection lands on the tab its STATE belongs to.
+                            let tab = server
+                                .tab_registry
+                                .lock()
+                                .await
+                                .tab_for_client(client_id)
+                                .unwrap_or(client_id);
+                            server.agent.select_picker(*kind, id, Some(tab)).await;
                         }
                         // Plan 109 I8: OM worker model selection — the same
                         // per-workspace book path plus the daemon's
@@ -1480,11 +1553,71 @@ where
                             id,
                             session_id,
                         } => {
-                            let tab = server.tab_registry.lock().await.tab_for_client(client_id);
+                            // Same tab resolution as the panel's own mount: a
+                            // bare `tab_for_client` can be `None` while the
+                            // panel still holds this tab's session, which sent
+                            // the book broadcast at a session-less snapshot and
+                            // wiped the Memory tab.
+                            let tab = server
+                                .tab_registry
+                                .lock()
+                                .await
+                                .tab_for_client(client_id)
+                                .unwrap_or(client_id);
                             server
                                 .agent
-                                .select_worker(*worker, id, session_id.clone(), tab)
+                                .select_worker(*worker, id, session_id.clone(), Some(tab))
                                 .await;
+                        }
+                        // Plan 117: the panel's resume — the same rich
+                        // load the picker uses (full transcript + trio +
+                        // tab rebind), tab-resolved client-side then
+                        // broadcast so the view's relay applies it. The
+                        // old dispatch path had no tab (no rebind) and
+                        // broadcast an entry-less snapshot that wiped the
+                        // restored transcript.
+                        AgentClientCommand::ResumeSession { session_id } => {
+                            let tab = server
+                                .tab_registry
+                                .lock()
+                                .await
+                                .tab_for_client(client_id)
+                                .unwrap_or(client_id);
+                            let snapshot = server.agent.resume_tab(tab, session_id, None).await;
+                            server.agent.broadcast(snapshot);
+                        }
+                        // Plan 117 follow-up: the coding-agent pane's mount
+                        // STATE — the tab's branch + daemon environment
+                        // (skills, MCP outcomes) before any prompt, so the
+                        // status row and the pinned cards are populated on a
+                        // freshly opened surface.
+                        AgentClientCommand::TabState => {
+                            let tab = server
+                                .tab_registry
+                                .lock()
+                                .await
+                                .tab_for_client(client_id)
+                                .unwrap_or(client_id);
+                            let snapshot = server.agent.tab_state_snapshot(tab).await;
+                            server
+                                .agent
+                                .broadcast(AgentServerMessage::Snapshot(snapshot));
+                        }
+                        // Plan 117: the panel's recent-sessions list —
+                        // labeled, workspace-scoped, bounded.
+                        AgentClientCommand::ResumableSessions => {
+                            let tab = server
+                                .tab_registry
+                                .lock()
+                                .await
+                                .tab_for_client(client_id)
+                                .unwrap_or(client_id);
+                            let sessions = server.agent.resumable_for_tab(tab, 5).await;
+                            server.agent.broadcast(AgentServerMessage::AgentRpc {
+                                code: "session.resumable".into(),
+                                result_json: serde_json::json!({ "sessions": sessions })
+                                    .to_string(),
+                            });
                         }
                         _ => server.agent.dispatch(*command),
                     }

@@ -65,7 +65,7 @@ await setFullAutonomy({ sessionId: "s1", enabled: false });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `agent.setFullAutonomy` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `agent.setFullAutonomy` in `~/.clay/init.js`.
 
 ## Custom properties
 

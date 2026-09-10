@@ -324,16 +324,16 @@ fn contribution_ids_of(record: &PackageRecord) -> Vec<String> {
         .collect()
 }
 
-/// Default configuration root: `~/.config/clay`.
+/// Default configuration root: `~/.clay` (decision 2026-09-10-1526).
 pub fn default_config_root() -> std::path::PathBuf {
     match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        Some(home) => std::path::PathBuf::from(home).join(".config").join("clay"),
+        Some(home) => std::path::PathBuf::from(home).join(".clay"),
         None => std::path::PathBuf::from(".clay-config"),
     }
 }
 
 /// Default on-disk package store root shared by the CLI and the production
-/// server runtime: `~/.config/clay/packages`.
+/// server runtime: `~/.clay/packages`.
 pub fn default_store_root() -> std::path::PathBuf {
     match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         Some(_) => default_config_root().join("packages"),

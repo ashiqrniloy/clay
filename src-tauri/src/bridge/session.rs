@@ -676,6 +676,12 @@ fn stamp_client_id(
             capability,
             selected_path,
         },
+        ClientMessage::ListAgentSettingsFiles { .. } => {
+            ClientMessage::ListAgentSettingsFiles { client_id }
+        }
+        ClientMessage::OpenAgentSettingsFile { name, .. } => {
+            ClientMessage::OpenAgentSettingsFile { client_id, name }
+        }
         ClientMessage::AddSelectedWorkspaceRoot {
             capability,
             selected_path,

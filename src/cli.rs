@@ -313,6 +313,29 @@ pub(crate) fn parse_endpoint_and_config_fixture(
                 )));
             }
             configuration_root = Some(resolve_config_fixture(&name)?);
+        } else if argument == "--configuration-root" {
+            let Some(path) = args.next() else {
+                return Err(CliError::new(format!(
+                    "missing path after --configuration-root for '{mode}'"
+                )));
+            };
+            if configuration_root.is_some() {
+                return Err(CliError::new(format!(
+                    "duplicate --configuration-root option for '{mode}'"
+                )));
+            }
+            // Absolute paths only: the configuration root anchors agent
+            // data, MCP allow-list discovery, and the per-agent config
+            // root — a relative path would resolve against whatever cwd
+            // the launcher happened to have.
+            let path = PathBuf::from(&path);
+            if !path.is_absolute() {
+                return Err(CliError::new(format!(
+                    "--configuration-root must be an absolute path: {}",
+                    path.to_string_lossy()
+                )));
+            }
+            configuration_root = Some(path);
         } else if allow_endpoint && endpoint.is_none() {
             endpoint = Some(IpcEndpoint::from_argument(argument));
         } else {

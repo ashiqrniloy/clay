@@ -43,7 +43,7 @@ Set Editor Viewport through the planned `clay:editor` Clay JavaScript facade.
 
 `clientSetViewport` is the planned public API for **Set Editor Viewport**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC. This entry is retained as a planned client-local viewport API, not as user configuration loaded from `~/.config/clay/init.js`.
+Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC. This entry is retained as a planned client-local viewport API, not as user configuration loaded from `~/.clay/init.js`.
 
 ## When to use
 
@@ -71,7 +71,7 @@ clientSetViewport({ documentId: "current", visibleLineCount: 40, overscanLines: 
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `editor.clientSetViewport` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `editor.clientSetViewport` in `~/.clay/init.js`.
 
 ## Custom properties
 

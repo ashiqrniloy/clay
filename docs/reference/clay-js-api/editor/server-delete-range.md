@@ -68,7 +68,7 @@ Default key bindings:
 - `Backspace`
 - `Delete`
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js`.
 
 ## Custom properties
 

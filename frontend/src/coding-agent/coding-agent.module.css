@@ -153,6 +153,100 @@
   color: var(--clay-text-muted);
 }
 
+/* Pinned skills card (plan 115): catalog reference card above the
+ * transcript — hairline-separated rows like the context list, muted
+ * text, accent left edge so it reads as its own card type. */
+.skillsCard {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  background: var(--clay-surface-panel);
+  border-left: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-accent-primary);
+}
+
+.skillsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.skillsRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  min-width: 0;
+}
+
+.skillsRow > :global(*) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pinned MCP card (plan 117): per-server connect outcomes, same card
+ * language as the skills card but neutral-edged — the accent edge stays
+ * on skills; failed servers read through diagnostic.error text. */
+.mcpCard {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  background: var(--clay-surface-panel);
+  border-left: var(--clay-dimension-border-thin, 2px) solid
+    var(--clay-border-subtle);
+}
+
+.mcpList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.mcpRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  min-width: 0;
+}
+
+.mcpRow > :global(*),
+.mcpSectionRow > :global(*) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpError {
+  color: var(--clay-diagnostic-error);
+}
+
+/* Composer MCP connections section (plan 117): below the message input,
+ * one row per server with state; hairline top divider per the status
+ * rhythm. Hidden when no server is configured. */
+.mcpSection {
+  list-style: none;
+  margin: 0;
+  padding: var(--clay-spacing-2xs, 4px) var(--clay-spacing-sm, 12px);
+  border-top: var(--clay-dimension-border-hairline, 1px) solid
+    var(--clay-border-hairline);
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.mcpSectionRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--clay-spacing-md, 16px);
+  min-width: 0;
+}
+
 .empty {
   margin: auto;
   padding: var(--clay-spacing-xl, 32px) 0;
@@ -224,6 +318,16 @@
   flex: 0 0 auto;
 }
 
+/* Plan 117 @-mention dropdown: section labels above skills/files groups. */
+.completionSection {
+  display: block;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-lg, 24px)
+    calc(var(--clay-spacing-xs, 8px) / 2);
+  background: var(--clay-surface-main);
+  color: var(--clay-text-muted);
+  text-align: left;
+}
+
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -256,6 +360,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Session token meter (plan 117): context occupancy vs the model's
+ * ceiling. Threshold tones ride diagnostic tokens only — warning above
+ * 60%, error above 80%; normal inherits the caption color. */
+.meterWarning {
+  color: var(--clay-diagnostic-warning);
+}
+
+.meterError {
+  color: var(--clay-diagnostic-error);
 }
 
 .extensionStrip {
@@ -460,4 +575,12 @@
   justify-content: space-between;
   gap: var(--clay-spacing-sm, 12px);
   min-height: 24px;
+}
+
+/* Plan 117 follow-up: label over last-active stamp, so a row identifies both
+   the session topic and when it was last touched. */
+.sessionLabel {
+  display: grid;
+  gap: var(--clay-spacing-2xs, 2px);
+  min-width: 0;
 }

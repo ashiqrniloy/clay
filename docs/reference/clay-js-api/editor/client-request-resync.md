@@ -55,7 +55,7 @@ bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientRequestResync, clientDismissRecovery } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 

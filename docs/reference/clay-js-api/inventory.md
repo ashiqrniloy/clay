@@ -20,7 +20,7 @@ This inventory classifies the current editor, protocol, behavior, key binding, c
 | `server-first-op-wrapper` | Future Clay JS facade calls a server-side op before mutating canonical document state. | Programmatic text insertion. |
 | `server-first-query` | Future Clay JS facade queries server-owned document/lease state. | Document snapshots and lease queries. |
 | `server-first-op-wrapper-runtime` | Runtime-backed Clay JS facade validates a server-side package/programmatic declaration through an explicit op wrapper. | `ui.serverRegisterPanelContribution`, `ui.serverRegisterComponentContribution`, `ui.serverRegisterTransientOverlayContribution`, `ui.serverRegisterInputContribution`, `ui.serverRegisterUiStateScope`, `ui.serverRegisterThemeToken`. |
-| `server-side-configuration-to-behavior-manifest` | Future `~/.config/clay/init.js` configuration updates manifest/key binding metadata on the server side. | `bindKey`, `unbindKey`. |
+| `server-side-configuration-to-behavior-manifest` | Future `~/.clay/init.js` configuration updates manifest/key binding metadata on the server side. | `bindKey`, `unbindKey`. |
 | `background-query` | Help/agent/configuration inspection that must not block editing. | Behavior route and manifest queries. |
 | `client-local-application-action` | Native application lifecycle action. | Escape/quit. |
 | `client-paint-layout-hot-path` and `local-ipc-codec` | Internal implementation details excluded from public registry generation. | Webview layout/paint and protocol DTOs. |

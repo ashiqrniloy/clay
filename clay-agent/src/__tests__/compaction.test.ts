@@ -203,6 +203,10 @@ test("chat session without OM attach has no recall tool", async () => {
     dataDir: await tempDir(),
     passphrase: "pass-phrase-ok",
     mock: true,
+    // Hermetic skill roots: exact tool assertions must not depend on the
+    // developer's real ~/.agents or agent config dir.
+    agentConfigRoot: await tempDir(),
+    homeSkillsRoot: await tempDir(),
   });
   await host.handle("agentProfile.register", { name: "chat" });
   const created = (await host.handle("session.new", {

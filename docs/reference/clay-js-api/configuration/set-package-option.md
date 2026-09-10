@@ -9,7 +9,7 @@ deno_op: op_clay_configuration_set_package_option
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_set_package_option
 name: setPackageOption
 user_facing_name: Set Package Option
-summary: Register a validated package-owned configuration option from `~/.config/clay/init.js`.
+summary: Register a validated package-owned configuration option from `~/.clay/init.js`.
 owner: server
 phase: Phase 18.4
 visibility: public
@@ -46,7 +46,7 @@ async: false
 
 ## Summary
 
-`setPackageOption` records a validated package-owned option from `~/.config/clay/init.js`.
+`setPackageOption` records a validated package-owned option from `~/.clay/init.js`.
 
 ## Description
 
@@ -73,7 +73,7 @@ setPackageOption({ packagePrefix: "markdown", option: "markdown.layout.defaultVi
 - `packagePrefix`: package apiPrefix.
 - `option`: package-prefixed documented option.
 - `value`: typed bounded value.
-- `source`: `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6). The `ui-session` source labels values persisted from the settings UI into `~/.config/clay/preferences.json`.
+- `source`: `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6). The `ui-session` source labels values persisted from the settings UI into `~/.clay/preferences.json`.
 
 ## Key bindings
 

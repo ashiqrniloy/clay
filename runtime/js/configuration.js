@@ -1,6 +1,6 @@
 // Clay configuration facade.
 //
-// Configuration runs from `~/.config/clay/init.js` in Clay's constrained
+// Configuration runs from `~/.clay/init.js` in Clay's constrained
 // server-side JavaScript runtime. These APIs delegate to Clay-owned ops when
 // the embedded runtime provides them; they do not grant network, shell,
 // package, AI, workspace, WASM, or client-side JavaScript authority.

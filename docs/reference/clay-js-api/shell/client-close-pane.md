@@ -46,7 +46,7 @@ Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-clien
 
 ## When to use
 
-Use this API when a user wants to bind an alternate pane-management chord in `~/.config/clay/init.js`.
+Use this API when a user wants to bind an alternate pane-management chord in `~/.clay/init.js`.
 
 ## JavaScript usage
 
@@ -66,7 +66,7 @@ bindKey("Ctrl+Alt+W", "shell.clientClosePane", { scope: "global" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientClosePane } from "clay:shell";
 import { bindKey } from "clay:keybindings";
 

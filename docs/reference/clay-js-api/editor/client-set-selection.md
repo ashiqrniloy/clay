@@ -82,7 +82,7 @@ Default key bindings:
 - `PrimaryPointerDrag`
 - `Ctrl+L` (select current line), `Ctrl+D` (select word at caret)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (e.g. `editor.clientSetSelection.selectLine`).
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js` using the direction-specific command IDs (e.g. `editor.clientSetSelection.selectLine`).
 
 ## Custom properties
 

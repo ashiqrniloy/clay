@@ -3,7 +3,7 @@
 // Each export returns a stable Clay command ID string. The command IDs are
 // ClientUiCommand-routed: bindKey installs an inert keybinding that the client
 // dispatches to ClayShellWidget without a server round-trip. Packages and user
-// configuration (`~/.config/clay/init.js`) use these helpers with
+// configuration (`~/.clay/init.js`) use these helpers with
 // `keybindings.bindKey` to remap the default Phase 22.1 chords.
 //
 // No function here performs side effects, runs server IPC, or mutates the

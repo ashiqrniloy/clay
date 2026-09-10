@@ -37,7 +37,7 @@ async: false
 
 ## Summary
 
-Forces Clay's syntax engine tier for a language or first-party package during `~/.config/clay/init.js` or package-load setup.
+Forces Clay's syntax engine tier for a language or first-party package during `~/.clay/init.js` or package-load setup.
 
 ## Description
 

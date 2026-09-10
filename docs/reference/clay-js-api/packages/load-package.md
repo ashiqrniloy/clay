@@ -21,7 +21,7 @@ custom_properties:
     default: required
     description: Package specifier, e.g. "@clay/markdown", "@vendor/foo", or an installed source spec such as "github:user/repo".
 security: The trusted-only packages facade cannot be imported by third-party code. Bundled trust requires an exact compiled inventory/provenance/integrity match; every other source remains third-party and must have a current durable user adoption record before enable or execution. Approved third-party load entries execute only in the shared third-party runtime, never the trusted runtime, and are not mutually isolated from sibling third-party packages. Graph relations and first-party mutations require declared extension scope plus durable user consent; stale/revoked approval fails closed. Root-confined loading grants no filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or implicit package-control authority.
-agent_guidance: Use as the one-line default for loading packages from ~/.config/clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.
+agent_guidance: Use as the one-line default for loading packages from ~/.clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.
 lookup_tags: [packages, js-api, load, source-aware, init]
 app_visible: true
 help_visible: true
@@ -37,13 +37,13 @@ Resolve and activate an installed, user-authorized package from a single specifi
 
 ## Description
 
-`loadPackage("@clay/markdown")` is the one-line end-user default for loading a package from `~/.config/clay/init.js`; installed source-aware packages can use the same API, e.g. `loadPackage("@vendor/foo")` or `loadPackage("github:user/repo")` after install and authorization. The resolver validates package metadata through Clay-owned `PackageService` validators, checks user-approved capability grants, enables the package, applies host-owned `package.json` contributions (modes, commands, completion, syntax, UI), and then imports the execute-only `loadEntry` for work that cannot be JSON (parse-handler module import, document analyzer). No inline manifest object, no per-primitive registration, and no manual `clay` facade plumbing are required in user configuration.
+`loadPackage("@clay/markdown")` is the one-line end-user default for loading a package from `~/.clay/init.js`; installed source-aware packages can use the same API, e.g. `loadPackage("@vendor/foo")` or `loadPackage("github:user/repo")` after install and authorization. The resolver validates package metadata through Clay-owned `PackageService` validators, checks user-approved capability grants, enables the package, applies host-owned `package.json` contributions (modes, commands, completion, syntax, UI), and then imports the execute-only `loadEntry` for work that cannot be JSON (parse-handler module import, document analyzer). No inline manifest object, no per-primitive registration, and no manual `clay` facade plumbing are required in user configuration.
 
 The resolved `loadEntry` is confined to the validated package root for its own imports; it cannot load modules outside its root or escape the config root for any non-package specifier. Bundled trust comes only from Clay's compiled exact inventory/root/integrity check. Every other source executes in one shared adopted-third-party runtime after durable approval; third-party packages are a disclosed trust cohort and are not mutually isolated from sibling packages.
 
 ## When to use
 
-Use this API as the default way to load a package from `~/.config/clay/init.js`. It is the preferred path over `serverLoadPackage(packageJson)` (which is a lower-level validation helper for fixtures) and over `markdownLoadMode()` (which remains a documented convenience alias for per-load options).
+Use this API as the default way to load a package from `~/.clay/init.js`. It is the preferred path over `serverLoadPackage(packageJson)` (which is a lower-level validation helper for fixtures) and over `markdownLoadMode()` (which remains a documented convenience alias for per-load options).
 
 Packages must be installed and authorized before loading. Third-party packages must also be adopted out-of-band with `clay package adopt <name>`; JavaScript cannot approve itself or promote a package into the trusted runtime. Install/provenance discovery, capability authorization, adoption validation, relation/replacement consent, conflict checking, canonicalization, and allowlist recording happen before load-entry execution. Revoked or stale approval fails closed.
 
@@ -63,7 +63,7 @@ await loadPackage("github:user/repo");
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 import { bindKey } from "clay:keybindings";
 
@@ -80,7 +80,7 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `packages.loadPackage` in `~/.config/clay/init.js` if they need a reload command, but reloading is not a default hot key.
+No default key binding is assigned. Users may bind a key to `packages.loadPackage` in `~/.clay/init.js` if they need a reload command, but reloading is not a default hot key.
 
 ## Custom properties
 

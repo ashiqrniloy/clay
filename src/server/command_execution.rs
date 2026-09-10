@@ -413,12 +413,19 @@ pub(crate) fn is_chat_command(command_id: &str) -> bool {
     command_id.starts_with("chat.")
 }
 
-/// Coding Agent surface launch/close intents (plan 108 task 8): validated
-/// package commands whose effect is the client-side presentation toggle. The
-/// dispatcher answers with one `ShellClientCommandRequest` the client
-/// re-parses deny-by-default; no server state changes.
+/// Coding Agent surface launch/close intents (plan 108 task 8) and the
+/// agent settings page toggle (plan 117): validated package commands whose
+/// effect is the client-side presentation toggle. The dispatcher answers
+/// with one `ShellClientCommandRequest` the client re-parses deny-by-default;
+/// no server state changes.
 pub(crate) fn is_agent_surface_command(command_id: &str) -> bool {
-    matches!(command_id, "coding-agent.profile" | "coding-agent.close")
+    matches!(
+        command_id,
+        "coding-agent.profile"
+            | "coding-agent.close"
+            | "coding-agent.agentSettings.open"
+            | "coding-agent.agentSettings.close"
+    )
 }
 
 /// Bounded appearance values accepted by `settings.setAppearance`.

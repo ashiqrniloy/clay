@@ -43,7 +43,7 @@ Palette). P16/P17/P18 above are subsumed by C8–C11/C20 for plan 109.
 | C8 | Context tab: open the drawer, open an item | Seven server-authoritative categories with counts; drawer lists items; item detail shows full redacted content; Back returns | context.test + ContextTab test (I7) |
 | C9 | Context across compaction: `/compact`, reopen Context tab | Compaction summary category reflects the compaction entry; counts refresh event-driven (no polling) | context.test compaction drill (I7) |
 | C10 | OM tab: run observe→reflect→drop via real worker models | Activity log lists observations, reflections, drops (drops visible, not silently vanished), compaction folds; bounded to 200 rows | om.test drill (I8) |
-| C11 | OM worker-model selection: pick distinct observation/reflection models | Selection persists per workspace and per session; restored on resume; clear resets | om.test retention (I8) |
+| C11 | OM worker-model selection: pick distinct observation/reflection models | Selection persists per workspace and per session; restored on resume; clear resets; **the panel keeps its live session** — the selection broadcast carries the tab's session id, transcript and branch instead of a session-less snapshot (the Memory/Context/Settings tabs must not fall back to "No active agent session.") | om.test retention (I8); `book_selection_broadcast_keeps_the_tab_session` |
 | C12 | `/resume` | Workspace-scoped picker lists this workspace's sessions (most-recent first, bounded); other workspaces absent | resume.test scoping (I9) |
 | C13 | Resume restore drill: resume a session with a switched model | Both turns reload; session resumes on its persisted model; follow-up prompt continues the branch | resume.test restart drill (I9) |
 | C14 | Session Info: click a chat card | Right pane auto-selects the Session Info tab with that entry's full detail (kind, content, tool/skill metadata); Back restores the prior tab; no selection shows guidance | CodingAgentPanel I10 tests |
@@ -196,6 +196,97 @@ gates green (protocol `doc` 148, lib `doc` 107).
 | C21/C22/C23 automated legs | PASS (automated) | citations in the table above |
 | C21/C22 live OpenCode Go legs | UNRESOLVED | standing manual step — no provider credential on this host (same blocker as the plan 109 real-provider legs); retry after credential setup |
 | C23 live effort leg (Shift+Tab / dropdown) | UNRESOLVED | same standing credential/GUI blocker; wire-path covered by the automated kernel suites |
+
+## Plan 117 steps (skill discovery, MCP, prompt layers, settings page, @ mentions, token meter, coding-agent fixes, 2026-09-10)
+
+Steps C24–C35 cover the plan 117 user-visible behaviors. Automated legs cite
+the pinning suites; live-build legs run against `cargo run` (scratch config
+root from `examples/config/`, per the launch-test setup in plan 117).
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C24 | Open the agent surface on a workspace with skills in any enabled root (workspace `.agents/skills/`, agent-config `skills/`, home `~/.agents/skills/`); no message sent yet | Skills card renders at the top of the transcript listing each catalog skill (name + description); card stays pinned once messages arrive | clay-agent skills discovery suites; CodingAgentPanel SkillsCard tests |
+| C25 | Toggle a root off in `agents/coding-agent/skills.json` (`roots.home.enabled: false`), restart the daemon, reopen the surface | Skills from the disabled root disappear from the card; workspace/config-root skills remain; no error surface | skills.json loader suites (root gating) |
+| C26 | Put `mcp.json` in the agent config root with a stdio server (e.g. the `mcp-fixture-server.mjs` fixture), relaunch | MCP card renders next to the skills card: one row per server with connection state + tool count; composer gains an MCP section below the input listing connected servers; tools surface as `mcp:<server>:<tool>` | clay-agent mcp suites; CodingAgentPanel McpCard + composer-section tests |
+| C27 | Repo-root `.mcp.json` with the same server id as the user file | User file wins on collision; the merged allow list connects the user's entry; bare command names PATH-resolve (repo file ignores `cwd`/`timeoutMs`) | `agent_mcp_config` merge suites |
+| C28 | Stop one configured MCP server's binary; relaunch | Per-server isolation: the failed server shows its error in the MCP card and hides only its tools; healthy servers stay connected and usable | connectAllowListedMcpServers allSettled isolation tests |
+| C29 | Open the coding agent's right-hand **Settings** tab | Lists exactly `SYSTEM.md` + `skills/<name>/SKILL.md` files with size and built-in-vs-edited provenance (untouched seeds read built-in); selecting one opens it in the pane editor (the agent surface releases, the tab does not open a side panel); edits save and provenance flips to edited; deleted seed files regenerate at next daemon start | `tests/agent_settings_listing.rs` (real `clay::client` connection); agent_settings listing/provenance/resolve suites (7); AgentSettingsPanel tests (3); CodingAgentPanel Settings-tab test |
+| C30 | Type `@` in the composer | Sectioned dropdown (Skills + Files) appears; type to filter; ArrowUp/Down navigate, Tab/Enter select, Escape dismisses; selecting a skill embeds `@skill:<name>` (body loaded for the run); selecting a file embeds `@file:<path>` and attaches its content (images as image blocks) | CodingAgentPanel mention tests; mentions.test (skill load, unknown-skill passthrough, unavailable-tool skip, file attach, symlink-escape rejection) |
+| C31 | Send a prompt and watch the status row token meter after the first finished turn | Meter shows `occupancy/ceiling` (e.g. `12k/270k`) from the last provider turn's prompt tokens vs the active model's context window; tone turns warning above 60% and error above 80%; ceiling follows model switches; when usage is unreported the meter estimates from transcript chars (calibration, not measurement) | CodingAgentPanel meter tests (thresholds, model switch, heuristic); clay.contextTokens state tests |
+| C32 | In a wiki-configured workspace submit `/wiki-init` | Daemon enables the wiki binding: wiki slash commands + skills appear; re-running is idempotent; with wiki disabled in skills.json the command stays a chat-safe prompt with no residue | skills-commands wiki intercept tests; daemon dispatch arm tests |
+| C33 | Open a coding session with the graft CLI available / absent | Graft available: graft skill registered + graft tools surface (extension strip shows the graft extension); graft absent: binding fails closed silently — no graft tools, no error surface; graft skill body still loads for guidance | graftBindAttempted/ensureGraftBound fail-closed tests; extension naming tests |
+| C34 | Open `/resume` (composer intercept) and the Files-tab recent list | Both list workspace sessions with a human label (first user-message words) **and the last-active local time**, never a bare profile + raw UTC stamp; clicking a row restores the full transcript (user/thinking/tool/assistant rows), model, and leaf into the live view without an entry-less snapshot wiping it; the next prompt continues the **resumed** session rather than starting a new one | resumable label/local-stamp tests (clay-agent resume suite); `resume_after_daemon_load_restores_bounded_history` (persisted entry shape); `resumed_tab_keeps_its_session_on_the_next_prompt`; `session_picker_rows_show_the_label_and_the_local_stamp`; FilesTab labeled-row tests |
+| C35 | Open a fresh session in a git workspace; check effort before any prompt | Status row shows the real branch from the first snapshot (no `—` placeholder); effort dropdown is visible and changeable pre-first-prompt (levels resolved from the models inventory), and a changed level applies from the next prompt | ensure_tab_session refresh_branch tests; effort-from-inventory tests; unit-variant wire contract test (bare-string client commands) |
+
+### Plan 117 prompt layers (context inspector)
+
+| # | Action | Expected |
+|---|--------|----------|
+| C36 | Run a prompt, open the context inspector, expand the System prompt group | The group renders the composed layers: user `SYSTEM.md` (user-owned layer), workspace `AGENTS.md` (app layer), and the profile's base instructions — never an empty group for instruction-only profiles | contextCategories system-prompt-base test; PROMPT_LAYER_LABELS tests |
+| C37 | Edit `agents/coding-agent/SYSTEM.md`, start a new session | The edited text appears as the top-ranked system-prompt layer; absent file seeds as EMPTY (no prompt pollution); 64 KiB cap enforced | loadUserSystemPrompt suites; seed manifest tests |
+
+## Negative checks (plan 117)
+
+| # | Check | Expected |
+|---|-------|----------|
+| C-N5 | `agentSkills` toggled off in skills.json (e.g. `graft: false`) | The skill never registers; its dependent slash commands never appear; disk-discovered skills unaffected | skills.json agentSkills gate tests |
+| C-N6 | Malformed or unreadable skills.json / mcp.json | Bounded stderr warning; defaults stay on (skills.json) or the file contributes nothing (mcp.json); startup never fails | loader warn-and-default tests |
+| C-N7 | Relative home path in skills.json (`home.path: "rel"`) | Home root disabled fail-closed for the session; workspace/config roots unaffected | home-path rejection tests |
+| C-N8 | Oversized or unreadable SYSTEM.md / SKILL.md seed | File skipped (SYSTEM.md) or falls back to the built-in seed (SKILL.md) with a stderr warning; the user file is never clobbered; session opens normally | MAX_PROMPT_LAYER_BYTES / MAX_AGENT_SKILL_FILE_BYTES tests |
+| C-N9 | Symlink escape | Workspace AGENTS.md pointing outside the workspace root and `@file:` mentions resolving outside the root are silently excluded | realpath containment tests |
+| C-N10 | Discovered skill with unavailable tools | Skill is skipped from activation (never bricks the session); built-in skills keep fail-closed semantics | toolName-subset filtering tests |
+| C-N11 | MCP entry with relative command or 33rd server | Entry/server rejected fail-closed at the daemon boundary; diagnostic names the offense; other servers still connect | parseEntry / MAX_MCP_SERVERS tests |
+
+## Known ceilings (not bugs)
+
+- Real-provider latency (PERF-1) varies with the provider; the recorded
+  budget applies to first-box latency on the mock path and the 2 s
+  first-box guide on real providers.
+- Shift+Tab keybind is fixed (not yet user-configurable) — plan 108 seam.
+  (Plan 109 I4 added the bindKey surface; the ceiling sentence applies to
+  plan 108-era builds only.)
+- Git branch in the status row is a seam showing `—` until wired.
+  (plan 109 R2 wired it; plan 117 extended it to fire at session
+  creation — the ceiling sentence applies to plan 108-era builds only.)
+- `@skill:` mentions cannot select skill names containing spaces
+  (whitespace-delimited token grammar) — documented plan 117 ceiling.
+- The token meter's chars-per-token estimate is a calibration fallback,
+  not a measurement; provider-reported occupancy always wins when present.
+- Agent settings listing covers only `SYSTEM.md` and
+  `skills/<name>/SKILL.md` (the delivered-agent layout); arbitrary config
+  files are not exposed.
+- The Settings tab fetches on open; the listing is not cached across tab
+  switches or session switches (re-requested each time the tab is entered).
+- Resume rows show the opening prompt's first five words, stamped when the
+  entry is written. Sessions persisted before the stamp existed read
+  "Untitled session" — no backfill is attempted, and a session created by the
+  pane mount but never prompted stays unlabelled until its first prompt.
+
+## Plan 117 execution record (Linux, 2026-09-10)
+
+Build: plan 117 working tree. Automated gates: cargo fmt/clippy clean;
+cargo test green (lib 1307, protocol 210, security 152); clay-agent 138
+(137 pass / 0 fail / 1 skip); frontend 294/294. Live launch-test executed
+with an isolated scratch config root (canonical `examples/config/` copied
+verbatim + sample MCP fixture server + scratch workspace skill), real
+server + GUI on a dedicated socket — never the developer profile.
+
+| Legs | Status | Evidence |
+|------|--------|----------|
+| C24/C25 automated legs (skills discovery + gating) | PASS (automated) | clay-agent skills discovery suites (3 roots, gating, toolName filtering); SkillsCard tests |
+| C26/C27/C28 automated legs (MCP wiring, merge, isolation) | PASS (automated) | clay-agent mcp suites; agent_mcp_config merge/PATH-resolve suites; allSettled isolation tests |
+| C29 automated legs (settings page) | PASS (automated) | 6 agent_settings suites (layout, provenance, resolve, symlink escape, per-agent root); document pipeline tests |
+| C30 automated legs (@ mentions) | PASS (automated) | mentions.test × 7 + frontend mention dropdown tests |
+| C31 automated legs (token meter) | PASS (automated) | meter threshold/model-switch/heuristic tests; clay.contextTokens state tests; per-turn prompt-token source pinned by tests |
+| C32/C33 automated legs (wiki-init, graft default) | PASS (automated) | wiki intercept tests; graft fail-closed bind + extension-naming tests |
+| C34/C35 automated legs (resume, branch, effort) | PASS (automated) | resumable label/local-stamp + parse tests; resume entry-shape + resumed-tab-retention tests; resume clobber-fix + broadcast tests; branch-at-creation tests; effort-from-inventory tests |
+| C36/C37 automated legs (prompt layers) | PASS (automated) | contextCategories base-layer test; loadUserSystemPrompt + seed manifest tests |
+| C-N5–C-N11 | PASS (automated) | per-check citations above (skills.json gates, malformed-config warnings, home-path rejection, size caps, realpath containment, MCP fail-closed) |
+| Live launch gate (scratch config, isolated roots) | PASS | Server ~2 s to listen, GUI connected ~6 s (debug build); status bar `Workspace · Connected`; zero wire errors after the dist+binary rebuild (the stale-bundle `listSessions:{}` unit-variant error surfaced and was fixed end-to-end); scratch isolation verified on disk — daemon seeded + read `/tmp/clay-launch-home/.clay/agents/coding-agent/` (skills seeds, SYSTEM.md, `.seed-manifest.json`), never the real home; scratch skills.json parsed (no absent/defaults warning) |
+| MCP fixture connect through the real daemon (C26 daemon half) | PASS | `environment.list` on a scratch-config daemon session → `mcpServers: [{serverId: "fixture", connected: true, tools: 2}]` — the exact outcome shape the MCP card renders; daemon fail-closed rejection of the bare `node` command confirmed the two-layer design (server canonicalizes PATH; daemon demands absolute) |
+| Skills discovery through the real daemon (C24 daemon half) | PASS | Scratch-config daemon session catalog: workspace-root skill (`demo-skill`) + home-root skill (`find-docs`) discovered from the enabled roots |
+| Interactive GUI legs (click-through of cards/settings/mentions/meter) | UNRESOLVED | Standing host ceiling (no input-synthesis path: no sudo for `/dev/uinput`, ydotoold cannot open uinput, portal consent requires a human); server-side halves verified above; card rendering pinned by the 294-test frontend suite; `test-plan/artifacts/117-coding-agent/launch-gate/` holds the launch capture |
+
 
 ## Plan 112 cross-reference (2026-09-07)
 

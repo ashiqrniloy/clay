@@ -618,7 +618,7 @@ Binding prior decisions:
     - Linux gates at completion: `cargo fmt --check` clean; `cargo check --all-targets` clean; `cargo clippy --all-targets -- -D warnings` clean; lib 1289 passed; security 152 passed (includes the 7 exit-gate drills); runtime 75; presentation 46; protocol 209. CLI verb wall-clock is manager-process dominated (drill binaries finish in ~3 s total including 10+ real npm invocations).
     - Security re-checks: un-adopted load line fails closed (drill 4 + task 13 drill), unsigned-payload rejection unchanged (`src-tauri/src/release.rs` suite untouched), `--ignore-scripts` default proven at the manager-process boundary (drill 3), binary provisioning without `--yes` refused (task 13 drill + parse tests).
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation (completed 2026-09-08)
   - Acceptance Criteria:
     - Functional: The project code wiki is updated after all implementation tasks are complete: package-management pages cover the new verbs, ledger, init-line management, self-update channels, and binary provisioning; distribution is documented; the master index links the pages.
     - Performance: Wiki updates add no runtime work and document performance-relevant details (CLI-only, off hot path, one manager process per verb).
@@ -644,6 +644,12 @@ Binding prior decisions:
       - `.agents/skills/project-wiki/SKILL.md`
   - Test Cases to Write:
     - Manual wiki review: Confirm the master index links relevant pages and updated pages explain what changed implementation does and how it works.
+  - Evidence:
+    - New `docs/wiki/modules/package-management.md`: Phase 3 CLI-only install/update/distribution — source map, overview (three trust domains, delegated manager, CLI-only, zero new ops), responsibilities (v1 `npm:` spec forms, ledger, exact-shape init.js block, pinned-vs-floating update, deny-by-default binary provisioning, npm+curl channels), how-it-works pipeline (parse → ledger → one manager process → idempotent append; remove strips byte-exactly; update semantics; self-update marker; provisioning refusal), security boundaries (install≠enable≠adopt≠execute, `--ignore-scripts` default + ENABLED warning + npm ≥ 11.17 `allowScripts` ceiling, fail-closed ledger/marker, accept_update as only apply gate), performance (CLI-only off hot path, one manager process per verb, 33 ms vs 60 ms boot load-line budget), tests (package_cli/package_exit_gate/package_loading), and runnable examples.
+    - `docs/wiki/index.md`: Package Management entry added to the Modules list; the wiki master-index coverage test (every non-archive page linked from index.md) passes.
+    - Stale-CLI sweep: `docs/wiki/modules/package-loading.md` and `docs/wiki/modules/configuration-runtime.md` replaced `clay package add|remove|list` references with Phase 3 verbs + cross-links; `docs/reference/primitives/package-loading.md` example block now lists the four accepted `npm:` forms (git/tarball/local examples removed — rejected in v1) and the `resolve_manager_backend` delegation sentence; `docs/reference/clay-js-api/configuration.md` lifecycle-script suppression text now uses `clay install --allow-scripts npm:<spec>` (env-var claim verified in src/cli.rs/launch.rs).
+    - Claims verified before writing (no invented behavior): npm channel does NOT write a channel marker (only the curl installer does — page documents the unmanaged no-op for npm-channel installs); `CLAY_ALLOW_LIFECYCLE_SCRIPTS` exists; CLI_USAGE surface matches the page.
+    - Gates: protocol 209 passed (wiki master-index + parity + doc coverage), security 152 passed (exit-gate drills + package_cli), lib package 181 + configuration 57 passed.
 
 ## Compromises Made
 

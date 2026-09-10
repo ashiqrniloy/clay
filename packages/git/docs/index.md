@@ -49,7 +49,7 @@ Loading `@clay/git` adds the read-only status panel on top of these always-avail
 ## Default Load Path
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/git");

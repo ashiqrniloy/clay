@@ -79,13 +79,80 @@ test("explicit env forwarding works even when ambient secret is absent", async (
   }
 });
 
-test("bad command fails closed: whole connect rejects, nothing partially bridged", async () => {
+test("per-server fault isolation: one failing server hides only its own tools", async () => {
+  // Connection failures no longer reject the connect (decision 1758
+  // amendment + plan 117): a crashed binary hides only its own tools.
+  const connected = await connectAllowListedMcpServers([
+    { serverId: "good", command: process.execPath, args: [FIXTURE] },
+    { serverId: "bad", command: "/definitely/not/a/real/binary-9f3c2a" },
+  ]);
+  try {
+    assert.ok(connected.tools.some((t) => t.name.startsWith("mcp:good:")), "healthy server's tools stay bridged");
+    assert.ok(!connected.tools.some((t) => t.name.startsWith("mcp:bad:")), "failing server's tools are hidden");
+    assert.equal(connected.outcomes.length, 2);
+    const good = connected.outcomes.find((o) => o.serverId === "good");
+    assert.ok(good?.connected, "healthy server outcome reports connected");
+    assert.ok((good?.tools ?? 0) >= 1, "healthy outcome carries its tool count");
+    const bad = connected.outcomes.find((o) => o.serverId === "bad");
+    assert.equal(bad?.connected, false);
+    assert.ok(bad?.error, "failing outcome carries why it is hidden");
+  } finally {
+    await connected.close();
+  }
+});
+
+test("timeoutMs rides the connect options: slow tool call times out", async () => {
+  const connected = await connectAllowListedMcpServers([
+    { serverId: "slow", command: process.execPath, args: [FIXTURE], timeoutMs: 200 },
+  ]);
+  try {
+    const tool = connected.tools.find((t) => t.name === "mcp:slow:sleep");
+    assert.ok(tool, "fixture sleep tool bridged");
+    // Prism semantics: a timed-out call resolves with an error ToolResult
+    // (call errors surface as results, they never throw to the model).
+    const result = (await tool.execute({}, ctx)) as { error?: { message?: string } };
+    assert.match(result.error?.message ?? "", /timed out after 200ms/);
+  } finally {
+    await connected.close();
+  }
+});
+
+test("validation: null cwd/timeoutMs read as absent, not as invalid values", async () => {
+  // Plan 117 regression: the Rust allow-list builder used to emit
+  // `"cwd": null` / `"timeoutMs": null` for entries without them, which
+  // failed the whole list and every session.new. Null now means "default".
+  const connected = await connectAllowListedMcpServers([
+    { serverId: "nullish", command: process.execPath, args: [FIXTURE], cwd: null, timeoutMs: null },
+  ]);
+  try {
+    assert.ok(
+      connected.tools.some((t) => t.name.startsWith("mcp:nullish:")),
+      "a null cwd/timeoutMs entry still connects with defaults",
+    );
+  } finally {
+    await connected.close();
+  }
+});
+
+test("validation: timeoutMs must be a positive integer within the Prism ceiling", async () => {
+  await assert.rejects(
+    connectAllowListedMcpServers([{ serverId: "t", command: "/bin/true", timeoutMs: 0 }]),
+    /positive integer/,
+  );
+  await assert.rejects(
+    connectAllowListedMcpServers([{ serverId: "t", command: "/bin/true", timeoutMs: 1.5 }]),
+    /positive integer/,
+  );
+  await assert.rejects(
+    connectAllowListedMcpServers([{ serverId: "t", command: "/bin/true", timeoutMs: 30 * 60 * 1000 + 1 }]),
+    /hard ceiling/,
+  );
   await assert.rejects(
     connectAllowListedMcpServers([
-      { serverId: "good", command: process.execPath, args: [FIXTURE] },
-      { serverId: "bad", command: "/definitely/not/a/real/binary-9f3c2a" },
+      { serverId: "t", command: "/bin/true" },
+      { serverId: "t", command: "/bin/true" },
     ]),
-    /error/i,
+    /duplicate serverId/,
   );
 });
 

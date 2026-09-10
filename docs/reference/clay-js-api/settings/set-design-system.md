@@ -40,7 +40,7 @@ Settings-panel command that activates a UI design system and persists the choice
 `settings.setDesignSystem` is the command-surface settings API behind the Settings panel's "Design system" dropdown. It accepts one string argument (`specifier`, or `item_id` from dropdown action payloads) and executes server-first:
 
 1. The command executor (`src/server/command_execution.rs::execute_settings`) validates the specifier: `@clay/core` (built-in baseline) or a bundled first-party package whose manifest contributes a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Anything else fails closed with an `InvalidArguments` diagnostic before any state changes.
-2. The connection runtime (`src/server/connection/runtime.rs::persist_settings_change`) persists the validated specifier as the `designSystem` preference in `~/.config/clay/preferences.json` (atomic write) and triggers a runtime generation reload.
+2. The connection runtime (`src/server/connection/runtime.rs::persist_settings_change`) persists the validated specifier as the `designSystem` preference in `~/.clay/preferences.json` (atomic write) and triggers a runtime generation reload.
 3. The reload applies persisted preferences (`src/server/evaluation.rs::apply_persisted_preferences`) through the same activation path as [`theme.setDesignSystem`](../theme/set-design-system.md) (`apply_design_system`), which resolves the declaration against the active theme, fills missing component recipes from the `@clay/core` fallback set, and fails closed on invalid or revoked packages.
 4. Every client receives the new `RuntimeStateSnapshot` — including `ui_choices` (the server-enumerated theme/design-system/appearance lists) and `active_design_system` — and the React adapter projects the recipes into CSS custom properties before paint. No restart and no component remount is required.
 
@@ -48,7 +48,7 @@ The command itself exposes no JavaScript module facade; settings intents are com
 
 ## When to use
 
-Invoke from UI action payloads (Settings panel dropdowns, command centre) or through `commands.serverExecuteCommand` with `commandId: "settings.setDesignSystem"` when the user changes the design system interactively. For startup configuration in `~/.config/clay/init.js`, use [`theme.setDesignSystem`](../theme/set-design-system.md) instead; a persisted settings choice overrides the equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
+Invoke from UI action payloads (Settings panel dropdowns, command centre) or through `commands.serverExecuteCommand` with `commandId: "settings.setDesignSystem"` when the user changes the design system interactively. For startup configuration in `~/.clay/init.js`, use [`theme.setDesignSystem`](../theme/set-design-system.md) instead; a persisted settings choice overrides the equivalent `init.js` call because preference apply runs after `init.js` evaluation on every reload.
 
 ## JavaScript usage
 

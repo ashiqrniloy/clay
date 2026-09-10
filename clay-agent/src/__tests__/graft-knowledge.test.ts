@@ -20,13 +20,23 @@ function textProvider(): Parameters<typeof ClayAgentHost.create>[0]["mockProvide
   };
 }
 
-async function codingHost(workspaceRoot: string): Promise<ClayAgentHost> {
+async function codingHost(
+  workspaceRoot: string,
+  opts: { agentConfigRoot?: string; graftCliPath?: string } = {},
+): Promise<ClayAgentHost> {
   const host = await ClayAgentHost.create({
     dataDir: await tempDir("clay-agent-graft-data-"),
     passphrase: "pass-phrase-ok",
     mock: true,
     mockProvider: textProvider(),
     emit: () => {},
+    // Hermetic agent config: knowledge gates must not depend on the
+    // developer's real skills.json.
+    agentConfigRoot: opts.agentConfigRoot ?? (await tempDir("clay-agent-graft-config-")),
+    // Deterministic default-bind CLI (plan 117): tests pass a stub or a
+    // nonexistent path so resolution never depends on a @nanonets/graft
+    // peer being installed.
+    graftCliPath: opts.graftCliPath,
   });
   await host.handle("agentProfile.register", {
     name: "coding",
@@ -64,20 +74,63 @@ const GRAFT_TOOLS = [
   "graft_blast",
 ];
 
-test("graft option is opt-in: absent CLI fails closed and leaves the agent unperturbed", async () => {
+async function writeGraftStub(root: string): Promise<string> {
+  const { writeFile: writeFileRaw, chmod } = await import("node:fs/promises");
+  const cliPath = join(root, "graft-stub.sh");
+  await writeFileRaw(cliPath, "#!/usr/bin/env bash\nprintf '{}\n'\n", { mode: 0o755 });
+  await chmod(cliPath, 0o755);
+  return cliPath;
+}
+
+test("graft is available by default: first coding session binds pull mode", async () => {
+  const root = await tempDir("clay-agent-graft-default-");
+  const cliPath = await writeGraftStub(root);
+  const host = await codingHost(root, { graftCliPath: cliPath });
+  // The FIRST session.new already carries the graft binding: tools active,
+  // skill in the catalog, extension visible in the environment.
+  const sessionId = liveSessionId(host);
+  const env = (await host.handle("environment.list", {})) as {
+    extensions?: string[];
+    skills?: Array<{ name: string }>;
+  };
+  assert(env.extensions?.some((name) => name.endsWith("/graft")), "graft extension bound by default");
+  assert(env.skills?.some((skill) => skill.name === "graft"), "graft skill catalogued by default");
+  const tools = kernelTools(host);
+  for (const tool of GRAFT_TOOLS) assert(tools.get(tool), `${tool} registered by default bind`);
+  // Second session for the SAME workspace: no re-bind (one attempt per
+  // root, already-bound early return).
+  const bindingBefore = (host as unknown as { graft?: { workspaceRoot: string } }).graft;
+  await host.handle("session.new", { profile: "coding", provider: "mock", model: "demo", workspaceRoot: root });
+  const bindingAfter = (host as unknown as { graft?: { workspaceRoot: string } }).graft;
+  assert.equal(bindingAfter, bindingBefore, "no re-bind for the same workspace");
+  // Explicit disable still wins over the default-on behavior.
+  await host.handle("knowledge.setOptions", { workspaceRoot: root, graft: false });
+  assert.equal(((host as unknown as { graft?: unknown }).graft), undefined, "disable unbinds");
+  // A failed default attempt is not retried: re-enable explicitly, disable,
+  // then a new workspace session — the old root stays attempted-once, but
+  // the explicit RPC path can always rebind.
+  await host.handle("knowledge.setOptions", { workspaceRoot: root, graft: true, graftCliPath: cliPath });
+  assert(((host as unknown as { graft?: { workspaceRoot: string } }).graft), "explicit RPC re-binds");
+  void sessionId;
+  await rm(root, { recursive: true, force: true });
+  host.close();
+});
+
+test("graft default bind fails closed without a resolvable CLI", async () => {
   const root = await tempDir("clay-agent-graft-absent-");
-  const host = await codingHost(root);
-  // No graft tools on a default coding session.
+  // Deterministic unresolvable CLI: the default attempt fails on every
+  // machine (no @nanonets/graft peer dependency in tests).
+  const host = await codingHost(root, { graftCliPath: "/nonexistent/graft-cli" });
   const created = (await host.handle("session.new", {
     profile: "coding",
     provider: "mock",
     model: "demo",
     workspaceRoot: root,
   })) as { tools: string[] };
-  for (const tool of GRAFT_TOOLS) assert(!created.tools.includes(tool), `no ${tool} when disabled`);
+  for (const tool of GRAFT_TOOLS) assert(!created.tools.includes(tool), `no ${tool} when unresolvable`);
 
-  // Enable with no resolvable CLI (no graftCliPath, no host packageRoot, no
-  // @nanonets/graft peer): fail closed — the option stays off, nothing loads.
+  // Explicit enable without any resolvable CLI: fail closed — the option
+  // stays off, nothing loads.
   const enabled = (await host.handle("knowledge.setOptions", {
     workspaceRoot: root,
     graft: true,
@@ -163,6 +216,33 @@ test("resolved graft CLI registers pull tools that answer with ranked spans; /gr
   const skillsAfter = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
   assert(!skillsAfter.skills.some((skill) => skill.name === "graft"));
   await rm(root, { recursive: true, force: true });
+  host.close();
+});
+
+test("agentSkills.graft=false blocks every binding path including explicit RPC", async () => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const root = await tempDir("clay-agent-graft-gated-");
+  const cliPath = await writeGraftStub(root);
+  const agentConfigRoot = await tempDir("clay-agent-graft-gated-config-");
+  await mkdir(agentConfigRoot, { recursive: true });
+  await writeFile(join(agentConfigRoot, "skills.json"), JSON.stringify({ agentSkills: { graft: false } }));
+  const host = await codingHost(root, { agentConfigRoot, graftCliPath: cliPath });
+  // Default bind: gate off ⇒ no attempt, no tools, no skill.
+  const env = (await host.handle("environment.list", {})) as {
+    extensions?: string[];
+    skills?: Array<{ name: string }>;
+  };
+  assert(!env.extensions?.some((name) => name.endsWith("/graft")), "no default bind when gated off");
+  assert(!env.skills?.some((skill) => skill.name === "graft"), "no graft skill when gated off");
+  // Explicit RPC: also refused — the gate is authoritative on every path.
+  const enabled = (await host.handle("knowledge.setOptions", {
+    workspaceRoot: root,
+    graft: true,
+  })) as { graft: boolean };
+  assert.equal(enabled.graft, false, "RPC graft:true is refused when gated off");
+  assert.equal(((host as unknown as { graft?: unknown }).graft), undefined, "no binding materializes");
+  await rm(root, { recursive: true, force: true });
+  await rm(agentConfigRoot, { recursive: true, force: true });
   host.close();
 });
 

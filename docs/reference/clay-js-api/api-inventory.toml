@@ -599,7 +599,7 @@ deno_op = "op_clay_configuration_get_state"
 deno_op_path = "src/server/ops/configuration.rs::op_clay_configuration_get_state"
 documentation_path = "docs/reference/clay-js-api/configuration/get-configuration-state.md"
 key_bindings = []
-custom_properties = ["entryPoint:string=~/.config/clay/init.js", "loadedModules:string[]=[]"]
+custom_properties = ["entryPoint:string=~/.clay/init.js", "loadedModules:string[]=[]"]
 permissions = []
 security_notes = "Returns configuration metadata only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "runtime/js/configuration.js::getConfigurationState"
@@ -1717,7 +1717,7 @@ registry_public = true
 
 # Phase 16 configuration review: package options, mode preferences, decoration theme preferences,
 # and parse policy preferences are preserved as planned `clay:configuration` APIs through
-# `~/.config/clay/init.js`. package enable/disable is package loading authority; no configuration API is added for it in this phase.
+# `~/.clay/init.js`. package enable/disable is package loading authority; no configuration API is added for it in this phase.
 # future enable/disable API requires an approved decision log, explicit permission model, and server validation before it can exist.
 [[api]]
 id = "configuration.setPackageOption"
@@ -1739,7 +1739,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/set-package-optio
 key_bindings = []
 custom_properties = ["packagePrefix:string=required", "option:string=package-prefixed", "value:json=required", "source:enum=init-js|package-default|clay-default|ui-session"]
 permissions = ["package-configuration"]
-security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.config/clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, package installation, or enable/disable authority."
+security_notes = "Requires package-configuration permission when the option changes package behavior and server validation through the ~/.clay/init.js configuration model; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, package installation, or enable/disable authority."
 current_rust_owner = "src/server/configuration.rs::ConfigurationRuntime"
 registry_public = true
 
@@ -1753,7 +1753,7 @@ js_export = "setModePreference"
 user_facing_name = "Set Mode Preference"
 authority = "configuration-api-mode-preference"
 runtime_path = "server-side-configuration-to-mode-registry-planned"
-hot_path_policy = "Mode preferences are applied from ~/.config/clay/init.js during configuration load or explicit reclassification only; they do not run on typing, layout, paint, parse-result, or edit-ack hot paths."
+hot_path_policy = "Mode preferences are applied from ~/.clay/init.js during configuration load or explicit reclassification only; they do not run on typing, layout, paint, parse-result, or edit-ack hot paths."
 facade_path = "runtime/js/configuration.js::setModePreference"
 backing_rust = "src/server/configuration.rs::ConfigurationRuntime::set_mode_preference; src/packages/modes.rs::ModeRegistry"
 deno_op = "op_clay_configuration_set_mode_preference"
@@ -1762,7 +1762,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/set-mode-preferen
 key_bindings = []
 custom_properties = ["modeId:string=registered", "extensions:string[]=optional", "mimeTypes:string[]=optional", "defaultActivation:enum=auto|manual=auto", "source:enum=init-js"]
 permissions = []
-security_notes = "Records user mode activation defaults for already registered modes through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, mode-registration, mode-activation, package installation, or enable/disable authority."
+security_notes = "Records user mode activation defaults for already registered modes through the ~/.clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, mode-registration, mode-activation, package installation, or enable/disable authority."
 current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/packages/modes.rs::ModeRegistry"
 registry_public = false
 
@@ -1785,7 +1785,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/set-decoration-th
 key_bindings = []
 custom_properties = ["theme:string=default", "styleTokens:string[]=known-only", "contrastMode:enum=default|high=default", "source:enum=init-js"]
 permissions = []
-security_notes = "Sets user preferences for known decoration style tokens through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, render-decorations, arbitrary GPU draw calls, native widget mutation, package installation, or enable/disable authority."
+security_notes = "Sets user preferences for known decoration style tokens through the ~/.clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, render-decorations, arbitrary GPU draw calls, native widget mutation, package installation, or enable/disable authority."
 current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/decorations.rs::DecorationRegistry"
 registry_public = false
 
@@ -1808,7 +1808,7 @@ documentation_path = "docs/reference/clay-js-api/configuration/set-parse-policy.
 key_bindings = []
 custom_properties = ["timeoutMs:number=50", "maxTimeoutMs:number=250", "parseUnits:enum=file|region|line-group=line-group", "viewportPriority:boolean=true", "source:enum=init-js"]
 permissions = []
-security_notes = "Sets bounded parse scheduling preferences through the ~/.config/clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, parse-document, access beyond open document content, package installation, or enable/disable authority."
+security_notes = "Sets bounded parse scheduling preferences through the ~/.clay/init.js configuration model and server validation; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, parse-document, access beyond open document content, package installation, or enable/disable authority."
 current_rust_owner = "planned: src/server/configuration.rs::ConfigurationRuntime; src/server/parse_coordinator.rs::ParseCoordinator"
 registry_public = false
 
@@ -2041,7 +2041,7 @@ js_export = "serverSetLayoutOverride"
 user_facing_name = "Set Layout Override"
 authority = "server-validated-package-layout-configuration"
 runtime_path = "server-side-configuration-to-shell-layout"
-hot_path_policy = "no-hot-path: layout overrides are evaluated through ~/.config/clay/init.js, package load, or explicit setting changes and never execute package JavaScript in client paint/layout/input handlers."
+hot_path_policy = "no-hot-path: layout overrides are evaluated through ~/.clay/init.js, package load, or explicit setting changes and never execute package JavaScript in client paint/layout/input handlers."
 facade_path = "runtime/js/ui.js::serverSetLayoutOverride"
 backing_rust = "src/server/ui.rs::PackageUiRegistry::set_layout_override"
 deno_op = "op_clay_ui_set_layout_override"
@@ -2050,7 +2050,7 @@ documentation_path = "docs/reference/clay-js-api/ui/server-set-layout-override.m
 key_bindings = []
 custom_properties = ["targetId:string=package-prefixed", "property:enum=slot|visibility|splitRatio|themeToken|inputDefault|actionDefault|fallback", "value:json=required", "source:enum=user-config|active-major-mode|compatible-minor-mode|global-package|package-default"]
 permissions = ["package-configuration"]
-security_notes = "Validates documented ~/.config/clay/init.js layout overrides, package prefixes, target IDs, precedence, same-type registered theme-token remaps, input/action references, and bounded values and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden JSON/TOML layout keys, direct client widgets, native widget handles, raw CSS, or renderer callback authority."
+security_notes = "Validates documented ~/.clay/init.js layout overrides, package prefixes, target IDs, precedence, same-type registered theme-token remaps, input/action references, and bounded values and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden JSON/TOML layout keys, direct client widgets, native widget handles, raw CSS, or renderer callback authority."
 current_rust_owner = "src/server/ui.rs::PackageUiRegistry::set_layout_override; src/server/ops/ui.rs::op_clay_ui_set_layout_override"
 registry_public = true
 

@@ -1,6 +1,6 @@
 # @clay/theme-gruvbox-material-dark
 
-A first-party **inert style-data** theme for Clay: the [Gruvbox Material](https://github.com/sainnhe/gruvbox-material) palette, **dark, medium contrast**, mapped onto Clay's two-axis syntax vocabulary (`TokenType` + `Modifiers`) and base UI color keys. Selected at runtime by the user via `setTheme("@clay/theme-gruvbox-material-dark")` in `~/.config/clay/init.js`.
+A first-party **inert style-data** theme for Clay: the [Gruvbox Material](https://github.com/sainnhe/gruvbox-material) palette, **dark, medium contrast**, mapped onto Clay's two-axis syntax vocabulary (`TokenType` + `Modifiers`) and base UI color keys. Selected at runtime by the user via `setTheme("@clay/theme-gruvbox-material-dark")` in `~/.clay/init.js`.
 
 This package carries **no executable authority**. All overrides are static `clay.contributions.textStyles` entries in [`package.json`](../package.json), parsed and validated by Clay at load and resolved into the single source of color (`StyleRegistry`). There is no runtime registration, no ops, no widgets, and no raw CSS — only hex colors + optional text-attribute flags (`bold`/`italic`/`underline`/`strike`).
 

@@ -20,13 +20,16 @@ function textProvider(): Parameters<typeof ClayAgentHost.create>[0]["mockProvide
   };
 }
 
-async function codingHost(workspaceRoot: string): Promise<ClayAgentHost> {
+async function codingHost(workspaceRoot: string, agentConfigRoot?: string): Promise<ClayAgentHost> {
   const host = await ClayAgentHost.create({
     dataDir: await tempDir(),
     passphrase: "pass-phrase-ok",
     mock: true,
     mockProvider: textProvider(),
     emit: () => {},
+    // Hermetic agent config: the wiki/graft gates must not depend on the
+    // developer's real ~/.clay/agents/coding-agent/skills.json.
+    agentConfigRoot: agentConfigRoot ?? (await tempDir()),
   });
   await host.handle("agentProfile.register", {
     name: "coding",
@@ -44,6 +47,93 @@ async function codingHost(workspaceRoot: string): Promise<ClayAgentHost> {
 
 const WIKI_TOOLS = ["wiki_search", "wiki_read_page", "wiki_record_insight"];
 
+test("wiki-init is the sole initiator: gate on enables + dispatches; gate off stays chat-safe", async () => {
+  const root = await tempDir();
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  await writeFile(
+    join(root, "README.md"),
+    "# Widget\n\nThe widget module exports a buildWidget factory used by every panel.\n",
+  );
+  // Raw source present, NO knowledge.setOptions call: /wiki-init itself is
+  // the initiator (plan 117).
+  const host = await codingHost(root);
+  const sessionId = (host as unknown as { live: Map<string, unknown> }).live.keys().next().value as string;
+
+  const init = (await host.handle("session.prompt", { sessionId, text: "/wiki-init" })) as {
+    value?: { status?: string; wikiRoot?: string };
+  };
+  assert.equal(init.value?.status, "initialized");
+  assert.equal(init.value?.wikiRoot, ".wiki");
+  // Writes stay inside .wiki/: no skill files deployed into the workspace.
+  await access(join(root, ".wiki", "index.md"));
+  const workspaceFiles = await readdir(root);
+  assert(!workspaceFiles.includes(".agents"), "no skill deployment outside .wiki/");
+  // Wiki skills activated with init (registry-at-enable).
+  const skills = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  assert(skills.skills.some((skill) => skill.name === "wiki-searcher"), "wiki-searcher registers at init");
+  assert(skills.skills.some((skill) => skill.name === "wiki-maintainer"), "wiki-maintainer registers at init");
+  // New sessions in the workspace carry the wiki tools.
+  const created = (await host.handle("session.new", {
+    profile: "coding",
+    provider: "mock",
+    model: "demo",
+    workspaceRoot: root,
+  })) as { tools: string[] };
+  for (const tool of WIKI_TOOLS) assert(created.tools.includes(tool), `${tool} active after init`);
+  // Second /wiki-init is idempotent: same binding, no re-bind.
+  const bindingBefore = (host as unknown as { wiki?: { workspaceRoot: string } }).wiki;
+  const again = (await host.handle("session.prompt", { sessionId, text: "/wiki-init" })) as {
+    value?: { status?: string };
+  };
+  assert.equal(again.value?.status, "initialized");
+  const bindingAfter = (host as unknown as { wiki?: { workspaceRoot: string } }).wiki;
+  assert.equal(bindingAfter, bindingBefore, "no re-bind on repeated /wiki-init");
+  await rm(root, { recursive: true, force: true });
+  host.close();
+
+  // Gate off: skills.json agentSkills.wikiSearcher=false keeps /wiki-init a
+  // chat-safe prompt with zero residue.
+  const gatedRoot = await tempDir();
+  const gatedConfig = await tempDir();
+  await mkdir(join(gatedConfig, "skills"), { recursive: true });
+  await writeFile(join(gatedConfig, "skills.json"), JSON.stringify({ agentSkills: { wikiSearcher: false } }));
+  const gatedHost = await codingHost(gatedRoot, gatedConfig);
+  const gatedSession = (gatedHost as unknown as { live: Map<string, unknown> }).live.keys().next().value as string;
+  const gated = (await gatedHost.handle("session.prompt", {
+    sessionId: gatedSession,
+    text: "/wiki-init",
+  })) as { lastEvent?: string };
+  assert.equal(gated.lastEvent, "agent_finished", "gated-off /wiki-init is a chat-safe prompt");
+  const gatedSkills = (await gatedHost.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  assert(!gatedSkills.skills.some((skill) => skill.name.startsWith("wiki-")), "no wiki skills when gated off");
+  await rm(gatedRoot, { recursive: true, force: true });
+  await rm(gatedConfig, { recursive: true, force: true });
+  gatedHost.close();
+});
+
+test("wiki-maintainer gate filters only its own skill at init", async () => {
+  const root = await tempDir();
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(join(root, "README.md"), "# Widget\n\nbuildWidget exists.\n");
+  const agentConfigRoot = await tempDir();
+  await writeFile(
+    join(agentConfigRoot, "skills.json"),
+    JSON.stringify({ agentSkills: { wikiMaintainer: false } }),
+  );
+  const host = await codingHost(root, agentConfigRoot);
+  const sessionId = (host as unknown as { live: Map<string, unknown> }).live.keys().next().value as string;
+  const init = (await host.handle("session.prompt", { sessionId, text: "/wiki-init" })) as {
+    value?: { status?: string };
+  };
+  assert.equal(init.value?.status, "initialized");
+  const skills = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
+  assert(skills.skills.some((skill) => skill.name === "wiki-searcher"), "searcher unaffected by maintainer gate");
+  assert(!skills.skills.some((skill) => skill.name === "wiki-maintainer"), "maintainer gated off never registers");
+  await rm(root, { recursive: true, force: true });
+  await rm(agentConfigRoot, { recursive: true, force: true });
+  host.close();
+});
+
 test("wiki option is opt-in: disabled by default leaves no residue", async () => {
   const root = await tempDir();
   const host = await codingHost(root);
@@ -58,15 +148,8 @@ test("wiki option is opt-in: disabled by default leaves no residue", async () =>
   // No wiki skills in the catalog, no wiki commands registered.
   const skills = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
   assert(!skills.skills.some((skill) => skill.name.startsWith("wiki-")));
-  // /wiki-init with the option disabled stays a chat-safe prompt (unknown
-  // command), not a dispatch and not an error.
-  const result = (await host.handle("session.prompt", {
-    sessionId: (host as unknown as { live: Map<string, unknown> }).live.keys().next().value,
-    text: "/wiki-init",
-  })) as { lastEvent?: string };
-  assert.equal(result.lastEvent, "agent_finished");
-  const skillsAfter = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
-  assert.equal(skillsAfter.skills.length, skills.skills.length, "no residue after disabled prompt");
+  // Dormant without /wiki-init: nothing registers on its own (the sole
+  // initiator is the slash command; gate-off behavior is covered above).
   await rm(root, { recursive: true, force: true });
   host.close();
 });
@@ -143,14 +226,15 @@ test("wiki init/refresh/lint commands build an OKF bundle the search tool answer
   );
 
   // Disable: zero residue — commands gone, tools unresolvable, catalog clean.
+  // /wiki-init remains the sole initiator: re-running it after a disable
+  // re-initializes the binding (init semantics, not a chat-safe prompt).
   await host.handle("knowledge.setOptions", { workspaceRoot: root, wiki: false });
   assert.throws(() => tools.resolve("wiki_search"));
-  const promptAfter = (await host.handle("session.prompt", { sessionId, text: "/wiki-init" })) as {
-    lastEvent?: string;
+  const reinit = (await host.handle("session.prompt", { sessionId, text: "/wiki-init" })) as {
+    value?: { status?: string };
   };
-  assert.equal(promptAfter.lastEvent, "agent_finished", "disabled /wiki-init is a chat-safe prompt");
-  const skillsAfter = (await host.handle("skill.list", {})) as { skills: Array<{ name: string }> };
-  assert(!skillsAfter.skills.some((skill) => skill.name.startsWith("wiki-")));
+  assert.equal(reinit.value?.status, "initialized", "/wiki-init re-initializes after a disable");
+  await access(join(root, ".wiki", "index.md"));
   await rm(root, { recursive: true, force: true });
   host.close();
 });
