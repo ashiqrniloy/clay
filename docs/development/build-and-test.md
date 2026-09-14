@@ -255,7 +255,7 @@ closing the window kills and reaps spawned server processes.
   37.1 kB gzip; total 342.9 / 400 kB. Review harness is DEV-only and is not
   in the production graph.
 - Vitest: 96 tests including AG-UI transport through real `@ag-ui/client`,
-  cancel/empty-prompt, ChatPanel landing/transcript/composer, and DEV fixture
+  cancel/empty-prompt, the agent panel's landing/transcript/composer, and DEV fixture
   landmarks.
 - Rust focused gates: `agent_agui` 6, agent picker 10, desktop lib 20,
   bridge session 1, config security 3, DTO 7, protocol documentation_coverage

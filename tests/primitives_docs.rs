@@ -548,7 +548,11 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 20);
+    // 20 at the Plan 061 baseline, +@clay/design-instrument (plan 118 task 8),
+    // -@clay/design-neobrutal/-@clay/design-glass (plan 118 task 9),
+    // -@clay/chat (plan 118's chat-removal task),
+    // +@clay/launcher (plan 118's launcher task).
+    assert_exact_inventory(package_section, &packages, 19);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
@@ -1738,9 +1742,8 @@ fn phase25_package_authoring_contract_is_consistent() {
     for marker in [
         "## Phase 25 authoring contract",
         "serverRegisterPaneContentContribution",
-        "loadPackage(\"@clay/chat\")",
-        "chat.entrySurface",
-        "chat.chromeActions",
+        "loadPackage(\"@clay/coding-agent\")",
+        "coding-agent.chromeActions",
         "clay.replaces",
         "clay-agent",
         "WelcomeWidget",
@@ -1761,7 +1764,7 @@ fn phase25_package_authoring_contract_is_consistent() {
             "components.md missing Phase 25 catalog marker {marker:?}"
         );
     }
-    for marker in ["@clay/chat", "empty-tab", "WelcomeWidget"] {
+    for marker in ["launcher", "empty-tab", "WelcomeWidget"] {
         assert!(
             navigation.contains(marker),
             "ui-components.md missing Phase 25 navigation marker {marker:?}"

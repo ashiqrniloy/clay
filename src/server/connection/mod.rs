@@ -24,6 +24,7 @@ use super::{
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
     language_intelligence::LanguageIntelligenceCoordinator,
+    launcher,
     menu_sessions::ServerMenuSessions,
     output_router::OutputRouter,
     parse_coordinator::ParseCoordinator,
@@ -159,6 +160,8 @@ fn client_message_identity(message: &ClientMessage) -> Option<ClientId> {
         | ClientMessage::ReloadDocument { client_id, .. }
         | ClientMessage::GetDocumentStatus { client_id, .. }
         | ClientMessage::ListDocuments { client_id }
+        | ClientMessage::ListLauncherEntries { client_id }
+        | ClientMessage::RemoveLauncherRecent { client_id, .. }
         | ClientMessage::SduiAction { client_id, .. }
         | ClientMessage::CommandIntent { client_id, .. }
         | ClientMessage::RuntimeGenerationInstalled { client_id, .. }
@@ -257,6 +260,47 @@ fn unbound_tab_state_error() -> ServerMessage {
         code: ProtocolErrorCode::InvalidMessage,
         message: "connection is not bound to a live tab".to_string(),
     }
+}
+
+/// Launcher (plan 118 Part D): answer with the server-resolved entries. The
+/// rows are display data, so an absent data root yields the first-run state
+/// rather than an error; pruned recents surface as one bounded diagnostic.
+async fn write_launcher_entries<S>(
+    codec: Codec,
+    stream: &mut S,
+    reload_server: Option<&super::IpcServer>,
+    client_id: ClientId,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let entries = reload_server
+        .map(|server| launcher::launcher_entries(server.configuration_root().as_deref()))
+        .unwrap_or_default();
+    if entries.pruned > 0 {
+        codec
+            .write_server_message(
+                stream,
+                &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::info(
+                    "launcher.recents_pruned",
+                    format!(
+                        "{} recent workspace(s) dropped: the folder no longer exists",
+                        entries.pruned
+                    ),
+                )),
+            )
+            .await?;
+    }
+    codec
+        .write_server_message(
+            stream,
+            &ServerMessage::LauncherEntries {
+                client_id,
+                entries: Box::new(entries),
+            },
+        )
+        .await?;
+    Ok(())
 }
 
 /// Phase 24.1: bounded diagnostic for menu intents naming a session this
@@ -1147,16 +1191,33 @@ where
             ClientMessage::ListAgentSettingsFiles { client_id } => {
                 // Agent settings page (plan 117): server-resolved listing;
                 // no config root ⇒ empty page, never an error.
-                let files = reload_server
-                    .as_ref()
-                    .and_then(|server| server.agent_settings_root())
-                    .map(|root| agent_settings::list_agent_settings_files(&root))
-                    .unwrap_or_default();
+                let files = match reload_server.as_ref() {
+                    Some(server) => server
+                        .agent_settings_root(client_id)
+                        .await
+                        .map(|root| agent_settings::list_agent_settings_files(&root))
+                        .unwrap_or_default(),
+                    None => Vec::new(),
+                };
                 codec
                     .write_server_message(
                         &mut stream,
                         &ServerMessage::AgentSettingsFiles { client_id, files },
                     )
+                    .await?;
+            }
+            ClientMessage::ListLauncherEntries { client_id } => {
+                write_launcher_entries(codec, &mut stream, reload_server.as_ref(), client_id)
+                    .await?;
+            }
+            ClientMessage::RemoveLauncherRecent { client_id, index } => {
+                if let Some(server) = reload_server.as_ref() {
+                    launcher::remove_recent_workspace(
+                        server.configuration_root().as_deref(),
+                        index,
+                    );
+                }
+                write_launcher_entries(codec, &mut stream, reload_server.as_ref(), client_id)
                     .await?;
             }
             ClientMessage::OpenAgentSettingsFile { client_id, name } => {
@@ -1165,9 +1226,10 @@ where
                 // server-side; the open/save path is the ordinary selected-
                 // file document pipeline (no extra capability — the name
                 // carries no path authority).
-                let root = reload_server
-                    .as_ref()
-                    .and_then(|server| server.agent_settings_root());
+                let root = match reload_server.as_ref() {
+                    Some(server) => server.agent_settings_root(client_id).await,
+                    None => None,
+                };
                 let response = match root
                     .map(|root| agent_settings::resolve_agent_settings_file(&root, &name))
                     .unwrap_or_else(|| Err("agent config root unavailable".to_string()))

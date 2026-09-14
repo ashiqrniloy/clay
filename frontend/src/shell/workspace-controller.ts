@@ -48,15 +48,21 @@ import {
   windowFromTabs,
   type TabLayout,
 } from "./persist";
+import { agentInspector, workspaceRail } from "./layout-state";
 import {
   createTabStore,
   emptyTabs,
   markDirty,
+  patchTab,
   removeTab,
   tabLabel,
+  tabUncommitted,
   upsertTab,
+  type ShellTabState,
+  type TabAgent,
   type TabSnapshot,
   type TabStore,
+  type TabView,
 } from "./tab-store";
 
 export interface WorkspaceAdapters {
@@ -68,7 +74,6 @@ export interface WorkspaceAdapters {
   saveLayout?: (state: unknown) => Promise<void>;
   openFileDialog?: (tabId?: number) => Promise<boolean>;
   openFolderDialog?: (tabId?: number) => Promise<boolean>;
-  openTabDialog?: () => Promise<BootstrapDto | null>;
   /** Agent settings page (plan 117): listen for the listing reply on the
    *  given session, or tear down with `null`. */
 }
@@ -92,7 +97,11 @@ export interface ServerKeyStroke {
 export interface TabRuntime {
   clientId: number;
   tabId: number | null;
-  workspaceRoot: string;
+  /** The server's root for this tab. Always a real folder: the server falls
+   *  back to the configured root or cwd. The *picked* folder (what the strip
+   *  shows and layout.json persists) lives on the tab record, because a tab
+   *  may have picked nothing yet while its session is still rooted. */
+  sessionRoot: string;
   /** Server workspace root id from the tab registry; null until known. */
   workspaceRootId: number | null;
   tree: SplitTree;
@@ -101,9 +110,18 @@ export interface TabRuntime {
   menu: TransientMenuSnapshotDto | null;
   diagnostic: RuntimeDiagnosticDto | null;
   settingsOpen: boolean;
-  /** Coding Agent split surface (plan 108 task 8): open state + hosting pane. */
-  agentSurfaceOpen: boolean;
-  agentSurfacePaneId: number | null;
+  /** The agent view has been shown at least once. The panel stays mounted
+   *  afterwards so switching views never restarts the session or loses the
+   *  transcript's scroll position (plan 118 task 33, performance AC). */
+  agentMounted: boolean;
+}
+
+/** Identity a newly mounted tab starts with; absent fields default to
+ *  "uncommitted, workspace view, no agent". */
+export interface TabIdentity {
+  workspaceRoot?: string;
+  agent?: TabAgent | null;
+  view?: TabView;
 }
 
 export interface PendingClose {
@@ -151,6 +169,12 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       void adapters.saveLayout?.(serialize());
     }, 250);
   };
+
+  // Rail/inspector visibility is per-tab layout state: a toggle persists with
+  // the rest of the layout, not only when something else schedules a write
+  // (plan 118 task E2).
+  workspaceRail.subscribe(schedulePersist);
+  agentInspector.subscribe(schedulePersist);
 
   const bindSession = (runtime: TabRuntime): DocumentSession => {
     const session = createDocumentSession({
@@ -211,11 +235,13 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
   const mountRuntime = (
     bootstrap: BootstrapDto,
     tree = singlePane(),
+    identity: TabIdentity = {},
   ): TabRuntime => {
     const runtime: TabRuntime = {
       clientId: bootstrap.clientId,
-      tabId: bootstrap.tabId ?? registryTabsByClient.get(bootstrap.clientId) ?? null,
-      workspaceRoot: bootstrap.initialDocument.workspaceRoot,
+      tabId:
+        bootstrap.tabId ?? registryTabsByClient.get(bootstrap.clientId) ?? null,
+      sessionRoot: bootstrap.initialDocument.workspaceRoot,
       workspaceRootId: null,
       tree,
       panes: new Map(),
@@ -223,23 +249,51 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       menu: null,
       diagnostic: null,
       settingsOpen: false,
-      agentSurfaceOpen: false,
-      agentSurfacePaneId: null,
+      agentMounted: identity.view === "agent",
     };
     const first = ensurePane(runtime, tree.activePaneId);
     first.session.installInitial(bootstrap);
     runtimes.set(bootstrap.clientId, runtime);
+    // Tab visibility follows the tab that is up; the first mounted tab is it
+    // until `activate` says otherwise.
+    if (tabs.get().activeClientId == null) {
+      workspaceRail.setActiveTab(bootstrap.clientId);
+      agentInspector.setActiveTab(bootstrap.clientId);
+    }
+    // Only an explicit pick commits a tab's folder. The server always roots a
+    // session (configured root or cwd fallback), so adopting its root here
+    // would mark a fresh window — and every ⌘T tab — as already committed and
+    // hide the launcher that is their landing (plan 118 Part D).
+    const picked = identity.workspaceRoot ?? "";
     tabs.set(
       upsertTab(tabs.get(), {
         tabId: runtime.tabId,
         clientId: runtime.clientId,
-        workspaceRoot: runtime.workspaceRoot,
-        label: tabLabel(runtime.workspaceRoot),
+        workspaceRoot: picked,
+        agent: identity.agent ?? null,
+        view: identity.view ?? "workspace",
+        agentBusy: false,
+        label: tabLabel(picked, identity.agent ?? null),
         dirty: false,
         disconnected: false,
       }),
     );
     return runtime;
+  };
+
+  /** The tab record for a runtime (strip identity; the runtime carries the
+   *  session's own server-side facts). */
+  const tabFor = (clientId: number): ShellTabState | null =>
+    tabs.get().tabs.find((tab) => tab.clientId === clientId) ?? null;
+
+  const patchActive = (
+    patch: Partial<Omit<ShellTabState, "clientId" | "label">>,
+    clientId?: number,
+  ) => {
+    const runtime = clientId == null ? activeRuntime() : runtimes.get(clientId);
+    if (!runtime) return;
+    tabs.set(patchTab(tabs.get(), runtime.clientId, patch));
+    schedulePersist();
   };
 
   const activeRuntime = (): TabRuntime | null => {
@@ -293,10 +347,17 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
 
   function serialize() {
     const snapshot = tabs.get();
+    const rails = workspaceRail.snapshot();
+    const inspectors = agentInspector.snapshot();
     const layouts: TabLayout[] = snapshot.tabs.map((tab) => {
       const runtime = runtimes.get(tab.clientId);
       return {
         workspaceRoot: tab.workspaceRoot,
+        agent: tab.agent,
+        view: tab.view,
+        // Absent means visible, which is also what the store answers.
+        railVisible: rails.get(tab.clientId) ?? true,
+        inspectorVisible: inspectors.get(tab.clientId) ?? true,
         tree: runtime?.tree ?? singlePane(),
         documents: runtimeDocuments(runtime),
       };
@@ -334,12 +395,30 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       if (!parsed) return;
       const existing = [...runtimes.values()];
       const first = existing[0];
+      const restoredVisibility = new Map<
+        number,
+        { rail: boolean; inspector: boolean }
+      >();
       if (first && parsed.tabs[0]) {
-        first.tree = parsed.tabs[0].tree;
+        const restored = parsed.tabs[0];
+        first.tree = restored.tree;
+        first.agentMounted = restored.view === "agent";
+        tabs.set(
+          patchTab(tabs.get(), first.clientId, {
+            workspaceRoot: restored.workspaceRoot,
+            agent: restored.agent,
+            view: restored.view,
+          }),
+        );
         for (const id of paneIds(first.tree.root)) ensurePane(first, id);
         for (const [paneId, path] of parsed.tabs[0].documents) {
           if (path) first.panes.get(paneId)?.session.open(path);
         }
+        // Per-tab visibility (plan 118 task E2): the first tab's own values.
+        restoredVisibility.set(first.clientId, {
+          rail: restored.railVisible,
+          inspector: restored.inspectorVisible,
+        });
         // The registry may have delivered the root id before these panes
         // existed (fresh boot: the handshake broadcast races the bootstrap
         // command); deliver the remembered root so queued opens flush.
@@ -357,7 +436,15 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         if (!adapters.openTab) break;
         try {
           const bootstrap = await adapters.openTab(extra.workspaceRoot);
-          const runtime = mountRuntime(bootstrap, extra.tree);
+          const runtime = mountRuntime(bootstrap, extra.tree, {
+            workspaceRoot: extra.workspaceRoot,
+            agent: extra.agent,
+            view: extra.view,
+          });
+          restoredVisibility.set(runtime.clientId, {
+            rail: extra.railVisible,
+            inspector: extra.inspectorVisible,
+          });
           for (const id of paneIds(extra.tree.root)) ensurePane(runtime, id);
           for (const [paneId, path] of extra.documents) {
             if (path) runtime.panes.get(paneId)?.session.open(path);
@@ -376,6 +463,20 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           // Hostile/unreachable persisted tab: skip; first tab stays up.
         }
       }
+      // Hand the restored values to the visibility stores once every tab has
+      // its clientId, then let `activate` put the right tab up.
+      workspaceRail.restore(
+        [...restoredVisibility].map(([clientId, value]) => [
+          clientId,
+          value.rail,
+        ]),
+      );
+      agentInspector.restore(
+        [...restoredVisibility].map(([clientId, value]) => [
+          clientId,
+          value.inspector,
+        ]),
+      );
       if (parsed.activeIndex != null) {
         const target = tabs.get().tabs[parsed.activeIndex];
         if (target) await this.activate(target.clientId);
@@ -389,24 +490,24 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       const runtime = runtimes.get(clientId);
       if (!runtime) return Promise.resolve();
       tabs.set({ ...tabs.get(), activeClientId: clientId });
+      workspaceRail.setActiveTab(clientId);
+      agentInspector.setActiveTab(clientId);
       notify();
       if (runtime.tabId != null && adapters.activateTab) {
         return adapters.activateTab(runtime.tabId);
       }
       return Promise.resolve();
     },
-    async openTab(workspaceRoot: string) {
+    async openTab(workspaceRoot: string, identity: TabIdentity = {}) {
       if (!adapters.openTab) return;
       const bootstrap = await adapters.openTab(workspaceRoot);
-      mountRuntime(bootstrap);
+      mountRuntime(bootstrap, singlePane(), {
+        workspaceRoot,
+        ...identity,
+      });
       tabs.set({ ...tabs.get(), activeClientId: bootstrap.clientId });
-      schedulePersist();
-    },
-    async openTabDialog() {
-      const bootstrap = await adapters.openTabDialog?.();
-      if (!bootstrap) return;
-      mountRuntime(bootstrap);
-      tabs.set({ ...tabs.get(), activeClientId: bootstrap.clientId });
+      workspaceRail.setActiveTab(bootstrap.clientId);
+      agentInspector.setActiveTab(bootstrap.clientId);
       schedulePersist();
     },
     setSettingsOpen(open: boolean) {
@@ -491,12 +592,94 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         runtime.tabId ?? undefined,
       );
     },
-    /** Launch the Coding Agent split surface in the active pane (same
-     *  client-routed command the Command Centre activates). */
-    launchCodingAgent() {
+    /** Show one of the active tab's two views (tab chrome, ⌘1/⌘2). The other
+     *  view stays mounted, so switching never re-fetches or restarts it. */
+    setView(view: TabView) {
       const runtime = activeRuntime();
       if (!runtime) return;
-      dispatchClientCommand(commandContext, runtime, "coding-agent.profile");
+      if (view === "agent") runtime.agentMounted = true;
+      patchActive({ view });
+    },
+    /** Attach an agent to the active tab in place (plan 118 task 34's picker
+     *  handoff; task 35 adds the in-tab registry). The workspace half and its
+     *  documents are untouched. */
+    attachAgent(agent: TabAgent) {
+      const runtime = activeRuntime();
+      if (!runtime) return;
+      runtime.agentMounted = true;
+      patchActive({ agent, view: "agent" });
+      this.setAgentType(runtime, agent.type);
+    },
+    /**
+     * Switch (or detach) the tab's agent type through tab chrome (plan 118
+     * task 35): the server validates the name against the configured
+     * `agents/` root, stores it on the registry, and re-reads that agent's
+     * config for the tab's live session. The workspace half is untouched, so
+     * the patch here is optimistic bookkeeping — the registry snapshot
+     * reconciles it if the server refuses.
+     */
+    setAgentType(runtime: TabRuntime, agent: string | null) {
+      if (runtime.tabId == null) return;
+      patchActive(
+        agent === null
+          ? { agent: null }
+          : { agent: { type: agent, configRoot: "" } },
+        runtime.clientId,
+      );
+      void adapters.send(
+        JSON.stringify({
+          family: "tabCommand",
+          payload: {
+            clientId: runtime.clientId,
+            command: { setAgent: { tabId: runtime.tabId, agent } },
+          },
+        }),
+        runtime.tabId,
+      );
+    },
+    /** The agent view's picker: the active tab's agent changes in place. */
+    pickAgent(agent: string | null) {
+      const runtime = activeRuntime();
+      if (!runtime) return;
+      this.setAgentType(runtime, agent);
+    },
+    /** The strip's marker pulses while this tab's agent is working. Patch only
+     *  on a real change: the view re-renders often and an unconditional write
+     *  would feed itself. */
+    setAgentBusy(clientId: number, busy: boolean) {
+      const tab = tabFor(clientId);
+      if (!tab || tab.agentBusy === busy) return;
+      patchActive({ agentBusy: busy }, clientId);
+    },
+    /** ⌘T / the strip's `+`: a new tab on the launcher. The tab is
+     *  uncommitted — nothing picked — so its landing is the launcher; the
+     *  server roots the session at its own fallback until a folder is picked. */
+    async newTab() {
+      await this.openTab("", { workspaceRoot: "" });
+    },
+    /** A launcher row pick. An uncommitted tab is filled in place by rebinding
+     *  its workspace (the server rebroadcasts the registry with the new path,
+     *  so the label and layout.json follow); a tab that already holds a
+     *  workspace opens the picked one as its own tab. */
+    async openWorkspace(root: string) {
+      const runtime = activeRuntime();
+      if (!runtime) return;
+      const tab = tabFor(runtime.clientId);
+      if (tab && tabUncommitted(tab) && runtime.tabId != null) {
+        patchActive({ workspaceRoot: root, view: "workspace" });
+        void adapters.send(
+          JSON.stringify({
+            family: "tabCommand",
+            payload: {
+              clientId: runtime.clientId,
+              command: { openWorkspace: { tabId: runtime.tabId, root } },
+            },
+          }),
+          runtime.tabId,
+        );
+        return;
+      }
+      await this.openTab(root);
     },
     requestClose(clientId: number) {
       if (tabs.get().tabs.length <= 1) return;
@@ -629,9 +812,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       // "ServerFirst"); package strings may use kebab. Normalize all three
       // spellings before comparing.
       const normalize = (value: unknown) =>
-        String(value)
-          .toLowerCase()
-          .replace(/[-_]/g, "");
+        String(value).toLowerCase().replace(/[-_]/g, "");
       return keymaps.filter(
         (binding) =>
           normalize(binding.context) === "global" &&

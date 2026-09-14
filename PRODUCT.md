@@ -28,6 +28,7 @@ Extensibility is achieved through inert declarative manifests and typed IPC APIs
 - **Surface Mode:** Operate. The user's focus is on completing technical tasks, writing code, reading documentation, and navigating project trees.
 - **Environment:** Desktop application. Primary development and CI host is Linux (with Windows/macOS compatibility long-term).
 - **Workflows:** Long continuous editing sessions, keyboard-driven navigation, multi-pane split layouts, file and workspace exploration, git status inspection, syntax-aware diagnostics, and user-driven configuration through `~/.clay/init.js`.
+- **Surfaces:** One tab holds one workspace and one agent, with two views (Workspace, Agent) switched from tab chrome; a fresh window and every empty tab open the **launcher**, which offers recent workspaces and the configured agents (one of each per launch). The former chat surface was removed in plan 118.
 
 ## Capabilities and Constraints
 
@@ -49,25 +50,28 @@ Extensibility is achieved through inert declarative manifests and typed IPC APIs
 - **Name:** Clay.
 - **Voice and Personality:** Restrained, utilitarian, mathematically precise, distraction-free, reliable.
 - **Visual Authority Commitments:**
-  - **Default UI Design System:** Restrained utilitarian Neobrutal geometry, visible compartmentalization (1px/2px solid borders, strict blueprint grid, 90-degree corners), bimodal density, and subtle spring motion.
-  - **Reference Replacement System:** Glass design system package proving that the same host components can adopt squircle radii, translucency, backdrop blur, layered borders, and diffused ambient depth without source changes or bundled color themes.
-  - **Theme Invariant:** Both design systems remain strictly colorized by whichever content theme the user selects.
+  - **UI Design Language — Quiet Instrument (the only shipped one):** one continuous surface zoned by 1px hairlines and whitespace, two elevations (canvas and overlay), accent reserved for state, a 5/8/12/16/pill radius ladder, monospace for data, and decelerating 150ms/240ms motion. Normative spec: `DESIGN.md`; shipped as `@clay/design-instrument`, with `@clay/core` resolving the same language's host-consumed subset before a snapshot lands.
+  - **One design language ships:** the earlier Restrained Neobrutal and Luminous Glass systems were the migration's comparison points and were **removed** in plan 118; no shipped surface may reference them, and the design-system choice set is `@clay/core` plus the shipped package.
+  - **Four shipped content themes:** Modus Operandi (light) and Modus Vivendi (dark) as the default pair chosen by OS preference, plus Gruvbox Material Dark and Gruvbox Material Light; each declares the same typed theme-side roles and is refused activation when a composited contrast floor fails.
+  - **Theme Invariant:** the design system remains strictly colorized by whichever content theme the user selects.
 
 ## Evidence on Hand
 
 - **Architecture Decisions:**
+  - `decision-logs/2026-09-11-1615-quiet-instrument-design-language.md`
   - `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`
   - `decision-logs/2026-08-23-0052-tauri-react-client-architecture.md`
   - `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
   - `decision-logs/2026-07-11-1418-semantic-font-roles-and-user-owned-typography.md`
   - `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`
+- **Design System Specification:** `DESIGN.md` (Quiet Instrument) — laws, values, geometry, materials, motion, typography, state language, per-surface recipes, shell composition, accessibility invariants, retired patterns, review checklist; proposal evidence in `design-artifacts/DS/`.
 - **Design-System Recipe Separation:** Separation of content themes, user-owned typography (`UiTextVariant`), and UI design-system component recipes.
 - **Recipe Matrix & Catalogs:**
   - Recipe matrix: `docs/development/ui-design-system-recipe-matrix.md`
   - Component catalog: `.agents/skills/clay-execution/references/components.md`
   - Token catalog: `.agents/skills/clay-execution/references/tokens.md`
   - React UI mapping: `docs/development/react-ui-catalog-mapping.md`
-- **Absences & Fabrication Prohibitions:** No artificial testimonials, fabricated user counts, or invented commercial benchmarks.
+- **Absences & Fabrication Prohibitions:** No artificial testimonials, fabricated user counts, or invented commercial benchmarks. UI surfaces show real state or an explicit unavailable state — never fabricated metrics, tool output, or counts.
 
 ## Product Principles
 

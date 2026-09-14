@@ -1,21 +1,24 @@
-/* Catalog `modal`: token-driven scrim + dialog chrome, z.modal stacking.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Catalog `modal`: the scrim (the one blurred, opaque-when-reduced veil) and the
+ * sheet — head (title + close), scrolling body, and an optional hairline-
+ * separated actions foot whose cancel leads and primary trails (the approved
+ * overlays composition).
+ *
+ * The dialog's entrance is the recipe's own motion tier (240ms `spring-snappy`,
+ * DESIGN.md §11); the reduced-transparency and reduced-motion fallbacks live in
+ * `styles/global.css`. `flush` hands the surface and the head to the content
+ * (the command palette is one `commandCentre.default.root.rest` sheet). */
 
 .scrim {
   position: fixed;
   inset: 0;
-  /* Opacity lives on the fill, not the overlay, so the dialog stays opaque. */
-  background: var(
-    --clay-ds-modal-default-scrim-rest-background-color,
-    color-mix(
-      in srgb,
-      var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
-      transparent
-    )
+  /* Opacity lives on the fill, not on the element, so the dialog stays opaque. */
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-modal-default-scrim-rest-background-color)
+      calc(var(--clay-ds-modal-default-scrim-rest-background-opacity, 1) * 100%),
+    transparent
   );
-  backdrop-filter: blur(
-    var(--clay-ds-modal-default-scrim-rest-backdrop-blur, 0px)
-  );
+  backdrop-filter: blur(var(--clay-ds-modal-default-scrim-rest-backdrop-blur));
   z-index: var(--clay-z-modal, 40);
   display: grid;
   place-items: center;
@@ -23,68 +26,81 @@
 
 .dialog {
   position: relative;
-  background: var(
-    --clay-ds-modal-default-dialog-rest-background-color,
-    var(--clay-surface-overlay)
-  );
-  color: var(
-    --clay-ds-modal-default-dialog-rest-text-color,
-    var(--clay-text-primary)
-  );
-  border: var(
-      --clay-ds-modal-default-dialog-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(
-      --clay-ds-modal-default-dialog-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-modal-default-dialog-rest-border-color,
-      var(--clay-border-strong)
-    );
-  border-radius: var(
-    --clay-ds-modal-default-dialog-rest-border-radius,
-    0
-  );
-  box-shadow: var(
-    --clay-ds-modal-default-dialog-rest-shadow,
-    none
-  );
-  backdrop-filter: blur(
-      var(
-        --clay-ds-modal-default-dialog-rest-backdrop-blur,
-        0px
-      )
-    )
-    saturate(
-      var(
-        --clay-ds-modal-default-dialog-rest-backdrop-saturate,
-        1
-      )
-    );
+  display: flex;
+  flex-direction: column;
   min-width: 320px;
   max-width: min(var(--clay-dimension-overlay-centered-width, 640px), 90vw);
   max-height: 80vh;
-  overflow-y: auto;
-  padding: var(
-    --clay-ds-modal-default-dialog-rest-padding,
-    var(--clay-spacing-md, 16px)
-  );
+  overflow: hidden;
+
+  border-width: var(--clay-ds-modal-default-dialog-rest-border-width);
+  border-style: var(--clay-ds-modal-default-dialog-rest-border-style);
+  border-color: var(--clay-ds-modal-default-dialog-rest-border-color);
+  border-radius: var(--clay-ds-modal-default-dialog-rest-border-radius);
+  background: var(--clay-ds-modal-default-dialog-rest-background-color);
+  color: var(--clay-ds-modal-default-dialog-rest-text-color);
+  box-shadow: var(--clay-ds-modal-default-dialog-rest-shadow);
+  transition:
+    opacity var(--clay-ds-modal-default-dialog-rest-transition-duration)
+      var(--clay-ds-modal-default-dialog-rest-transition-timing),
+    transform var(--clay-ds-modal-default-dialog-rest-transition-duration)
+      var(--clay-ds-modal-default-dialog-rest-transition-timing);
 }
 
+.dialog[data-entering] {
+  opacity: 0;
+  transform: translateY(-12px) scale(0.99);
+}
+
+/* The content owns the surface: no second frame, no second head, no padding. */
+.flush {
+  border-width: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.head,
 .title {
-  margin: 0 0
-    var(
-      --clay-ds-modal-default-title-rest-margin-bottom,
-      var(--clay-spacing-sm, 12px)
-    );
-  color: var(
-    --clay-ds-modal-default-title-rest-text-color,
-    var(--clay-text-primary)
+  margin: 0;
+  padding: var(--clay-ds-modal-default-dialog-rest-padding);
+  padding-inline-end: calc(
+    var(--clay-dimension-target-min, 32px) +
+      var(--clay-ds-modal-default-dialog-rest-padding)
   );
+  color: var(--clay-ds-modal-default-dialog-rest-text-color);
   font-size: var(--clay-text-title-size);
   line-height: var(--clay-text-title-line-height);
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.body {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-ds-modal-default-dialog-rest-gap);
+  padding: var(--clay-ds-modal-default-dialog-rest-padding);
+}
+
+.flush .body {
+  padding: 0;
+  overflow: visible;
+}
+
+/* The actions foot: hairline top, wrap-first (a 1024px window must not clip
+ * the actions), cancel leading and the primary action last. */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--clay-ds-modal-default-dialog-rest-gap);
+  padding: var(--clay-ds-modal-default-dialog-rest-padding);
+  border-top: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
 }
 
 .close {
@@ -96,15 +112,19 @@
   width: var(--clay-dimension-target-min, 32px);
   height: var(--clay-dimension-target-min, 32px);
   border: none;
-  border-radius: var(--clay-ds-modal-default-close-rest-border-radius, 0);
+  border-radius: var(--clay-ds-button-default-root-rest-border-radius);
   background: transparent;
-  color: var(
-    --clay-ds-modal-default-close-rest-text-color,
-    var(--clay-text-muted)
-  );
+  color: var(--clay-text-muted);
   cursor: pointer;
 }
 
 .close:hover {
   color: var(--clay-text-primary);
+}
+
+.close:focus-visible {
+  outline: var(--clay-ds-button-default-root-focus-outline-width)
+    var(--clay-ds-button-default-root-focus-outline-style)
+    var(--clay-ds-button-default-root-focus-outline-color);
+  outline-offset: var(--clay-ds-button-default-root-focus-outline-offset);
 }

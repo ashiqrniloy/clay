@@ -1101,11 +1101,13 @@ mod tests {
         let geometry = runtime
             .slot_layout(&defaults)
             .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
-        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 660.0, 600.0));
+        // The fixed-slot default follows `dimension.panel.side.default` (244px,
+        // DESIGN.md §5; plan 118 task E1).
+        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 656.0, 600.0));
         assert_eq!(geometry.fixed_slots[0].slot_id, FixedSlotId::Right);
         assert_eq!(
             geometry.fixed_slots[0].rect,
-            Rect::new(660.0, 0.0, 900.0, 600.0)
+            Rect::new(656.0, 0.0, 900.0, 600.0)
         );
     }
 

@@ -1,0 +1,4 @@
+clay server listening on <isolated-root>/review.sock
+clay: package discovery failed (package manager error: `npm list --json` output has no dependencies object); store packages stay unloaded
+agent_registration_lines=22
+configuration_failed_lines=0

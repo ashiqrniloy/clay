@@ -1,7 +1,10 @@
-/* Workspace route: the live surface wired to bridge session state. */
+/* Workspace view: the routed surface plus the optional right rail
+ * (DESIGN.md §12). The composition is one grid; the rail's width is host-owned
+ * geometry (§5) and every colour/border/radius is a recipe value or theme role. */
 
 .workspace {
   height: 100%;
+  min-height: 0;
   display: grid;
   place-items: center;
   padding: var(--clay-spacing-lg, 24px);
@@ -15,7 +18,198 @@
   text-align: center;
 }
 
+.view {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--clay-dimension-rail-width, 340px);
+}
+
+.view[data-rail="collapsed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.viewMain {
+  min-width: 0;
+  min-height: 0;
+}
+
 .editor {
   height: 100%;
   min-height: 0;
+}
+
+/* ---------- right rail -------------------------------------------------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  border-left-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-left-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-left-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.railHead {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: 14px 14px 10px;
+}
+
+.railLabel {
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* Facts: micro-label left, mono value right (DESIGN.md §8 — every datum is
+ * monospace with tabular figures). */
+.railFacts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 12px;
+  align-items: baseline;
+  padding: 0 14px 14px;
+  margin: 0;
+}
+
+.railFacts dt {
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.railFacts dd {
+  margin: 0;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-status-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--clay-text-primary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px 12px;
+  margin: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.railEmpty {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  margin: 0;
+}
+
+.entry {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  color: var(--clay-text-muted);
+  text-align: left;
+  transition: background-color
+    var(--clay-ds-list-default-row-hover-transition-duration, 150ms) ease-out;
+}
+
+.entry:hover {
+  background: var(--clay-ds-list-default-row-hover-background-color);
+  color: var(--clay-text-primary);
+}
+
+.entry[data-active="true"] {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-list-default-row-selected-background-color)
+      calc(
+        var(--clay-ds-list-default-row-selected-background-opacity, 1) * 100%
+      ),
+    transparent
+  );
+  color: var(--clay-text-primary);
+}
+
+.entryTime {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-variant-numeric: tabular-nums;
+  color: var(--clay-text-muted);
+}
+
+.entryTitle {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-status-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railFoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  color: var(--clay-text-muted);
+}
+
+/* Mid-width windows keep a narrower rail so the measure survives (DESIGN.md §5:
+ * 340px, 312px ≤1240px). */
+@media (max-width: 1240px) {
+  .view {
+    grid-template-columns: minmax(0, 1fr) 312px;
+  }
+}
+
+/* Narrow windows: the rail becomes a right-hand drawer so the editor keeps its
+ * measure instead of being crushed by a second column (approved narrow rule). */
+@media (max-width: 1000px) {
+  .view,
+  .view[data-rail="collapsed"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    position: fixed;
+    z-index: 40;
+    top: var(--clay-dimension-titlebar-height, 40px);
+    right: 0;
+    bottom: var(--clay-dimension-statusbar-height, 28px);
+    width: min(340px, 92vw);
+    /* Opaque: a drawer sits over document text, so legibility wins over the
+     * veil fill (§6 sidebar/rail are 1.0; the pop shadow carries the lift). */
+    background: var(--clay-surface-main);
+    box-shadow: var(--clay-ds-panel-transient-root-rest-shadow);
+  }
 }

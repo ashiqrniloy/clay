@@ -595,7 +595,7 @@ async fn settings_set_design_system_persists_and_snapshot_lists_choices() {
     //    package now applies through the shared enable path (plan 110 task 18
     //    fixed the package-service double-lock deadlock); the specifier is
     //    suffix-built to stay plan-104 source-independence-guard-proof.
-    let ds_suffix = "neobrutal";
+    let ds_suffix = "instrument";
     let ds_specifier = format!("@clay/design-{ds_suffix}");
     let response = settings_request("settings.setDesignSystem", item(&ds_specifier)).await;
     assert!(response.is_none(), "setDesignSystem accepted");
@@ -627,21 +627,17 @@ async fn settings_set_design_system_persists_and_snapshot_lists_choices() {
         "enabled theme is enumerated: {:?}",
         choices.themes
     );
+    // Plan 118 task 20: the choice set is exactly what ships — the built-in core
+    // baseline first, then the enabled design-system packages, sorted — so the
+    // Settings dropdown shows the shipped set and nothing else.
     assert_eq!(
         choices
             .design_systems
-            .first()
-            .map(|option| option.specifier.as_str()),
-        Some("@clay/core"),
-        "core baseline is always selectable"
-    );
-    assert!(
-        choices
-            .design_systems
             .iter()
-            .any(|option| option.specifier == ds_specifier),
-        "enabled DS package is enumerated: {:?}",
-        choices.design_systems
+            .map(|option| option.specifier.as_str())
+            .collect::<Vec<_>>(),
+        vec!["@clay/core", ds_specifier.as_str()],
+        "exactly the shipped design-system choices, core baseline first"
     );
     assert_eq!(
         snapshot.active_design_system.specifier.as_str(),
@@ -677,7 +673,7 @@ async fn persisted_design_system_preference_applies_at_startup_reload() {
     // is applied by `apply_persisted_preferences` during the startup reload
     // without deadlocking the package service. The bounded timeout makes a
     // regression fail the test instead of hanging CI.
-    let ds_suffix = "neobrutal";
+    let ds_suffix = "instrument";
     let ds_specifier = format!("@clay/design-{ds_suffix}");
     let root = temp_workspace("persisted-design-system-startup");
     fs::write(root.join("init.js"), "").unwrap();
@@ -711,6 +707,74 @@ async fn persisted_design_system_preference_applies_at_startup_reload() {
     assert!(
         !snapshot.active_design_system.recipes.is_empty(),
         "applied design system carries the package's resolved recipes"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn persisted_removed_design_system_preference_commits_the_core_baseline() {
+    // Plan 118 task 20: a preference naming a design system this generation
+    // removed must not fail the generation or leave a half-installed snapshot.
+    // The committed generation carries the core baseline — the host-consumed
+    // subset of the shipped language — and the shipped choice set is unchanged.
+    // The specifier is assembled so the plan-118 absence guard sees no literal of
+    // a removed package name.
+    let removed = format!("@clay/design-{}", "neobrutal");
+    let shipped = format!("@clay/design-{}", "instrument");
+    let root = temp_workspace("persisted-removed-design-system-startup");
+    fs::write(root.join("init.js"), "").unwrap();
+    fs::write(
+        root.join("preferences.json"),
+        serde_json::json!({ "designSystem": removed }).to_string(),
+    )
+    .unwrap();
+    let mut config = super::super::ServerConfig::new(crate::ipc::IpcEndpoint::from_argument(
+        "persisted-removed-design-system-startup",
+    ));
+    config.configuration_root = Some(root.clone());
+    let server = super::super::IpcServer::new(config);
+
+    let outcome = timeout(Duration::from_secs(5), server.reload_runtime_generation())
+        .await
+        .expect("startup reload with a removed design-system preference must not hang");
+    assert!(outcome.reloaded, "startup reload succeeds");
+    assert_eq!(server.runtime_generation.generation_id().await, 2);
+
+    let snapshot = server
+        .runtime_generation
+        .latest_runtime_snapshot_for(1)
+        .await
+        .expect("committed runtime snapshot");
+    assert_eq!(
+        snapshot.active_design_system.specifier.as_str(),
+        "@clay/core",
+        "a removed design system falls back to the core baseline"
+    );
+    assert_eq!(
+        snapshot.active_design_system.provenance.package_name,
+        "core"
+    );
+    assert!(
+        !snapshot.active_design_system.recipes.is_empty(),
+        "the fallback carries the shipped language's recipes"
+    );
+    assert_eq!(
+        snapshot
+            .ui_choices
+            .design_systems
+            .iter()
+            .map(|option| option.specifier.as_str())
+            .collect::<Vec<_>>(),
+        vec!["@clay/core", shipped.as_str()],
+        "the rejected preference leaves the shipped choice set intact"
+    );
+    // The shipped system is offered (with its declared display name) without a
+    // prior loadPackage, so the dropdown matches what the command accepts.
+    assert_eq!(
+        snapshot.ui_choices.design_systems[1]
+            .display_name
+            .as_deref(),
+        Some("Quiet Instrument")
     );
     let _ = fs::remove_dir_all(root);
 }
@@ -788,7 +852,7 @@ async fn workspace_directory_action_sends_refreshed_file_browser_snapshot() {
         .nodes
         .iter()
         .find_map(|node| match &node.kind {
-            SduiNodeKind::List { items } => {
+            SduiNodeKind::List { items, .. } => {
                 Some(items.iter().map(|item| item.label.clone()).collect())
             }
             _ => None,
@@ -814,7 +878,7 @@ async fn file_browser_action_survives_markdown_open_followup_diagnostic() {
         .nodes
         .iter()
         .find_map(|node| match &node.kind {
-            SduiNodeKind::List { items } => items
+            SduiNodeKind::List { items, .. } => items
                 .iter()
                 .find(|item| item.label == "note.md")
                 .and_then(|item| item.action.clone()),
@@ -2621,7 +2685,7 @@ async fn path_browser_workspace_open_rebinds_only_bound_tab() {
                     .nodes
                     .iter()
                     .find_map(|node| match &node.kind {
-                        SduiNodeKind::List { items } => {
+                        SduiNodeKind::List { items, .. } => {
                             Some(items.iter().map(|item| item.label.clone()).collect())
                         }
                         _ => None,
@@ -6362,7 +6426,7 @@ async fn file_browser_open_uses_generic_open_document_followups() {
         .nodes
         .iter()
         .find_map(|node| match &node.kind {
-            SduiNodeKind::List { items } => items
+            SduiNodeKind::List { items, .. } => items
                 .iter()
                 .find(|item| item.label == "note.md")
                 .and_then(|item| item.action.clone()),

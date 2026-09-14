@@ -66,7 +66,8 @@ vi.mock("../bridge/client", () => ({
   }),
 }));
 
-import { chatAgent, resetChatAgentForTests } from "./state";
+import { agentSession, resetAgentSessionForTests } from "./state";
+import { sessionFiles } from "./session-files";
 
 const emit = harness.emit as (event: AgentStreamEvent) => void;
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -74,11 +75,17 @@ const frame = () => new Promise<void>((resolve) => setTimeout(resolve, 40));
 
 beforeEach(() => {
   harness.sendRequestCalls.length = 0;
-  resetChatAgentForTests();
+  resetAgentSessionForTests();
 });
 
 function messagesSnapshot(
-  rows: Array<{ id: string; role: string; content: string; clayKind?: string }>,
+  rows: Array<{
+    id: string;
+    role: string;
+    content: string;
+    clayKind?: string;
+    sessionFile?: { path: string; op: string };
+  }>,
 ): AgentStreamEvent {
   return {
     type: EventType.MESSAGES_SNAPSHOT,
@@ -86,8 +93,13 @@ function messagesSnapshot(
       id: row.id,
       role: row.role,
       content: row.content,
-      ...(row.clayKind
-        ? { metadata: { clayKind: row.clayKind } }
+      ...(row.clayKind || row.sessionFile
+        ? {
+            metadata: {
+              ...(row.clayKind ? { clayKind: row.clayKind } : {}),
+              ...(row.sessionFile ? { sessionFile: row.sessionFile } : {}),
+            },
+          }
         : {}),
     })),
     clientId: 1,
@@ -101,6 +113,7 @@ function toolPhase(value: {
   argsDigest?: string;
   outputDigest?: string;
   skillName?: string;
+  sessionFile?: { path: string; op: string };
 }): AgentStreamEvent {
   return {
     type: EventType.CUSTOM,
@@ -140,7 +153,7 @@ function textChunk(runId: string, delta: string): AgentStreamEvent {
 
 describe("transcript lifecycle (plan 109 I5)", () => {
   it("prompt → immediate snapshot ordering no longer drops history", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     try {
       // Turn 1 settled: the server list already has history.
@@ -209,7 +222,7 @@ describe("transcript lifecycle (plan 109 I5)", () => {
   });
 
   it("multi-turn with tools and a skill load renders every row in order", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     try {
       store.agent.sendPrompt("list files then load the skill");
@@ -226,6 +239,27 @@ describe("transcript lifecycle (plan 109 I5)", () => {
       );
       emit(runStarted("run-1"));
       emit(textChunk("run-1", "checking"));
+      emit(
+        toolPhase({
+          phase: "started",
+          name: "edit",
+          toolCallId: "c0",
+          argsDigest: '{"path":"src/main.rs"}',
+          sessionFile: { path: "src/main.rs", op: "edit" },
+        }),
+      );
+      // Plan 118 task 36: the live row carries the file record, so the Files
+      // tab counts the call without waiting for the settle snapshot.
+      await flush();
+      const liveRow = store
+        .getSnapshot()
+        .messages.find((row) => row.id === "clay-tool-c0") as
+        | { metadata?: { sessionFile?: { path: string; op: string } } }
+        | undefined;
+      expect(liveRow?.metadata?.sessionFile).toEqual({
+        path: "src/main.rs",
+        op: "edit",
+      });
       emit(
         toolPhase({
           phase: "started",
@@ -269,6 +303,13 @@ describe("transcript lifecycle (plan 109 I5)", () => {
           },
           { id: "clay-entry-1", role: "assistant", content: "checking" },
           {
+            id: "clay-tool-c0",
+            role: "tool",
+            content: 'edit {"path":"src/main.rs"}',
+            clayKind: "tool",
+            sessionFile: { path: "src/main.rs", op: "edit" },
+          },
+          {
             id: "clay-tool-c1",
             role: "tool",
             content: 'glob {"pattern":"**/*.rs"} -> src/main.rs, src/lib.rs',
@@ -297,31 +338,38 @@ describe("transcript lifecycle (plan 109 I5)", () => {
         "assistant",
         "tool",
         "tool",
+        "tool",
         "assistant",
       ]);
-      expect(rows[2]?.content).toBe(
+      expect(rows[3]?.content).toBe(
         'glob {"pattern":"**/*.rs"} -> src/main.rs, src/lib.rs',
       );
       expect(
-        (rows[3] as { metadata?: { clayKind?: string } }).metadata?.clayKind,
+        (rows[4] as { metadata?: { clayKind?: string } }).metadata?.clayKind,
       ).toBe("skill");
+      // The Files tab's projection over the settled transcript.
+      expect(sessionFiles(rows)).toEqual([
+        { path: "src/main.rs", role: "modified" },
+      ]);
 
       // Remount/restore (snapshot replay) renders the same complete
       // server-authoritative history.
       const restored = [...rows];
-      emit(messagesSnapshot(restored.map((row) => ({
-        id: row.id,
-        role: row.role,
-        content: String(row.content ?? ""),
-        ...((
-          row as { metadata?: { clayKind?: string } }
-        ).metadata?.clayKind
-          ? {
-              clayKind: (row as { metadata?: { clayKind?: string } }).metadata
-                ?.clayKind,
-            }
-          : {}),
-      }))));
+      emit(
+        messagesSnapshot(
+          restored.map((row) => ({
+            id: row.id,
+            role: row.role,
+            content: String(row.content ?? ""),
+            ...((row as { metadata?: { clayKind?: string } }).metadata?.clayKind
+              ? {
+                  clayKind: (row as { metadata?: { clayKind?: string } })
+                    .metadata?.clayKind,
+                }
+              : {}),
+          })),
+        ),
+      );
       await frame();
       expect(store.getSnapshot().messages.map((row) => row.id)).toEqual(
         restored.map((row) => row.id),
@@ -332,7 +380,7 @@ describe("transcript lifecycle (plan 109 I5)", () => {
   });
 
   it("mid-run steer appears as a user-kind entry without losing in-flight text", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     try {
       store.agent.sendPrompt("start");
@@ -375,8 +423,7 @@ describe("transcript lifecycle (plan 109 I5)", () => {
       // In-flight run text survived the mid-run snapshot boundary.
       expect(
         rows.some(
-          (row) =>
-            row.role === "assistant" && row.content === "partial answer",
+          (row) => row.role === "assistant" && row.content === "partial answer",
         ),
       ).toBe(true);
     } finally {

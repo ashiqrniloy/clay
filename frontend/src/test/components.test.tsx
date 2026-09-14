@@ -80,6 +80,103 @@ describe("ClayTextField accessibility wiring", () => {
     );
     expect(screen.getByLabelText("Path")).toBeInvalid();
   });
+
+  it("renders the declared error slot with its own message and association (plan 118 E6)", () => {
+    const { rerender } = render(
+      <ClayTextField
+        label="UI size"
+        value="4"
+        onChange={() => {}}
+        validationState="error"
+        errorMessage="Enter a size between 6 and 96."
+      />,
+    );
+    const input = screen.getByLabelText("UI size");
+    expect(input).toBeInvalid();
+    expect(input).toHaveAccessibleDescription("Enter a size between 6 and 96.");
+    const slot = document.querySelector(
+      "[data-clay-component='textInput'][data-clay-slot='error']",
+    );
+    expect(slot).not.toBeNull();
+    expect(slot?.textContent).toBe("Enter a size between 6 and 96.");
+
+    // No message, no slot, no association.
+    rerender(
+      <ClayTextField
+        label="UI size"
+        value="12"
+        onChange={() => {}}
+        validationState="none"
+      />,
+    );
+    expect(document.querySelector("[data-clay-slot='error']")).toBeNull();
+    expect(screen.getByLabelText("UI size")).not.toBeInvalid();
+  });
+});
+
+describe("ClayList filter affordance (plan 118 E1)", () => {
+  const items = [
+    { id: "src/alpha.md", title: "alpha.md", detail: "src" },
+    { id: "src/beta.md", title: "beta.md", detail: "src" },
+    { id: "docs/gamma.md", title: "gamma.md", detail: "docs" },
+  ];
+
+  it("filters the delivered rows locally and reports the match count", async () => {
+    const user = userEvent.setup();
+    const onAction = vi.fn();
+    render(
+      <ClayList
+        ariaLabel="Files"
+        items={items}
+        filter={{ placeholder: "Filter files", shortcut: "/" }}
+        onAction={onAction}
+      />,
+    );
+    const field = screen.getByLabelText("Filter files");
+    // No query: every row, no count (the approved copy).
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+    expect(screen.queryByText(/match/)).not.toBeInTheDocument();
+
+    await user.type(field, "beta");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+
+    // The count follows the visible rows and the plural is honest.
+    await user.clear(field);
+    await user.type(field, "md");
+    expect(screen.getByText("3 matches")).toBeInTheDocument();
+    await user.clear(field);
+    await user.type(field, "src/beta");
+    expect(screen.getByText("1 match")).toBeInTheDocument();
+
+    // Enter opens the first match without leaving the field.
+    await user.keyboard("{Enter}");
+    expect(onAction).toHaveBeenCalledWith("src/beta.md");
+
+    // Escape clears the query and restores the listing exactly.
+    await user.keyboard("{Escape}");
+    expect((field as HTMLInputElement).value).toBe("");
+    expect(screen.getAllByRole("option")).toHaveLength(3);
+  });
+
+  it("keeps the field the only ring in the list and the chord's target marked", () => {
+    const { container } = render(
+      <ClayList
+        ariaLabel="Files"
+        items={items}
+        filter={{ placeholder: "Filter files", shortcut: "/" }}
+      />,
+    );
+    const tools = container.querySelector("[data-clay-list-filter]");
+    expect(tools).not.toBeNull();
+    // One ring per surface: the list rows draw none at rest; the field's well is
+    // the list's only input treatment.
+    expect(container.querySelectorAll("input")).toHaveLength(1);
+    expect(tools?.querySelector("kbd")?.textContent).toBe("/");
+    expect(
+      container.querySelector("[data-clay-component='list']"),
+    ).not.toBeNull();
+  });
 });
 
 describe("ClayList selection semantics", () => {
@@ -377,11 +474,7 @@ describe("ClayTabStrip catalog primitive and unification", () => {
     const onNew = vi.fn();
 
     render(
-      <ClayTabStrip
-        tabs={[]}
-        emptyLabel="No open buffers"
-        onNew={onNew}
-      />,
+      <ClayTabStrip tabs={[]} emptyLabel="No open buffers" onNew={onNew} />,
     );
 
     expect(screen.getByText("No open buffers")).toBeInTheDocument();
@@ -426,10 +519,7 @@ describe("ClayTabStrip catalog primitive and unification", () => {
     expect(TabBar).toBeDefined();
     expect(ClayTabBar).toBe(ClayTabStrip);
     const { container: shellContainer } = render(
-      <TabBar
-        tabs={[{ id: "1", label: "buffer.rs" }]}
-        activeId="1"
-      />,
+      <TabBar tabs={[{ id: "1", label: "buffer.rs" }]} activeId="1" />,
     );
     const { container: stripContainer } = render(
       <ClayTabStrip

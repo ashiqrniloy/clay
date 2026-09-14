@@ -1007,6 +1007,12 @@ pub enum ClientConnectionEvent {
         client_id: ClientId,
         files: Vec<crate::protocol::AgentSettingsFileInfo>,
     },
+    /// Reply to `ListLauncherEntries` / `RemoveLauncherRecent`: the start
+    /// surface's server-resolved rows (recent workspaces + agent types).
+    LauncherEntries {
+        client_id: ClientId,
+        entries: Box<crate::protocol::LauncherEntries>,
+    },
     ServerError {
         code: ProtocolErrorCode,
         message: String,
@@ -1923,6 +1929,11 @@ async fn run_connection<S>(
                                 client_id,
                                 files,
                             })
+                            .await;
+                    }
+                    Ok(ServerMessage::LauncherEntries { client_id, entries }) => {
+                        let _ = events
+                            .send(ClientConnectionEvent::LauncherEntries { client_id, entries })
                             .await;
                     }
                     Ok(ServerMessage::TransientMenuSnapshot(snapshot)) => {

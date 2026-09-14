@@ -4,7 +4,7 @@
 // pipeline (chunk expansion, event verification, message/state application)
 // is entirely upstream. This class only bridges transports:
 // - Outgoing: composer text becomes the existing server-validated
-//   `chat.submit` intent through the typed session bridge.
+//   `agent.submit` intent through the typed session bridge.
 // - Incoming: one shared relay stream carries Rust-adapted AG-UI events; a
 //   run observable forwards exactly its own run and completes at the
 //   terminal lifecycle event.
@@ -19,17 +19,13 @@ import { sendRequest } from "../bridge/client";
 
 const RUN_TERMINAL = new Set(["RUN_FINISHED", "RUN_ERROR"]);
 
-export interface ChatIntentContext {
-  /** Current package UI version for intent validation. */
-  uiVersion: number;
-}
-
 /**
- * Builds the `sduiAction` payload for a chat command with a string argument.
+ * Builds the `sduiAction` payload for an agent command with a string argument.
  * Mirrors `packageIntent`/`sduiActionPayload` from the SDUI layer without a
- * declared node (the chat surface is host-rendered).
+ * declared node (the agent composer is host-rendered, so its intents carry
+ * agent naming and are authorized by the bound tab session).
  */
-function chatIntentPayload(
+function agentIntentPayload(
   uiVersion: number,
   commandId: string,
   value?: string,
@@ -39,9 +35,7 @@ function chatIntentPayload(
   // second named argument; the server forwards it to the daemon, which
   // fail-closes invalid strings at its boundary.
   const args: Array<{ name: string; value: { string: string } }> =
-    value === undefined
-      ? []
-      : [{ name: "value", value: { string: value } }];
+    value === undefined ? [] : [{ name: "value", value: { string: value } }];
   if (thinkingLevel !== undefined) {
     args.push({ name: "thinkingLevel", value: { string: thinkingLevel } });
   }
@@ -127,7 +121,7 @@ export class TauriClayAgent extends AbstractAgent {
       });
       // Fire the validated server intent; streaming arrives over the relay.
       void this.sender(
-        chatIntentPayload(uiVersion, "chat.submit", prompt, effort),
+        agentIntentPayload(uiVersion, "agent.submit", prompt, effort),
       ).catch((error) => {
         if (!subscriber.closed) subscriber.error(error);
       });
@@ -136,7 +130,7 @@ export class TauriClayAgent extends AbstractAgent {
   }
 
   override abortRun() {
-    void this.sender(chatIntentPayload(this.uiVersion, "chat.cancel")).catch(
+    void this.sender(agentIntentPayload(this.uiVersion, "agent.cancel")).catch(
       () => {
         // Server unreachable; the disconnect flow owns recovery.
       },
@@ -146,10 +140,10 @@ export class TauriClayAgent extends AbstractAgent {
   /** Queues a mid-run user message (pi-parity steer, plan 108 task 9).
    *  Server-side no-op when no run is active on the tab's session. */
   steer(text: string) {
-    void this.sender(chatIntentPayload(this.uiVersion, "chat.steer", text)).catch(
-      () => {
-        // Server unreachable; the disconnect flow owns recovery.
-      },
-    );
+    void this.sender(
+      agentIntentPayload(this.uiVersion, "agent.steer", text),
+    ).catch(() => {
+      // Server unreachable; the disconnect flow owns recovery.
+    });
   }
 }

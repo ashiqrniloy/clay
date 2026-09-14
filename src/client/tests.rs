@@ -3117,7 +3117,7 @@ async fn real_server_restore_sequence_orders_tabs_and_opens_documents() {
     };
     assert!(initial_alpha_browser.nodes.iter().any(|node| matches!(
         &node.kind,
-        SduiNodeKind::List { items } if items.iter().any(|item| item.label == "notes.md")
+        SduiNodeKind::List { items, .. } if items.iter().any(|item| item.label == "notes.md")
     )));
 
     // Registry order equals persisted order — no `MoveTo` needed.

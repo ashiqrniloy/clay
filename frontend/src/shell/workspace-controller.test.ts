@@ -1,9 +1,10 @@
 import { EditorState } from "@codemirror/state";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { BootstrapDto } from "../bridge/types";
 import type { RuntimeSnapshot } from "../sdui/types";
 import { tabsFromWindow } from "./persist";
+import { agentInspector, workspaceRail } from "./layout-state";
 import { createWorkspace } from "./workspace-controller";
 
 function bootstrap(
@@ -66,6 +67,86 @@ function bootstrap(
     ...over,
   } as BootstrapDto;
 }
+
+describe("per-tab layout visibility (plan 118 task E2)", () => {
+  it("keeps rail and inspector visibility per tab and persists both", async () => {
+    vi.useFakeTimers();
+    const saved: unknown[] = [];
+    const ws = createWorkspace({
+      send: async () => {},
+      saveLayout: async (state) => {
+        saved.push(state);
+      },
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    expect(agentInspector.isVisible()).toBe(true);
+    expect(workspaceRail.isVisible()).toBe(true);
+
+    // Tab 1: hide both — a toggle alone schedules the layout write.
+    workspaceRail.setVisible(false);
+    agentInspector.setVisible(false);
+    expect(workspaceRail.isVisible()).toBe(false);
+    vi.advanceTimersByTime(300);
+    await Promise.resolve();
+    const afterToggle = saved.at(-1) as {
+      tabs: Array<{ railVisible: boolean; inspectorVisible: boolean }>;
+    };
+    expect(afterToggle.tabs[0]).toMatchObject({
+      railVisible: false,
+      inspectorVisible: false,
+    });
+
+    // Tab 2: its own shape (both visible again) — switching tabs re-reads.
+    ws.installBootstrap(bootstrap({ clientId: 2 }));
+    await ws.activate(2);
+    expect(workspaceRail.isVisible()).toBe(true);
+    expect(agentInspector.isVisible()).toBe(true);
+    workspaceRail.setVisible(true);
+
+    // Back to tab 1: the hidden rail is still hidden for that tab.
+    await ws.activate(1);
+    expect(workspaceRail.isVisible()).toBe(false);
+    expect(agentInspector.isVisible()).toBe(false);
+
+    // Persist: one entry per tab, from the same store.
+    vi.advanceTimersByTime(300);
+    await Promise.resolve();
+    const layout = saved.at(-1) as {
+      tabs: Array<{ railVisible: boolean; inspectorVisible: boolean }>;
+    };
+    expect(layout.tabs).toHaveLength(2);
+    expect(layout.tabs[0]).toMatchObject({
+      railVisible: false,
+      inspectorVisible: false,
+    });
+    expect(layout.tabs[1]).toMatchObject({
+      railVisible: true,
+      inspectorVisible: true,
+    });
+    vi.useRealTimers();
+  });
+
+  it("restores what the layout recorded, per tab", async () => {
+    const ws = createWorkspace({
+      send: async () => {},
+      loadLayout: async () => ({
+        version: 2,
+        activeTab: 0,
+        tabs: [
+          {
+            workspaceRoot: "/tmp/one",
+            railVisible: false,
+            inspectorVisible: false,
+          },
+        ],
+      }),
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    await ws.restore();
+    expect(workspaceRail.isVisible()).toBe(false);
+    expect(agentInspector.isVisible()).toBe(false);
+  });
+});
 
 describe("workspace controller", () => {
   it("adopts the tab id from a pre-bootstrap registry so server-first chords route to the right tab", async () => {
@@ -605,9 +686,15 @@ describe("workspace controller", () => {
     );
     expect(cancel).toBeDefined();
 
-    ws.launchCodingAgent();
-    expect(ws.active()?.agentSurfaceOpen).toBe(true);
-    expect(ws.active()?.agentSurfacePaneId).not.toBeNull();
+    // Plan 118 task 33: the agent is a *view* of the tab, not a pane surface.
+    // Attaching it keeps the workspace half; the view switches with it.
+    ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    const attached = ws.tabs.get().tabs[0];
+    expect(attached?.agent?.type).toBe("coding-agent");
+    expect(attached?.view).toBe("agent");
+    ws.setView("workspace");
+    expect(ws.tabs.get().tabs[0]?.view).toBe("workspace");
+    expect(ws.tabs.get().tabs[0]?.agent).not.toBeNull();
   });
 
   it("exposes global server-first keymaps and dispatches their command intents", async () => {
@@ -625,8 +712,24 @@ describe("workspace controller", () => {
         {
           commandId: "controlCenter.open",
           sequence: [
-            { key: { character: "x" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
-            { key: { character: "p" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
+            {
+              key: { character: "x" },
+              modifiers: {
+                shift: false,
+                control: true,
+                alt: false,
+                superKey: false,
+              },
+            },
+            {
+              key: { character: "p" },
+              modifiers: {
+                shift: false,
+                control: true,
+                alt: false,
+                superKey: false,
+              },
+            },
           ],
           context: "Global",
           routingPolicy: "ServerFirst",
@@ -634,7 +737,15 @@ describe("workspace controller", () => {
         {
           commandId: "shell.clientSplitPaneVertical",
           sequence: [
-            { key: { character: "\\" }, modifiers: { shift: false, control: true, alt: false, superKey: false } },
+            {
+              key: { character: "\\" },
+              modifiers: {
+                shift: false,
+                control: true,
+                alt: false,
+                superKey: false,
+              },
+            },
           ],
           context: "Global",
           routingPolicy: "ClientUiCommand",

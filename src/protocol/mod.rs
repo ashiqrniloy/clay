@@ -258,6 +258,74 @@ pub fn bounded_document_chunk_bytes(max_bytes: u32) -> Result<usize, DocumentChu
 
 /// One agent-delivered settings file (plan 117): bounded metadata for the
 /// settings page listing. Inert: names + provenance only, never content.
+/// One recently opened workspace root, as the launcher lists it. Display
+/// data: the name is the folder's basename, the root the server's own stored
+/// path (the webview never supplies one back).
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherWorkspaceEntry {
+    pub name: String,
+    pub root: String,
+}
+
+/// One configured agent type under the Clay data root's `agents/` folder.
+/// Data only: nothing here loads a package or grants tool authority.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherAgentEntry {
+    /// Directory name (the agent type's identity).
+    pub name: String,
+    /// Human label for the row (`coding-agent` → `Coding Agent`).
+    pub label: String,
+    /// Config root, home-relative for display.
+    pub config_root: String,
+    /// Seeded skills under `<config root>/skills/`.
+    pub skill_count: u32,
+}
+
+/// Server-resolved launcher payload: recent workspaces and configured agent
+/// types. `pruned` counts recents dropped because the folder is gone.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherEntries {
+    pub workspaces: Vec<LauncherWorkspaceEntry>,
+    pub agents: Vec<LauncherAgentEntry>,
+    pub pruned: u32,
+}
+
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -2004,6 +2072,18 @@ pub enum ClientMessage {
         client_id: ClientId,
         name: String,
     },
+    /// Launcher (plan 118 Part D): the start surface's server-resolved entries
+    /// — recent workspaces and configured agent types. Read-only display data
+    /// with no path authority.
+    ListLauncherEntries {
+        client_id: ClientId,
+    },
+    /// Launcher: drop one recent workspace by its index in the server's own
+    /// list. The webview never sends a path back.
+    RemoveLauncherRecent {
+        client_id: ClientId,
+        index: u32,
+    },
     AddSelectedWorkspaceRoot {
         client_id: ClientId,
         /// Server-issued single-use selected-path capability token. Required so
@@ -2728,14 +2808,42 @@ pub struct TabRegistrySnapshot {
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum TabCommand {
-    New { workspace_root: String },
-    OpenWorkspace { tab_id: TabId, root: String },
-    Close { tab_id: TabId },
-    Activate { tab_id: TabId },
-    Reclaim { tab_id: TabId },
-    MoveLeft { tab_id: TabId },
-    MoveRight { tab_id: TabId },
-    MoveTo { tab_id: TabId, position: u32 },
+    New {
+        workspace_root: String,
+    },
+    OpenWorkspace {
+        tab_id: TabId,
+        root: String,
+    },
+    Close {
+        tab_id: TabId,
+    },
+    Activate {
+        tab_id: TabId,
+    },
+    Reclaim {
+        tab_id: TabId,
+    },
+    MoveLeft {
+        tab_id: TabId,
+    },
+    MoveRight {
+        tab_id: TabId,
+    },
+    MoveTo {
+        tab_id: TabId,
+        position: u32,
+    },
+    /// Plan 118 task 35: the tab's agent type (the per-agent config root's
+    /// directory name under the Clay data root's `agents/`). `None` detaches
+    /// the tab from its agent. The server validates the name and that the
+    /// agent actually resolves before the registry accepts it: this is the
+    /// only way a tab's agent changes (tab chrome), and no absolute path ever
+    /// travels on the wire.
+    SetAgent {
+        tab_id: TabId,
+        agent: Option<String>,
+    },
 }
 
 /// Resolved active theme snapshot shipped from the server (which owns package
@@ -2979,6 +3087,13 @@ pub enum ServerMessage {
     AgentSettingsFiles {
         client_id: ClientId,
         files: Vec<AgentSettingsFileInfo>,
+    },
+    /// Reply to `ListLauncherEntries` (and after a recent is removed): the
+    /// launcher's server-resolved rows. `pruned` entries were dropped because
+    /// their folder is gone.
+    LauncherEntries {
+        client_id: ClientId,
+        entries: Box<LauncherEntries>,
     },
     RuntimeDiagnostic(RuntimeDiagnostic),
     /// Phase 18.11 completion result set. Bounded, versioned, provenance-bearing

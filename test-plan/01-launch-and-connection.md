@@ -32,18 +32,39 @@ cargo build
 | L10 | Put a syntax error in `~/.clay/init.js`, restart | GUI still opens; status/terminal shows `runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
 | L11 | No server reachable for a client-only invocation | `Local Fallback` state |
 
-## Plan 087 UI foundation steps
+## Landing steps (Plan 087 foundation, reshaped by Plan 118 Part D)
+
+The empty tab is a **package contribution** since plan 118 Part D
+(`DESIGN.md` §12/§16). Two states exist and both are steps below:
+
+- **Launcher landing** — the bundled `@clay/launcher` package contributes the
+  empty-tab content and the host renders its compiled panel (the trusted
+  provenance lookup beside the Coding Agent panel). This is what
+  `examples/config/packages/first-party.js` loads, i.e. the shipped landing.
+- **Core fallback** — with no empty-tab contribution installed, the empty tab
+  is the Clay-owned `Start with a file or folder` card with `Open file` /
+  `Open folder`. Core carries **no product-named landing** (plan 118).
 
 | # | Action | Expected |
 |---|--------|----------|
-| L12 | Fresh isolated launch with an empty-document tab (no restore) | Welcome entry state shows instead of a stale prototype document: `Welcome to Clay` group with `Open File` / `Open Folder` buttons, polite status `Ready to edit; Open a file or folder to start editing.; Workspace: <basename>; Connection: Connected; Access: Editable.`; status bar shows `Connected — Editable`; no ambient config/socket used |
-| L13 | Review harness launch: `scripts/capture-ui-review.sh --fixture ui-review-default --output <dir>` | Documented repeatable command (module reference `docs/development/launch-and-gui-smoke.md`) boots isolated server+client, captures AT-SPI dump + screenshot, writes `review.status PASS`; UNRESOLVED (exit 2) with a stated reason when the desktop accessibility bus is unavailable — never a false pass |
-| L14 | Watch the AT-SPI tree while idle (welcome state) | No `Welcome to Clay's Phase 4 IPC server.` copy anywhere; entry/status labels contain no absolute paths |
+| L12 | Fresh isolated launch with an empty-document tab and **no** empty-tab contribution (`scripts/capture-ui-review.sh --fixture ui-review-default --output <dir>`, whose `init.js` is empty) | Core fallback only: group named `Empty tab`, title `Start with a file or folder`, buttons `Open file` and `Open folder`, polite status `Ready to edit; Open a file or folder to start editing.; Workspace: <basename>; Connection: Connected; Access: Editable.`, status bar `Connected — Editable`; **no `Coding Agent` button and no product name anywhere in the fallback**; no `Welcome to Clay's Phase 4 IPC server.` copy; no ambient config/socket used |
+| L12a | Same launch with the bundled launcher loaded (`scripts/capture-ui-review.sh --fixture ui-review-launcher --output <dir>`, whose `init.js` loads `@clay/launcher`) | The landing replaces the fallback: `Start` title plus its one-paragraph explanation, one `Workspaces` and one `Agents` pane each with a count chip and a `Filter` well, rows from the server listing (real names + the stored path / agent config root), the first-run note when a pane is empty (`No workspace has been opened yet…`, `No agent is configured…`), each pane's foot (`Open folder…` / `One folder per agent in ~/.clay/agents/`), and one action row: `Tab panes · ↑↓ move · ⏎ pick · ⌘⏎ open both · esc clear` beside the primary button, which names exactly what it opens (`Open <name>`, `Open Coding Agent`, `Open <name> + Coding Agent`) and stays disabled until a row is picked. Shell chrome around it is unchanged (tab strip, sidebar, outline rail); no fabricated rows; no document is opened by rendering the landing |
+| L13 | Review harness contract: `scripts/capture-ui-review.sh --fixture <name> --output <dir>` | Documented repeatable command (module reference `docs/development/launch-and-gui-smoke.md`) boots an isolated server+client (mode-700 HOME/XDG/socket), captures AT-SPI dump + window-cropped screenshot, and writes `review.status PASS`; UNRESOLVED (exit 2) with a stated reason when the desktop accessibility bus or portal capture is unavailable — never a false pass. Both landing fixtures above are accepted by the argument check; the removed design-system fixtures exit 2 as unknown |
+| L14 | Watch the AT-SPI tree while idle (either landing state) | No `Phase 4 IPC server` copy anywhere; the entry/status chrome keeps basenames only. The launcher's recents rows deliberately show the stored absolute workspace path (it is the user's own workspace identity, and the landing must not invent a display name) — that is product data, not a sanitize leak; no *other* label may carry a host path, secret or token |
+| L14a | Landing → workspace handoff: pick a recents row, then activate the primary button (click, or AT-SPI action) | The folder opens as the tab's workspace; the landing disappears and the editor pane (plus the docbar's document actions) takes its place; the tab strip label updates. UNRESOLVED on hosts without an input-synthesis backend — the automated legs below pin the same wiring |
+| L14b | Landing → agent handoff: with `@clay/coding-agent` loaded and one agent folder present, pick the agent row and activate the primary button | The tab switches to the agent view (module [17](17-coding-agent-parity.md) C38) instead of opening a document; picking one workspace **and** one agent and using `⌘⏎ open both` opens the workspace and then the agent view in the same tab. UNRESOLVED on hosts without input synthesis; automated legs: `frontend/src/launcher/LauncherPanel.test.tsx`, `frontend/src/shell/WorkspacePanes.test.tsx` |
 
 ## Negative checks
 
 - Status line never shows absolute paths, source snippets, secrets, tokens,
   or env dumps (sanitize contract).
+- Landing: with no empty-tab contribution the fallback shows no product name
+  (L12); with the launcher installed, an empty recents store renders the
+  first-run note rather than a placeholder row, and a stored path whose folder
+  disappeared is pruned instead of being listed.
+- Landing: rendering the launcher never opens a document, never records a new
+  recent (recents are stamped only when a folder is opened — L14a) and never
+  writes to the workspace.
 - Typing never blocks on IPC: keystrokes stay local-optimistic even while
   `Pending edits` > 0 or after disconnect.
 
@@ -176,3 +197,35 @@ JS- or Tauri-reachable (task-13 inventory); the live dialog path remains
 (ashpd portal), and the Open file/Open folder welcome actions render with
 sanitized names in the capture. Live chooser selection stays input-blocked as
 in every prior record.
+
+## Plan 118 landing execution record (2026-09-13)
+
+Executed against a freshly rebuilt `target/debug/clay` **and**
+`target/debug/clay-desktop` (`cargo build --bins` plus
+`cargo build --bins -p clay-desktop`; the desktop binary lives in `src-tauri`
+and a stale one produces `Session lost` — the standing mixed-binary ceiling).
+Artifacts: `test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| L12 core fallback | PASS live | `core-fallback/` (`review.status=PASS`): AT-SPI tree is `Empty tab` + `Open file` / `Open folder` only — no `Coding Agent` button, no product name; window-cropped screenshot shows `Start with a file or folder` inside the shipped shell |
+| L12a launcher landing | PASS live | `launcher-landing/`: tree exposes `Start` (heading + paragraph), `Recent workspaces` landmark with a `list box` holding the real recents row (`workspace  /tmp/clay-ui-review.*/workspace`), `Open folder…`, `Agents` landmark with its first-run paragraph, and the action footer with the disabled primary `Open`; `runtime-tree.txt` records the contribution; screenshot inspected (both panes, count chips `1`/`0`, filter wells, hints) |
+| L13 harness contract | PASS + 2 defects found and fixed | The launcher fixture is accepted by the argument check and the removed-system fixtures still exit 2 (`plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`). **Defect 1 (fixed):** the harness `chmod 700 "$home/.config"` ran against a directory it never created, so **every** fixture aborted under `set -e` before launch — `mkdir` now creates it. **Defect 2 (fixed):** `ui-review-coding-agent` relied on `commandDispatch("coding-agent.profile")` alone, so with the agent package unloaded the fixture silently captured the fallback; it now loads `@clay/coding-agent` first |
+| L14 sanitize / AT-SPI names | PASS | `launcher-landing/accessibility.txt`: the only absolute path is the launcher's own recents row (intended product data, L14); status/footer keep the workspace basename; no secret/token string anywhere |
+| L14a/L14b interactive handoffs | UNRESOLVED — no input-synthesis backend | `computer-use-linux doctor`: `can_send_development_input=false` (no `/dev/uinput`, xdotool/ydotool, or portal input path). AT-SPI action invocation works on this host (Plan 087 opened the native dialog that way) but the capture harness tears the app down before a probe can act; automated legs pin the same wiring (`LauncherPanel.test.tsx`, `WorkspacePanes.test.tsx`). Not a false pass and not a weakened step |
+| L15–L22 regression class (welcome/shell geometry, error, recovery, loading, large typography) | PASS live | `core-fallback/`, `error/` (status bar `JavaScript runtime evaluation failed.`), `recovery/` (`Reconnect session`), `loading/` (`Loading review` panel), `large-typography/` (landing-free fallback at size 24/20/21, in bounds) — all `review.status=PASS` |
+| Cross-module | see | Coding Agent view [17](17-coding-agent-parity.md#plan-118-coding-agent-view-record-2026-09-13), Workspace composition [15](15-ui-design-systems.md#plan-118-ui-design-system-execution-record-2026-09-13), panes [13](13-window-splits.md#plan-118-execution-record-2026-09-13), files/workspace [03](03-files-and-workspace.md#plan-118-execution-record-2026-09-13) |
+
+**Finding carried to the visual review (module 15 task, not a pass claim):**
+on the landing the workspace route still mounts its side chrome — the file
+browser on the left and the outline rail on the right. The rail renders a
+zero-document fact block (`FILE —`, `REVISION v1`, `STATE clean`,
+`ENTRIES 0`, `WORDS 0`, `No headings in this document.`) for a tab whose
+document set is empty. The values are the session's real defaults (nothing is
+fabricated), but the composition reads as if a document existed; the approved
+`start.html` draws the landing without either surface. Recorded for the
+visual-review task's deviation table: fix by hiding the rail (and optionally
+the sidebar) when the active pane has no document, or re-approve the chrome.
+
+No existing step was deleted or weakened. L12 changed only in wording (the
+fallback copy/name that ships) and gained its launcher counterpart.

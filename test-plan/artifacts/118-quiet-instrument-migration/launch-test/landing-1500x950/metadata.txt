@@ -1,0 +1,14 @@
+fixture=ui-review-launcher
+config_source=examples/config (canonical tree, cp -r parity)
+window_requested_size=1500x950
+theme=fixture-default
+appearance=fixture-default
+drive_steps=none
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 1500x950, compositor kept 1500x1151
+window_viewport=1500x1104
+window_frame=1552x1203
+screenshot=1500x1151

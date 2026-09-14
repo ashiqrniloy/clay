@@ -25,8 +25,8 @@ use crate::protocol::{
     AgentModelInfo, AgentOmWorkerKind, AgentOmWorkerModel, AgentPickerItem, AgentPickerKind,
     AgentProfileInfo, AgentProviderInfo, AgentSecret, AgentServerMessage, AgentSessionInfo,
     AgentSessionSnapshot, AgentSkillInfo, AgentSlashCommand, AgentToolPhase, AgentTranscriptEntry,
-    AgentTranscriptKind, AgentWireEvent, ApprovalRequestKind, TabId, apply_transcript_event,
-    truncate_transcript_text,
+    AgentTranscriptFile, AgentTranscriptKind, AgentWireEvent, ApprovalRequestKind, TabId,
+    apply_transcript_event, transcript_file_for_tool, truncate_transcript_text,
 };
 use crate::server::agent_picker::AgentSearchHit;
 
@@ -205,9 +205,12 @@ impl AgentHostConfig {
             inert: false,
             // Plan 117: user mcp.json + repo .mcp.json merge into the
             // server-built allow-list (decision 2026-09-09-1341).
+            // The shipped agent's list doubles as the initialize-time default
+            // (plan 118 task 35: each agent's own list rides its session).
             mcp_allow_list: super::agent_mcp_config::build_mcp_allow_list(
                 configuration_root,
                 workspace_root,
+                None,
             ),
         }
     }
@@ -226,6 +229,17 @@ struct Running {
     commands: mpsc::Sender<HostCommand>,
 }
 
+/// Plan 118 task 35: where per-agent config roots resolve from, installed by
+/// the owning server (mirrors `set_tab_registry`).
+#[derive(Debug, Clone)]
+struct AgentRoots {
+    /// Clay data root (`~/.clay` or the explicit configuration root).
+    config_root: Option<PathBuf>,
+    /// Launch workspace root — merged into each agent's MCP allow-list from
+    /// the repo `.mcp.json` (plan 117).
+    workspace_root: Option<PathBuf>,
+}
+
 #[derive(Default)]
 struct SessionBook {
     profile: String,
@@ -235,11 +249,24 @@ struct SessionBook {
     /// picker/model selections that happen while a tab is bound to the
     /// root; resolved at session creation with the global trio as fallback.
     workspaces: HashMap<String, BookSelection>,
+    /// Plan 118 task 35: last-used selection per (agent type, workspace
+    /// root). Switching a tab's agent must reset the model/effort controls
+    /// to *that* agent's defaults, so each agent remembers its own pick;
+    /// `workspaces` keeps the pre-agent behavior (and stays the fallback).
+    agent_workspaces: HashMap<String, HashMap<String, BookSelection>>,
     tab_session: HashMap<TabId, String>,
     /// Workspace root each tab's session was created against (plan 109 I1).
     /// A tab whose registry root no longer matches is rebound on its next
     /// interaction; the old session stays resumable from `transcripts`.
     tab_session_root: HashMap<TabId, String>,
+    /// Plan 118 task 35: the agent type each session runs as. Recorded at
+    /// creation (and on load/resume from the daemon record), stamped onto
+    /// every transcript row the server appends, and rewritten by a switch.
+    session_agent: HashMap<String, String>,
+    /// The agent type the tab's session was created for: a change makes
+    /// `session_for_root` drop the binding so the next interaction creates a
+    /// session for the new agent (the old one stays resumable).
+    tab_session_agent: HashMap<TabId, String>,
     /// Last finished run's context-token counter per session (plan 108
     /// task 9): the snapshot's context-used-vs-window numerator.
     context_tokens: HashMap<String, Option<u64>>,
@@ -439,21 +466,44 @@ fn parse_environment(value: &Value) -> DaemonEnvironment {
 
 impl SessionBook {
     /// The tab's session when it still matches `current_root` (the tab
-    /// registry's root, empty when unknown). A root change clears the
-    /// stale binding so the caller creates a session for the new root.
-    fn session_for_root(&mut self, tab: TabId, current_root: Option<&str>) -> Option<String> {
+    /// registry's root, empty when unknown) and `current_agent` (the tab's
+    /// agent type, empty when the tab has none). Either change clears the
+    /// stale binding so the caller creates a session for the new
+    /// root/agent; the old session stays resumable from `transcripts`.
+    fn session_for_root(
+        &mut self,
+        tab: TabId,
+        current_root: Option<&str>,
+        current_agent: Option<&str>,
+    ) -> Option<String> {
         let session_id = self.tab_session.get(&tab)?.clone();
-        let bound_root = self
+        let root_matches = self
             .tab_session_root
             .get(&tab)
             .map(String::as_str)
-            .unwrap_or("");
-        if bound_root == current_root.unwrap_or("") {
+            .unwrap_or("")
+            == current_root.unwrap_or("");
+        let agent_matches = self
+            .tab_session_agent
+            .get(&tab)
+            .map(String::as_str)
+            .unwrap_or("")
+            == current_agent.unwrap_or("");
+        if root_matches && agent_matches {
             return Some(session_id);
         }
         self.tab_session.remove(&tab);
         self.tab_session_root.remove(&tab);
+        self.tab_session_agent.remove(&tab);
         None
+    }
+
+    /// Append a transcript row, stamped with the agent that produced it.
+    fn push_row(&mut self, session_id: &str, row: AgentTranscriptEntry) {
+        let agent = self.session_agent.get(session_id).cloned();
+        let entries = self.transcripts.entry(session_id.to_string()).or_default();
+        entries.push(row.with_agent(agent.as_deref()));
+        cap_entries(entries);
     }
 }
 
@@ -511,18 +561,64 @@ fn json_om_workers(
     })
 }
 
-/// Resolve the selection for a workspace root (plan 109 I2): the
-/// workspace's last-used selection when it exists and its provider is
-/// configured, else the global fallback trio.
+/// Resolve the selection for (agent type, workspace root) (plan 109 I2, plan
+/// 118 task 35): that agent's last-used selection for the root, else the
+/// root's pre-agent entry (a migration read, so an existing book keeps its
+/// pick), else the global fallback trio. Only a configured provider wins;
+/// anything else falls through.
+fn stored_selection(
+    book: &SessionBook,
+    agent: Option<&str>,
+    root: Option<&str>,
+) -> Option<BookSelection> {
+    match agent.map(str::trim).filter(|agent| !agent.is_empty()) {
+        // A named agent reads only its own map: a switch must land on *that*
+        // agent's defaults, never on another agent's last pick. A pre-agent
+        // book is migrated into the shipped agent's map at load, so this does
+        // not strand an existing selection.
+        Some(agent) => book
+            .agent_workspaces
+            .get(agent)
+            .and_then(|roots| root.and_then(|root| roots.get(root)))
+            .cloned(),
+        // No agent = the daemon's default agent (and the pre-agent path).
+        None => root.and_then(|root| book.workspaces.get(root)).cloned(),
+    }
+}
+
 fn selection_for(
     book: &SessionBook,
+    agent: Option<&str>,
     root: Option<&str>,
     is_configured: &impl Fn(&str) -> bool,
 ) -> BookSelection {
-    root.and_then(|root| book.workspaces.get(root))
+    stored_selection(book, agent, root)
         .filter(|selection| selection.is_configured(is_configured))
-        .cloned()
         .unwrap_or_else(|| BookSelection::from_book(book))
+}
+
+/// Record a selection where its own read path will find it: a named agent's
+/// map, or the root map for the daemon's default agent (the pre-agent read).
+fn remember_selection(
+    book: &mut SessionBook,
+    agent: Option<&str>,
+    root: Option<&str>,
+    selection: &BookSelection,
+) {
+    let Some(root) = root.map(str::to_string) else {
+        return;
+    };
+    match agent.map(str::to_string).filter(|agent| !agent.is_empty()) {
+        Some(agent) => {
+            book.agent_workspaces
+                .entry(agent)
+                .or_default()
+                .insert(root, selection.clone());
+        }
+        None => {
+            book.workspaces.insert(root, selection.clone());
+        }
+    }
 }
 
 /// Pending daemon-initiated approval requests, keyed by request id.
@@ -539,6 +635,12 @@ struct Inner {
     /// Server tab registry, installed once by the owning server (plan 109
     /// I1): the source of truth for each tab's current workspace root.
     tab_roots: Mutex<Option<Arc<Mutex<super::tab_registry::TabRegistry>>>>,
+    /// Plan 118 task 35: the Clay data root + launch workspace root, installed
+    /// by the server so the host can resolve per-agent config roots
+    /// (`<data root>/agents/<agent type>`) and build that agent's MCP
+    /// allow-list per session. `None` ⇒ the host keeps the single shipped
+    /// agent (inert/test hosts).
+    agent_roots: Mutex<Option<AgentRoots>>,
     /// Pending daemon-initiated approval requests, keyed by request id.
     /// Resolved by `ApprovalResolve`/`AskDecisionResolve`; dropped senders
     /// and timeouts deny fail-closed.
@@ -551,8 +653,10 @@ struct Inner {
     /// Daemon environment (plan 109 R1/R3): registered slash commands +
     /// active extensions + catalog skills, fetched once per daemon
     /// generation and invalidated on daemon death or a registration / new
-    /// session / knowledge mutation.
-    environment: Mutex<Option<DaemonEnvironment>>,
+    /// session / knowledge mutation. Plan 118 task 35: keyed by agent type
+    /// (`""` = the default agent), because MCP outcomes follow the session's
+    /// agent — a switch shows that agent's servers.
+    environment: Mutex<HashMap<String, DaemonEnvironment>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -732,10 +836,11 @@ impl AgentHost {
                 book: Arc::new(Mutex::new(book)),
                 reverse: Mutex::new(None),
                 tab_roots: Mutex::new(None),
+                agent_roots: Mutex::new(None),
+                environment: Mutex::new(HashMap::new()),
                 approvals: Arc::new(Mutex::new(HashMap::new())),
                 approval_seq: AtomicU64::new(1),
                 pending_registrations: Arc::new(Mutex::new(Vec::new())),
-                environment: Mutex::new(None),
             }),
         }
     }
@@ -781,6 +886,23 @@ impl AgentHost {
         }
     }
 
+    /// Plan 118 task 35: install the roots per-agent config resolves from
+    /// (the Clay data root and the launch workspace root). Called once by the
+    /// owning server right after construction; without it the host runs the
+    /// single shipped agent.
+    pub(crate) fn set_agent_roots(
+        &self,
+        config_root: Option<PathBuf>,
+        workspace_root: Option<PathBuf>,
+    ) {
+        if let Ok(mut roots) = self.inner.agent_roots.try_lock() {
+            *roots = Some(AgentRoots {
+                config_root,
+                workspace_root,
+            });
+        }
+    }
+
     /// The tab's current workspace root from the registry. `None` when no
     /// registry is installed (tests) or the tab is unregistered.
     async fn tab_workspace_root(&self, tab: TabId) -> Option<String> {
@@ -796,6 +918,55 @@ impl AgentHost {
     /// writes): `None` when the caller has no bound tab.
     async fn tab_workspace_root_for(&self, tab: Option<TabId>) -> Option<String> {
         self.tab_workspace_root(tab?).await
+    }
+
+    /// Plan 118 task 35: the tab's agent type from the registry (`None` when
+    /// no registry is installed, the tab is unregistered, or it holds no
+    /// agent). The registry accepts only names that resolve under the data
+    /// root's `agents/`, so this value is always a configured agent or none.
+    async fn tab_agent_type(&self, tab: TabId) -> Option<String> {
+        let registry = self.inner.tab_roots.lock().await.clone()?;
+        let registry = registry.lock().await;
+        registry.agent_type(tab).filter(|agent| !agent.is_empty())
+    }
+
+    async fn tab_agent_type_for(&self, tab: Option<TabId>) -> Option<String> {
+        self.tab_agent_type(tab?).await
+    }
+
+    /// The tab's `session.new` parameters, agent-resolved: the agent's MCP
+    /// allow-list (its own `mcp.json` merged with the repo `.mcp.json`) rides
+    /// the session so one agent's servers are never granted to another.
+    async fn agent_session_params(&self, agent: Option<&str>) -> serde_json::Map<String, Value> {
+        let mut params = serde_json::Map::new();
+        let Some(agent) = agent else {
+            return params;
+        };
+        if self.agent_config_root(agent).await.is_none() {
+            return params;
+        }
+        params.insert("agent".into(), json!(agent));
+        let roots = self.inner.agent_roots.lock().await.clone();
+        if let Some(roots) = roots {
+            let allow_list: Vec<Value> = super::agent_mcp_config::build_mcp_allow_list(
+                roots.config_root.as_deref(),
+                roots.workspace_root.as_deref(),
+                Some(agent),
+            )
+            .iter()
+            .map(AgentMcpAllowListEntry::to_json)
+            .collect();
+            params.insert("mcpAllowList".into(), json!(allow_list));
+        }
+        params
+    }
+
+    /// Resolve one agent type to its per-agent config root (plan 118 task 35):
+    /// contained to `<data root>/agents/`, and only when the directory
+    /// resolves — a name the launcher would not list is not an agent.
+    pub(crate) async fn agent_config_root(&self, agent_type: &str) -> Option<PathBuf> {
+        let roots = self.inner.agent_roots.lock().await.clone()?;
+        super::launcher::resolve_agent_type(roots.config_root.as_deref(), agent_type)
     }
 
     /// Surface a daemon-initiated user-approval request to connected clients
@@ -888,12 +1059,16 @@ impl AgentHost {
         if matches!(kind, AgentPickerKind::Provider) {
             self.ensure_default_model().await;
         }
-        // Plan 109 I2: a selection made while a tab is bound to a workspace
-        // also becomes that workspace's last-used selection.
-        if let Some(root) = self.tab_workspace_root_for(tab).await {
+        // Plan 109 I2 + plan 118 task 35: a selection made while a tab is
+        // bound to a workspace also becomes that workspace's last-used
+        // selection — for the tab's own agent type (each agent keeps its
+        // defaults; the root entry stays the pre-agent read).
+        let root = self.tab_workspace_root_for(tab).await;
+        let agent = self.tab_agent_type_for(tab).await;
+        {
             let mut book = self.inner.book.lock().await;
             let selection = BookSelection::from_book(&book);
-            book.workspaces.insert(root, selection);
+            remember_selection(&mut book, agent.as_deref(), root.as_deref(), &selection);
         }
         self.persist_book_selection().await;
         self.publish_book_snapshot(tab).await;
@@ -918,20 +1093,19 @@ impl AgentHost {
                 model: model.to_string(),
             });
         let root = self.tab_workspace_root_for(tab).await;
+        let agent = self.tab_agent_type_for(tab).await;
         {
             let mut book = self.inner.book.lock().await;
-            let mut selection = root
-                .as_deref()
-                .and_then(|r| book.workspaces.get(r))
-                .cloned()
+            // Deliberately unfiltered (the pre-agent behavior): an OM worker
+            // binding is written even when the entry has no configured
+            // provider yet.
+            let mut selection = stored_selection(&book, agent.as_deref(), root.as_deref())
                 .unwrap_or_else(|| BookSelection::from_book(&book));
             match worker {
                 AgentOmWorkerKind::Observation => selection.om_observation = parsed.clone(),
                 AgentOmWorkerKind::Reflection => selection.om_reflection = parsed.clone(),
             }
-            if let Some(root) = root {
-                book.workspaces.insert(root, selection);
-            }
+            remember_selection(&mut book, agent.as_deref(), root.as_deref(), &selection);
         }
         self.persist_book_selection().await;
         self.publish_book_snapshot(tab).await;
@@ -1003,8 +1177,9 @@ impl AgentHost {
         let bound_session = match tab {
             Some(tab) => {
                 let root = self.tab_workspace_root(tab).await;
+                let agent = self.tab_agent_type(tab).await;
                 let mut book = self.inner.book.lock().await;
-                book.session_for_root(tab, root.as_deref())
+                book.session_for_root(tab, root.as_deref(), agent.as_deref())
             }
             None => None,
         };
@@ -1052,9 +1227,10 @@ impl AgentHost {
         };
         {
             let mut book = self.inner.book.lock().await;
-            let entries = book.transcripts.entry(session_id.clone()).or_default();
-            entries.push(AgentTranscriptEntry::new(AgentTranscriptKind::User, text));
-            cap_entries(entries);
+            book.push_row(
+                &session_id,
+                AgentTranscriptEntry::new(AgentTranscriptKind::User, text),
+            );
             book.cancelled.remove(&session_id);
             book.running.insert(session_id.clone());
             // Plan 109 I4: the prompt's level becomes the session's active
@@ -1070,9 +1246,15 @@ impl AgentHost {
         // resolves first; no inventory re-check here — the entry was written
         // from an already-configured picker selection.
         let workspace_root = self.tab_workspace_root(tab).await;
+        let agent_type = self.tab_agent_type(tab).await;
         let (provider, model) = {
             let book = self.inner.book.lock().await;
-            let resolved = selection_for(&book, workspace_root.as_deref(), &|_| true);
+            let resolved = selection_for(
+                &book,
+                agent_type.as_deref(),
+                workspace_root.as_deref(),
+                &|_| true,
+            );
             (resolved.provider, resolved.model)
         };
         self.dispatch(AgentClientCommand::Prompt {
@@ -1115,9 +1297,10 @@ impl AgentHost {
         // the snapshot so the live run reconciles around it.
         let snapshot = {
             let mut book = self.inner.book.lock().await;
-            let entries = book.transcripts.entry(session_id.clone()).or_default();
-            entries.push(AgentTranscriptEntry::new(AgentTranscriptKind::User, text));
-            cap_entries(entries);
+            book.push_row(
+                &session_id,
+                AgentTranscriptEntry::new(AgentTranscriptKind::User, text),
+            );
             self.snapshot_for(&session_id).await
         };
         self.dispatch(AgentClientCommand::Steer {
@@ -1144,7 +1327,10 @@ impl AgentHost {
         // The root binding is load-bearing, not bookkeeping: `session_for_root`
         // prunes a tab whose recorded root does not match, so a resume that
         // left it unset made the next prompt start a brand-new session and
-        // silently abandon the one just opened.
+        // silently abandon the one just opened. The agent binding is
+        // symmetric (plan 118 task 35): resuming a session written by another
+        // agent type adopts *that* agent, so the next run re-reads the config
+        // the transcript was produced under.
         if let Some(root) = self.tab_workspace_root(tab).await {
             self.inner
                 .book
@@ -1152,6 +1338,12 @@ impl AgentHost {
                 .await
                 .tab_session_root
                 .insert(tab, root);
+        }
+        if let Some(agent) = self.session_agent(session_id).await {
+            let mut book = self.inner.book.lock().await;
+            book.session_agent
+                .insert(session_id.to_string(), agent.clone());
+            book.tab_session_agent.insert(tab, agent);
         }
         let loaded = self
             .run(AgentClientCommand::LoadSession {
@@ -1284,9 +1476,12 @@ impl AgentHost {
 
     async fn ensure_tab_session(&self, tab: TabId) -> Option<String> {
         let workspace_root = self.tab_workspace_root(tab).await;
+        let agent_type = self.tab_agent_type(tab).await;
         {
             let mut book = self.inner.book.lock().await;
-            if let Some(session_id) = book.session_for_root(tab, workspace_root.as_deref()) {
+            if let Some(session_id) =
+                book.session_for_root(tab, workspace_root.as_deref(), agent_type.as_deref())
+            {
                 // Plan 109 R2: keep the root binding and the branch fresh —
                 // cached within the run generation, re-read across runs.
                 if let Some(root) = workspace_root.as_deref() {
@@ -1325,7 +1520,12 @@ impl AgentHost {
         };
         let selection = {
             let book = self.inner.book.lock().await;
-            let resolved = selection_for(&book, workspace_root.as_deref(), &is_configured);
+            let resolved = selection_for(
+                &book,
+                agent_type.as_deref(),
+                workspace_root.as_deref(),
+                &is_configured,
+            );
             if resolved.provider.is_empty() || resolved.model.is_empty() {
                 eprintln!(
                     "[agent] ensure_tab_session({tab:?}): empty selection (provider='{}' model='{}')",
@@ -1341,19 +1541,22 @@ impl AgentHost {
             selection.profile
         };
         let created = self
-            .run(AgentClientCommand::NewSession {
-                profile,
-                provider: selection.provider,
-                model: selection.model,
-                workspace_root: workspace_root.clone(),
-                full_autonomy: None,
-                om_observation: selection.om_observation,
-                om_reflection: selection.om_reflection,
-            })
+            .create_session(
+                &profile,
+                &selection.provider,
+                &selection.model,
+                workspace_root.as_deref(),
+                agent_type.as_deref(),
+                selection.om_observation,
+                selection.om_reflection,
+            )
             .await;
-        let AgentServerMessage::Snapshot(snapshot) = created else {
-            eprintln!("[agent] ensure_tab_session({tab:?}): NewSession failed -> {created:?}");
-            return None;
+        let snapshot = match created {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                eprintln!("[agent] ensure_tab_session({tab:?}): session.new failed -> {error:?}");
+                return None;
+            }
         };
         if snapshot.session_id.is_empty() {
             eprintln!("[agent] ensure_tab_session({tab:?}): NewSession returned empty session id");
@@ -1363,6 +1566,16 @@ impl AgentHost {
         book.tab_session.insert(tab, snapshot.session_id.clone());
         book.tab_session_root
             .insert(tab, self.tab_workspace_root(tab).await.unwrap_or_default());
+        match agent_type.as_deref() {
+            Some(agent) => {
+                book.session_agent
+                    .insert(snapshot.session_id.clone(), agent.to_string());
+                book.tab_session_agent.insert(tab, agent.to_string());
+            }
+            None => {
+                book.tab_session_agent.remove(&tab);
+            }
+        }
         book.transcripts
             .entry(snapshot.session_id.clone())
             .or_default();
@@ -1377,8 +1590,155 @@ impl AgentHost {
         Some(snapshot.session_id)
     }
 
+    /// Create a daemon session (plan 118 task 35: with the tab's agent type,
+    /// so the daemon resolves that agent's config root — SYSTEM.md, skills,
+    /// tool caps — and connects only the servers that agent declares).
+    #[allow(clippy::too_many_arguments)]
+    async fn create_session(
+        &self,
+        profile: &str,
+        provider: &str,
+        model: &str,
+        workspace_root: Option<&str>,
+        agent_type: Option<&str>,
+        om_observation: Option<AgentOmWorkerModel>,
+        om_reflection: Option<AgentOmWorkerModel>,
+    ) -> Result<AgentSessionSnapshot, AgentError> {
+        let mut params = self.agent_session_params(agent_type).await;
+        params.insert("profile".into(), json!(profile));
+        params.insert("provider".into(), json!(provider));
+        params.insert("model".into(), json!(model));
+        if let Some(root) = workspace_root {
+            params.insert("workspaceRoot".into(), json!(root));
+        }
+        // Plan 109 I8: the workspace book's OM worker defaults ride session
+        // creation (per-session retention is daemon metadata).
+        let om_workers = json_om_workers(om_observation, om_reflection);
+        if !om_workers.is_null() {
+            params.insert("observationalMemoryWorkers".into(), om_workers);
+        }
+        let result = self.rpc("session.new", Value::Object(params)).await?;
+        Ok(self.decorate_snapshot(snapshot_from_new(&result)).await)
+    }
+
+    /// Plan 118 task 35: the agent type a session id runs as, read from the
+    /// live book or (for a session this server has not seen yet) from the
+    /// daemon's record metadata.
+    async fn session_agent(&self, session_id: &str) -> Option<String> {
+        {
+            let book = self.inner.book.lock().await;
+            if let Some(agent) = book.session_agent.get(session_id)
+                && !agent.is_empty()
+            {
+                return Some(agent.clone());
+            }
+        }
+        let loaded = self
+            .rpc("session.load", json!({ "sessionId": session_id }))
+            .await
+            .ok()?;
+        loaded
+            .get("metadata")
+            .and_then(|meta| meta.get("agentType"))
+            .and_then(Value::as_str)
+            .filter(|agent| !agent.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Plan 118 task 35: align the tab's live agent session with the tab's
+    /// agent type. Called after the tab registry accepted a new type (or
+    /// detached it — the daemon's default agent is the detach target, so a
+    /// cleared type really does leave the previous agent's config).
+    ///
+    /// `Ok(None)` = nothing to align (the tab has no live session yet — its
+    /// next interaction creates one for the tab's agent). A live session is
+    /// switched in place through the daemon's `session.setAgent`, which keeps
+    /// the session id and its transcript and re-reads only that agent's
+    /// config; the tab's workspace is untouched. The previous agent's model
+    /// pick is not carried over: the new agent's own last-used selection
+    /// (else the book's fallback) resolves, so the model/effort controls reset
+    /// to that agent's defaults.
+    pub async fn rebind_tab_agent(
+        &self,
+        tab: TabId,
+    ) -> Result<Option<AgentSessionSnapshot>, AgentError> {
+        let agent = self.tab_agent_type(tab).await;
+        let session_id = {
+            let book = self.inner.book.lock().await;
+            book.tab_session.get(&tab).cloned()
+        };
+        let Some(session_id) = session_id else {
+            return Ok(None);
+        };
+        let root = self.tab_workspace_root(tab).await;
+        let inventory = self.picker_inventory().await;
+        let is_configured = |provider: &str| {
+            inventory
+                .providers
+                .iter()
+                .any(|candidate| candidate.id == provider && candidate.configured)
+        };
+        let selection = {
+            let book = self.inner.book.lock().await;
+            selection_for(&book, agent.as_deref(), root.as_deref(), &is_configured)
+        };
+        // No agent = the daemon's default agent: the params omit the name (and
+        // its allow-list), so the switch lands on the shipped root rather than
+        // keeping whatever the tab ran before.
+        let mut params = self.agent_session_params(agent.as_deref()).await;
+        params.insert("sessionId".into(), json!(session_id));
+        if !selection.provider.is_empty() && !selection.model.is_empty() {
+            params.insert("provider".into(), json!(selection.provider));
+            params.insert("model".into(), json!(selection.model));
+            // Plan 109 I8: the new agent's own OM worker defaults ride the
+            // switch the same way they ride session creation.
+            let om_workers = json_om_workers(selection.om_observation, selection.om_reflection);
+            if !om_workers.is_null() {
+                params.insert("observationalMemoryWorkers".into(), om_workers);
+            }
+        }
+        // The daemon validates the agent type again (containment inside its
+        // own `agents/` root) and fails closed; the caller then reverts the
+        // registry so the tab never claims an agent its session is not using.
+        let result = self.rpc("session.setAgent", Value::Object(params)).await?;
+        let mut book = self.inner.book.lock().await;
+        match agent.as_deref() {
+            Some(agent) => {
+                book.session_agent
+                    .insert(session_id.clone(), agent.to_string());
+                book.tab_session_agent.insert(tab, agent.to_string());
+            }
+            None => {
+                book.session_agent.remove(&session_id);
+                book.tab_session_agent.remove(&tab);
+            }
+        }
+        if let Some(provider) = result.get("provider").and_then(Value::as_str)
+            && !provider.is_empty()
+        {
+            book.provider = provider.to_string();
+        }
+        if let Some(model) = result.get("model").and_then(Value::as_str)
+            && !model.is_empty()
+        {
+            book.model = model.to_string();
+        }
+        // The new agent is a new effort context: the previous level was the
+        // old model's.
+        book.effort.remove(&session_id);
+        drop(book);
+        Ok(Some(self.snapshot_for(&session_id).await))
+    }
+
     async fn snapshot_for(&self, session_id: &str) -> AgentSessionSnapshot {
-        let environment = self.environment().await;
+        let agent = {
+            let book = self.inner.book.lock().await;
+            book.session_agent
+                .get(session_id)
+                .cloned()
+                .filter(|agent| !agent.is_empty())
+        };
+        let environment = self.environment(agent.as_deref()).await;
         let book = self.inner.book.lock().await;
         AgentSessionSnapshot {
             session_id: session_id.to_string(),
@@ -1386,6 +1746,7 @@ impl AgentHost {
             provider: book.provider.clone(),
             model: book.model.clone(),
             leaf_id: None,
+            agent: agent.clone(),
             context_tokens: book.context_tokens.get(session_id).cloned().flatten(),
             entries: book
                 .transcripts
@@ -1438,7 +1799,7 @@ impl AgentHost {
     async fn unconfigured_snapshot(&self) -> AgentSessionSnapshot {
         // A fresh webview's first STATE snapshot already carries the
         // completion list + extension strip + skills card (plan 109 R1/R3).
-        let environment = self.environment().await;
+        let environment = self.environment(None).await;
         let book = self.inner.book.lock().await;
         AgentSessionSnapshot {
             session_id: String::new(),
@@ -1446,6 +1807,7 @@ impl AgentHost {
             provider: book.provider.clone(),
             model: book.model.clone(),
             leaf_id: None,
+            agent: None,
             context_tokens: None,
             entries: Vec::new(),
             mcp_servers: environment.mcp_servers,
@@ -1462,7 +1824,19 @@ impl AgentHost {
     /// parsed from a daemon attach/open reply (those replies carry no
     /// environment data of their own).
     async fn decorate_snapshot(&self, mut snapshot: AgentSessionSnapshot) -> AgentSessionSnapshot {
-        let environment = self.environment().await;
+        // Plan 118 task 35: the attach/open reply already names the session's
+        // agent, so its inventories are that agent's.
+        let environment = self.environment(snapshot.agent.as_deref()).await;
+        // A session reply carries its own agent when the daemon recorded one;
+        // otherwise the book (a resumed session) does.
+        if snapshot.agent.is_none() {
+            let book = self.inner.book.lock().await;
+            snapshot.agent = book
+                .session_agent
+                .get(&snapshot.session_id)
+                .cloned()
+                .filter(|agent| !agent.is_empty());
+        }
         snapshot.commands = environment.commands;
         snapshot.extensions = environment.extensions;
         snapshot.skills = environment.skills;
@@ -2153,16 +2527,16 @@ impl AgentHost {
                     "command.register" | "skill.register" | "knowledge.setOptions" | "session.new"
                 ) || wiki_init_prompt
                 {
-                    self.inner.environment.lock().await.take();
+                    self.inner.environment.lock().await.clear();
                 }
                 result
             }
             Ok(Err(_)) => {
-                self.inner.environment.lock().await.take();
+                self.inner.environment.lock().await.clear();
                 Err(AgentError::ServiceStopped)
             }
             Err(_) => {
-                self.inner.environment.lock().await.take();
+                self.inner.environment.lock().await.clear();
                 Err(AgentError::Timeout)
             }
         }
@@ -2171,22 +2545,35 @@ impl AgentHost {
     /// Plan 109 R1/R3: the daemon's registered commands + active
     /// extensions, cached per daemon generation. Failure-silent — an
     /// unavailable daemon yields empty (state merges keep prior values).
-    async fn environment(&self) -> DaemonEnvironment {
+    async fn environment(&self, agent_type: Option<&str>) -> DaemonEnvironment {
         if self.inner.config.inert {
             return DaemonEnvironment::default();
         }
+        let key = agent_type.unwrap_or("").to_string();
         {
             let cached = self.inner.environment.lock().await;
-            if let Some(environment) = cached.as_ref() {
+            if let Some(environment) = cached.get(&key) {
                 return environment.clone();
             }
         }
+        // Plan 118 task 35: the daemon resolves the session's agent root from
+        // the session id, so the inventories it answers with are that
+        // session's (its registered commands/extensions are host-wide).
+        let params = if key.is_empty() {
+            json!({})
+        } else {
+            json!({ "agent": key })
+        };
         let fetched = self
-            .rpc("environment.list", json!({}))
+            .rpc("environment.list", params)
             .await
             .map(|value| parse_environment(&value))
             .unwrap_or_default();
-        *self.inner.environment.lock().await = Some(fetched.clone());
+        self.inner
+            .environment
+            .lock()
+            .await
+            .insert(key, fetched.clone());
         fetched
     }
 
@@ -2644,6 +3031,7 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             output_digest: None,
             // load_skill args are {"name": "<skill>"} (plan 109 I5).
             skill_name: skill_name_from_args(event),
+            file: tool_file(event, secrets),
         },
         "tool_execution_progress" => AgentWireEvent::Tool {
             session_id: session_id.clone(),
@@ -2654,6 +3042,7 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             args_digest: None,
             output_digest: None,
             skill_name: None,
+            file: None,
         },
         "tool_execution_finished" => AgentWireEvent::Tool {
             session_id: session_id.clone(),
@@ -2664,6 +3053,7 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             args_digest: None,
             output_digest: tool_output_digest(event, secrets),
             skill_name: None,
+            file: None,
         },
         "tool_execution_error" => AgentWireEvent::Tool {
             session_id: session_id.clone(),
@@ -2678,6 +3068,8 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             ))
             .filter(|output| !output.is_empty()),
             skill_name: skill_name_from_args(event),
+            // An errored file tool still names the file it tried to touch.
+            file: tool_file(event, secrets),
         },
         "tool_execution_blocked" => AgentWireEvent::Tool {
             session_id: session_id.clone(),
@@ -2689,6 +3081,7 @@ fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServerMessage> {
             output_digest: Some(redact_text(&json_string(event, &["reason"]), secrets))
                 .filter(|output| !output.is_empty()),
             skill_name: None,
+            file: None,
         },
         "permission_requested" | "permission_request" => AgentWireEvent::Permission {
             session_id: session_id.clone(),
@@ -2791,6 +3184,23 @@ fn json_string(value: &Value, path: &[&str]) -> String {
         };
     }
     current.as_str().unwrap_or("").to_string()
+}
+
+/// The file a tool call touches (plan 118 task 36): its verb plus the call's
+/// `path` argument, redacted and bounded like the args digest. Only the tools
+/// that name one file carry a record — search, shell, git and move name none.
+fn tool_file(event: &Value, secrets: &[String]) -> Option<AgentTranscriptFile> {
+    let name = json_string(event, &["call", "name"]);
+    let arguments = event.get("call").and_then(|call| call.get("arguments"))?;
+    let file = transcript_file_for_tool(&name, arguments)?;
+    let path = truncate_transcript_text(
+        &redact_text(&file.path, secrets),
+        AGENT_MAX_ENTRY_TEXT_BYTES,
+    );
+    if path.is_empty() {
+        return None;
+    }
+    Some(AgentTranscriptFile { path, op: file.op })
 }
 
 /// Bounded, redacted argument summary for tool rows (plan 109 I5): the
@@ -3034,6 +3444,13 @@ fn snapshot_from_new(value: &Value) -> AgentSessionSnapshot {
             .get("leafId")
             .and_then(Value::as_str)
             .map(str::to_string),
+        // Plan 118 task 35: the daemon names the session's agent type in its
+        // new/load/setAgent replies (absent for the default agent).
+        agent: value
+            .get("agent")
+            .and_then(Value::as_str)
+            .filter(|agent| !agent.is_empty())
+            .map(str::to_string),
         context_tokens: value.get("contextTokens").and_then(Value::as_u64),
         entries: Vec::new(),
         mcp_servers: Vec::new(),
@@ -3072,10 +3489,19 @@ fn snapshot_from_load(value: &Value) -> AgentSessionSnapshot {
                 .to_string();
         }
     }
+    // Plan 118 task 35: the session's agent type rides the record metadata
+    // and each entry's own stamp, so a resumed session keeps running (and
+    // labelling its turns) as the agent that produced them.
+    snapshot.agent = value
+        .get("metadata")
+        .and_then(|meta| meta.get("agentType"))
+        .and_then(Value::as_str)
+        .filter(|agent| !agent.is_empty())
+        .map(str::to_string);
     if let Some(entries) = value.get("entries").and_then(Value::as_array) {
         let mut rows = Vec::new();
         for entry in entries {
-            append_loaded_entry(&mut rows, entry);
+            append_loaded_entry(&mut rows, entry, snapshot.agent.as_deref());
         }
         rows.truncate(AGENT_MAX_SNAPSHOT_ENTRIES);
         snapshot.entries = rows;
@@ -3125,16 +3551,33 @@ fn loaded_tool_result_text(block: &Value) -> String {
 /// every resume produced an empty transcript and the panel looked like the
 /// click did nothing. One message can hold several rows: an assistant turn
 /// interleaves text, thinking, and tool calls.
-fn append_loaded_entry(rows: &mut Vec<AgentTranscriptEntry>, entry: &Value) {
+fn append_loaded_entry(
+    rows: &mut Vec<AgentTranscriptEntry>,
+    entry: &Value,
+    fallback_agent: Option<&str>,
+) {
+    // Plan 118 task 35: each entry carries the agent type that produced it
+    // (the daemon stamps the record metadata on append). Rows written before
+    // the stamp existed fall back to the session's agent, so a resumed
+    // transcript is labelled rather than blank.
+    let agent = entry
+        .get("metadata")
+        .and_then(|meta| meta.get("agentType"))
+        .and_then(Value::as_str)
+        .filter(|agent| !agent.is_empty())
+        .or(fallback_agent);
     if let Some(summary) = entry
         .get("summary")
         .and_then(Value::as_str)
         .filter(|summary| !summary.is_empty())
     {
-        rows.push(AgentTranscriptEntry::new(
-            AgentTranscriptKind::Assistant,
-            truncate_transcript_text(summary, AGENT_MAX_ENTRY_TEXT_BYTES),
-        ));
+        rows.push(
+            AgentTranscriptEntry::new(
+                AgentTranscriptKind::Assistant,
+                truncate_transcript_text(summary, AGENT_MAX_ENTRY_TEXT_BYTES),
+            )
+            .with_agent(agent),
+        );
         return;
     }
     let Some(message) = entry.get("message") else {
@@ -3153,10 +3596,13 @@ fn append_loaded_entry(rows: &mut Vec<AgentTranscriptEntry>, entry: &Value) {
                 if text.is_empty() {
                     continue;
                 }
-                rows.push(AgentTranscriptEntry::new(
-                    transcript_kind(role),
-                    truncate_transcript_text(text, AGENT_MAX_ENTRY_TEXT_BYTES),
-                ));
+                rows.push(
+                    AgentTranscriptEntry::new(
+                        transcript_kind(role),
+                        truncate_transcript_text(text, AGENT_MAX_ENTRY_TEXT_BYTES),
+                    )
+                    .with_agent(agent),
+                );
             }
             Some("thinking") => {
                 let Some(text) = block.get("text").and_then(Value::as_str) else {
@@ -3165,10 +3611,13 @@ fn append_loaded_entry(rows: &mut Vec<AgentTranscriptEntry>, entry: &Value) {
                 if text.is_empty() {
                     continue;
                 }
-                rows.push(AgentTranscriptEntry::new(
-                    AgentTranscriptKind::Thinking,
-                    truncate_transcript_text(text, AGENT_MAX_ENTRY_TEXT_BYTES),
-                ));
+                rows.push(
+                    AgentTranscriptEntry::new(
+                        AgentTranscriptKind::Thinking,
+                        truncate_transcript_text(text, AGENT_MAX_ENTRY_TEXT_BYTES),
+                    )
+                    .with_agent(agent),
+                );
             }
             Some("tool_call") => {
                 let name = json_string(block, &["name"]);
@@ -3185,11 +3634,21 @@ fn append_loaded_entry(rows: &mut Vec<AgentTranscriptEntry>, entry: &Value) {
                     _ => format!("{name} - running"),
                 };
                 let skill = json_string(block, &["arguments", "name"]);
-                rows.push(AgentTranscriptEntry::new_tool(
-                    truncate_transcript_text(&text, AGENT_MAX_ENTRY_TEXT_BYTES),
-                    &id,
-                    (name == "load_skill" && !skill.is_empty()).then_some(skill),
-                ));
+                // A resumed session rebuilds the same file records the live
+                // rows carried (plan 118 task 36): the persisted call keeps
+                // its arguments, so the Files tab survives a resume.
+                let file = block
+                    .get("arguments")
+                    .and_then(|arguments| transcript_file_for_tool(&name, arguments));
+                rows.push(
+                    AgentTranscriptEntry::new_tool(
+                        truncate_transcript_text(&text, AGENT_MAX_ENTRY_TEXT_BYTES),
+                        &id,
+                        (name == "load_skill" && !skill.is_empty()).then_some(skill),
+                        file,
+                    )
+                    .with_agent(agent),
+                );
             }
             Some("tool_result") => {
                 let id = json_string(block, &["toolCallId"]);
@@ -3210,11 +3669,17 @@ fn append_loaded_entry(rows: &mut Vec<AgentTranscriptEntry>, entry: &Value) {
                         } else {
                             format!("{name} -> {digest}")
                         };
-                        rows.push(AgentTranscriptEntry::new_tool(
-                            truncate_transcript_text(&text, AGENT_MAX_ENTRY_TEXT_BYTES),
-                            &id,
-                            None,
-                        ));
+                        // No call row to project from (the transcript
+                        // dropped it): name only, no file record.
+                        rows.push(
+                            AgentTranscriptEntry::new_tool(
+                                truncate_transcript_text(&text, AGENT_MAX_ENTRY_TEXT_BYTES),
+                                &id,
+                                None,
+                                None,
+                            )
+                            .with_agent(agent),
+                        );
                     }
                 }
             }
@@ -3259,6 +3724,32 @@ fn load_persisted_book(data_dir: &Path) -> SessionBook {
                     }
                 }
             }
+            // Plan 118 task 35: per-agent selections. A book written before
+            // agent types existed carries only the root map, so the shipped
+            // agent inherits it (a read migration, not a rewrite): the user's
+            // existing pick survives without being re-picked per agent.
+            if value.get("agents").is_none() && !book.workspaces.is_empty() {
+                book.agent_workspaces.insert(
+                    super::agent_settings::DEFAULT_AGENT_TYPE.to_string(),
+                    book.workspaces.clone(),
+                );
+            }
+            if let Some(agents) = value.get("agents").and_then(Value::as_object) {
+                for (agent, roots) in agents {
+                    let Some(roots) = roots.as_object() else {
+                        continue;
+                    };
+                    let mut per_agent = HashMap::new();
+                    for (root, entry) in roots {
+                        if let Ok(selection) =
+                            serde_json::from_value::<BookSelection>(entry.clone())
+                        {
+                            per_agent.insert(root.clone(), selection);
+                        }
+                    }
+                    book.agent_workspaces.insert(agent.clone(), per_agent);
+                }
+            }
         }
         Err(error) => {
             eprintln!("[agent] book.json unreadable: {error}");
@@ -3271,6 +3762,8 @@ fn persist_book(data_dir: &Path, book: &SessionBook) {
     let payload = json!({
         "fallback": BookSelection::from_book(book),
         "workspaces": book.workspaces,
+        // Plan 118 task 35: per-agent last-used selections.
+        "agents": book.agent_workspaces,
     });
     if let Err(error) = std::fs::write(book_path(data_dir), payload.to_string()) {
         eprintln!("[agent] book.json write failed: {error}");
@@ -3293,6 +3786,11 @@ fn book_snapshot(
         provider: book.provider.clone(),
         model: book.model.clone(),
         leaf_id: None,
+        agent: book
+            .session_agent
+            .get(session_id)
+            .cloned()
+            .filter(|agent| !agent.is_empty()),
         context_tokens: book.context_tokens.get(session_id).cloned().flatten(),
         entries: book
             .transcripts
@@ -3344,11 +3842,20 @@ fn apply_book_event(book: &mut SessionBook, message: &AgentServerMessage) {
         }
         _ => {}
     }
+    // Plan 118 task 35: only the rows this event added are stamped with the
+    // session's agent — rows from before a switch keep theirs.
+    let (agent, before) = {
+        let entries = book.transcripts.entry(session_id.clone()).or_default();
+        (book.session_agent.get(session_id).cloned(), entries.len())
+    };
     apply_transcript_event(
         book.transcripts.entry(session_id.clone()).or_default(),
         event,
     );
     if let Some(entries) = book.transcripts.get_mut(session_id) {
+        for row in entries.iter_mut().skip(before) {
+            *row = row.clone().with_agent(agent.as_deref());
+        }
         cap_entries(entries);
     }
 }
@@ -3669,6 +4176,7 @@ fn redact_text(text: &str, secrets: &[String]) -> String {
 #[cfg(test)]
 mod tab_workspace_tests {
     use super::*;
+    use crate::protocol::AgentTranscriptFileOp;
 
     // Plan 109 R2: a counting reader exposes cache hits — same generation
     // must reuse the cached branch without re-reading.
@@ -4018,7 +4526,7 @@ for line in sys.stdin:
 
         let bound = {
             let mut book = host.inner.book.lock().await;
-            book.session_for_root(1, repo.to_str())
+            book.session_for_root(1, repo.to_str(), None)
         };
         assert_eq!(
             bound.as_deref(),
@@ -4251,6 +4759,7 @@ for line in sys.stdin:
         let AgentWireEvent::Tool {
             args_digest,
             skill_name,
+            file,
             ..
         } = event
         else {
@@ -4258,6 +4767,10 @@ for line in sys.stdin:
         };
         assert_eq!(args_digest.as_deref(), Some(r#"{"path":"[redacted].txt"}"#));
         assert_eq!(skill_name, None);
+        // Plan 118 task 36: the file record is the redacted path + the verb.
+        let file = file.expect("read names a file");
+        assert_eq!(file.path, "[redacted].txt");
+        assert_eq!(file.op, AgentTranscriptFileOp::Read);
 
         let skill = map_event(
             &serde_json::json!({
@@ -4281,6 +4794,7 @@ for line in sys.stdin:
         let AgentWireEvent::Tool {
             args_digest,
             skill_name,
+            file,
             ..
         } = event
         else {
@@ -4288,6 +4802,60 @@ for line in sys.stdin:
         };
         assert_eq!(skill_name.as_deref(), Some("rust-review"));
         assert_eq!(args_digest.as_deref(), Some(r#"{"name":"rust-review"}"#));
+        // A tool that names no file records none — the Files tab is session
+        // history, never a guess.
+        assert!(file.is_none());
+
+        // Every file verb maps; search/shell/git name no single file.
+        let write = map_event(
+            &serde_json::json!({
+                "sessionId": "s1",
+                "event": {
+                    "type": "tool_execution_started",
+                    "runId": "run-1",
+                    "call": {
+                        "id": "c3",
+                        "name": "write",
+                        "arguments": { "path": "plans/118.md", "content": "x" }
+                    }
+                }
+            }),
+            &secrets,
+        )
+        .expect("write event maps");
+        let AgentServerMessage::Event { event, .. } = write else {
+            panic!("event expected");
+        };
+        let AgentWireEvent::Tool { file, .. } = event else {
+            panic!("tool event expected");
+        };
+        let file = file.expect("write names a file");
+        assert_eq!(file.path, "plans/118.md");
+        assert_eq!(file.op, AgentTranscriptFileOp::Write);
+
+        let search = map_event(
+            &serde_json::json!({
+                "sessionId": "s1",
+                "event": {
+                    "type": "tool_execution_started",
+                    "runId": "run-1",
+                    "call": {
+                        "id": "c4",
+                        "name": "repo_search",
+                        "arguments": { "query": "sessionFile" }
+                    }
+                }
+            }),
+            &secrets,
+        )
+        .expect("search event maps");
+        let AgentServerMessage::Event { event, .. } = search else {
+            panic!("event expected");
+        };
+        let AgentWireEvent::Tool { file, .. } = event else {
+            panic!("tool event expected");
+        };
+        assert!(file.is_none());
 
         let finished = map_event(
             &serde_json::json!({
@@ -4383,7 +4951,8 @@ for line in sys.stdin:
     fn session_kept_while_workspace_root_matches() {
         let mut book = book_with_session(7, "/tmp/alpha");
         assert_eq!(
-            book.session_for_root(7, Some("/tmp/alpha")).as_deref(),
+            book.session_for_root(7, Some("/tmp/alpha"), None)
+                .as_deref(),
             Some("session-1")
         );
     }
@@ -4393,9 +4962,12 @@ for line in sys.stdin:
         // Pre-I1 entries recorded no root: keep them stable when no
         // registry resolves (never surprise-rebind legacy sessions).
         let mut book = book_with_session(7, "");
-        assert_eq!(book.session_for_root(7, None).as_deref(), Some("session-1"));
         assert_eq!(
-            book.session_for_root(7, Some("")).as_deref(),
+            book.session_for_root(7, None, None).as_deref(),
+            Some("session-1")
+        );
+        assert_eq!(
+            book.session_for_root(7, Some(""), None).as_deref(),
             Some("session-1")
         );
     }
@@ -4405,7 +4977,7 @@ for line in sys.stdin:
         // A root-bound session must never keep running against a root the
         // registry no longer reports: rebind (fresh create) instead.
         let mut book = book_with_session(7, "/tmp/alpha");
-        assert_eq!(book.session_for_root(7, None), None);
+        assert_eq!(book.session_for_root(7, None, None), None);
         assert!(!book.tab_session.contains_key(&7));
         assert!(!book.tab_session_root.contains_key(&7));
     }
@@ -4413,7 +4985,7 @@ for line in sys.stdin:
     #[test]
     fn workspace_change_clears_stale_binding_for_rebind() {
         let mut book = book_with_session(7, "/tmp/alpha");
-        assert_eq!(book.session_for_root(7, Some("/tmp/beta")), None);
+        assert_eq!(book.session_for_root(7, Some("/tmp/beta"), None), None);
         assert!(!book.tab_session.contains_key(&7));
         assert!(!book.tab_session_root.contains_key(&7));
         // Next call is a fresh create; the old session stays resumable.
@@ -4629,6 +5201,109 @@ mod approval_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn per_agent_selections_resolve_and_remember_each_agent() {
+        // Plan 118 task 35: each agent type keeps its own last-used selection
+        // for a workspace, so switching an agent resets the model/effort
+        // controls to *that* agent's defaults — while the root-keyed entry
+        // stays the pre-agent read (migration) and the global trio the
+        // fallback.
+        let mut book = book_with_selection("/tmp/alpha", "root-agent-provider", "root-model");
+        let configured = |_: &str| true;
+        // No per-agent entry for a named agent: it does NOT inherit the root
+        // entry's pick — it starts from the global fallback, so switching an
+        // agent lands on that agent's own defaults.
+        assert_eq!(
+            selection_for(&book, Some("reviewer"), Some("/tmp/alpha"), &configured).model,
+            "global-model"
+        );
+        // A per-agent pick wins for that agent only.
+        let reviewer = BookSelection {
+            profile: String::new(),
+            provider: "reviewer-provider".to_string(),
+            model: "reviewer-model".to_string(),
+            om_observation: None,
+            om_reflection: None,
+        };
+        remember_selection(&mut book, Some("reviewer"), Some("/tmp/alpha"), &reviewer);
+        assert_eq!(
+            selection_for(&book, Some("reviewer"), Some("/tmp/alpha"), &configured).model,
+            "reviewer-model"
+        );
+        assert_eq!(
+            selection_for(&book, Some("coding-agent"), Some("/tmp/alpha"), &configured).model,
+            "global-model",
+            "another agent keeps its own (empty) entry, not the reviewer's pick"
+        );
+        // A named agent's write does not touch the root map (the daemon's
+        // default agent's own read path).
+        assert_eq!(
+            book.workspaces.get("/tmp/alpha").map(|s| s.model.as_str()),
+            Some("root-model")
+        );
+        // The default agent (no name) still reads and writes the root map.
+        let default = BookSelection {
+            profile: String::new(),
+            provider: "default-provider".to_string(),
+            model: "default-model".to_string(),
+            om_observation: None,
+            om_reflection: None,
+        };
+        remember_selection(&mut book, None, Some("/tmp/alpha"), &default);
+        assert_eq!(
+            selection_for(&book, None, Some("/tmp/alpha"), &configured).model,
+            "default-model"
+        );
+        // An agent-named write without a workspace records nothing to resolve.
+        remember_selection(&mut book, Some("reviewer"), None, &reviewer);
+        assert_eq!(book.agent_workspaces["reviewer"].len(), 1);
+    }
+
+    #[test]
+    fn book_round_trips_per_agent_selections_and_reads_v2_books() {
+        let dir = std::env::temp_dir().join(format!("clay-book-agents-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut book = book_with_selection("/tmp/alpha", "b", "m2");
+        let reviewer = BookSelection {
+            profile: String::new(),
+            provider: "p".to_string(),
+            model: "m".to_string(),
+            om_observation: None,
+            om_reflection: None,
+        };
+        remember_selection(&mut book, Some("reviewer"), Some("/tmp/alpha"), &reviewer);
+        persist_book(&dir, &book);
+        let reloaded = load_persisted_book(&dir);
+        let per_agent = reloaded
+            .agent_workspaces
+            .get("reviewer")
+            .and_then(|roots| roots.get("/tmp/alpha"))
+            .expect("per-agent entry survives the round trip");
+        assert_eq!(per_agent.model, "m");
+        // A book written before agent types existed has no `agents` map; the
+        // root entry then serves every agent (migration read).
+        std::fs::write(
+            book_path(&dir),
+            r#"{"fallback":{"provider":"a","model":"b"},"workspaces":{"/tmp/legacy":{"provider":"c","model":"d"}}}"#,
+        )
+        .unwrap();
+        let legacy = load_persisted_book(&dir);
+        assert_eq!(
+            selection_for(&legacy, Some("coding-agent"), Some("/tmp/legacy"), &|_| {
+                true
+            })
+            .model,
+            "d",
+            "a pre-agent book migrates into the shipped agent's map"
+        );
+        assert_eq!(
+            selection_for(&legacy, Some("reviewer"), Some("/tmp/legacy"), &|_| true).model,
+            "b",
+            "a brand-new agent type starts from the global fallback"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn book_with_selection(root: &str, provider: &str, model: &str) -> SessionBook {
         let mut book = SessionBook {
             provider: "global-provider".to_string(),
@@ -4652,18 +5327,18 @@ mod approval_tests {
     fn workspace_selection_wins_over_global_fallback() {
         let book = book_with_selection("/tmp/alpha", "b", "m2");
         let configured = |provider: &str| provider != "unconfigured";
-        let resolved = selection_for(&book, Some("/tmp/alpha"), &configured);
+        let resolved = selection_for(&book, None, Some("/tmp/alpha"), &configured);
         assert_eq!(
             (resolved.provider.as_str(), resolved.model.as_str()),
             ("b", "m2")
         );
         // Unknown root and no-root fall back to the global trio.
         assert_eq!(
-            selection_for(&book, Some("/tmp/other"), &configured).model,
+            selection_for(&book, None, Some("/tmp/other"), &configured).model,
             "global-model"
         );
         assert_eq!(
-            selection_for(&book, None, &configured).model,
+            selection_for(&book, None, None, &configured).model,
             "global-model"
         );
     }
@@ -4672,7 +5347,7 @@ mod approval_tests {
     fn unconfigured_workspace_selection_falls_back_to_global() {
         let book = book_with_selection("/tmp/alpha", "unconfigured", "m2");
         let configured = |provider: &str| provider != "unconfigured";
-        let resolved = selection_for(&book, Some("/tmp/alpha"), &configured);
+        let resolved = selection_for(&book, None, Some("/tmp/alpha"), &configured);
         assert_eq!(resolved.provider, "global-provider");
         assert_eq!(resolved.model, "global-model");
     }

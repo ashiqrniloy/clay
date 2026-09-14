@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "note": "Recorded fixture for the launcher prototype. The launcher shows the user's recent workspaces and agent types, which are machine state, not repository state — so the values below were read from this development machine on 2026-09-11 (git branch of each sibling repository under ~/Projects, skill count under ~/.clay/agents/*) and are checked in so the prototype builds identically anywhere. The generator reads this file; it fabricates nothing at build time. Re-record with `python3 design-artifacts/tools/make-pages.py --recents` when the machine's state changes.",
+    "recorded": "2026-09-11",
+    "sources": ["~/Projects/*/.git", "~/.clay/agents/*/skills"]
+  },
+  "workspaces": [
+    { "name": "clay", "path": "/home/arn/Projects/clay", "branch": "redesign/uiux", "mcp": 1 },
+    { "name": "prism", "path": "/home/arn/Projects/prism", "branch": "main", "mcp": 0 },
+    { "name": "synapta-core", "path": "/home/arn/Projects/synapta-core", "branch": "feature/core", "mcp": 1 }
+  ],
+  "agents": [
+    { "id": "coding-agent", "label": "Coding Agent", "skills": 3, "mcp": 0 }
+  ]
+}

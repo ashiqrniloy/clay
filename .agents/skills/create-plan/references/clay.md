@@ -115,7 +115,7 @@ Each Clay plan that includes an Example Configuration Maintenance Task must also
 
 - Copy `examples/config/init.js` (plus `examples/config/packages/` when present) to an isolated scratch config root (e.g. temp `HOME`/`.clay`); never launch against the developer's real profile.
 - Launch a real Linux GUI build (server + client) with that config and verify healthy startup: client reaches Connected, configuration evaluation commits a generation with no `configuration failed` diagnostics, shell responds to interaction (open a pane, run a command, open a menu).
-- Exercise the surfaces the plan changed as loaded from the example config: theme/appearance/typography apply visually, `bindKey` commands fire, `loadPackage`'d packages register contributions (profiles, commands, language modes), new option values take effect. Verify design-system/theme selections render as the selected system (e.g. `setDesignSystem("@clay/design-glass")` shows glass recipes — rounded 1px-border controls — not the neobrutal fallback; a failed activation silently falls back and users report it as "the wrong design system").
+- Exercise the surfaces the plan changed as loaded from the example config: theme/appearance/typography apply visually, `bindKey` commands fire, `loadPackage`'d packages register contributions (profiles, commands, language modes), new option values take effect. Verify design-system/theme selections render as the selected system (e.g. `setDesignSystem("@clay/design-instrument")` shows Quiet Instrument recipes — 1px hairlines, 8px control radii, no hard shadows — not the previously active system; a failed activation silently falls back and users report it as "the wrong design system").
 - Record the launch command, scratch config path, and observed results in the task evidence. A broken or degraded app under the example config is a product defect (or an explicitly prioritized follow-up), never a docs-only fix.
 - If a headless/sandboxed environment blocks the GUI launch, record the blocker, run the strongest available automated check (start the server against the copied config, assert the runtime generation commits without diagnostics), and leave live interactive acceptance unresolved rather than claiming it passed.
 
@@ -133,11 +133,48 @@ Each Clay plan document that changes user-visible behavior — editor features, 
 
 Recommended title: `- [ ] Execute and update the manual test plan (test-plan/)` — after implementation/verification (feature must be buildable), before the final wiki task. Decision source: user instruction 2026-08-04 (test-plan/ folder + per-plan manual verification duty).
 
+## UI Prototype and Explicit User Approval Task
+
+Every Clay plan that changes app UI — components, panels, overlays, pop-ups, dropdowns, menus, text inputs, layout, page/IA structure, theme values, design tokens, typography, icon geometry, or the design-system package data that feeds them — must include two dedicated, ordered tasks before the first implementation task: a prototype task and a freeze/approval task. Decision source: user instruction 2026-09-11 (update `create-plan` to mandate HTML prototypes and user approval for any future UI work, artifacts stored in `design-artifacts/`, strictly followed during development, differentiated between prototypes and approved designs).
+
+**Prototype task** — `- [ ] Build the HTML prototype for <surface> in design-artifacts/prototypes/<slug>/`. It must require:
+
+- One self-contained HTML artifact per in-scope surface (or a shared language stylesheet plus per-surface pages), openable with `file://` and no build step, checked into `design-artifacts/prototypes/<slug>/` with a `README.md` stating scope, variants, coverage, and how to open it.
+- Rendering against the **four shipped content themes** (`@clay/theme-modus-operandi`, `@clay/theme-modus-vivendi`, `@clay/theme-gruvbox-material-dark`, `@clay/theme-gruvbox-material-light`) using their real values plus the proposed theme-level additions; a theme switcher is expected so approval covers every theme, not one.
+- Every cataloged component kind and internal surface in scope, in every state that can ship: `rest`, `hover`, `active`, `focus`, `selected`, `disabled`, `invalid`, plus empty/loading/error/recovery where applicable; narrow and wide window layouts when layout can change; real repository content instead of placeholder text where data exists.
+- Reuse of the catalog vocabulary (`component.variant.slot.state`, kind names, token names) so approval maps 1:1 onto catalog entries; a prototype that needs a catalog addition names it explicitly in the task evidence.
+- Verification evidence recorded in the task: the artifact paths, the screenshots (path + state + theme + width) or the exact blocker, zero console/script errors, no horizontal overflow or clipping at the tested widths, and a keyboard-only pass over the prototype's interactive controls.
+- Explicit statement that the prototype has no authority: it may be replaced, and no implementation task may cite it as the reference.
+- Prototype scope can be trimmed only when an approved artifact already exists for that exact surface and state set; the task then records the approved path and its coverage instead of rebuilding — an implementation task that needs a state the approved artifact does not show stops and requests a prototype.
+
+Recommended title: `- [ ] Build the HTML prototype for <surface> in design-artifacts/prototypes/<slug>/` — after entry-gate/baseline tasks and after the UI catalog review, before any implementation task.
+
+Landing and IA baseline (do not re-plan it): the launcher is the landing surface (a fresh window and every empty tab), a tab is one workspace plus one agent with two views switched from tab chrome, the agent view's title is the agent-type picker, and its Files tab is the session's file history — `DESIGN.md` §12, approved set `design-artifacts/approved/quiet-instrument-migration/`, decision source `decision-logs/2026-09-11-2331-workspace-agent-tab-model-and-launcher-landing.md`. A plan that touches the shell, tabs, the landing, or the agent surface reads §12 first and cannot introduce a second landing.
+
+**Freeze/approval task** — `- [ ] Obtain explicit user approval and freeze design-artifacts/approved/<slug>/`. It must require:
+
+- The prototype is presented to the user with the choices that need a decision (variant, density, IA, state treatment) called out; approval is a real user statement, never inferred from silence or from the agent's own review.
+- On approval, the chosen files are copied into `design-artifacts/approved/<slug>/` with a `README.md` recording: approval date, the approving user statement (quoted), chosen variant, requested changes, superseded variants, the exact surface/state/theme/width coverage, and the path of every artifact that is now binding.
+- Losing variants stay under `design-artifacts/prototypes/` for history and are marked as not approved; they are never referenced as authority.
+- Approved artifacts are append-only. A later change is a new variant directory plus a new approval, never an in-place edit.
+- The task cannot be closed by the agent alone: without the user's explicit approval the task stays unchecked and blocks dependent implementation tasks.
+- Deviation policy: any later implementation deviation from the approved artifact is either fixed to match or re-approved through this loop with the reason recorded (defect, accessibility failure, or missing feasibility), plus a decision-log entry when the change alters the approved language.
+
+Recommended title: `- [ ] Obtain explicit user approval and freeze design-artifacts/approved/<slug>/` — immediately after the prototype task, before the first implementation task. Both tasks belong to the design phase of the plan.
+
+**Booking rules that make the gate real:**
+
+- Implementation tasks list the approved artifact path in `Approach -> Documentation Reviewed` and in `References`, and their acceptance criteria include matching it.
+- The mandatory visual/accessibility review task compares the running app against the approved artifact and reports per-surface deviations (see below).
+- `design-artifacts/` is tracked in git: a binding artifact that exists only on one machine is not a reference. Generated snapshots (workspace data) are regenerated by a checked-in script, never hand-edited.
+- `design-artifacts/README.md` is the contract page: what prototypes are, what approved artifacts are, which is normative, and the update loop.
+
 ## Clay UI Primitives-First Task
 
 Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, layout) routes UI skill loading through `.agents/skills/clay-execution/` before proposing new UI code. The plan should require:
 
-- Before reviewing, designing, or implementing each UI task, read `.agents/skills/clay-execution/references/ui.md` (distilled binding rules, design-skill routing, shell layout model, client architecture) plus `references/components.md` and `references/tokens.md` (the catalogs) and list them under every UI task's `Approach -> Documentation Reviewed`; plan-level mention alone is insufficient. Substantial new-surface design tasks additionally load the four project-local design skills (`impeccable`, `full-output-enforcement`, `high-end-visual-design`, `design-taste-frontend`). Read `docs/reference/ui-components.md` as the navigation/contract entry point.
+- Before reviewing, designing, or implementing each UI task, read [`DESIGN.md`](../../../../DESIGN.md) (normative design language, values, per-surface recipes, retired patterns, review checklist), `.agents/skills/clay-execution/references/ui.md` (distilled binding rules, design-skill routing, shell layout model, client architecture) plus `references/components.md` and `references/tokens.md` (the catalogs) and list them under every UI task's `Approach -> Documentation Reviewed`; plan-level mention alone is insufficient. Substantial new-surface design tasks additionally load the four project-local design skills (`impeccable`, `full-output-enforcement`, `high-end-visual-design`, `design-taste-frontend`). Read `docs/reference/ui-components.md` as the navigation/contract entry point.
+- Conform to the Quiet Instrument language in `DESIGN.md`: 1px hairline zoning, radii from the 5/8/12/16/pill ladder, elevation only on transient surfaces, accent only for state, mono for data, and none of the retired patterns in `DESIGN.md` §14. Aesthetic changes to the language itself are `DESIGN.md` edits plus design-system package data, never host CSS or component rewrites.
 - Reconcile conflicting aesthetic guidance through the user brief, Clay product identity, accessibility, security, authority, catalog compatibility, and typed token ownership; adapt marketing-page guidance to Clay's Operate-mode desktop UI instead of forcing AIDA, hero sections, hardcoded palettes/fonts, or decorative motion.
 - Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in `Options Considered`.
 - New components, primitives, tokens, or layout rules are generic and reusable across packages, token-driven (no raw colors, uncontrolled package CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled). Target web components consume host-generated CSS custom properties with the same semantic token ownership. Component kinds, style variables, and token names are additive-only so existing packages keep working.
@@ -157,8 +194,8 @@ Each Clay plan that adds or changes UI design-system packages, component recipes
 - Reject raw CSS, selectors, JSX, scripts, renderer callbacks, URLs, literal colors, color aliases/palettes, arbitrary transforms/filters, and direct Tauri APIs. React Aria and Clay retain behavior, focus, accessibility semantics, and DOM ownership.
 - Validate exact package provenance, current generation, schema version, property/token types, color-role references, bounds, recipe completeness, contrast across representative themes, reduced-motion/transparency fallbacks, and revocation before atomic install.
 - Keep component kinds, slots, recipe properties, tokens, and style variables additive and versioned; existing fixed non-color recipes remain fallback until migration completes; fallback colors always resolve through active-theme roles.
-- Include both restrained Neobrutal and Glass conformance fixtures across at least two materially different content themes; the abstraction is incomplete if either requires host component source changes or declares a concrete color.
-- Apply `.agents/skills/clay-execution/references/config.md` (UI Design-System Packages) and route UI skills through `.agents/skills/clay-execution/references/ui.md` (distilled rules; four design skills load only for substantial new-surface design tasks).
+- Include conformance fixtures for every shipped first-party design system across at least two materially different content themes, and delete the fixtures/harness states of any package the plan removes in the same phase; the abstraction is incomplete if any of them requires host component source changes or declares a concrete color. Quiet Instrument's package profile, values, and per-surface recipes are specified in `DESIGN.md` §4/§11/§16.
+- Apply `.agents/skills/clay-execution/references/config.md` (UI Design-System Packages) and route UI skills through `.agents/skills/clay-execution/references/ui.md` (distilled rules; four design skills load only for substantial new-surface design tasks). New or changed appearance must conform to [`DESIGN.md`](../../../../DESIGN.md) — the Quiet Instrument language and its values/recipes are the target profile of any design-system package work.
 
 Recommended title: `- [ ] Review and implement the typed UI design-system recipe boundary`. Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.
 
@@ -172,7 +209,7 @@ Each Clay plan that touches app UI must include one post-implementation task rev
 - If GUI launch, screenshots, or computer use are unavailable, state the exact blocker, preserve automated structural/accessibility checks, and leave manual visual/a11y acceptance unresolved rather than claiming it passed.
 - Treat a screenshot or accessibility failure as a product defect or an explicitly prioritized follow-up; never replace it with source inspection alone.
 
-Recommended title: `- [ ] Perform visual screenshot and accessibility review of changed UI` — after UI implementation and automated verification, before Clay JS API/configuration/manual-test-plan/wiki finalization. Decision source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.
+Recommended title: `- [ ] Perform visual screenshot and accessibility review of changed UI` — after UI implementation and automated verification, before Clay JS API/configuration/manual-test-plan/wiki finalization. The task must also compare the running UI against the plan's approved artifacts under `design-artifacts/approved/<slug>/` surface by surface and record every deviation (geometry, material, state, spacing, typography role, IA position) with its disposition: fixed to match, or explicitly re-approved. A deviation that is neither fixed nor re-approved fails the review. Decision source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`; approved-artifact conformance per user instruction 2026-09-11.
 
 ## Final Code Wiki Task
 

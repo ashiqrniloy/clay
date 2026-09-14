@@ -1,0 +1,13 @@
+clay server listening on /tmp/clay-ui-review.CsAHBn/review.sock
+clay: package discovery failed (package manager error: failed to spawn `npm`: No such file or directory (os error 2)); store packages stay unloaded
+[agent-reg] agentProfile.register 'coding' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/compact' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/new' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/n' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/branch' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/tree' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/discard' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/fork' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/clone' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/open-session' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/open-session-as-fork' host=live -> Ok(Object {"queued": Bool(true)})

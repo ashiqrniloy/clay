@@ -56,79 +56,232 @@ const SETTINGS_PANEL = Object.freeze({
     kind: "panel",
     id: "settings.root",
     title: "Settings",
-    children: [{
-      kind: "scroll",
-      id: "settings.scroll",
-      children: [
+    children: [
       {
-        kind: "collapse",
-        id: "settings.section.theme",
-        title: "Theme",
+        kind: "scroll",
+        id: "settings.scroll",
         children: [
-          { kind: "label", id: "settings.label.theme", text: "Theme", style: { typography: "typography.title" } },
           {
-            kind: "dropdown",
-            id: "settings.dropdown.theme",
+            kind: "collapse",
+            id: "settings.section.theme",
             title: "Theme",
-            items: [
-              { id: "@clay/theme-modus-operandi", label: "Modus Operandi", action: { commandId: "settings.setTheme" } },
-              { id: "@clay/theme-modus-vivendi", label: "Modus Vivendi", action: { commandId: "settings.setTheme" } },
-              { id: "@clay/theme-gruvbox-material-light", label: "Gruvbox Material Light", action: { commandId: "settings.setTheme" } },
-              { id: "@clay/theme-gruvbox-material-dark", label: "Gruvbox Material Dark", action: { commandId: "settings.setTheme" } }
+            children: [
+              {
+                kind: "label",
+                id: "settings.label.theme",
+                text: "Theme"
+              },
+              {
+                kind: "dropdown",
+                id: "settings.dropdown.theme",
+                title: "Theme",
+                items: [
+                  {
+                    id: "@clay/theme-modus-operandi",
+                    label: "Modus Operandi",
+                    action: {
+                      commandId: "settings.setTheme"
+                    }
+                  },
+                  {
+                    id: "@clay/theme-modus-vivendi",
+                    label: "Modus Vivendi",
+                    action: {
+                      commandId: "settings.setTheme"
+                    }
+                  },
+                  {
+                    id: "@clay/theme-gruvbox-material-light",
+                    label: "Gruvbox Material Light",
+                    action: {
+                      commandId: "settings.setTheme"
+                    }
+                  },
+                  {
+                    id: "@clay/theme-gruvbox-material-dark",
+                    label: "Gruvbox Material Dark",
+                    action: {
+                      commandId: "settings.setTheme"
+                    }
+                  }
+                ]
+              },
+              {
+                kind: "label",
+                id: "settings.label.designSystem",
+                text: "Design system"
+              },
+              {
+                kind: "dropdown",
+                id: "settings.dropdown.designSystem",
+                title: "Design system",
+                items: [
+                  {
+                    id: "@clay/core",
+                    label: "Core baseline",
+                    action: {
+                      commandId: "settings.setDesignSystem"
+                    }
+                  },
+                  {
+                    id: "@clay/design-instrument",
+                    label: "Quiet Instrument (Default)",
+                    action: {
+                      commandId: "settings.setDesignSystem"
+                    }
+                  }
+                ]
+              },
+              {
+                kind: "label",
+                id: "settings.label.appearance",
+                text: "Appearance"
+              },
+              {
+                kind: "dropdown",
+                id: "settings.dropdown.appearance",
+                title: "Appearance",
+                items: [
+                  {
+                    id: "light",
+                    label: "Light",
+                    action: {
+                      commandId: "settings.setAppearance"
+                    }
+                  },
+                  {
+                    id: "dark",
+                    label: "Dark",
+                    action: {
+                      commandId: "settings.setAppearance"
+                    }
+                  },
+                  {
+                    id: "system",
+                    label: "System",
+                    action: {
+                      commandId: "settings.setAppearance"
+                    }
+                  }
+                ]
+              }
             ]
           },
-          { kind: "label", id: "settings.label.designSystem", text: "Design system", style: { typography: "typography.title" } },
           {
-            kind: "dropdown",
-            id: "settings.dropdown.designSystem",
-            title: "Design system",
-            items: [
-              { id: "@clay/core", label: "Core baseline", action: { commandId: "settings.setDesignSystem" } },
-              { id: "@clay/design-neobrutal", label: "Neobrutal (Default)", action: { commandId: "settings.setDesignSystem" } },
-              { id: "@clay/design-glass", label: "Glass (Reference)", action: { commandId: "settings.setDesignSystem" } }
+            kind: "collapse",
+            id: "settings.section.typography",
+            title: "Typography",
+            children: [
+              {
+                kind: "textInput",
+                id: "settings.input.font.ui",
+                title: "UI families",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.font.monospace",
+                title: "Monospace families",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.font.proportional",
+                title: "Proportional families",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.size.ui",
+                title: "UI size",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.size.monospace",
+                title: "Monospace size",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.size.proportional",
+                title: "Proportional size",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              },
+              {
+                kind: "textInput",
+                id: "settings.input.hierarchy",
+                title: "Hierarchy ratios",
+                style: {
+                  validationState: "none",
+                  placeholderColor: "text.muted"
+                }
+              }
             ]
           },
-          { kind: "label", id: "settings.label.appearance", text: "Appearance", style: { typography: "typography.title" } },
           {
-            kind: "dropdown",
-            id: "settings.dropdown.appearance",
-            title: "Appearance",
-            items: [
-              { id: "light", label: "Light", action: { commandId: "settings.setAppearance" } },
-              { id: "dark", label: "Dark", action: { commandId: "settings.setAppearance" } },
-              { id: "system", label: "System", action: { commandId: "settings.setAppearance" } }
+            kind: "flex",
+            id: "settings.actions",
+            style: {
+              gap: "spacing.sm"
+            },
+            children: [
+              {
+                kind: "button",
+                id: "settings.button.apply",
+                label: "Apply typography",
+                action: {
+                  commandId: "settings.setTypography"
+                },
+                style: {
+                  variant: "primary"
+                }
+              },
+              {
+                kind: "button",
+                id: "settings.button.reset",
+                label: "Reset preferences",
+                action: {
+                  commandId: "settings.reset"
+                },
+                style: {
+                  variant: "muted"
+                }
+              },
+              {
+                kind: "button",
+                id: "settings.button.close",
+                label: "Close",
+                action: {
+                  commandId: "settings.close"
+                },
+                style: {
+                  variant: "default"
+                }
+              }
             ]
           }
         ]
-      },
-      {
-        kind: "collapse",
-        id: "settings.section.typography",
-        title: "Typography",
-        children: [
-          { kind: "label", id: "settings.label.fonts", text: "Font families (comma-separated, per role)", style: { typography: "typography.title" } },
-          { kind: "textInput", id: "settings.input.font.monospace", title: "Monospace families", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "textInput", id: "settings.input.font.proportional", title: "Proportional families", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "textInput", id: "settings.input.font.ui", title: "UI families", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "label", id: "settings.label.sizes", text: "Base sizes and hierarchy ratios", style: { typography: "typography.title" } },
-          { kind: "textInput", id: "settings.input.size.monospace", title: "Monospace base size (6–96)", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "textInput", id: "settings.input.size.proportional", title: "Proportional base size (6–96)", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "textInput", id: "settings.input.size.ui", title: "UI base size (6–96)", style: { validationState: "none", placeholderColor: "text.muted" } },
-          { kind: "textInput", id: "settings.input.hierarchy", title: "Hierarchy ratios (display, title, section, body, status, detail, caption)", style: { validationState: "none", placeholderColor: "text.muted" } }
-        ]
-      },
-      {
-        kind: "flex",
-        id: "settings.actions",
-        style: { gap: "spacing.sm" },
-        children: [
-          { kind: "button", id: "settings.button.apply", label: "Apply", action: { commandId: "settings.setTypography" }, style: { variant: "primary" } },
-          { kind: "button", id: "settings.button.reset", label: "Reset", action: { commandId: "settings.reset" }, style: { variant: "muted" } },
-          { kind: "button", id: "settings.button.close", label: "Close", action: { commandId: "settings.close" }, style: { variant: "default" } }
-        ]
       }
-      ]
-    }]
+    ]
   }
 });
 

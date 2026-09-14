@@ -3195,6 +3195,63 @@ mod tests {
         assert_eq!(restored.id, "other.entry");
     }
 
+    /// Plan 118 Part D shipped split: one package claims the landing
+    /// (`empty-tab`) and another its named surface (`pane`) — no conflict, and
+    /// a second landing still fails closed.
+    #[test]
+    fn launcher_landing_and_agent_pane_coexist_without_competing() {
+        let mut registry = PackageUiRegistry::new();
+        let launcher = package();
+        let agent = other_package();
+        let commands = vec!["markdown.openFile".to_string(), "other.open".to_string()];
+
+        registry
+            .register_pane_content(
+                &launcher,
+                &entry_declaration("markdown.start", "markdown.openFile"),
+                &commands,
+            )
+            .unwrap();
+        let registered = registry
+            .register_pane_content(
+                &agent,
+                &surface_declaration("other.surface", "other.open"),
+                &commands,
+            )
+            .unwrap();
+        assert_eq!(registered.activation, "pane");
+
+        let winner = registry.snapshot().empty_tab().unwrap().unwrap();
+        assert_eq!(winner.id, "markdown.start");
+        let snapshot = registry.snapshot();
+        let surfaces: Vec<&str> = snapshot
+            .pane_contents
+            .iter()
+            .filter(|entry| entry.activation == "pane")
+            .map(|entry| entry.id.as_str())
+            .collect();
+        assert_eq!(surfaces, vec!["other.surface"]);
+
+        // A second landing candidate conflicts, in sorted id order, and
+        // withdrawing one restores the single winner.
+        registry
+            .register_pane_content(
+                &agent,
+                &entry_declaration("other.start", "other.open"),
+                &commands,
+            )
+            .unwrap();
+        assert_eq!(
+            registry.snapshot().empty_tab().unwrap_err(),
+            vec!["markdown.start", "other.start"]
+        );
+        registry.pane_contents.remove("other.start");
+        assert_eq!(
+            registry.snapshot().empty_tab().unwrap().unwrap().id,
+            "markdown.start"
+        );
+    }
+
     fn surface_declaration(id: &str, command: &str) -> serde_json::Value {
         json!({
             "id": id,

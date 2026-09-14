@@ -15,8 +15,8 @@ use std::path::PathBuf;
 
 use crate::protocol::{
     DocumentId, DocumentVersion, SduiActionArgument, SduiActionIntent, SduiActionSource,
-    SduiActionValue, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
-    SduiNodeKind, SduiTree, WorkspaceRootId,
+    SduiActionValue, SduiEditorBinding, SduiFlexDirection, SduiListFilter, SduiListItem, SduiNode,
+    SduiNodeId, SduiNodeKind, SduiTree, WorkspaceRootId,
 };
 use crate::server::workspace::{FileListEntryKind, UserBrowseEntryKind, WorkspaceState};
 
@@ -147,8 +147,13 @@ impl FileBrowserState {
         &self.entries
     }
 
-    /// Produce an SDUI tree with a left Workspace panel populated by the
+    /// Produce an SDUI tree with a left Workspace region populated by the
     /// inert file listing and a main editor view. No filesystem access.
+    ///
+    /// The left region is a plain stack, not a `Panel`: the workspace sidebar
+    /// is a flush canvas zone with one hairline edge (DESIGN.md §6), so the
+    /// host's left slot paints it (`fileBrowser` + `divider`); a panel would
+    /// frame the region a second time.
     pub(crate) fn to_sdui_tree(
         &self,
         document_id: DocumentId,
@@ -156,7 +161,6 @@ impl FileBrowserState {
     ) -> SduiTree {
         let root_id = SduiNodeId(1);
         let sidebar_id = SduiNodeId(2);
-        let sidebar_stack_id = SduiNodeId(3);
         let title_label_id = SduiNodeId(4);
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
@@ -188,21 +192,29 @@ impl FileBrowserState {
                 .iter()
                 .map(|entry| entry.to_sdui_list_item(file_list_id)),
         );
-        let file_list = SduiNode::new(file_list_id, SduiNodeKind::List { items: list_items });
-
-        let sidebar_stack = SduiNode::new(
-            sidebar_stack_id,
-            SduiNodeKind::Stack {
-                children: vec![title_label_id, file_list_id],
+        // The listing is delivered whole and bounded, so the filter is host
+        // behaviour over it (the approved tools row) rather than a per-keystroke
+        // server round-trip (plan 118 task E1).
+        let file_list = SduiNode::new(
+            file_list_id,
+            SduiNodeKind::List {
+                items: list_items,
+                filter: Some(SduiListFilter {
+                    placeholder: "Filter files".to_string(),
+                    shortcut: Some("/".to_string()),
+                }),
             },
         );
 
-        let sidebar = SduiNode::new(
+        // The region is sized from the host's typed dimension token (244px,
+        // 224px at ≤1240px): the approved sidebar width, which a flex share
+        // cannot express (plan 118 task E1).
+        let sidebar = SduiNode::sized(
             sidebar_id,
-            SduiNodeKind::Panel {
-                title: "Workspace".to_string(),
-                children: vec![sidebar_stack_id],
+            SduiNodeKind::Stack {
+                children: vec![title_label_id, file_list_id],
             },
+            "dimension.sidebar.default",
         );
 
         let editor = SduiNode::new(
@@ -226,7 +238,7 @@ impl FileBrowserState {
         SduiTree {
             ui_version: 1,
             root_id,
-            nodes: vec![root, sidebar, sidebar_stack, title_label, file_list, editor],
+            nodes: vec![root, sidebar, title_label, file_list, editor],
         }
     }
 
@@ -489,7 +501,7 @@ mod tests {
     }
 
     #[test]
-    fn file_browser_sdui_tree_has_left_workspace_panel() {
+    fn file_browser_sdui_tree_has_flat_left_workspace_region() {
         let root = temp_workspace("browser-sdui");
         fs::write(root.join("main.rs"), "fn main() {}").unwrap();
         fs::create_dir(root.join("src")).unwrap();
@@ -500,11 +512,50 @@ mod tests {
         let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
 
         let tree = browser.to_sdui_tree(7u64, 3u64);
+        // The sidebar is one stack (label + listing) inside the row: no panel
+        // frames it, because the host's left slot owns the region's paint.
         assert!(
-            tree.nodes
+            !tree
+                .nodes
                 .iter()
-                .any(|node| matches!(node.kind, SduiNodeKind::Panel { .. }))
+                .any(|node| matches!(node.kind, SduiNodeKind::Panel { .. })),
+            "the workspace sidebar must not be a framed panel"
         );
+        let (sidebar, sidebar_size) = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Stack { children } => Some((children.clone(), node.size.clone())),
+                _ => None,
+            })
+            .expect("workspace sidebar stack");
+        // Plan 118 task E1: the region is sized by the host's token (244 / 224)
+        // instead of taking an equal flex share, and the listing carries the
+        // approved filter affordance — the field + the `/` hint.
+        assert_eq!(sidebar_size.as_deref(), Some("dimension.sidebar.default"));
+        let kinds: Vec<&SduiNodeKind> = sidebar
+            .iter()
+            .map(|id| {
+                &tree
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == *id)
+                    .expect("sidebar child")
+                    .kind
+            })
+            .collect();
+        assert!(matches!(kinds.first(), Some(SduiNodeKind::Label { .. })));
+        assert!(matches!(kinds.get(1), Some(SduiNodeKind::List { .. })));
+        let filter = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { filter, .. } => filter.clone(),
+                _ => None,
+            })
+            .expect("the file listing is filterable");
+        assert_eq!(filter.placeholder, "Filter files");
+        assert_eq!(filter.shortcut.as_deref(), Some("/"));
         let title = tree
             .nodes
             .iter()
@@ -538,7 +589,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -654,7 +705,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -685,7 +736,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -730,7 +781,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -759,7 +810,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -785,7 +836,9 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => items.iter().find(|item| item.label == "main.rs"),
+                SduiNodeKind::List { items, .. } => {
+                    items.iter().find(|item| item.label == "main.rs")
+                }
                 _ => None,
             })
             .expect("nested main.rs list item");
@@ -826,7 +879,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();

@@ -1,0 +1,24 @@
+{
+  "note": "Plan 118 task 21 recording, shrunk by the host-CSS adoption tasks. After the shared components (task 16), the SDUI/editor/package surfaces (task 17), the shell + workspace composition, the coding-agent composition, the command-centre/overlay adoption (which adopted the palette's menu-item active state, the popover surface the menu origins use, and the key-hint vocabulary), and the agent-type picker (task 35: the agent view's title trigger consumes `agentPicker.default.trigger.*`), what remains is surfaces that do not exist yet: the launcher's richer `recentRow` (the shipped launcher paints `list.default.row`), the settings swatch, the session-list rows, the card roots, and the toast, plus the retired roots that no host surface renders (no product surface emits one \u2014 a host with no emitter would be dead code, so it stays recorded here until a notification feature ships). Both lists are asserted by exact equality: anything new fails immediately, anything adopted must leave the recording. Task 36 (session file history) consumed the session row's focus ring, so the agent Files tab's rows now paint the whole family: 20 \u2192 19 keys. Task E6 (the input's error slot) consumed `textInput.default.error.rest` with its producer wired: 19 \u2192 18 keys.",
+  "unbackedConsumedVariables": [],
+  "unconsumedRecipeKeys": [
+    "button.danger.root.focus",
+    "button.muted.root.focus",
+    "button.primary.root.focus",
+    "card.default.root.hover",
+    "card.default.root.rest",
+    "dropdown.default.root.rest",
+    "editor.default.path.rest",
+    "label.default.root.rest",
+    "panel.fixed.root.rest",
+    "recentRow.default.root.focus",
+    "recentRow.default.root.hover",
+    "recentRow.default.root.rest",
+    "recentRow.default.root.selected",
+    "swatch.default.root.focus",
+    "swatch.default.root.hover",
+    "swatch.default.root.rest",
+    "swatch.default.root.selected",
+    "toast.default.root.rest"
+  ]
+}

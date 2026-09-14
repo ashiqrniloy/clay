@@ -1,3 +1,11 @@
+> **SUPERSEDED — do not execute (2026-09-11).** Clay adopted the Quiet Instrument
+> design language (`DESIGN.md`) and the migration scope recorded in
+> `decision-logs/2026-09-11-1700-quiet-instrument-migration-scope-no-third-design-system-chat-removal.md`:
+> one shipped design system (`@clay/design-instrument`), the four existing themes, no new
+> theme packages. The three languages and three paired themes planned below (Graphite
+> Precision, Warm Analog, Glass Cockpit) are out of scope; the migration plan is
+> `plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md`. Kept as history.
+
 # Phase 20.10 — Graphite Precision, Warm Analog, and Glass Cockpit Design-System + Paired Theme Packages
 
 Implements the three user-approved UI design languages from the proposal review (`.impeccable/reviews/design-proposals/index.html`, samples 2/4/5) as first-party packages: three `uiDesignSystem` recipe packages and three content themes with identical display names so the pairing is obvious to users. All six packages ride the existing typed recipe boundary (plans 101–104, decision log 2026-08-28-2234): design systems supply geometry/material/motion referencing **theme color roles only**; themes supply the palettes via `clay.contributions.designTokens`; every design system therefore works with every theme, and each named theme is the best-fit palette for its namesake design system.

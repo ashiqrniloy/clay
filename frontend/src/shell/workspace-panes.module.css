@@ -9,9 +9,16 @@
   place-items: center;
 }
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--clay-spacing-xs, 8px);
-  margin-top: var(--clay-spacing-sm, 12px);
+/* The tab's two views share the working area; the inactive one is hidden but
+ * stays mounted so switching keeps its state (plan 118 task 33). `hidden`
+ * removes it from the accessibility tree as well, and the explicit display
+ * rule survives a `display: grid` host. */
+.viewSlot {
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.viewSlot[hidden] {
+  display: none;
 }

@@ -62,7 +62,16 @@ fn reasoning_message_id(run_id: &str) -> String {
 /// client's default apply pipeline keeps owning them.
 fn transcript_entry_message(index: usize, entry: &AgentTranscriptEntry) -> Value {
     let id = format!("clay-entry-{index}");
-    match entry.kind {
+    // Plan 118 task 35: the agent type that produced the row rides every
+    // message's metadata, so a transcript that spans a switch labels each
+    // turn with its producer (and the view derives the switch note).
+    let agent_metadata = |mut metadata: Value| -> Value {
+        if let Some(agent) = &entry.agent {
+            metadata["agent"] = serde_json::json!(agent);
+        }
+        metadata
+    };
+    let mut message = match entry.kind {
         AgentTranscriptKind::User => serde_json::json!({
             "id": id, "role": "user", "content": entry.text
         }),
@@ -102,10 +111,24 @@ fn transcript_entry_message(index: usize, entry: &AgentTranscriptEntry) -> Value
             if let Some(skill) = &entry.skill_name {
                 metadata["skillName"] = serde_json::json!(skill);
             }
-            value["metadata"] = metadata;
+            // Plan 118 task 36: the tool row's file record, so the Files tab
+            // is a projection of the transcript rather than a second source.
+            if let Some(file) = &entry.file {
+                metadata["sessionFile"] =
+                    serde_json::to_value(file).unwrap_or(serde_json::Value::Null);
+            }
+            value["metadata"] = agent_metadata(metadata);
             value
         }
+    };
+    // Rows without a clayKind carry the agent stamp directly; rows that
+    // printed metadata above must not be overwritten.
+    if let Some(agent) = &entry.agent
+        && message.get("metadata").is_none()
+    {
+        message["metadata"] = serde_json::json!({ "agent": agent });
     }
+    message
 }
 
 fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
@@ -114,6 +137,10 @@ fn snapshot_events(snapshot: &AgentSessionSnapshot) -> Vec<AgUiEvent> {
         "profile": snapshot.profile,
         "provider": snapshot.provider,
         "model": snapshot.model,
+        // Plan 118 task 35: the agent type the session runs as — rows
+        // written before the tab picked an agent carry no stamp of their
+        // own, so the view needs the session's identity to label them.
+        "agent": snapshot.agent,
         "mcpServers": snapshot.mcp_servers,
         // Context-used-vs-window numerator (plan 108 task 9):
         // bounded counter only, never transcript content.
@@ -265,6 +292,7 @@ fn adapt_wire_event(session_id: &str, event: &AgentWireEvent) -> Vec<AgUiEvent> 
             args_digest,
             output_digest,
             skill_name,
+            file,
             ..
         } => {
             // Plan 109 I5: bounded payload digests + skill name ride the
@@ -284,6 +312,15 @@ fn adapt_wire_event(session_id: &str, event: &AgentWireEvent) -> Vec<AgUiEvent> 
             }
             if let Some(skill) = skill_name {
                 value["skillName"] = serde_json::json!(skill);
+            }
+            // Plan 118 task 36: the file record rides the live row so the
+            // Files tab counts a call the moment its started phase arrives,
+            // same shape the snapshot rows carry.
+            if let Some(file) = file {
+                value["sessionFile"] = serde_json::json!({
+                    "path": file.path,
+                    "op": file.op,
+                });
             }
             vec![AgUiEvent::Custom {
                 name: "clay.toolPhase".into(),
@@ -329,6 +366,7 @@ mod tests {
     use super::*;
     use crate::protocol::{
         AgentModelInfo, AgentProfileInfo, AgentProviderInfo, AgentSessionInfo, AgentToolPhase,
+        AgentTranscriptFile, AgentTranscriptFileOp,
     };
 
     fn sample_snapshot() -> AgentSessionSnapshot {
@@ -340,6 +378,7 @@ mod tests {
             provider: "mock".into(),
             model: "mock-mini".into(),
             leaf_id: None,
+            agent: None,
             entries: vec![
                 AgentTranscriptEntry::new(AgentTranscriptKind::User, "hi"),
                 AgentTranscriptEntry::new(AgentTranscriptKind::Thinking, "pondering"),
@@ -531,6 +570,10 @@ mod tests {
                 args_digest: Some("{\"path\":\"src/main.rs\"}".into()),
                 output_digest: None,
                 skill_name: None,
+                file: Some(AgentTranscriptFile {
+                    path: "src/main.rs".into(),
+                    op: AgentTranscriptFileOp::Read,
+                }),
             },
         });
         let AgUiEvent::Custom { name, value } = &tool[0] else {
@@ -541,6 +584,9 @@ mod tests {
         assert_eq!(value["toolCallId"], "t1");
         // Plan 109 I5: the bounded args digest rides the row event.
         assert_eq!(value["argsDigest"], r#"{"path":"src/main.rs"}"#);
+        // Plan 118 task 36: so does the file record the live Files tab counts.
+        assert_eq!(value["sessionFile"]["path"], "src/main.rs");
+        assert_eq!(value["sessionFile"]["op"], "read");
         // No execution surface leaks: the custom payload has no raw args/result.
         assert!(value.get("arguments").is_none());
         assert!(value.get("result").is_none());
@@ -556,11 +602,16 @@ mod tests {
             "read {\"path\":\"src/main.rs\"} -> fn main()",
             "t1",
             None,
+            Some(AgentTranscriptFile {
+                path: "src/main.rs".into(),
+                op: AgentTranscriptFileOp::Read,
+            }),
         ));
         snapshot.entries.push(AgentTranscriptEntry::new_tool(
             "load_skill {\"name\":\"rust-review\"} -> Loaded skill",
             "t2",
             Some("rust-review".into()),
+            None,
         ));
         let events = adapt_agent_message(&AgentServerMessage::Snapshot(snapshot));
         let AgUiEvent::MessagesSnapshot { messages } = &events[0] else {

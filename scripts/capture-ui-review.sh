@@ -7,22 +7,62 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fixture=""
 output=""
 timeout_seconds="${CLAY_UI_REVIEW_TIMEOUT_SECONDS:-45}"
+example_config=""
+requested_size=""
+theme_specifier=""
+appearance=""
+drive_steps=""
 
 usage() {
     cat <<'EOF'
 Usage: scripts/capture-ui-review.sh --fixture <name> --output <directory>
+       [--size WxH] [--theme <specifier>] [--appearance light|dark|system]
+       [--drive '<json steps>']
+
+--size WxH requests that window size through the computer-use-linux GNOME Shell
+extension (`dev.avifenesh.ComputerUseLinux.WindowControl`) and moves the window
+fully on-screen first. The requested *width* is verified (it drives every
+responsive breakpoint); the height is recorded as measured, because this
+session's compositor pins window height to the work area for every app. A
+missing extension or a refused request records UNRESOLVED instead of claiming
+the size. Measured frame and webview-viewport sizes land in metadata.txt.
+
+A capture is only valid review evidence inside the plan-087 logical envelope of
+900×600 or larger, so a measured viewport below that floor records UNRESOLVED
+rather than passing: the old fixed 900×600 claim is now a checked floor and a
+measured value, not a constant. Larger sizes (`--size 1500x950`, `--size
+1024x800`) are what exercise the wide and narrow layouts.
+--example-config boots the review against a copy of the canonical
+`examples/config/` tree instead of the fixture's own init.js: the whole tree
+(init.js plus packages/) is copied into the isolated mode-700 config root, so
+the run exercises the shipped example exactly as `cp -r examples/config/. ~/.clay/`
+would. It is only valid with the fixtures whose checks match what the canonical
+config renders (ui-review-launcher); the other fixtures assert their own panel
+content (or auto-open their own surface through their own init.js calls), so
+pairing them would be a false pass.
+--theme/--appearance seed ~/.clay/preferences.json, so any fixture can be
+captured under any shipped theme. --drive executes AT-SPI steps before
+the capture, which reaches states that otherwise need keyboard input (palette,
+menus, modals, rail toggles, the agent view) without input synthesis:
+
+  [{"find": {"role": "button", "name": "Palette"}, "do": "click"},
+   {"find": {"role": "entry", "name": "Document editor"}, "do": "type",
+    "text": "hello"},
+   {"find": {"role": "button", "name": "Palette"}, "do": "focus"},
+   {"wait": 400}]
+
+`do` is one of click, focus, type, clear. Every step is verified against the
+live AT-SPI tree; a step that cannot be applied records UNRESOLVED with its
+reason instead of passing.
 
 Fixtures:
-  ui-review-default         clean Clay shell/welcome state
+  ui-review-default         clean Clay shell, core empty-tab fallback (no packages)
+  ui-review-launcher        bundled launcher landing on the empty tab
   ui-review-loading         deterministic loading-state SDUI panel
   ui-review-error           configuration/runtime error state
   ui-review-recovery        disconnected/recovery state after server stop
-  ui-review-design-system   explicit core design-system activation (dark)
-  ui-review-design-system-light explicit core design-system activation (light)
-  ui-review-design-neobrutal default Neobrutal design-system activation (dark)
-  ui-review-design-neobrutal-light Neobrutal design-system activation (light)
-  ui-review-design-glass    Glass reference design-system activation (dark)
-  ui-review-design-glass-light Glass reference design-system activation (light)
+  ui-review-design-system   shipped design-system activation (dark)
+  ui-review-design-system-light shipped design-system activation (light)
   ui-review-large-typography user-owned large typography state
   ui-review-completion      completion-ready document (interactive capture)
   ui-review-command-centre command centre (interactive capture)
@@ -51,6 +91,30 @@ while (($#)); do
             timeout_seconds=$2
             shift 2
             ;;
+        --size)
+            [[ $# -ge 2 ]] || { echo "missing value for --size" >&2; exit 2; }
+            requested_size=$2
+            shift 2
+            ;;
+        --theme)
+            [[ $# -ge 2 ]] || { echo "missing value for --theme" >&2; exit 2; }
+            theme_specifier=$2
+            shift 2
+            ;;
+        --appearance)
+            [[ $# -ge 2 ]] || { echo "missing value for --appearance" >&2; exit 2; }
+            appearance=$2
+            shift 2
+            ;;
+        --example-config)
+            example_config=1
+            shift
+            ;;
+        --drive)
+            [[ $# -ge 2 ]] || { echo "missing value for --drive" >&2; exit 2; }
+            drive_steps=$2
+            shift 2
+            ;;
         -h|--help)
             usage
             exit 0
@@ -64,7 +128,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-design-neobrutal|ui-review-design-neobrutal-light|ui-review-design-glass|ui-review-design-glass-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-rust|ui-review-coding-agent|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) ;;
+    ui-review-default|ui-review-launcher|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-workspace|ui-review-rust|ui-review-coding-agent|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -72,7 +136,32 @@ case "$fixture" in
         ;;
 esac
 [[ -n "$output" ]] || { echo "--output is required" >&2; exit 2; }
+if [[ -n "$requested_size" && ! "$requested_size" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]]; then
+    echo "--size must look like WIDTHxHEIGHT" >&2
+    exit 2
+fi
+if [[ -n "$appearance" && ! "$appearance" =~ ^(light|dark|system)$ ]]; then
+    echo "--appearance must be light, dark or system" >&2
+    exit 2
+fi
+if [[ -n "$theme_specifier" && ! "$theme_specifier" =~ ^@clay/theme-[a-z0-9-]+$ ]]; then
+    echo "--theme must be a bundled @clay/theme-* specifier" >&2
+    exit 2
+fi
+if [[ -n "$drive_steps" ]] && ! python3 -c 'import json,sys; json.loads(sys.argv[1])' "$drive_steps" 2>/dev/null; then
+    echo "--drive must be a JSON array of steps" >&2
+    exit 2
+fi
 [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || { echo "--timeout must be a positive integer" >&2; exit 2; }
+if [[ -n "$example_config" ]]; then
+    case "$fixture" in
+        ui-review-launcher) ;;
+        *)
+            echo "--example-config is only valid with --fixture ui-review-launcher (the canonical config renders the launcher landing), got ${fixture:-<missing>}" >&2
+            exit 2
+            ;;
+    esac
+fi
 
 mkdir -p "$output"
 output=$(cd "$output" && pwd)
@@ -84,8 +173,25 @@ data_home=$root/data
 home=$root/home
 workspace=$root/workspace
 socket=$root/review.sock
-mkdir -p "$config_dir" "$data_home" "$home/.clay" "$workspace" "$root/tmp"
+mkdir -p "$config_dir" "$data_home" "$home/.clay" "$home/.config" "$workspace" "$root/tmp"
 chmod 700 "$config_home" "$config_dir" "$data_home" "$home" "$home/.config" "$home/.clay" "$workspace" "$root/tmp"
+
+# Optional theme/appearance seeding: preferences.json is the same closed store
+# the Settings panel writes, so every fixture can be captured under any shipped
+# theme without a second fixture directory.
+if [[ -n "$theme_specifier" || -n "$appearance" ]]; then
+    python3 - "$home/.clay/preferences.json" "$theme_specifier" "$appearance" <<'PY'
+import json, sys
+path, theme, appearance = sys.argv[1:]
+preferences = {}
+if theme:
+    preferences["theme"] = theme
+if appearance:
+    preferences["appearance"] = appearance
+with open(path, "w", encoding="utf-8") as output:
+    json.dump(preferences, output)
+PY
+fi
 
 # The Rust fixture keeps Clay configuration/data isolated but lets the fixed
 # rustup language-server descriptor inherit the host HOME for its installed
@@ -165,7 +271,10 @@ if [[ ! -x "$repo/target/debug/clay" ]]; then
 fi
 
 cat > "$root/atspi_probe.py" <<'PY'
+import json
 import sys
+import time
+
 try:
     import gi
     gi.require_version("Atspi", "2.0")
@@ -174,63 +283,261 @@ except Exception as exc:
     print(f"PREREQ_MISSING: {exc}", file=sys.stderr)
     raise SystemExit(3)
 
-if not sys.argv or sys.argv[1] not in {"prereq", "app", "dump-index"}:
-    raise SystemExit("usage: atspi_probe.py prereq|app INDEX|dump-index INDEX")
+MODES = {"prereq", "app", "dump-index", "frame-size", "viewport-size", "drive"}
+if not sys.argv or sys.argv[1] not in MODES:
+    raise SystemExit(
+        "usage: atspi_probe.py prereq|app INDEX|dump-index INDEX|frame-size INDEX"
+        "|viewport-size INDEX|drive INDEX JSON"
+    )
 
 desktop = Atspi.get_desktop(0)
 if sys.argv[1] == "prereq":
     print(f"OK apps={desktop.get_child_count()}")
     raise SystemExit(0)
-if len(sys.argv) != 3:
-    raise SystemExit("usage: atspi_probe.py app INDEX|dump-index INDEX")
-application = desktop.get_child_at_index(int(sys.argv[2]))
-if sys.argv[1] == "app":
-    # Skip stale AT-SPI registrations whose owning process is already gone;
-    # orphaned windows from earlier runs otherwise shadow the live one.
-    try:
-        pid = application.get_process_id()
-    except Exception:
-        pid = 0
-    if pid and not __import__("pathlib").Path(f"/proc/{pid}").exists():
-        raise SystemExit(0)
-    print(str(application.get_name() or "").strip().upper())
-    raise SystemExit(0)
+
 
 def clean(value):
     return str(value or "").replace("|", " ").replace("\n", " ")
 
-def walk(node, depth):
+
+def application_at(index):
+    """Return the live Clay application node at `index`, or None when stale."""
+    try:
+        application = desktop.get_child_at_index(int(index))
+    except Exception:
+        return None
+    if application is None:
+        return None
+    try:
+        name = str(application.get_name() or "").strip().upper()
+        if name not in {"CLAY", "CLAY-DESKTOP"}:
+            return None
+        pid = application.get_process_id()
+        if pid and not __import__("pathlib").Path(f"/proc/{pid}").exists():
+            return None
+    except Exception:
+        return None
+    return application
+
+
+if sys.argv[1] == "app":
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: atspi_probe.py app INDEX")
+    application = application_at(sys.argv[2])
+    if application is None:
+        raise SystemExit(0)
+    print(str(application.get_name() or "").strip().upper())
+    raise SystemExit(0)
+
+
+def walk(node, depth, visit):
     if node is None:
         return
     try:
-        app = node.get_application()
-        app_name = clean(app.get_name() if app is not None else "")
-        if app_name.lower() in {"clay", "clay-desktop"}:
-            selected = "selected" if node.get_state_set().contains(Atspi.StateType.SELECTED) else "-"
-            role = clean(node.get_role_name())
-            text = ""
-            if role == "status bar":
-                try:
-                    text = clean(Atspi.Text.get_text(node, 0, -1))
-                except Exception:
-                    pass
-            print("|".join([
-                str(depth), role, selected, clean(node.get_name()), text,
-                clean(node.path), app_name,
-            ]))
+        visit(node, depth)
     except Exception:
-        return
+        pass
     try:
         count = node.get_child_count()
     except Exception:
         return
     for index in range(count):
         try:
-            walk(node.get_child_at_index(index), depth + 1)
+            walk(node.get_child_at_index(index), depth + 1, visit)
         except Exception:
             continue
 
-walk(application, 0)
+
+if sys.argv[1] == "dump-index":
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: atspi_probe.py dump-index INDEX")
+    application = application_at(sys.argv[2])
+
+    def dump(node, depth):
+        app = node.get_application()
+        app_name = clean(app.get_name() if app is not None else "")
+        if app_name.lower() not in {"clay", "clay-desktop"}:
+            return
+        selected = "selected" if node.get_state_set().contains(Atspi.StateType.SELECTED) else "-"
+        role = clean(node.get_role_name())
+        text = ""
+        if role == "status bar":
+            try:
+                text = clean(Atspi.Text.get_text(node, 0, -1))
+            except Exception:
+                pass
+        print("|".join([
+            str(depth), role, selected, clean(node.get_name()), text,
+            clean(node.path), app_name,
+        ]))
+
+    walk(application, 0, dump)
+    raise SystemExit(0)
+
+
+def clay_frame(application):
+    """The window frame node (AT-SPI extents; ~3% wider than the client area)."""
+    found = []
+
+    def visit(node, _depth):
+        if clean(node.get_role_name()) == "frame":
+            found.append(node)
+
+    walk(application, 0, visit)
+    return found[0] if found else None
+
+
+if sys.argv[1] == "frame-size":
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: atspi_probe.py frame-size INDEX")
+    application = application_at(sys.argv[2])
+    if application is None:
+        raise SystemExit("Clay application is not live")
+    frame = clay_frame(application)
+    if frame is None:
+        raise SystemExit("Clay window frame is not exposed")
+    extents = frame.get_extents(Atspi.CoordType.SCREEN)
+    print(f"{extents.width}x{extents.height}")
+    raise SystemExit(0)
+
+
+if sys.argv[1] == "viewport-size":
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: atspi_probe.py viewport-size INDEX")
+    application = application_at(sys.argv[2])
+    if application is None:
+        raise SystemExit("Clay application is not live")
+    found = []
+
+    def visit(node, _depth):
+        if "document web" in clean(node.get_role_name()).lower():
+            found.append(node)
+
+    walk(application, 0, visit)
+    if not found:
+        raise SystemExit("the webview node is not exposed")
+    extents = found[0].get_extents(Atspi.CoordType.SCREEN)
+    print(f"{extents.width}x{extents.height}")
+    raise SystemExit(0)
+
+
+
+if sys.argv[1] == "drive":
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: atspi_probe.py drive INDEX JSON")
+    steps = json.loads(sys.argv[3])
+    if not isinstance(steps, list):
+        raise SystemExit("drive steps must be a JSON array")
+    failures = []
+    for position, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            failures.append(f"step {position}: not an object")
+            continue
+        if "wait" in step:
+            time.sleep(max(0, int(step["wait"])) / 1000)
+            print(f"OK step {position}: wait {step['wait']}ms")
+            continue
+        application = application_at(sys.argv[2])
+        if application is None:
+            failures.append(f"step {position}: Clay application is not live")
+            break
+        selector = step.get("find") or {}
+        role = str(selector.get("role", "")).lower()
+        name = str(selector.get("name", "")).lower()
+        exact = bool(selector.get("exact"))
+        wanted = int(selector.get("index", 0))
+        matches = []
+
+        def collect(node, _depth):
+            node_role = clean(node.get_role_name()).lower()
+            node_name = clean(node.get_name()).lower()
+            if role and role not in node_role:
+                return
+            if name and (node_name != name if exact else name not in node_name):
+                return
+            matches.append(node)
+
+        walk(application, 0, collect)
+        if len(matches) <= wanted:
+            failures.append(
+                f"step {position}: no node matched role~{role!r} name~{name!r}"
+                f" (found {len(matches)}, wanted index {wanted})"
+            )
+            continue
+        node = matches[wanted]
+        action = step.get("do", "click")
+        try:
+            if action == "click":
+                count = Atspi.Action.get_n_actions(node)
+                chosen = None
+                for index in range(count):
+                    candidate = clean(Atspi.Action.get_action_name(node, index)).lower()
+                    if any(word in candidate for word in ("click", "press", "activate", "jump")):
+                        chosen = index
+                        break
+                if chosen is None and count:
+                    chosen = 0
+                if chosen is None:
+                    failures.append(f"step {position}: node exposes no action")
+                    continue
+                Atspi.Action.do_action(node, chosen)
+                label = clean(Atspi.Action.get_action_name(node, chosen))
+                print(f"OK step {position}: click {clean(node.get_name())!r} via {label!r}")
+            elif action == "focus":
+                if not Atspi.Component.grab_focus(node):
+                    failures.append(f"step {position}: grab_focus refused for {clean(node.get_name())!r}")
+                    continue
+                print(f"OK step {position}: focus {clean(node.get_name())!r}")
+            elif action in {"type", "clear"}:
+                text = str(step.get("text", "")) if action == "type" else ""
+                Atspi.Component.grab_focus(node)
+                Atspi.EditableText.set_text_contents(node, text)
+                print(f"OK step {position}: {action} {clean(node.get_name())!r}")
+            else:
+                failures.append(f"step {position}: unknown do {action!r}")
+        except Exception as exc:  # noqa: BLE001 - the probe reports, never raises
+            failures.append(f"step {position}: {action} failed: {exc}")
+    for failure in failures:
+        print(f"FAIL {failure}", file=sys.stderr)
+    raise SystemExit(1 if failures else 0)
+PY
+
+cat > "$root/window_control.py" <<'PY'
+"""Read the GNOME Shell extension's window listing (a GVariant string)."""
+
+import json
+import sys
+
+if len(sys.argv) != 4 or sys.argv[1] not in {"id", "bounds", "rect"}:
+    raise SystemExit("usage: window_control.py id|bounds|rect LISTING_FILE PID")
+
+mode, path, pid = sys.argv[1], sys.argv[2], sys.argv[3]
+raw = open(path, encoding="utf-8").read().strip()
+if raw.startswith("('") and raw.endswith("',)"):
+    raw = raw[2:-3]
+windows = json.loads(raw)
+
+def is_clay(window):
+    if pid and str(window.get("pid")) == pid:
+        return True
+    return str(window.get("wm_class") or "").startswith("clay")
+
+for window in windows:
+    if not is_clay(window):
+        continue
+    if mode == "id":
+        print(window.get("window_id"))
+        raise SystemExit(0 if window.get("window_id") else 1)
+    bounds = window.get("bounds") or {}
+    if mode == "rect":
+        print(
+            f"{bounds.get('width')}x{bounds.get('height')}"
+            f"+{bounds.get('x')}+{bounds.get('y')}"
+        )
+    else:
+        print(f"{bounds.get('width')}x{bounds.get('height')}")
+    raise SystemExit(0)
+raise SystemExit(1)
 PY
 
 cat > "$root/crop_window.py" <<'PY'
@@ -241,15 +548,42 @@ gi.require_version("Atspi", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Atspi, GdkPixbuf
 
-if len(sys.argv) != 3:
-    raise SystemExit("usage: crop_window.py FULL_PNG OUTPUT_PNG")
-source, destination = sys.argv[1:]
+if len(sys.argv) < 3:
+    raise SystemExit("usage: crop_window.py FULL_PNG OUTPUT_PNG [WxH+X+Y]")
+source, destination = sys.argv[1], sys.argv[2]
+compositor_bounds = None
+if len(sys.argv) == 4 and sys.argv[3]:
+    size, x, y = sys.argv[3].split("+")
+    width, height = size.split("x")
+    compositor_bounds = (int(x), int(y), int(width), int(height))
+
+def clean(value):
+    return str(value or "").strip()
+
+
+def walk(node, visit, depth=0):
+    if node is None:
+        return
+    try:
+        visit(node, depth)
+    except Exception:
+        pass
+    try:
+        count = node.get_child_count()
+    except Exception:
+        return
+    for index in range(count):
+        try:
+            walk(node.get_child_at_index(index), visit, depth + 1)
+        except Exception:
+            continue
+
 
 desktop = Atspi.get_desktop(0)
 extents = None
 for i in range(desktop.get_child_count()):
     application = desktop.get_child_at_index(i)
-    if str(application.get_name() or "").strip().upper() != "CLAY-DESKTOP":
+    if clean(application.get_name()).upper() != "CLAY-DESKTOP":
         continue
     try:
         pid = application.get_process_id()
@@ -259,7 +593,7 @@ for i in range(desktop.get_child_count()):
         continue
     for j in range(application.get_child_count()):
         child = application.get_child_at_index(j)
-        if str(child.get_name() or "").strip() == "Clay":
+        if clean(child.get_name()) == "Clay":
             frame = child.get_extents(0)
             if frame.width > 0 and frame.height > 0:
                 extents = (frame.x, frame.y, frame.width, frame.height)
@@ -267,17 +601,32 @@ for i in range(desktop.get_child_count()):
     if extents:
         break
 
+# AT-SPI frame extents carry Wayland shadow padding that overshoots the real
+# window, which would pull host pixels (panel, neighbouring windows) into the
+# retained crop. Intersect them with the compositor's own window bounds.
+if extents is not None and compositor_bounds is not None:
+    x, y, width, height = extents
+    cx, cy, cw, ch = compositor_bounds
+    left = max(x, cx)
+    top = max(y, cy)
+    right = min(x + width, cx + cw)
+    bottom = min(y + height, cy + ch)
+    if right - left > 0 and bottom - top > 0:
+        extents = (left, top, right - left, bottom - top)
+
 full = GdkPixbuf.Pixbuf.new_from_file(source)
 if extents is None:
     raise SystemExit("Clay window extents not found in AT-SPI tree")
 x, y, width, height = extents
 # Wayland AT-SPI frame extents include invisible shadow/border padding that
-# overshoots the visible window. Inset the right/bottom edges so no host
-# window pixels can bleed into retained captures (plan 097 privacy rule).
+# overshoots the visible window. When the compositor gave exact bounds the crop
+# is already inside the window; otherwise inset 3% so no host window pixels can
+# bleed into retained captures (plan 097 privacy rule).
 # ponytail: fixed 3% inset; switch to pixel-accurate edge detection if the
 # trimmed chrome ever matters.
-width -= max(1, width // 32)
-height -= max(1, height // 32)
+if compositor_bounds is None:
+    width -= max(1, width // 32)
+    height -= max(1, height // 32)
 print(
     f"extents=({x},{y},{width},{height}) full={full.get_width()}x{full.get_height()}",
     file=sys.stderr,
@@ -363,6 +712,18 @@ if [[ "$fixture" == ui-review-rust ]]; then
     cp "$repo/tests/fixtures/lsp/rust/Cargo.toml" "$workspace/Cargo.toml"
     cp "$repo/tests/fixtures/lsp/rust/Cargo.lock" "$workspace/Cargo.lock"
     cp "$repo/tests/fixtures/lsp/rust/src/main.rs" "$workspace/src/main.rs"
+elif [[ "$fixture" == ui-review-workspace ]]; then
+    cat > "$workspace/review.md" <<'MD'
+# Review document
+
+## 09:10 — Landing shell
+
+The first-entry summary of the migrated shell.
+
+## 09:40 — Workspace and rail
+
+A second entry so the outline rail has something to navigate.
+MD
 elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light || "$fixture" == ui-review-icons-regular-light || "$fixture" == ui-review-icons-duotone-dark || "$fixture" == ui-review-icons-fallback-large ]]; then
     printf 'Fixture document\n' > "$workspace/loading.txt"
 fi
@@ -371,10 +732,19 @@ document_name=""
 case "$fixture" in
     ui-review-loading|ui-review-design-system|ui-review-design-system-light|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) document_name=loading.txt ;;
     ui-review-completion) document_name=review.rs ;;
+    ui-review-workspace) document_name=review.md ;;
     ui-review-rust) document_name=src/main.rs ;;
 esac
-init_fixture="$repo/tests/fixtures/configuration/$fixture/init.js"
-cp "$init_fixture" "$home/.clay/init.js"
+if [[ -n "$example_config" ]]; then
+    # Canonical example tree: init.js plus packages/ (and agents/, if present),
+    # copied exactly as the documented `cp -r examples/config/. ~/.clay/`.
+    cp -r "$repo/examples/config/." "$home/.clay/"
+    config_source="examples/config (canonical tree, cp -r parity)"
+else
+    init_fixture="$repo/tests/fixtures/configuration/$fixture/init.js"
+    cp "$init_fixture" "$home/.clay/init.js"
+    config_source="tests/fixtures/configuration/$fixture/init.js"
+fi
 
 if [[ -n "$document_name" ]]; then
     python3 - "$config_dir/layout.json" "$workspace" "$document_name" <<'PY'
@@ -399,7 +769,7 @@ cat > "$output/instructions.md" <<EOF
 # Clay UI review capture
 
 - Fixture: $fixture
-- Logical window: 900×600
+- Window size: recorded in metadata.txt (window_requested_size, window_viewport)
 - Screenshot: screenshot.png
 - Accessibility dump: accessibility.txt
 
@@ -427,9 +797,10 @@ EOF
     ui-review-design-system|ui-review-design-system-light)
         cat >> "$output/instructions.md" <<'EOF'
 
-The fixture selects the built-in `@clay/core` design system explicitly and
-publishes a representative panel, action, enabled list row, disabled list row,
-and editor view. It is paired with the theme named in the fixture.
+The fixture selects the shipped `@clay/design-instrument` design system
+explicitly and publishes a representative panel, action, enabled list row,
+disabled list row, and editor view. It is paired with the theme named in the
+fixture.
 EOF
         ;;
     ui-review-rust)
@@ -453,7 +824,11 @@ esac
 
 cat > "$output/metadata.txt" <<EOF
 fixture=$fixture
-window_logical_size=900x600
+config_source=$config_source
+window_requested_size=${requested_size:-default}
+theme=${theme_specifier:-fixture-default}
+appearance=${appearance:-fixture-default}
+drive_steps=${drive_steps:-none}
 ipc=private-unix-socket
 config=private-mode-700
 screenshot=xdg-desktop-portal
@@ -539,6 +914,43 @@ wait_for_inlay() {
 }
 
 wait_for_tree 'Clay workspace' || unresolved "Clay window/accessibility shell did not appear"
+
+# Optional window sizing. AT-SPI cannot resize a Wayland toplevel here, but the
+# GNOME Shell extension can: it resizes the window and moves it fully on-screen
+# (an off-screen window would bleed host pixels into the retained crop).
+compositor_bounds=""
+window_id=""
+extension_method="dev.avifenesh.ComputerUseLinux.WindowControl"
+extension_path="/dev/avifenesh/ComputerUseLinux/WindowControl"
+extension_call() {
+    gdbus call --session --dest "$extension_method" --object-path "$extension_path" \
+        --method "$extension_method.$1" "${@:2}" 2>/dev/null
+}
+if [[ -n "$requested_size" ]]; then
+    width=${requested_size%x*}
+    height=${requested_size#*x}
+    extension_call ListWindows > "$root/windows.json" \
+        || unresolved "the computer-use-linux GNOME Shell extension is unavailable"
+    window_id=$(python3 "$root/window_control.py" id "$root/windows.json" "$desktop_pid") \
+        || unresolved "no Clay window is exposed to the GNOME Shell extension"
+    extension_call MoveWindow "$window_id" 40 40 >/dev/null \
+        || unresolved "moving the Clay window on-screen failed"
+    extension_call ResizeWindow "$window_id" "$width" "$height" >/dev/null \
+        || unresolved "resizing the Clay window to $requested_size failed"
+    sleep 0.8
+    extension_call ListWindows > "$root/windows-resized.json" \
+        || unresolved "re-reading windows after resize failed"
+    bounds=$(python3 "$root/window_control.py" bounds "$root/windows-resized.json" "$desktop_pid" || true)
+    compositor_bounds=$(python3 "$root/window_control.py" rect "$root/windows-resized.json" "$desktop_pid" || true)
+    # Width is the layout-relevant dimension (1240/1000/760 breakpoints); the
+    # compositor pins height, so a shorter frame is recorded, not failed.
+    [[ "${bounds%%x*}" == "$width" ]] \
+        || unresolved "window width did not take $width (measured ${bounds:-unknown})"
+    if [[ "$bounds" != "$requested_size" ]]; then
+        printf 'window_resize_note=requested %s, compositor kept %s\n' "$requested_size" "$bounds" \
+            >> "$output/metadata.txt"
+    fi
+fi
 # Force one watcher-driven reload only after the client has completed its
 # initial handshake, so runtime fixtures are delivered through the live
 # RuntimeStateSnapshot path instead of racing startup bootstrap.
@@ -572,6 +984,19 @@ client_stay=connected
 EOF
         printf '\nRuntime evidence: `runtime-tree.txt` records the sanitized reload diagnostic.\n' >> "$output/instructions.md"
         ;;
+    ui-review-launcher)
+        # The landing is a compiled host panel for @clay/launcher's contribution.
+        # AT-SPI exposes its section labels and buttons; the ellipsis-bearing
+        # folder button proves the launcher rendered and not the core fallback.
+        wait_for_tree 'Open folder…' || unresolved "launcher landing did not appear"
+        cat > "$output/runtime-tree.txt" <<'EOF'
+Landing=PASS
+surface=@clay/launcher empty-tab contribution (host-rendered panel)
+panes=Workspaces,Agents
+core_fallback=Open file / Open folder only (absent here)
+EOF
+        printf '\nRuntime evidence: `runtime-tree.txt` records the launcher landing.\n' >> "$output/instructions.md"
+        ;;
     ui-review-loading)
         wait_for_tree 'Loading review' || unresolved "loading SDUI tree did not appear"
         cat > "$output/runtime-tree.txt" <<'EOF'
@@ -585,29 +1010,11 @@ EOF
         wait_for_tree 'Design system review' || unresolved "design-system SDUI tree did not appear"
         cat > "$output/runtime-tree.txt" <<'EOF'
 RuntimeStateSnapshot=PASS
-active_design_system=@clay/core
+active_design_system=@clay/design-instrument
 sdui_panel=Design system review
 sdui_states=enabled,disabled
 EOF
-        printf '\nRuntime evidence: `runtime-tree.txt` records explicit core activation and host-owned states.\n' >> "$output/instructions.md"
-        ;;
-    ui-review-design-neobrutal|ui-review-design-neobrutal-light)
-        wait_for_tree 'Neobrutal Design System' || unresolved "neobrutal design-system SDUI tree did not appear"
-        cat > "$output/runtime-tree.txt" <<'EOF'
-RuntimeStateSnapshot=PASS
-active_design_system=@clay/design-neobrutal
-sdui_panel=Neobrutal Design System
-sdui_states=enabled,disabled
-EOF
-        ;;
-    ui-review-design-glass|ui-review-design-glass-light)
-        wait_for_tree 'Frosted Glass Reference System' || unresolved "glass design-system SDUI tree did not appear"
-        cat > "$output/runtime-tree.txt" <<'EOF'
-RuntimeStateSnapshot=PASS
-active_design_system=@clay/design-glass
-sdui_panel=Frosted Glass Reference System
-sdui_states=enabled,disabled
-EOF
+        printf '\nRuntime evidence: `runtime-tree.txt` records shipped design-system activation and host-owned states.\n' >> "$output/instructions.md"
         ;;
     ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large)
         wait_for_tree 'Icon Pack Review' || unresolved "icon-pack SDUI tree did not appear"
@@ -669,19 +1076,89 @@ EOF
         ;;
 esac
 
+
+if [[ -z "$compositor_bounds" ]]; then
+    extension_call ListWindows > "$root/windows.json" 2>/dev/null || true
+    compositor_bounds=$(python3 "$root/window_control.py" rect "$root/windows.json" "$desktop_pid" 2>/dev/null || true)
+fi
+if [[ -n "$drive_steps" ]]; then
+    if ! drive_output=$(timeout 60s python3 "$root/atspi_probe.py" drive "$clay_index" "$drive_steps" 2>&1); then
+        # Keep the whole probe transcript, not just its last line: the probe
+        # prints per-step OK lines on stdout and FAIL lines on stderr, so
+        # either stream may arrive last and a tail alone hides the reason.
+        printf '%s\n' "$drive_output" > "$output/drive.failed.txt"
+        unresolved "drive step failed: $(printf '%s' "$drive_output" | grep -m1 '^FAIL' || printf '%s' "$drive_output" | tail -n 1)"
+    fi
+    printf '%s\n' "$drive_output" > "$output/drive.txt"
+    printf '\nDriven steps (AT-SPI, no input synthesis):\n\n```\n%s\n```\n' "$drive_output" >> "$output/instructions.md"
+    # Let the driven surface animate in (enter tier is 240ms) before capture.
+    sleep 0.8
+fi
+# Measure the settled geometry only after any driven step: a compositor-driven
+# size change (or an unmaximise) must be reflected in the recorded viewport.
+viewport_size=$(timeout 10s python3 "$root/atspi_probe.py" viewport-size "$clay_index" 2>/dev/null || true)
+frame_size=$(timeout 10s python3 "$root/atspi_probe.py" frame-size "$clay_index" 2>/dev/null || true)
+# Plan 087 envelope floor: a capture smaller than a 900×600 logical window cannot
+# show the layouts this harness exists to review, so it is not passing evidence.
+if [[ "$viewport_size" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    if (( BASH_REMATCH[1] < 900 || BASH_REMATCH[2] < 600 )); then
+        unresolved "measured viewport $viewport_size is below the 900×600 review floor"
+    fi
+fi
+# Re-dump: driven steps change the exposed tree.
+capture_dump
+
 cp "$latest_dump" "$output/accessibility.txt"
 if ! python3 "$root/portal_capture.py" "$root/full-screenshot.png" > "$root/portal.out" 2> "$root/portal.err"; then
     printf 'UNRESOLVED\nreason=xdg-desktop-portal Screenshot is unavailable\n' > "$output/review.status"
     echo "UI review unresolved: xdg-desktop-portal Screenshot is unavailable" >&2
     exit_status=2
-elif ! python3 "$root/crop_window.py" "$root/full-screenshot.png" "$output/screenshot.png" > "$root/crop.out" 2> "$root/crop.err"; then
+elif ! python3 "$root/crop_window.py" "$root/full-screenshot.png" "$output/screenshot.png" "$compositor_bounds" > "$root/crop.out" 2> "$root/crop.err"; then
     # Never retain full-desktop captures: they can contain unrelated host
     # windows (plan 097 privacy rule).
     printf 'UNRESOLVED\nreason=Clay window crop failed; full-desktop capture discarded\n' > "$output/review.status"
     echo "UI review unresolved: Clay window crop failed" >&2
     exit_status=2
 else
-    printf 'PASS\nfixture=%s\n' "$fixture" > "$output/review.status"
+    # Keep the accessibility tree of the captured state: it is the evidence for
+    # role/name/state exposure and for transient surfaces (inlays, dialogs) that
+    # no later run can reproduce without replaying the same drive steps.
+    [[ -f "${latest_dump:-}" ]] && cp "$latest_dump" "$output/a11y-tree.txt"
+    screenshot_size=$(python3 - "$output/screenshot.png" <<'PY'
+import struct, sys
+with open(sys.argv[1], "rb") as handle:
+    header = handle.read(24)
+width, height = struct.unpack(">II", header[16:24])
+print(f"{width}x{height}")
+PY
+)
+    {
+        printf 'window_viewport=%s\n' "${viewport_size:-unknown}"
+        printf 'window_frame=%s\n' "${frame_size:-unknown}"
+        printf 'screenshot=%s\n' "$screenshot_size"
+    } >> "$output/metadata.txt"
+    printf '\n- Measured viewport: %s (window frame %s, cropped screenshot %s)\n' \
+        "${viewport_size:-unknown}" "${frame_size:-unknown}" "$screenshot_size" >> "$output/instructions.md"
+    # Bounded, privacy-safe server evidence for the startup contract
+    # ("configuration commits a generation with no configuration failed
+    # diagnostics"): only diagnostic/configuration/generation lines survive,
+    # and the scratch root is redacted. Full logs stay failure-only.
+    if [[ -s "$root/server.log" ]]; then
+        sed -e "s|$root|<isolated-root>|g" "$root/server.log" \
+            | grep -Ei 'diagnostic|configuration|generation|load_failed|module_failed|error|listening|package discovery' \
+            | head -40 > "$output/server.diagnostics.txt" || true
+        {
+            # Counters a reviewer can cite without reading a log: the package
+            # registrations prove the loaded agent package ran its load entry,
+            # and the failure count is the startup contract's own metric.
+            printf 'agent_registration_lines=%s\n' "$(grep -c '^\[agent-reg\]' "$root/server.log" || true)"
+            printf 'configuration_failed_lines=%s\n' "$(grep -ci 'configuration failed' "$root/server.log" || true)"
+        } >> "$output/server.diagnostics.txt"
+        printf '\nServer diagnostics (bounded, root-redacted): `server.diagnostics.txt`.\n' \
+            >> "$output/instructions.md"
+    fi
+    printf 'PASS\nfixture=%s\nviewport=%s\nscreenshot=%s\n' \
+        "$fixture" "${viewport_size:-unknown}" "$screenshot_size" > "$output/review.status"
     echo "UI review captured: $output" >&2
 fi
 exit "$exit_status"

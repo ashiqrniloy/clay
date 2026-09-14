@@ -22,7 +22,22 @@ Layout (mirrors `~/.clay/` on a user machine):
 Each Clay agent owns `~/.clay/agents/<agentId>/`; the coding agent
 is the first occupant (decisions 2026-09-09-1420 and 2026-09-10-1526).
 This directory holds agent configuration, agent-delivered content, and —
-in `data/` — the agent's runtime state:
+in `data/` — the agent's runtime state.
+
+**More agent types.** Any directory under `~/.clay/agents/` is an agent type
+Clay offers: copy `coding-agent/` to `~/.clay/agents/reviewer/`, edit its
+`SYSTEM.md` / `skills.json` / `mcp.json` / `tool-caps.json`, and it appears in
+the launcher's agent pane and in the agent view's title picker (both read the
+same directory scan, no package load, no restart needed for a picker entry that
+already exists). Picking one for a tab switches *that tab* to the agent's own
+configuration — system prompt, skill roots, tool caps, MCP servers, model/effort
+defaults — without touching the tab's folder or its conversation, and the
+transcript keeps every earlier turn labelled with the agent that produced it.
+The name must be a plain directory name (letters, digits, `-`, `_`, at most 64
+characters): separators, `..`, and absolute names are rejected, so an agent type
+can never address a path outside `agents/`. Runtime state (`data/`) stays with
+the shipped agent's directory: one daemon holds one sessions database and one
+credential vault.
 
 - `skills.json` — skill discovery roots and agent-skill toggles. All
   keys optional; absent file = everything on with defaults. Relative

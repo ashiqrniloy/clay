@@ -185,13 +185,13 @@ describe("design system DTO projection", () => {
           activeTheme: themeSnapshot,
           activeTypography: typographySnapshot,
           activeDesignSystem: {
-            specifier: "@clay/design-glass",
+            specifier: "@thirdparty/design-sample",
             schemaVersion: 1,
             generation: 2,
             provenance: {
-              packageName: "@clay/design-glass",
+              packageName: "@thirdparty/design-sample",
               packageVersion: "0.2.0",
-              apiPrefix: "glass",
+              apiPrefix: "design-sample",
               trustDomain: "thirdParty",
             },
             recipes: {
@@ -244,7 +244,7 @@ describe("design system DTO projection", () => {
 
     if (envelope.kind === "runtimeSnapshot") {
       expect(envelope.data.snapshot.activeDesignSystem.specifier).toBe(
-        "@clay/design-glass",
+        "@thirdparty/design-sample",
       );
       expect(envelope.data.snapshot.activeDesignSystem.generation).toBe(2);
       expect(

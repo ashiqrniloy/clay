@@ -1,45 +1,24 @@
-/* Clay tooltip — `paint_tooltip_shell` React projection (Plan 112 Task 7).
- * Consumes the shipped `tooltip.default.root.rest` design-system recipe
- * (both reference packages) with core-token fallbacks. Typography from the
- * semantic body variant; z-order from `z.tooltip`. */
+/* Clay tooltip — the `tooltip.default.root.rest` recipe: overlay fill, 1px
+ * hairline, radius 8, pop shadow, `spacing.tooltip` padding. Typography comes
+ * from the semantic body variant; z-order from `z.tooltip`. No backdrop blur:
+ * only the scrim and the toast blur (DESIGN.md §10.3). */
 
 .tooltip {
   box-sizing: border-box;
   max-inline-size: 20rem;
-  background: var(
-    --clay-ds-tooltip-default-root-rest-background-color,
-    var(--clay-surface-tooltip)
-  );
-  color: var(
-    --clay-ds-tooltip-default-root-rest-text-color,
-    var(--clay-text-tooltip)
-  );
-  border: var(
-      --clay-ds-tooltip-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-tooltip-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-tooltip-default-root-rest-border-color,
-      var(--clay-border-hairline)
-    );
-  border-radius: var(
-    --clay-ds-tooltip-default-root-rest-border-radius,
-    var(--clay-radius-sm, 4px)
-  );
-  padding: var(
-    --clay-ds-tooltip-default-root-rest-padding,
-    var(--clay-spacing-tooltip, 8px)
-  );
-  box-shadow: var(--clay-ds-tooltip-default-root-rest-shadow, none);
-  backdrop-filter: blur(
-    var(--clay-ds-tooltip-default-root-rest-backdrop-blur, 0px)
-  );
-
+  padding: var(--clay-ds-tooltip-default-root-rest-padding);
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-body-size, 13px);
   line-height: var(--clay-text-body-line-height, 1.2);
   word-break: break-word;
+
+  border-width: var(--clay-ds-tooltip-default-root-rest-border-width);
+  border-style: var(--clay-ds-tooltip-default-root-rest-border-style);
+  border-color: var(--clay-ds-tooltip-default-root-rest-border-color);
+  border-radius: var(--clay-ds-tooltip-default-root-rest-border-radius);
+  background: var(--clay-ds-tooltip-default-root-rest-background-color);
+  color: var(--clay-ds-tooltip-default-root-rest-text-color);
+  box-shadow: var(--clay-ds-tooltip-default-root-rest-shadow);
 
   z-index: var(--clay-z-tooltip, 50);
   outline: none;
@@ -48,7 +27,9 @@
   /* Entry: fade only (no positional animation); global reduced-motion
    * preferences collapse this to zero duration. */
   opacity: 1;
-  transition: opacity var(--clay-motion-fast, 100ms) ease-out;
+  transition: opacity
+    var(--clay-ds-tooltip-default-root-rest-transition-duration)
+    var(--clay-ds-tooltip-default-root-rest-transition-timing);
 }
 
 .tooltip[data-entering] {

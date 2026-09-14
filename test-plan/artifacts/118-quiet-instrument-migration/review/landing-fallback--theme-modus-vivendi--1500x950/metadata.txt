@@ -1,0 +1,13 @@
+fixture=ui-review-default
+window_requested_size=1500x950
+theme=@clay/theme-modus-vivendi
+appearance=dark
+drive_steps=none
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 1500x950, compositor kept 1500x1151
+window_viewport=1500x1107
+window_frame=1552x1203
+screenshot=78x1151

@@ -5,13 +5,15 @@
 - `frontend/src/app/{App,router,use-clay-session}.tsx`
 - `frontend/src/app/layout/{app-shell,tab-bar,working-area}.tsx`
 - `frontend/src/components/*`
+- `frontend/src/shell/{PaneTree,WorkspacePanes,workspace-controller,layout-state,use-shell-chords}.ts`
+- `frontend/src/routes/{workspace,WorkspaceRail,fixture}.tsx`
 - `frontend/src/theme/{adapter,types}.ts`
 - `frontend/src/state/{theme-store,stores,connection-store}.ts`
 - `frontend/src/styles/{global,tokens}.css`
 - `frontend/src/routes/{workspace,fixture}.tsx`
 - `src/shell/theme.rs` (`resolve_theme_token_snapshot`, `CORE_TOKEN_NAMES`)
 - `src-tauri/src/bridge/dto.rs` (`ThemeSnapshotDto`, `TypographySnapshotDto`)
-- `frontend/src/test/{theme-adapter,components,shell,performance}.test.ts*`
+- `frontend/src/test/{theme-adapter,components,shell,performance,surface-adoption,design-system-consumption}.test.ts*`
 
 ## Overview
 
@@ -52,6 +54,50 @@ and tabs (see [React Tabs, Splits, and Layout Persistence](react-tabs-and-splits
    updates do not remount the tree. Production routes subscribe to the
    session store; tests may inject a connection snapshot.
 
+## Plan 118 shipped composition (Quiet Instrument)
+
+The design-system migration re-laid the host chrome instead of re-skinning it
+(`DESIGN.md` §12/§16, approved set in
+`design-artifacts/approved/quiet-instrument-migration/`; recipes come from
+`@clay/design-instrument`, see [UI Design System Runtime](ui-design-system-runtime.md)):
+
+- **Shell** (`frontend/src/app/layout/shell.module.css`): a three-row grid —
+  40px title bar, `1fr` working area, 28px status bar — with hairline zone
+  separators. The title bar hosts the brand, the tab strip and the
+  `Palette` / `Files` / `Outline` actions; `ClayTabStrip` gained an `inline`
+  variant (no bottom border, centred items) so the strip does not double the
+  title bar's own hairline. The status bar renders mono hints through `ClayKbd`
+  and consumes the `statusItem` recipe.
+- **Workspace** (`frontend/src/routes/workspace.module.css`): a three-column
+  grid — sidebar, editor, rail — where the sidebar is a **flush zone** (canvas
+  fill, one leading hairline, no radius and no veil; the SDUI file browser no
+  longer wraps itself in a `Panel`), the editor column centres its text at a
+  92ch measure (`max-width: calc(92ch + 4rem)` on `.canvas`), and the rail is
+  `340px` (`312px` at `≤1240px`, a fixed drawer at `≤1000px`).
+  `WorkspaceRail.tsx` derives the outline from `## HH:MM — title` headings plus
+  a facts list (file, revision, state, entries, words) and navigates through
+  `DocumentSession.revealLine`; its visibility lives in
+  `frontend/src/shell/layout-state.ts` and toggles from the title bar or the
+  client-local `Ctrl+I` chord (`use-shell-chords.ts`). The editor's relative-path
+  field is an on-demand strip (docbar button, not `Ctrl+O` — that stays the
+  native file dialog) and consumes `textInput.default.input` so the single-line
+  boundary keeps the `r8` contract.
+- **Overlays** (`frontend/src/components/modal.tsx` + `modal.module.css`):
+  `ClayModal` takes `flush` (the palette sheet paints its own surface) and
+  `footer` (head / body / foot with hairline separations), the scrim uses the
+  theme's `surface.scrim` role, and the reduced-transparency fallback in
+  `frontend/src/styles/global.css` paints veil-bearing components opaque
+  (`[data-clay-component]` / `[data-clay-slot]` selectors, not the retired
+  material attribute).
+- **Consumption rule.** Component CSS must not carry geometry or colour
+  literals: radius, border width, shadow, colour and duration come from
+  `var(--clay-ds-*)` recipes or `var(--clay-*)` roles, with translucency
+  composed through `color-mix(… calc(var(--clay-ds-…-background-opacity, 1) * 100%), transparent)`.
+  `frontend/src/test/surface-adoption.test.tsx` asserts that for the editor,
+  SDUI and package-workspace surfaces (no literals, recipes wired, fixed-slot
+  panels flattened), and `frontend/src/test/design-system-consumption.test.ts`
+  keeps every consumed variable backed by a recipe or a host fallback.
+
 ## Code Examples
 
 ```ts
@@ -69,12 +115,16 @@ const router = createMemoryRouter(routes, {
 
 - Token names and component kinds are additive-only; schema changes need a
   migration test.
-- `border-radius` is `0` on chrome (mechanical geometry). Badge/kbd may use
-  `radius.xs` from the catalog.
+- Geometry comes from the active design system: chrome and fixed slots stay
+  radius-free because they are flush zones, interactive controls take the
+  language's control radius (see
+  [Design Artifact Gate](design-artifact-gate.md) for the frozen values, and
+  `DESIGN.md` §11 for the recipes).
 - Modal scrim alpha-multiplies `surface.scrim` × `opacity.scrim` on the fill,
   not the overlay element, so the dialog stays opaque.
 - Fixture routes exist only when `import.meta.env.DEV`.
-- Production gzip budget: 160 kB (`frontend/scripts/bundle-budget.mjs`).
+- Production gzip budgets: 180 kB shell / 400 kB total
+  (`frontend/scripts/bundle-budget.mjs`); plan 118 measured 169.8 / 390.9 kB.
 
 ## Tests
 

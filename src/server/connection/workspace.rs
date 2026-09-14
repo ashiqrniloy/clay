@@ -394,6 +394,14 @@ where
             .is_some_and(|state| state.workspace_pane_visible()),
         None => true,
     };
+    // Launcher (plan 118 Part D): the folder dialog is an explicit open, so
+    // the picked folder leads the recents list. Best-effort.
+    if let Some(server) = reload_server {
+        crate::server::launcher::record_recent_workspace(
+            server.configuration_root().as_deref(),
+            std::path::Path::new(&selected_path),
+        );
+    }
     for message in add_selected_workspace_root_messages(
         workspace,
         document,

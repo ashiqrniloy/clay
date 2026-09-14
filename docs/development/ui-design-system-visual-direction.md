@@ -1,86 +1,175 @@
 # UI Design System Visual Direction Contract
 
-**Date:** 2026-09-05  
-**Status:** Approved Direction Contract - Amended for Legibility Revamp (Plan 110)  
-**Related Plans:** [Plan 101](../../plans/101-UI-Design-System-Recipe-Foundation.md), [Plan 102](../../plans/102-UI-Design-System-Activation-and-Frontend-Runtime.md), [Plan 103](../../plans/103-UI-Design-System-Component-and-Surface-Migration.md), [Plan 104](../../plans/104-Neobrutal-and-Glass-Design-System-Packages-and-Conformance.md), [Plan 110](../../plans/110-UI-Design-System-Consistency-Neobrutal-Legibility-Revamp.md)  
-**Product Reference:** [`PRODUCT.md`](../../PRODUCT.md)  
-**Surface Brief:** [`.impeccable/surfaces/operate-visual-direction.md`](../../.impeccable/surfaces/operate-visual-direction.md)  
-**Decision Log:** [`decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`](../../decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md)  
+**Date:** 2026-09-11 (supersedes the 2026-09-05 Neobrutal contract)
+**Status:** Approved Direction Contract — Quiet Instrument (**implemented**; package, themes, gates, fallbacks and the host CSS adoption are shipped; the target IA's tab-model work is the remaining plan-118 feature work — see [`DESIGN.md`](../../DESIGN.md) §16). The comparison columns below are the evaluation record of the 2026-09-11 round; the two comparator systems were removed by the migration (plan 118 task 9).
+**Normative spec:** [`DESIGN.md`](../../DESIGN.md) — this document records the *why* and the comparison; `DESIGN.md` owns the values.
+**Approved artifacts:** `design-artifacts/approved/quiet-instrument-language/workspace-rethink.html`, `design-artifacts/approved/quiet-instrument-language/agent-rethink.html`, `design-artifacts/approved/quiet-instrument-language/ds-quiet.css`, `design-artifacts/approved/quiet-instrument-language/theme.css`, `design-artifacts/approved/quiet-instrument-language/README.md` (contract: `design-artifacts/README.md`)
+**Related Plans (historical records):** [101](../../plans/101-UI-Design-System-Recipe-Foundation.md), [102](../../plans/102-UI-Design-System-Activation-and-Frontend-Runtime.md), [103](../../plans/103-UI-Design-System-Component-and-Surface-Migration.md), [104](../../plans/104-Neobrutal-and-Glass-Design-System-Packages-and-Conformance.md), [110](../../plans/110-UI-Design-System-Consistency-Neobrutal-Legibility-Revamp.md)
+**Product Reference:** [`PRODUCT.md`](../../PRODUCT.md)
+**Surface Brief:** [`.impeccable/surfaces/operate-visual-direction.md`](../../.impeccable/surfaces/operate-visual-direction.md)
+**Decision Log:** [`decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`](../../decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md), [`decision-logs/2026-09-11-1615-quiet-instrument-design-language.md`](../../decision-logs/2026-09-11-1615-quiet-instrument-design-language.md)
 
 ---
 
 ## 1. Executive Summary
 
-This document establishes the visual direction contract for Clay's default UI design system package (`@clay/design-neobrutal`) and its companion reference package (`@clay/design-glass`).
+Clay's UI design language becomes **Quiet Instrument**, selected from a four-screen,
+design proposal round (2026-09-11, approved artifacts in `design-artifacts/approved/quiet-instrument-language/`). The language
+keeps Clay's architectural invariants unchanged — content themes are the sole
+color authority, design systems own geometry/material/motion, typography stays
+user-owned — and replaces the former Restrained-Neobrutal default with a single-surface,
+hairline-zoned, state-driven instrument face.
 
-In accordance with Clay's core architectural invariants, **content themes are the sole color authority**. UI design systems govern **geometry, framing, materials, shadows, spatial rhythm, and motion**, completely decoupled from color palettes, literal hex codes, or user-owned typography.
+The proposal round compared two directions per screen: a legibility-repaired
+**former Neobrutal** (0px corners, 2px ink borders, hard offset shadows, since
+removed) and a ground-up rethinking (hairline zoning, two elevations,
+accent-as-state). The rethinking direction was chosen on the evidence of
+long-session use: the former Neobrutal face spends structural attention on
+itself (every panel framed, every row boxed, static chrome shadowed like a
+control), which reads as noise in a surface that is open for hours.
 
 ---
 
 ## 2. Direction Contract
 
 ### THESIS
-A restrained, utilitarian Neobrutal design system engineered for prolonged desktop development. Replaces the generic rounded-gray modern editor aesthetic with blueprint-like compartmentalization, mathematical 90-degree corners, crisp 2px structural ink borders at rest (`borderColor: text.primary`), and physical mechanical feedback, refusing loud web Neobrutal cartoon tropes, garish yellow fills, and excessive non-functional ornamentation while guaranteeing high-contrast structural legibility across both dark and light content themes.
+A quiet instrument: one continuous surface zoned by hairlines and whitespace,
+exactly two elevations (canvas and overlay), accent reserved for state rather
+than decoration, and typography — monospace for data, not for prose — carrying
+the hierarchy that borders used to. It refuses boxed-in-boxes chrome, hard
+offset shadows, 90-degree control corners, gradients, textures, and any motion
+that does not report a state change.
 
 ### OWN-WORLD
-- **Palette & Material Authority:** Content themes are the sole color authority. Surfaces are opaque, crisp, and high-contrast, reading strictly from semantic theme tokens (`surface.canvas`, `surface.panel`, `surface.control`, `surface.selected`, `accent.primary`, `focus.ring`). List rows maintain solid `surface.control` fills at rest (never transparent); selected rows and panels receive 2px ink borders and solid `surface.selected` fills.
-- **Geometry & Structure:** Hard 90-degree corners (`borderRadius: 0px` across all controls, containers, overlays, and dialogs), 2px structural framing borders at rest using the ink role (`borderColor: text.primary`), 2px focus outlines (`outlineColor: text.primary`), and hard offset drop shadows (`3px 3px 0px var(--clay-text-primary)` at rest, extending to `4px 4px 0px` on hover and collapsing to `1px 1px 0px` on active press) without diffuse blur (`blur: 0px`).
-- **Spatial Rhythm:** Bimodal density — compact density (4px gap, 2px/4px padding) for toolbars, tab bars, status bars, and breadcrumbs; generous comfortable density (8px/12px padding) for dialogs, modals, and settings.
-- **Motion Grammar:** Snappy mechanical translation (`transform: translateY(-1px)` via `hover-lift` on hover, `translateY(1px)` via `press-shift-down` on active press), `100ms ease-out` state transitions, collapsing to `0ms` under `prefers-reduced-motion`. Zero backdrop blur anywhere.
+- **Palette & Material Authority:** Content themes remain the sole color
+  authority. The default surface is the canvas itself (`surface.main`);
+  grouped content sits on a veil (`surface.panel` at `opacity.veil` = 0.55);
+  insets (fields, composers, meters) use `surface.control`; transient layers use
+  `surface.overlay` with the overlay/pop shadow recipes. Chrome strips inherit
+  the canvas and are separated by one hairline (`border.hairline`).
+- **Geometry & Structure:** A single radius ladder — 5 (chips/kbd/badges), 8
+  (controls, rows, tabs), 12 (panels, popovers), 16 (window, sheets, modals),
+  9999 (pills) — and one border weight (1px hairline). The two-pixel marks are
+  states only — the focus ring and the composer shell's accent boundary, both
+  inset shadow layers — while a leading selection bar and a tab underline are
+  retired patterns (`DESIGN.md` §14.13).
+  Full-bleed region edges stay square and flush.
+- **Spatial Rhythm:** 32px rows (26 compact), 30px controls (28 compact), 40px
+  title bar, 28px status bar; 4/8/12/16/24px spacing steps; panel interiors
+  10–14px; sheets 18–20px. Density scales the spacing rhythm only.
+- **Motion Grammar:** 150ms `ease-out` for state changes, 240ms
+  `spring-snappy` for surfaces entering (fade + small translate/scale), a
+  one-shot 620ms accent pulse when a keyboard action moves focus. No hover
+  lift, no bounce, no loops except the running-work indicator. Reduced motion
+  collapses everything to instant.
+- **Type & Measure:** 20/15/13/12/11/10px ladder; monospace for every datum
+  with tabular figures; 10px/0.14em uppercase micro-labels for section
+  eyebrows; editor column 92ch, transcript 72ch, empty-state prose ≤48ch.
 
 ### STORY
-The developer opens Clay to an environment that feels like a precision machinist's console. Every pane boundary is sharply defined; active tabs and focused controls announce themselves through solid mechanical offsets and crisp ink borders rather than blurry glows. Interactive elements react instantaneously with subtle physical compression, confirming action without breaking cognitive flow.
+The developer opens Clay and lands on the launcher — recent workspaces and
+configured agents, one of each per launch — and then sees the document, not the
+editor. Regions are separated by a single hairline and air; nothing is framed.
+The eye lands on text and data. Moving the pointer tints a row; pressing a
+button nudges it 1px; selecting a file tints its fill and changes the text role
+(nothing is drawn on its leading edge).
+When a keyboard action moves focus, the destination pulses once so the eye
+finds it. Overlays lift above the plane on a soft, wide shadow — the only
+shadows in the application — and then disappear without ceremony.
 
 ### FIRST VIEWPORT
-A 3-pane split editor layout with a left workspace tree, central CodeMirror canvas with active tab bar and breadcrumb rail, right git diff pane, and bottom collapsible terminal/status bar. An active command palette overlay sits centered above the canvas, framed in a 2px solid ink border with hard 4px 4px 0px ink drop shadow, its text field and candidate list maintaining perfect 90-degree alignment.
+Launcher (`⌘T`, and what a fresh window opens): recent workspaces and
+configured agents side by side, each pane with a filter well, closed by one
+action row whose primary button names what it will open. Choosing a workspace
+opens the tab's workspace view: sidebar with the workspace tree (mono names,
+right-aligned counts, count footer) · centered editor column with a line-number
+gutter and a 92ch measure · optional right rail with document facts and the
+entry outline · status bar carrying workspace, connection, word/entry counts,
+and the keyboard hint row. `⌘2` switches the same tab to its agent view:
+picker-as-title header, 72ch transcript, one-boundary composer, inspector with
+the Files (session history), Memory, Context, Session Info and Settings tabs.
+`⌘K` raises the centered command palette: radius-16 sheet, hairline border,
+overlay shadow, mono group eyebrows, rows that tint on hover and on keyboard
+selection.
 
 ### FORM
-Restrained Utilitarian Blueprint Neobrutal (Candidate #3 in the Operate-mode grounded system matrix, Seed Key 87634504), raised by the density discipline of technical ruling engines and the strict baseline rhythm of typographic specimen books.
+Quiet Instrument (approved direction from the 2026-09-11 four-screen proposal
+round; two rethinking screens — workspace and coding-agent — plus a shared
+token/behaviour layer). Ancestry: technical instrument panels and editorial
+typography — the density discipline of a mixing desk, the restraint of a
+specimen sheet.
 
 ### FINISH CONDITION
-Unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping package recipe carrying its proven conformance across every recipe-styled surface in the matrix (15 component kinds plus the 19 Clay-native internal/chrome surfaces and the reserved `table` kind).
+Unreviewed and undocumented is unfinished: the migration ends with the design
+system package shipped, the visual/accessibility review recorded, `DESIGN.md`
+conformance proven across every recipe-styled surface in the matrix, and the
+retired patterns of `DESIGN.md` §14 provably absent.
 
 ---
 
 ## 3. Visual System Comparison & Conformance Grammar
 
-| Attribute | Default Neobrutal (`@clay/design-neobrutal`) | Reference Glass (`@clay/design-glass`) | Conformance Rule / Invariant |
-| --- | --- | --- | --- |
-| **Corner Radius** | `0px` (Strict 90° right angles across all controls and surfaces) | `8px` (controls), `12px` (panels), `16px` (dialogs/modals) | Enforced via `--clay-ds-*-radius` recipe variables; zero CSS overrides in components |
-| **Borders** | `2px solid var(--clay-text-primary)` (rest and active; ink role ensures high contrast on both dark and light themes), `2px solid var(--clay-text-primary)` (focus outline, offset 1px) | `1px solid var(--clay-border-subtle)` with subtle alpha | All border colors reference active theme semantic tokens |
-| **Surfaces & Materials** | Opaque solid fills (`var(--clay-surface-*)`). List rows maintain solid `var(--clay-surface-control)` at rest (never transparent) and solid `var(--clay-surface-selected)` on selection with 2px ink border. Zero backdrop blur anywhere. | Translucent tinted fills (`opacity: 0.85` / `0.92`), `backdrop-filter: blur(12px)` | Glass provides solid opaque fallback under `prefers-reduced-transparency` and unsupported filters |
-| **Shadows & Elevation** | Hard offset shadows (`3px 3px 0px var(--clay-text-primary)` at rest, `4px 4px 0px` on hover, `1px 1px 0px` on active press), 0px blur, strictly using the ink role (`text.primary`) rather than low-contrast `border.strong` | Diffused layered ambient shadows (`0 8px 24px -4px rgba(...)`), 1px top highlight | Max 3 shadow layers; zero literal colors in Neobrutal shadows |
-| **Hover Feedback** | `translateY(-1px)` (`hover-lift`) with matching shadow extension to `4px 4px 0px` | Subtle surface brightness lift (`brightness(1.05)`), `translateY(-1px)` | Snappy `100ms ease-out` response |
-| **Active / Press Feedback** | `translateY(1px)` (`press-shift-down`) with collapsed shadow to `1px 1px 0px` | `scale(0.99)` or `translateY(0px)` with softened shadow | Tactile physical click verification |
-| **Focus State** | Crisp 2px solid offset ink ring (`outlineColor: text.primary`, offset 1px) or 2px inset ink border | 2px smooth glow/ring around squircle contour | Clear WCAG 2.1 AA focus indication |
-| **Density** | Bimodal (Compact for code/navigation chrome; Comfortable for forms/settings) | Bimodal (Compact for code/navigation chrome; Comfortable for forms/settings) | Identical layout geometry and hit-target metrics prevent layout thrash |
+| Attribute | **Quiet Instrument** (`@clay/design-instrument`, shipped default) | Former Neobrutal (removed, plan 118 task 9) | Former Luminous Glass (removed, plan 118 task 9) | Conformance rule |
+| --- | --- | --- | --- | --- |
+| **Corner radius** | 5 / 8 / 12 / 16 / pill; full-bleed edges square | `0px` everywhere | 4–14px + pills | Radii resolve from recipe variables; no CSS overrides in components |
+| **Borders** | 1px `border.hairline` only; 2px state marks are inset shadows | 2px `text.primary` ink at rest | 1px `border.subtle`, translucent | Border colors reference theme roles; no literals |
+| **Surfaces** | Single surface + veil planes (`panel` @0.55) + `surface.control` insets | Opaque boxed panels and rows | Translucent fills + blur | Depth comes from role + opacity, never from an added frame |
+| **Elevation** | Two levels: canvas and overlay (`0 24px 60px -20px` @0.42 + `0 2px 10px -4px` @0.22) | Hard `3px 3px 0` offsets | Diffuse ambient shadows | Max 3 shadow layers; static surfaces carry none |
+| **Hover feedback** | Fill change (`surface.hover`) | Position lift + shadow growth | Brightness lift | No position change on hover |
+| **Press feedback** | `press-shift-down` (1px) + `surface.active` | Collapse shadow to `1px 1px 0` | Scale 0.99 | Tactile confirmation without layout movement |
+| **Focus** | 2px `focus.ring`, offset 2px, plus 620ms pulse on keyboard moves | 2px ink outline | 2px glow ring | WCAG 2.1 AA visible focus in every theme |
+| **Blur** | Scrim (3px) and toast (8px) only | none | 8–24px on many surfaces | Editor canvas, gutter, scroll, panels, rows: `backdropBlur == 0` |
+| **Type role** | Mono for data, UI face for prose, tracked micro-labels | same roles | same roles | Concrete families/sizes stay user-owned |
+| **Density** | 32px rows / 30px controls (26/28 compact) | same host geometry | same host geometry | Layout geometry stays host-owned and identical across systems |
 
 ---
 
 ## 4. Accessibility and Platform Constraints
 
-1. **Forced Colors Mode (`forced-colors: active`):**
-   - Both design systems yield to system-enforced canvas and highlight colors.
-   - Neobrutal 2px ink borders ensure structure remains 100% visible even when backgrounds are replaced by the OS.
-   - Glass translucent layers and blur filters are completely bypassed in favor of native OS system colors.
-2. **Light and Dark Theme Contrast (Plan 110 Legibility Revamp):**
-   - Neobrutal structural borders and drop shadows utilize the semantic ink role (`text.primary`) rather than `border.subtle` or `border.strong`, guaranteeing high contrast and crisp structural definition on light themes (e.g., Modus Operandi, Gruvbox Light) as well as dark themes (e.g., Modus Vivendi, Gruvbox Dark).
-   - List rows maintain solid `surface.control` fills at rest and solid `surface.selected` fills when selected, preventing low-contrast washed-out rows.
-3. **Reduced Motion (`prefers-reduced-motion: reduce`):**
-   - All translation, spring, scale, and elevation transitions collapse to `0ms` (instant state change).
-4. **Reduced Transparency (`prefers-reduced-transparency: reduce`):**
-   - Translucent glass panels render as solid opaque surfaces using `var(--clay-surface-panel)` and `var(--clay-surface-control)`.
-5. **Keystroke Latency & Rendering Budget:**
-   - Recipe styles compile to static CSS custom properties on `:root`.
-   - Zero DOM measurements, JavaScript hooks, or mutation observers during keyboard, scroll, or layout operations.
+1. **Contrast (Plan 110 Gate):** text ≥ 4.5:1, UI affordances ≥ 3:1, enforced
+   at theme activation. The proposal's six themes each needed contrast repairs
+   (hairline, meta text step, syntax number/comment roles, focus ring) — those
+   repairs are recorded in `design-artifacts/approved/quiet-instrument-language/README.md` and are part of the
+   theme-side migration work.
+2. **Focus visibility:** a 2px `focus.ring` outline at 2px offset on every
+   interactive element; the accent halo is *additional* to the ring, never a
+   substitute (`accent.primary` must clear 3:1 on the surface it outlines).
+3. **Hover is never load-bearing:** every hover-revealed affordance is also
+   keyboard-reachable and visible in rest or focus state.
+4. **Forced colors:** system colors replace canvas, text, highlights, borders,
+   and focus; hairline-only structure must still read as structure.
+5. **Reduced motion / transparency:** durations collapse to instant, transforms
+   are removed, all fills become opaque, blur is disabled.
+6. **Keystroke latency:** recipes compile to static `--clay-ds-*` custom
+   properties once per activation; zero measurements, observers, or style
+   injection in paint/input/layout paths.
 
 ---
 
 ## 5. Traceability and Next Steps
 
-- **Task 1 (Completed):** Package primitives reviewed, data-only package manifests enabled.
-- **Task 2 (Completed):** Visual direction established and recorded in `.impeccable/surfaces/operate-visual-direction.md` and this document.
-- **Task 3 (Completed):** Author `@clay/design-neobrutal` package manifest (`packages/design-neobrutal/package.json`), documentation, and complete recipe schema.
-- **Task 4 (Completed):** Author `@clay/design-glass` reference package and fallbacks.
-- **Plan 110 Task 7 (Completed):** Rewrite `@clay/design-neobrutal` into legible, proper neobrutalism (2px structural rest borders with `text.primary` ink role, hard offset shadows using ink color with blur 0, solid `surface.control` list row fills, 0px radius everywhere, tactile hover/active presets).
-
+- **Approved (2026-09-11):** the four-screen proposal (approved language in `design-artifacts/approved/quiet-instrument-language/`, rejected neobrutal variants in `design-artifacts/prototypes/quiet-instrument-language/`):
+  former-Neobrutal-improved and rethinking variants of the Workspace and
+  Coding-Agent screens, six themes, contrast-verified token layer.
+  *(Update, plan 118 task 9: the former Neobrutal and Glass packages were removed;
+  `@clay/design-instrument` is the only shipped first-party design system.)*
+- **Approved (2026-09-11):** Quiet Instrument chosen as Clay's design language;
+  `DESIGN.md` rewritten as the normative specification. The two comparator
+  packages were still shipped at that moment and were removed later in plan 118
+  task 9.
+- **Documentation (complete):** direction contract, product commitments,
+  design-system reference, component/token catalogs, recipe-matrix profile,
+  conformance document, CSS audit note, wiki runtime page, manual test plan,
+  package authoring guide, create-plan UI gate, and the `clay-execution` UI
+  references all point to `DESIGN.md`; no former-Neobrutal design instruction
+  remains.
+- **Migration (plan 118, in progress):** done — the package (values + 165 recipe
+  keys, zero schema change), the four themes' thirteen UI roles with the
+  composited contrast gate, the core fallback alignment and the pre-bootstrap
+  projection, the selection/enumeration contract, the conformance suites, the
+  host CSS adoption across shell / workspace / agent / settings / overlays, the
+  removal of `@clay/chat` and of the two comparator systems, the launcher as the
+  landing surface, and the visual/accessibility review. The
+  unstarted `plans/111-Graphite-Analog-Cockpit-Design-Systems-and-Paired-Themes.md`
+  direction is superseded. Remaining — the target IA's tab model, agent picker
+  and session-files surfaces (tasks 33–36) plus the documentation/API close-out.

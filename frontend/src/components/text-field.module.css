@@ -1,118 +1,120 @@
-/* Catalog `textInput`: bordered field, placeholder in text.muted,
- * validation-state border, focus ring, disabled dimming.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Catalog `textInput`: the field shell, its label/description/error text, and
+ * the input well (rest / hover / focus / invalid / disabled).
+ *
+ * One ring per surface (DESIGN.md §14.4): the well's focus state is the accent
+ * border plus the accent halo the recipe carries — never an inner outline. */
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(
-    --clay-ds-text-input-default-field-rest-gap,
-    var(--clay-spacing-xxs, 4px)
-  );
+  gap: var(--clay-ds-text-input-default-field-rest-gap);
+  border-radius: var(--clay-ds-text-input-default-field-rest-border-radius);
 }
 
 .label {
-  color: var(
-    --clay-ds-text-input-default-label-rest-text-color,
-    var(--clay-text-muted)
-  );
+  color: var(--clay-ds-text-input-default-label-rest-text-color);
   font-size: var(--clay-text-detail-size);
   font-weight: 500;
   letter-spacing: 0.02em;
 }
 
+.description {
+  color: var(--clay-ds-text-input-default-description-rest-text-color);
+  font-size: var(--clay-text-detail-size);
+}
+
+/* The declared error slot (plan 118 task E6): the well is already toned by
+ * `.input.error`; this is the message that says which field is wrong and why.
+ * `role="alert"` announces it when it appears, and the input points at it. */
+.error {
+  color: var(--clay-ds-text-input-default-error-rest-text-color);
+  border-width: var(--clay-ds-text-input-default-error-rest-border-width);
+  font-size: var(--clay-text-detail-size);
+}
+
 .input {
-  background: var(
-    --clay-ds-text-input-default-input-rest-background-color,
-    var(--clay-surface-control)
-  );
-  color: var(
-    --clay-ds-text-input-default-input-rest-text-color,
-    var(--clay-text-primary)
-  );
-  border: var(
-      --clay-ds-text-input-default-input-rest-border-width,
-      var(--clay-dimension-border-thin, 2px)
-    )
-    var(--clay-ds-text-input-default-input-rest-border-style, solid)
-    var(
-      --clay-ds-text-input-default-input-rest-border-color,
-      var(--clay-border-subtle)
-    );
-  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius, 0);
-  padding: var(
-    --clay-ds-text-input-default-input-rest-padding,
-    var(--clay-spacing-xs, 8px)
-  );
+  padding: var(--clay-ds-text-input-default-input-rest-padding);
   font-family: inherit;
   font-size: var(--clay-text-body-size);
-  box-shadow: var(--clay-ds-text-input-default-input-rest-shadow, none);
+
+  border-width: var(--clay-ds-text-input-default-input-rest-border-width);
+  border-style: var(--clay-ds-text-input-default-input-rest-border-style);
+  border-color: var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  color: var(--clay-ds-text-input-default-input-rest-text-color);
   transition:
     border-color
-      var(
-        --clay-ds-text-input-default-input-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-text-input-default-input-rest-transition-timing, linear),
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing),
     background-color
-      var(
-        --clay-ds-text-input-default-input-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-text-input-default-input-rest-transition-timing, linear);
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing),
+    box-shadow var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing);
+}
+
+/* Value role: data (sizes, ratios, paths) reads as data (DESIGN.md §8). */
+/* Labels stay in the accessibility tree while a row supplies the visible one
+ * (the settings rows): clipped, never `display: none`. */
+.labelHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.input.monospace {
+  font-family: var(--clay-font-monospace);
 }
 
 .input::placeholder {
-  color: var(
-    --clay-ds-text-input-default-input-rest-placeholder-color,
-    var(--clay-text-muted)
-  );
+  color: var(--clay-text-muted);
 }
 
-.input[data-focused],
-.input:focus-visible {
-  border-color: var(
-    --clay-ds-text-input-default-input-focus-border-color,
-    var(--clay-border-focus)
-  );
-  outline: var(--clay-ds-text-input-default-input-focus-outline-width, 2px)
-    var(--clay-ds-text-input-default-input-focus-outline-style, solid)
-    var(
-      --clay-ds-text-input-default-input-focus-outline-color,
-      var(--clay-focus-ring)
-    );
-  outline-offset: var(
-    --clay-ds-text-input-default-input-focus-outline-offset,
-    1px
-  );
+.input[data-hovered] {
+  border-color: var(--clay-ds-text-input-default-input-hover-border-color);
+  background: var(--clay-ds-text-input-default-input-hover-background-color);
+  color: var(--clay-ds-text-input-default-input-hover-text-color);
 }
 
-.error {
-  border-color: var(
-    --clay-ds-text-input-default-input-invalid-border-color,
-    var(--clay-diagnostic-error)
-  );
+/* Validation tones: only `invalid` has a recipe key; the warning/success tones
+ * are host states on the theme's diagnostic roles. Declared before focus so a
+ * focused field still shows the accent boundary. */
+.input.error {
+  border-color: var(--clay-ds-text-input-default-input-invalid-border-color);
+  background: var(--clay-ds-text-input-default-input-invalid-background-color);
 }
-.warning {
+.input.warning {
   border-color: var(--clay-diagnostic-warning);
 }
-.success {
+.input.success {
   border-color: var(--clay-diagnostic-success);
 }
 
+/* Focus lives on the well: accent border + the recipe's accent halo. */
+.input[data-focused],
+.input:focus-visible {
+  border-color: var(--clay-ds-text-input-default-input-focus-border-color);
+  background: var(--clay-ds-text-input-default-input-focus-background-color);
+  color: var(--clay-ds-text-input-default-input-focus-text-color);
+  box-shadow: var(--clay-ds-text-input-default-input-focus-shadow);
+  outline: var(--clay-ds-text-input-default-input-focus-outline-width)
+    var(--clay-ds-text-input-default-input-focus-outline-style)
+    var(--clay-ds-text-input-default-input-focus-outline-color);
+  outline-offset: var(--clay-ds-text-input-default-input-focus-outline-offset);
+}
+
 .input[data-disabled] {
-  background: var(
-    --clay-ds-text-input-default-input-disabled-background-color,
-    var(--clay-surface-disabled)
-  );
-  color: var(
-    --clay-ds-text-input-default-input-disabled-text-color,
-    var(--clay-text-disabled)
-  );
-  opacity: var(
-    --clay-ds-text-input-default-input-disabled-opacity,
-    var(--clay-opacity-disabled)
-  );
+  border-color: var(--clay-ds-text-input-default-input-disabled-border-color);
+  background: var(--clay-ds-text-input-default-input-disabled-background-color);
+  color: var(--clay-ds-text-input-default-input-disabled-text-color);
+  opacity: var(--clay-ds-text-input-default-input-disabled-opacity);
   cursor: default;
 }
 
@@ -123,4 +125,69 @@
   max-height: 40vh;
   overflow-y: auto;
   field-sizing: content;
+}
+
+/* Composer variant (DESIGN.md §11/§12): the shell is the well and the control
+ * inside it draws none, so the composer shows exactly one boundary. The shell
+ * carries the multiline radius (12) while fill, hairline and padding come from
+ * the input recipe; focus moves to the shell (`:focus-within` → accent border
+ * plus the accent halo), and the send/cancel actions passed as `endContent` sit
+ * on its trailing edge. */
+.composer {
+  flex-direction: row;
+  align-items: flex-end;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-ds-text-input-default-input-rest-padding);
+  border-width: var(--clay-ds-text-input-default-input-rest-border-width);
+  border-style: var(--clay-ds-text-input-default-input-rest-border-style);
+  border-color: var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-text-input-default-field-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  transition:
+    border-color
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing),
+    box-shadow var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing);
+}
+
+.composer:focus-within {
+  border-color: var(--clay-ds-text-input-default-input-focus-border-color);
+  box-shadow: var(--clay-ds-text-input-default-input-focus-shadow);
+}
+
+.composer[data-disabled] {
+  background: var(--clay-ds-text-input-default-input-disabled-background-color);
+  opacity: var(--clay-ds-text-input-default-input-disabled-opacity);
+}
+
+/* The prompt is the placeholder: the label stays as the accessible name only. */
+.composer .label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.composer .input,
+.composer .input[data-hovered],
+.composer .input[data-focused] {
+  /* The prompt fills the well so the actions passed as `endContent` land on the
+   * trailing edge (approved composition) rather than next to the text, and it
+   * opens at the approved two-line height, growing to a third of the viewport
+   * before it scrolls. */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 32vh;
+  overflow: auto;
+  resize: none;
+  padding: 0;
+  border-width: var(--clay-ds-text-input-default-field-rest-border-width);
+  border-color: var(--clay-ds-text-input-default-field-rest-background-color);
+  background: var(--clay-ds-text-input-default-field-rest-background-color);
+  box-shadow: none;
+  outline: none;
 }

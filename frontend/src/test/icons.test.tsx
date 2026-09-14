@@ -44,7 +44,11 @@ function pack(overrides: Partial<IconPackSnapshot> = {}): IconPackSnapshot {
       },
       "disclosure.right": {
         viewBox: [0, 0, 256, 256],
-        paths: [{ d: "M 154.34,128 L 68.69,213.66 91.31,236.28 199.66,128 91.31,19.72 68.69,42.34 Z" }],
+        paths: [
+          {
+            d: "M 154.34,128 L 68.69,213.66 91.31,236.28 199.66,128 91.31,19.72 68.69,42.34 Z",
+          },
+        ],
       },
       "document.save": {
         viewBox: [0, 0, 256, 256],
@@ -71,7 +75,9 @@ describe("ClayIcon geometry rendering", () => {
     // Path order is preserved: duotone shade layer first, outline second.
     expect(paths[0]?.getAttribute("d")).toBe("M 8,8 L 8,2 L 18,2 L 18,8 Z");
     expect(paths[0]?.getAttribute("opacity")).toBe("0.2");
-    expect(paths[1]?.getAttribute("d")).toBe("M 6,2 L 2,6 L 2,22 L 22,22 L 22,6 L 18,2 Z");
+    expect(paths[1]?.getAttribute("d")).toBe(
+      "M 6,2 L 2,6 L 2,22 L 22,22 L 22,6 L 18,2 Z",
+    );
     expect(paths[1]?.getAttribute("opacity")).toBeNull();
   });
 
@@ -87,16 +93,23 @@ describe("ClayIcon geometry rendering", () => {
 
   it("renders duotone packs identically: opacity rides each path", () => {
     act(() =>
-      iconStore.setIconPack(pack({ specifier: "@clay/icons-phosphor-duotone" })),
+      iconStore.setIconPack(
+        pack({ specifier: "@clay/icons-phosphor-duotone" }),
+      ),
     );
     const view = render(<ClayIcon name="document.save" />);
-    expect(getIconByName(view, "document.save")?.querySelectorAll("path")).toHaveLength(2);
+    expect(
+      getIconByName(view, "document.save")?.querySelectorAll("path"),
+    ).toHaveLength(2);
     iconStore.resetToFallback();
   });
 
   it("keeps decorative icons out of the accessibility tree", () => {
     const view = render(<ClayIcon name="action.close" />);
-    expect(getIconByName(view, "action.close")).toHaveAttribute("aria-hidden", "true");
+    expect(getIconByName(view, "action.close")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
   });
 
   it("exposes informative icons as role=img with one name", () => {
@@ -106,7 +119,9 @@ describe("ClayIcon geometry rendering", () => {
 
   it("renders an empty decorative slot for unknown keys (no broken glyph)", () => {
     const view = render(<ClayIcon name="vendor.nonexistent" />);
-    const slot = view.container.querySelector("span[data-clay-component=\"iconSlot\"]");
+    const slot = view.container.querySelector(
+      'span[data-clay-component="iconSlot"]',
+    );
     expect(slot).not.toBeNull();
     expect(slot?.querySelector("svg")).toBeNull();
     expect(slot).toHaveAttribute("aria-hidden", "true");
@@ -117,7 +132,9 @@ describe("ClayIconButton accessibility contract", () => {
   it("activates on Enter and Space with keyboard focus", async () => {
     const user = userEvent.setup();
     const onPress = vi.fn();
-    render(<ClayIconButton icon="document.save" label="Save" onPress={onPress} />);
+    render(
+      <ClayIconButton icon="document.save" label="Save" onPress={onPress} />,
+    );
     const button = screen.getByRole("button", { name: "Save" });
     button.focus();
     await user.keyboard("{Enter}");
@@ -136,8 +153,17 @@ describe("ClayIconButton accessibility contract", () => {
   it("gates activation while disabled and conveys the state", async () => {
     const user = userEvent.setup();
     const onPress = vi.fn();
-    render(<ClayIconButton icon="document.save" label="Save" isDisabled onPress={onPress} />);
-    const button = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+    render(
+      <ClayIconButton
+        icon="document.save"
+        label="Save"
+        isDisabled
+        onPress={onPress}
+      />,
+    );
+    const button = screen.getByRole("button", {
+      name: "Save",
+    }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     await user.click(button);
     expect(onPress).not.toHaveBeenCalled();
@@ -153,7 +179,9 @@ describe("ClayIconButton accessibility contract", () => {
   it("keeps DOM identity and focus across icon-pack switches", () => {
     act(() => iconStore.setIconPack(pack()));
     const onPress = vi.fn();
-    render(<ClayIconButton icon="document.save" label="Save" onPress={onPress} />);
+    render(
+      <ClayIconButton icon="document.save" label="Save" onPress={onPress} />,
+    );
     const button = screen.getByRole("button", { name: "Save" });
     button.focus();
     expect(document.activeElement).toBe(button);
@@ -177,9 +205,9 @@ describe("ClayIconButton accessibility contract", () => {
     // Keyboard focus opens the tooltip (programmatic focus is not
     // focus-visible, so simulate Tab).
     await user.tab();
-    expect(await screen.findByRole("tooltip", {}, { timeout: 3000 })).toHaveTextContent(
-      "Save (Mod+S)",
-    );
+    expect(
+      await screen.findByRole("tooltip", {}, { timeout: 3000 }),
+    ).toHaveTextContent("Save (Mod+S)");
 
     // Escape dismisses (WCAG 1.4.13).
     await user.keyboard("{Escape}");
@@ -233,7 +261,12 @@ describe("icon-capable shared controls", () => {
           send={send}
         />
         <PackageComponent
-          node={{ id: "l1", kind: "label", text: "Ready", icon: "status.success" }}
+          node={{
+            id: "l1",
+            kind: "label",
+            text: "Ready",
+            icon: "status.success",
+          }}
           uiVersion={1}
           send={send}
         />
@@ -355,7 +388,9 @@ describe("plan 112 task 10 cross-layer matrix", () => {
       } else {
         iconStore.resetToFallback();
       }
-      const view = render(<ClayIconButton icon="document.save" label="Save" onPress={onPress} />);
+      const view = render(
+        <ClayIconButton icon="document.save" label="Save" onPress={onPress} />,
+      );
       const button = screen.getByRole("button", { name: "Save" });
       fireEvent.click(button);
       expect(onPress).toHaveBeenCalledTimes(1);
@@ -365,4 +400,3 @@ describe("plan 112 task 10 cross-layer matrix", () => {
     expect(onPress).not.toHaveBeenCalled();
   });
 });
-

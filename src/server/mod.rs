@@ -32,6 +32,8 @@ mod js_runtime;
 pub mod language_intelligence;
 #[doc(hidden)]
 pub mod language_server;
+#[allow(dead_code)]
+pub(crate) mod launcher;
 pub(crate) mod locks;
 #[allow(dead_code)]
 mod ops;
@@ -727,6 +729,21 @@ impl IpcServer {
         // root from the registry so agent sessions bind to the tab's
         // workspace (and rebind when it changes), never the launch cwd.
         agent.set_tab_registry(Arc::clone(&tab_registry));
+        // Plan 118 task 35: per-agent config roots resolve from the Clay data
+        // root (`<root>/agents/<agent type>`) and each agent's MCP allow-list
+        // from its own `mcp.json` merged with the launch workspace's
+        // `.mcp.json`.
+        agent.set_agent_roots(
+            config
+                .configuration_root
+                .clone()
+                .or_else(effective_agent_root),
+            config
+                .workspace_roots
+                .first()
+                .cloned()
+                .or_else(|| std::env::current_dir().ok()),
+        );
         // Phase 1 `agent` domain: install the process-global RPC authority
         // for user-facing agent facades (`clay:agent`). Package JS cannot
         // reach the daemon except through these validated ops.
@@ -834,6 +851,14 @@ impl IpcServer {
         let (state, root_id) = self
             .new_tab_state(PathBuf::from(&workspace_root), first_tab)
             .await?;
+        // Launcher (plan 118 Part D): a tab that opens on a folder was an
+        // explicit open, so it leads the recents list. Best-effort.
+        if !workspace_root.is_empty() {
+            launcher::record_recent_workspace(
+                self.config.configuration_root.as_deref(),
+                Path::new(&workspace_root),
+            );
+        }
         let tab_id = registry.create_tab(client_id, root_id, workspace_root);
         let state_for_connection = state.clone();
         self.tab_states.lock().await.insert(tab_id, state);
@@ -880,10 +905,32 @@ impl IpcServer {
     }
 
     /// Agent settings page (plan 117): the server-resolved daemon config
-    /// root (`<configuration root>/agents/coding-agent`). The webview never
+    /// root (`<configuration root>/agents/<agent type>`). The webview never
     /// supplies paths for this surface; the server owns the resolution.
-    pub(crate) fn agent_settings_root(&self) -> Option<PathBuf> {
-        agent_settings::agent_config_root(self.config.configuration_root.as_deref())
+    ///
+    /// Plan 118 task 35: the root follows the *tab's* agent type (from the
+    /// registry, which stores only names the server validated), so the
+    /// Settings tab lists the files of the agent the tab actually runs.
+    /// `None` (no bound tab, or a tab with no agent) reads the shipped
+    /// default agent.
+    pub(crate) async fn agent_settings_root(&self, client_id: ClientId) -> Option<PathBuf> {
+        let agent_type = {
+            let registry = self.tab_registry.lock().await;
+            registry
+                .tab_for_client(client_id)
+                .and_then(|tab| registry.agent_type(tab))
+        };
+        agent_settings::agent_config_root_for(
+            self.config.configuration_root.as_deref(),
+            agent_type.as_deref(),
+        )
+    }
+
+    /// Launcher (plan 118 Part D): the configured Clay root whose recents
+    /// store and `agents/` folder the start surface lists. `None` means the
+    /// per-user default (`~/.clay`), resolved by the launcher module.
+    pub(crate) fn configuration_root(&self) -> Option<PathBuf> {
+        self.config.configuration_root.clone()
     }
 
     pub(crate) async fn state_for_client(&self, client_id: ClientId) -> Option<TabServerState> {
@@ -2075,6 +2122,25 @@ impl IpcServer {
             .filter(|record| record.contributions.ui_design_system.is_some())
             .map(|record| option(record))
             .collect();
+        // Plan 118 task 20: a bundled design-system package is selectable without
+        // a prior `loadPackage` — `settings.setDesignSystem` accepts it and the
+        // apply path enables the record on demand — so the panel must offer it,
+        // not only enumerate what happens to be enabled. Without this pass the
+        // shipped system is unreachable from the Settings dropdown on a fresh
+        // install. Bundled manifests are read, never installed or enabled.
+        for name in crate::packages::bundled::bundled_package_names() {
+            if design_systems.iter().any(|option| option.specifier == name) {
+                continue;
+            }
+            if let Some(display_name) =
+                crate::packages::bundled::bundled_design_system_display_name(name)
+            {
+                design_systems.push(crate::protocol::UiChoiceOption {
+                    specifier: name.to_string(),
+                    display_name: Some(display_name),
+                });
+            }
+        }
         themes.sort_by(|a, b| a.specifier.cmp(&b.specifier));
         design_systems.sort_by(|a, b| a.specifier.cmp(&b.specifier));
         // The built-in core baseline is always selectable and never a record.
@@ -3540,13 +3606,24 @@ await loadPackage("@clay/typescript");"#,
             "no package diagnostics from the example tree; diagnostics: {:?}",
             outcome.diagnostics
         );
-        let chat_entry = evaluation
+        // Plan 118 Part D: the example tree's landing is the launcher package
+        // (the chat landing is gone), and the agent keeps its named pane surface —
+        // the two never compete for the same activation.
+        let landing = evaluation
             .ui_contributions
             .empty_tab()
             .expect("example empty-tab must not conflict")
-            .expect("first-party.js loadPackage(@clay/chat) must install the landing");
-        assert_eq!(chat_entry.id, "chat.entry");
-        assert_eq!(chat_entry.package_name, "@clay/chat");
+            .expect("the launcher claims the example tree's empty tab");
+        assert_eq!(landing.id, "launcher.start");
+        assert_eq!(landing.package_name, "@clay/launcher");
+        assert!(
+            evaluation
+                .ui_contributions
+                .pane_contents
+                .iter()
+                .any(|content| content.id == "coding-agent.surface"),
+            "the agent keeps its named pane surface"
+        );
         let manifest = evaluation
             .behavior_manifest
             .as_ref()
@@ -3560,8 +3637,15 @@ await loadPackage("@clay/typescript");"#,
             catalogue
                 .commands()
                 .iter()
-                .any(|command| command.command_id == "chat.profile"),
-            "one-line Chat load must register chat.profile"
+                .any(|command| command.command_id == "coding-agent.profile"),
+            "one-line Coding Agent load must register coding-agent.profile"
+        );
+        assert!(
+            catalogue
+                .commands()
+                .iter()
+                .all(|command| !command.command_id.starts_with("chat.")),
+            "the removed chat commands are absent from the catalogue"
         );
         fs::remove_dir_all(&root).unwrap();
     }

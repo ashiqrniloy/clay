@@ -16,7 +16,7 @@ Tauri/React owner, and certifies the final cutover.
 | Capabilities | 18 | this ledger |
 | Manual test steps | 541 | `test-plan/01` … `test-plan/14` |
 | Public Clay JS API IDs (`registry_public`) | 130 | `docs/reference/clay-js-api/api-inventory.toml` |
-| Protocol message families | 26 client + 40 server + agent inventory | `src/protocol/mod.rs`, `src/protocol/agent.rs` |
+| Protocol message families | 28 client + 41 server + agent inventory | `src/protocol/mod.rs`, `src/protocol/agent.rs` |
 
 The ledger distinguishes implemented behavior from unfinished historical
 roadmap work: only surfaces that exist in today's tests, docs, and source have

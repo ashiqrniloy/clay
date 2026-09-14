@@ -75,6 +75,31 @@ pub(crate) fn bundled_package_names() -> impl Iterator<Item = &'static str> {
     BUNDLED_PACKAGES.iter().map(|entry| entry.name)
 }
 
+/// Display name declared by a bundled package's `uiDesignSystem` contribution.
+///
+/// `None` when the package is not in the inventory, declares no such
+/// contribution, or its manifest cannot be read — every caller treats those
+/// identically (the package is not selectable as a design system). Reads the
+/// checked-in manifest only: never installs, enables, authorizes, or executes
+/// the package.
+pub(crate) fn bundled_design_system_display_name(name: &str) -> Option<String> {
+    let entry = bundled_entry(name)?;
+    let bytes = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("packages")
+            .join(entry.root)
+            .join("package.json"),
+    )
+    .ok()?;
+    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    json.get("clay")?
+        .get("contributions")?
+        .get("uiDesignSystem")?
+        .get("displayName")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Look up a helper inventory entry by directory name.
 pub(crate) fn bundled_helper(root: &str) -> Option<&'static BundledPackageEntry> {
     BUNDLED_HELPERS.iter().find(|entry| entry.root == root)

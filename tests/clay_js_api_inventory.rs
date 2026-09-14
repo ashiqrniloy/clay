@@ -728,3 +728,143 @@ fn agent_configuration_options_are_documented_custom_properties_with_decision_de
         "daemon default compactAfterTokens must stay 80000 (decision 2158)"
     );
 }
+
+/// Plan 118: the design-system/theme selection surface changed values, not
+/// APIs. This gate pins the documented configuration contract: the choice set
+/// and removal fallback are stated where users configure them, and every
+/// behaviour-changing option a configuration API declares in frontmatter is
+/// actually documented in its page body — so an option that exists only in
+/// metadata (or only in the inventory) cannot ship undocumented.
+#[test]
+fn plan118_configuration_documents_choice_set_fallback_and_every_option() {
+    let configuration =
+        fs::read_to_string(root().join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration guide");
+    for marker in [
+        "## Plan 118 design-system, theme, and chat-surface configuration review",
+        "### Shipped configuration surfaces",
+        "`settings.setTheme`",
+        "`settings.setAppearance`",
+        "`settings.setTypography`",
+        "`settings.setDesignSystem`",
+        "preferences.json",
+        "ui_choices",
+        "### Shipped choice set",
+        "@clay/theme-modus-operandi",
+        "@clay/theme-modus-vivendi",
+        "@clay/theme-gruvbox-material-dark",
+        "@clay/theme-gruvbox-material-light",
+        "@clay/design-instrument",
+        "### Removed-specifier fallback",
+        "theme.load_failed",
+        "kept",
+        "### Removed chat-surface options",
+        "### Rejected hidden configuration keys",
+        "landingPackage",
+        "### Authority",
+        "no new configuration authority",
+        "adds no file-watch, polling, or reload work",
+    ] {
+        assert!(
+            configuration.contains(marker),
+            "configuration guide must document plan 118 marker {marker}"
+        );
+    }
+
+    // Both selection surfaces must be discoverable from the configuration guide.
+    for api in [
+        "theme.setDesignSystem",
+        "theme.setTheme",
+        "settings.setDesignSystem",
+    ] {
+        assert!(
+            configuration.contains(api),
+            "configuration guide must link {api}"
+        );
+    }
+
+    // Every custom property a configuration API declares must be documented in
+    // the page body, not only in frontmatter metadata or the inventory.
+    let registry = ClayJsApiRegistry::from_docs(&root()).expect("build registry from docs");
+    for id in [
+        "theme.setTheme",
+        "theme.setAppearance",
+        "theme.setDesignSystem",
+        "settings.setDesignSystem",
+    ] {
+        let entry = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("{id} must stay a public configuration API"));
+        assert!(
+            !entry.custom_properties.is_empty(),
+            "{id} must declare its behaviour-changing options"
+        );
+        let path = root().join(&entry.documentation_path);
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("{id}: read {}: {error}", path.display()));
+        let body = text
+            .strip_prefix("---")
+            .and_then(|rest| rest.split_once("\n---\n").map(|(_, body)| body))
+            .unwrap_or_else(|| panic!("{id}: {} must keep frontmatter", path.display()));
+        // The option must be documented where a user looks for it — inside the
+        // page's `## Options` section — not merely somewhere in prose.
+        let options = body
+            .find("## Options")
+            .map(|start| {
+                let rest = &body[start + "## Options".len()..];
+                let end = rest.find("\n## ").unwrap_or(rest.len());
+                &rest[..end]
+            })
+            .unwrap_or_else(|| panic!("{id}: {} must keep an Options section", path.display()));
+        for property in &entry.custom_properties {
+            // The repo's two Options conventions both backtick the option name:
+            // a bullet (`- \`option\`: ...`) or the object/positional form
+            // (`{ option }`, `pass \`option\``). Requiring the backticked form is
+            // what makes "documented" mean declared-here rather than mentioned
+            // somewhere in the same paragraph.
+            let bare = format!("`{}`", property.name);
+            let object = format!("`{{ {} }}`", property.name);
+            assert!(
+                options.contains(&bare) || options.contains(&object),
+                "{id}: option {} is declared but not documented in the Options section of {}",
+                bare,
+                path.display()
+            );
+        }
+    }
+
+    // The removed surface must not survive as a live configuration option, and
+    // the canonical example must not carry it at all. Both documents are allowed
+    // to *name* rejected keys (`landingPackage`, `chatPanel.*`) in the rejected-key
+    // sections that teach the closed boundary — that is the opposite of shipping
+    // them — so the identifiers asserted absent here are the ones no prose needs.
+    let init_js = fs::read_to_string(root().join("examples/config/init.js"))
+        .expect("read canonical example config");
+    for retired in ["@clay/chat", "chat.entry", "chat.default."] {
+        assert!(
+            !configuration.contains(retired),
+            "removed chat surface `{retired}` must not appear in the configuration guide"
+        );
+    }
+    for retired in [
+        "@clay/chat",
+        "chat.entry",
+        "chat.default.",
+        "chatPanel.",
+        "landingPackage",
+        "design-neobrutal",
+        "design-glass",
+    ] {
+        assert!(
+            !init_js.contains(retired),
+            "canonical example config must not mention `{retired}`"
+        );
+    }
+    // Rejected keys are documented as rejected, which is what keeps them closed.
+    for rejected in ["landingPackage", "chatPanel."] {
+        assert!(
+            configuration.contains(rejected),
+            "configuration guide must name rejected key {rejected} in the closed boundary"
+        );
+    }
+}

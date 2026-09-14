@@ -1,67 +1,51 @@
+/* Settings panel (fixed right slot, DESIGN.md §12 composition rules).
+ *
+ * One column: heading with the close affordance, a scrolling group of
+ * hairline-separated rows, and the actions row. The panel is a *fixed* slot,
+ * so it carries no elevation and no radius: the slot boundary is the shared
+ * divider hairline. Its own recipe border and radius are spent where the panel
+ * becomes an overlay drawer instead of a slot (narrow widths).
+ *
+ * Layout (column width, padding, gaps, grid) is host-owned; every colour,
+ * border, radius, shadow and duration is a recipe value or a theme role. */
+
 .panel {
-  min-width: min(var(--clay-dimension-panel-side-min, 48px), 100%);
-  width: min(var(--clay-dimension-panel-side-default, 240px), 36vw);
-  max-width: min(var(--clay-dimension-panel-side-max, 480px), 48vw);
+  width: min(var(--clay-dimension-settings-width, 340px), 42vw);
   height: 100%;
+  min-width: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
-  background: var(
-    --clay-ds-settings-panel-default-panel-rest-background-color,
-    var(--clay-surface-panel)
+  border-width: 0;
+  border-radius: 0;
+  --fill: var(--clay-ds-settings-panel-default-panel-rest-background-color);
+  --fill-opacity: var(
+    --clay-ds-settings-panel-default-panel-rest-background-opacity,
+    1
   );
-  color: var(
-    --clay-ds-settings-panel-default-panel-rest-text-color,
-    var(--clay-text-primary)
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity) * 100%),
+    transparent
   );
-  border-left: var(
-      --clay-ds-settings-panel-default-panel-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-settings-panel-default-panel-rest-border-style, solid)
-    var(
-      --clay-ds-settings-panel-default-panel-rest-border-color,
-      var(--clay-border-subtle)
-    );
-}
-
-.heading,
-.actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--clay-spacing-sm, 12px);
-  padding: var(--clay-spacing-sm, 12px);
+  color: var(--clay-ds-settings-panel-default-panel-rest-text-color);
 }
 
 .heading {
-  border-bottom: var(
-      --clay-ds-settings-panel-default-heading-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(
-      --clay-ds-settings-panel-default-heading-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-settings-panel-default-heading-rest-border-color,
-      var(--clay-border-subtle)
-    );
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-settings-panel-default-heading-rest-gap);
+  padding: var(--clay-ds-settings-panel-default-heading-rest-padding);
+  background: var(
+    --clay-ds-settings-panel-default-heading-rest-background-color
+  );
+  color: var(--clay-ds-settings-panel-default-heading-rest-text-color);
+  border-bottom: var(--clay-ds-settings-panel-default-heading-rest-border-width)
+    var(--clay-ds-settings-panel-default-heading-rest-border-style)
+    var(--clay-ds-settings-panel-default-heading-rest-border-color);
 }
 
-.actions {
-  flex-wrap: wrap;
-  border-top: var(
-      --clay-ds-settings-panel-default-actions-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(
-      --clay-ds-settings-panel-default-actions-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-settings-panel-default-actions-rest-border-color,
-      var(--clay-border-subtle)
-    );
+.headSpacer {
+  flex: 1;
 }
 
 .scroll {
@@ -69,18 +53,88 @@
   overflow: auto;
 }
 
-.fields {
-  display: grid;
-  gap: var(--clay-spacing-sm, 12px);
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-ds-settings-panel-default-panel-rest-padding);
 }
 
-.error {
-  padding: var(--clay-spacing-sm, 12px);
-  color: var(--clay-diagnostic-error);
-  border-top: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-diagnostic-error);
+.section {
+  display: block;
 }
 
+/* Section eyebrow: micro-label treatment (DESIGN.md §8) over the caption role
+ * the collapse header already colours. */
+.eyebrow {
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+/* Rows are hairline-separated, never framed: the panel keeps no box inside a
+ * box (approved composition — the only framed control is the input well). */
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-2xs, 4px);
+  padding: var(--clay-spacing-xs, 8px) 0;
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowLabel {
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.rowControl {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  min-width: 0;
+}
+
+.rowNote {
+  color: var(--clay-text-muted);
+}
+
+/* The actions zone states what the commit will do, then sits its buttons at the
+ * trailing edge with the primary last (approved cell). The slot is narrow, so
+ * the note takes its own line rather than squeezing the buttons. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-ds-settings-panel-default-actions-rest-gap);
+  padding: var(--clay-ds-settings-panel-default-actions-rest-padding);
+  background: var(
+    --clay-ds-settings-panel-default-actions-rest-background-color
+  );
+  border-top: var(--clay-ds-settings-panel-default-actions-rest-border-width)
+    var(--clay-ds-settings-panel-default-actions-rest-border-style)
+    var(--clay-ds-settings-panel-default-actions-rest-border-color);
+}
+
+.actionsRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--clay-ds-settings-panel-default-actions-rest-gap);
+  flex-wrap: wrap;
+}
+
+/* Below the working area's stacking breakpoint the panel stops being a slot and
+ * becomes a drawer over the content: it takes the recipe's radius and its own
+ * hairline, and goes opaque so the document behind it stays unreadable-but-
+ * invisible rather than legible-through. Still no shadow: it is not transient. */
 @media (max-width: 760px) {
   .panel {
     position: absolute;
@@ -88,5 +142,23 @@
     z-index: var(--clay-z-panel, 10);
     width: min(88vw, var(--clay-dimension-panel-side-max, 480px));
     max-width: 88vw;
+    border-left: var(--clay-ds-settings-panel-default-panel-rest-border-width)
+      var(--clay-ds-settings-panel-default-panel-rest-border-style)
+      var(--clay-ds-settings-panel-default-panel-rest-border-color);
+    border-radius: var(
+        --clay-ds-settings-panel-default-panel-rest-border-radius
+      )
+      0 0 var(--clay-ds-settings-panel-default-panel-rest-border-radius);
+    background: var(
+      --clay-ds-settings-panel-default-panel-rest-background-color
+    );
+  }
+}
+
+/* Mid widths match the inspector's column so the two right-hand surfaces of a
+ * tab never disagree about how much room the content gets. */
+@media (min-width: 761px) and (max-width: 1240px) {
+  .panel {
+    --clay-dimension-settings-width: 312px;
   }
 }

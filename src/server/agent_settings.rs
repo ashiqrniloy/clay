@@ -24,14 +24,31 @@ const SEED_MANIFEST: &str = ".seed-manifest.json";
 const MAX_LIST: usize = 64;
 const MAX_SKILL_DIR: usize = 64;
 
-/// Resolved agent config root: the explicit configuration root when set,
-/// else the user's default (`~/.clay`). `None` ⇒ the settings page
-/// lists nothing.
-pub(crate) fn agent_config_root(configuration_root: Option<&Path>) -> Option<PathBuf> {
+/// Directory name of the agent the surface fell back to before agent types
+/// existed (plan 118 task 35: a tab without an agent still shows this one's
+/// delivered files — the shipped agent is what a fresh install runs).
+pub(crate) const DEFAULT_AGENT_TYPE: &str = "coding-agent";
+
+/// Resolved agent config root for one agent type: `<data root>/agents/<type>`.
+///
+/// Containment comes from the name rule (`valid_agent_name`), so a read can
+/// only ever land inside `<data root>/agents/`; whether the directory exists
+/// is the listing's business (a missing one lists nothing). `<data root>/agents/coding-agent`
+/// is the default when the caller has no agent — the shipped agent a fresh
+/// install runs, so a tab that never picked one still shows its files.
+pub(crate) fn agent_config_root_for(
+    configuration_root: Option<&Path>,
+    agent_type: Option<&str>,
+) -> Option<PathBuf> {
     let root = configuration_root
         .map(Path::to_path_buf)
         .or_else(ConfigurationRuntime::default_config_root)?;
-    Some(root.join("agents").join("coding-agent"))
+    let name = agent_type
+        .map(str::trim)
+        .filter(|agent| !agent.is_empty())
+        .filter(|agent| super::launcher::valid_agent_name(agent))
+        .unwrap_or(DEFAULT_AGENT_TYPE);
+    Some(root.join("agents").join(name))
 }
 
 /// Validate a client-supplied name against the fixed layout and return the
@@ -362,9 +379,61 @@ mod tests {
     }
 
     #[test]
+    fn per_agent_roots_stay_contained_and_fall_back_to_the_shipped_agent() {
+        let base = temp_root("peragent");
+        // The default (no agent named) is the shipped agent.
+        assert_eq!(
+            agent_config_root_for(Some(&base), None),
+            Some(base.join("agents").join("coding-agent"))
+        );
+        // A configured name resolves to its own directory.
+        assert_eq!(
+            agent_config_root_for(Some(&base), Some("reviewer")),
+            Some(base.join("agents").join("reviewer"))
+        );
+        // A name that is not a plain identifier can never address a path
+        // outside `agents/` — it falls back to the shipped agent instead.
+        for name in ["../etc", "a/b", "..", "", " ", "a b", &"x".repeat(65)] {
+            assert_eq!(
+                agent_config_root_for(Some(&base), Some(name)),
+                Some(base.join("agents").join("coding-agent")),
+                "`{name}` must not escape the layout"
+            );
+        }
+        // Reads are contained to the resolved root: a valid name stays under
+        // it, and the resolver never produces the parent directory.
+        let root = agent_config_root_for(Some(&base), Some("reviewer")).expect("root");
+        assert!(root.starts_with(base.join("agents")));
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn per_agent_settings_reads_are_contained_to_that_agents_root() {
+        let base = temp_root("peragent-read");
+        let reviewer = base.join("agents").join("reviewer");
+        fs::create_dir_all(reviewer.join("skills").join("review")).unwrap();
+        fs::write(reviewer.join("SYSTEM.md"), "review prompt").unwrap();
+        fs::write(
+            reviewer.join("skills").join("review").join("SKILL.md"),
+            "review skill",
+        )
+        .unwrap();
+        let root = agent_config_root_for(Some(&base), Some("reviewer")).expect("root");
+
+        let files = list_agent_settings_files(&root);
+        let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
+        assert_eq!(names, vec!["SYSTEM.md", "skills/review/SKILL.md"]);
+        // A name from another agent's layout still cannot traverse: the name
+        // rule rejects it before any filesystem access.
+        assert!(resolve_agent_settings_file(&root, "../../coding-agent/SYSTEM.md").is_err());
+        assert!(resolve_agent_settings_file(&root, "SYSTEM.md").is_ok());
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn agent_config_root_joins_the_per_agent_layout() {
         let base = temp_root("cfgroot");
-        let root = agent_config_root(Some(&base)).expect("root");
+        let root = agent_config_root_for(Some(&base), None).expect("root");
         assert_eq!(root, base.join("agents").join("coding-agent"));
         let _ = fs::remove_dir_all(&base);
     }

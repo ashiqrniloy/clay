@@ -1,6 +1,12 @@
 import { Fragment, type ReactNode } from "react";
 
-import { ClayButton, ClayIcon, ClayList, ClayText } from "../components";
+import {
+  ClayButton,
+  ClayIcon,
+  ClayList,
+  ClayText,
+  recipeAttributes,
+} from "../components";
 import { sduiActionPayload, type IntentSender } from "./actions";
 import type { SduiActionIntent } from "./types";
 import type { SduiState } from "./state";
@@ -24,6 +30,11 @@ export function SduiRenderer({
     const node = state.nodes.get(id);
     if (!node) return null;
     const next = new Set(ancestors).add(id);
+    // A region node may name the host dimension token it is sized from
+    // (`dimension.sidebar.default`). The attribute is data; the rule that reads
+    // it and the token it resolves to are host-owned CSS, so a tree can neither
+    // invent geometry nor pick an arbitrary size.
+    const sizeToken = node.size ?? undefined;
     const children = (ids: number[]) =>
       ids.map((child) => (
         <Fragment key={child}>{render(child, next)}</Fragment>
@@ -31,7 +42,11 @@ export function SduiRenderer({
     const kind = node.kind;
     if ("panel" in kind) {
       return (
-        <aside className={styles.panel} aria-labelledby={`sdui-${id}-title`}>
+        <aside
+          className={styles.panel}
+          aria-labelledby={`sdui-${id}-title`}
+          {...recipeAttributes("panel", "root")}
+        >
           <ClayText id={`sdui-${id}-title`} variant="title">
             {kind.panel.title}
           </ClayText>
@@ -59,6 +74,14 @@ export function SduiRenderer({
       return (
         <ClayList
           ariaLabel="Server-driven items"
+          filter={
+            kind.list.filter
+              ? {
+                  placeholder: kind.list.filter.placeholder,
+                  shortcut: kind.list.filter.shortcut ?? undefined,
+                }
+              : null
+          }
           items={kind.list.items.map((item) => ({
             id: item.id,
             title: item.label,
@@ -77,15 +100,27 @@ export function SduiRenderer({
     }
     if ("editorView" in kind) return editorSlot;
     if ("flex" in kind) {
+      const direction =
+        kind.flex.direction === "row"
+          ? styles.row
+          : kind.flex.direction === "column"
+            ? styles.column
+            : styles.flexDefault;
       return (
-        <div
-          className={kind.flex.direction === "row" ? styles.row : styles.column}
-        >
+        <div className={direction} {...recipeAttributes("flex", "root")}>
           {children(kind.flex.children)}
         </div>
       );
     }
-    return <div className={styles.stack}>{children(kind.stack.children)}</div>;
+    return (
+      <div
+        className={styles.stack}
+        data-clay-size={sizeToken}
+        {...recipeAttributes("stack", "root")}
+      >
+        {children(kind.stack.children)}
+      </div>
+    );
   };
 
   return <>{render(state.rootId)}</>;

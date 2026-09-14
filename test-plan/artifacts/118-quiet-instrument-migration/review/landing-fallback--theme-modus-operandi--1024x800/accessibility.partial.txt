@@ -1,0 +1,116 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/12|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/2|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/3|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/6|clay-desktop
+5|button|-|Minimise||/org/a11y/atspi/accessible/13|clay-desktop
+5|button|-|Maximise||/org/a11y/atspi/accessible/10|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/11|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/7|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/8|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/9|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/1|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/2aa29eae_f33b_48a2_95d4_2eab52c3fbb6|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/b65c7864_ea8a_404a_a9f0_a3e5fd2f69db|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/4fcd858b_d3c0_4072_bccd_955b0364304c|clay-desktop
+7|section|-|||/org/a11y/atspi/accessible/864ca0b7_c270_4e4c_bbe2_48208f9bd7bc|clay-desktop
+8|button|-|Dismiss||/org/a11y/atspi/accessible/09d79c58_cd50_419c_822f_e1d855556827|clay-desktop
+7|dialog|-|Control Center||/org/a11y/atspi/accessible/534697a7_7171_4669_8bdc_78f28d57fdbc|clay-desktop
+8|button|-|Close||/org/a11y/atspi/accessible/037b9fba_56b7_4f3b_8f8a_3cd26f7ae907|clay-desktop
+8|entry|-|Control Center||/org/a11y/atspi/accessible/ffcf909c_3080_4dde_8111_befe5ef0c691|clay-desktop
+8|list box|-|Control Center results||/org/a11y/atspi/accessible/8e371f13_77bf_4199_aacb_e137a82235dc|clay-desktop
+9|list item|selected|/branch server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/0c18861c_5a54_4a03_b052_84c7078af14f|clay-desktop
+9|list item|-|/clone server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/256c9816_f29f_4631_b102_03785b174765|clay-desktop
+9|list item|-|/compact server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/c999debc_fd5b_49b6_b5ff_b25873585d70|clay-desktop
+9|list item|-|/discard server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/a714ed5a_70c6_4862_b648_c536b94f2289|clay-desktop
+9|list item|-|/fork server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/2b163128_61ec_4ada_898b_5750486ffff4|clay-desktop
+9|list item|-|/n server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/d65265aa_cd69_4d87_9610_61df54d29169|clay-desktop
+9|list item|-|/new server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/505e784d_4b70_4f74_a256_172812dce164|clay-desktop
+9|list item|-|/open-session server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/bce0aadf_0628_4f10_bb2f_083c3da1cf22|clay-desktop
+9|list item|-|/open-session-as-fork server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/6a0bbaa6_6b8a_4248_bc39_20fd67277cde|clay-desktop
+9|list item|-|/resume server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/61af9927_8230_44c4_82d4_e61bef7352a1|clay-desktop
+9|list item|-|/tree server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/c6a4fe82_a2af_49c2_8530_130341efaa0d|clay-desktop
+9|list item|-|Activate Tab 1 Ctrl+1 — client — built-in||/org/a11y/atspi/accessible/62de9930_2187_41e3_8cee_5d3907a92c5f|clay-desktop
+9|list item|-|Activate Tab 2 Ctrl+2 — client — built-in||/org/a11y/atspi/accessible/e09b8881_ae0f_4a72_8c48_caaf8af238c8|clay-desktop
+9|list item|-|Activate Tab 3 Ctrl+3 — client — built-in||/org/a11y/atspi/accessible/12f80931_2cf0_4506_9fd1_79b25cc4b232|clay-desktop
+9|list item|-|Activate Tab 4 Ctrl+4 — client — built-in||/org/a11y/atspi/accessible/ff2a8622_c923_4c22_9e72_8419c2dcc432|clay-desktop
+9|list item|-|Activate Tab 5 Ctrl+5 — client — built-in||/org/a11y/atspi/accessible/78527fcd_c132_460c_b4ae_99a3092892d6|clay-desktop
+9|list item|-|Activate Tab 6 Ctrl+6 — client — built-in||/org/a11y/atspi/accessible/9af3caae_d1c0_4c99_95f5_ade2910d0029|clay-desktop
+9|list item|-|Activate Tab 7 Ctrl+7 — client — built-in||/org/a11y/atspi/accessible/580d7142_fbd8_4fa2_9700_1fba9643b4bc|clay-desktop
+9|list item|-|Activate Tab 8 Ctrl+8 — client — built-in||/org/a11y/atspi/accessible/6297bd15_d978_4ca0_badd_19aa1b72469b|clay-desktop
+9|list item|-|Activate Tab 9 Ctrl+9 — client — built-in||/org/a11y/atspi/accessible/72ae9636_5682_4bba_be2a_14aea5cae645|clay-desktop
+9|list item|-|Add Equal Pane Ctrl+Shift+\ — client — built-in||/org/a11y/atspi/accessible/f7b09f97_34ba_41de_8f76_b4eabd287383|clay-desktop
+9|list item|-|Browse Filesystem Ctrl+X Ctrl+F — server-first — built-in||/org/a11y/atspi/accessible/5be21d60_f38a_4160_9762_71185b8fd99f|clay-desktop
+9|list item|-|Choose Agent server-first — built-in||/org/a11y/atspi/accessible/cc80d0bd_0a60_4a08_b3c3_535c3101a84d|clay-desktop
+9|list item|-|Choose Model server-first — built-in||/org/a11y/atspi/accessible/bcbf6bc9_2bee_4382_a41f_e4de0bb9821f|clay-desktop
+9|list item|-|Choose Provider server-first — built-in||/org/a11y/atspi/accessible/0d736294_bfab_4be7_b7b0_b3ffe8d32c53|clay-desktop
+9|list item|-|Close Coding Agent server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/2a618880_1a64_460c_a440_7c139f69edd4|clay-desktop
+9|list item|-|Close Pane Ctrl+Alt+W — client — built-in||/org/a11y/atspi/accessible/7735038a_016a_4217_bd28_c8ee28e17538|clay-desktop
+9|list item|-|Close Tab Ctrl+Shift+W — client — built-in||/org/a11y/atspi/accessible/2a3ac231_44bb_4fb8_bd6a_abc4f3adc7b3|clay-desktop
+9|list item|-|Code Actions server-first — built-in||/org/a11y/atspi/accessible/6a3905e4_4536_4bd1_b283_b69c403e52f4|clay-desktop
+9|list item|-|Coding Agent server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/94b796cb_a770_46d9_ae29_a3092ab28609|clay-desktop
+9|list item|-|Configure Provider server-first — built-in||/org/a11y/atspi/accessible/cca2f279_7ef4_478a_ad2e_ed9d1704fded|clay-desktop
+9|list item|-|Cycle Reasoning Effort Shift+Tab — server-first — @clay/coding-agent@0.1.0||/org/a11y/atspi/accessible/e2520b0d_315c_4787_b004_5971bbbfb859|clay-desktop
+9|list item|-|Dismiss Language Result server-first — built-in||/org/a11y/atspi/accessible/333997c7_10a2_41c7_841a_7ff1bc1f8826|clay-desktop
+9|list item|-|Explain Active Mode server-first — built-in||/org/a11y/atspi/accessible/b305a8e5_05a4_4211_a897_4afb7e5609aa|clay-desktop
+9|list item|-|Focus Active Document server-first — built-in||/org/a11y/atspi/accessible/4d97871b_5e46_45d9_8d30_a78fded0a26b|clay-desktop
+9|list item|-|Focus Next Pane Ctrl+Alt+→ — client — built-in||/org/a11y/atspi/accessible/4719fd4a_a5b7_49c3_90a9_81d4549c38ea|clay-desktop
+9|list item|-|Focus Previous Pane Ctrl+Alt+← — client — built-in||/org/a11y/atspi/accessible/9aea6d3f_f956_4104_882d_8a9dc35a0456|clay-desktop
+9|list item|-|Go to Definition server-first — built-in||/org/a11y/atspi/accessible/9b228bfb_3579_4249_99b5_e13616d6e377|clay-desktop
+9|list item|-|Hover server-first — built-in||/org/a11y/atspi/accessible/72387351_3f25_4c4c_8d3c_a68f81827538|clay-desktop
+9|list item|-|Insert Markdown Heading Ctrl+Alt+1 — server-first — @clay/markdown@0.1.0||/org/a11y/atspi/accessible/052f3c0e_a1b3_4809_a7b7_993fb4082f83|clay-desktop
+9|list item|-|List Active Modes server-first — built-in||/org/a11y/atspi/accessible/39efa01a_61fe_4f32_8015_acc339634bf2|clay-desktop
+9|list item|-|List Git Statuses server-first — built-in||/org/a11y/atspi/accessible/e99495d5_5d83_4c26_b6b2_0151c2dc5ff5|clay-desktop
+9|list item|-|Move Pane Next Ctrl+Alt+] — client — built-in||/org/a11y/atspi/accessible/8b885d8e_68b4_409a_94c4_76c31b06c8e1|clay-desktop
+9|list item|-|Move Pane Previous Ctrl+Alt+[ — client — built-in||/org/a11y/atspi/accessible/fe78545b_bdc7_4388_97e2_ace17c371094|clay-desktop
+9|list item|-|Move Tab Left Ctrl+Shift+[ — client — built-in||/org/a11y/atspi/accessible/854a5f52_6fc8_4060_be7c_0e3323b8d0cf|clay-desktop
+9|list item|-|Move Tab Right Ctrl+Shift+] — client — built-in||/org/a11y/atspi/accessible/862b2c16_54fa_472d_bba0_713ad2d4f40b|clay-desktop
+9|list item|-|Move Tab to Position 1 Ctrl+Shift+1 — client — built-in||/org/a11y/atspi/accessible/284510dc_068f_4d3b_811e_4e0148c289bd|clay-desktop
+9|list item|-|Move Tab to Position 2 Ctrl+Shift+2 — client — built-in||/org/a11y/atspi/accessible/b6859b89_2623_44be_a8fd_f7201e5531f0|clay-desktop
+9|list item|-|Move Tab to Position 3 Ctrl+Shift+3 — client — built-in||/org/a11y/atspi/accessible/f38a1bab_1015_4266_a4f5_07b447ad5236|clay-desktop
+9|list item|-|Move Tab to Position 4 Ctrl+Shift+4 — client — built-in||/org/a11y/atspi/accessible/c2f1d32f_e029_4401_b016_d66e801cb4cc|clay-desktop
+9|list item|-|Move Tab to Position 5 Ctrl+Shift+5 — client — built-in||/org/a11y/atspi/accessible/34f55d9e_949a_41ae_bc33_8a2fc979b401|clay-desktop
+9|list item|-|Move Tab to Position 6 Ctrl+Shift+6 — client — built-in||/org/a11y/atspi/accessible/4f9fbc08_2044_469a_8978_78a58eebfa1b|clay-desktop
+9|list item|-|Move Tab to Position 7 Ctrl+Shift+7 — client — built-in||/org/a11y/atspi/accessible/4617b79f_1dc4_4968_9daf_375902eb183f|clay-desktop
+9|list item|-|Move Tab to Position 8 Ctrl+Shift+8 — client — built-in||/org/a11y/atspi/accessible/393cd592_1714_4f2f_a2d3_b17d6997ec5a|clay-desktop
+9|list item|-|Move Tab to Position 9 Ctrl+Shift+9 — client — built-in||/org/a11y/atspi/accessible/fe138304_0b66_405d_92e3_ae844766dd48|clay-desktop
+9|list item|-|Navigate Definition server-first — built-in||/org/a11y/atspi/accessible/f3c9b74f_afdf_43f8_856a_6ac495668b83|clay-desktop
+9|list item|-|New Tab Ctrl+T — client — built-in||/org/a11y/atspi/accessible/31cbf9fa_3067_4915_a161_b1bda322ba8b|clay-desktop
+9|list item|-|Next Tab Ctrl+Tab — client — built-in||/org/a11y/atspi/accessible/308a5bb4_b323_4e53_ba8c_c583a4d95e22|clay-desktop
+9|list item|-|Open Control Center Ctrl+X Ctrl+P — server-first — built-in||/org/a11y/atspi/accessible/48f9c4aa_846b_458a_b7f5_f9c9911b3066|clay-desktop
+9|list item|-|Open Directory server-first — built-in||/org/a11y/atspi/accessible/4efe0026_b675_4ba0_89fa_93af6e537268|clay-desktop
+9|list item|-|Open File server-first — built-in||/org/a11y/atspi/accessible/a9900b0d_8b5f_4723_9ced_2c48e7c08456|clay-desktop
+9|list item|-|Open File by Name server-first — built-in||/org/a11y/atspi/accessible/f4060f40_635b_4b8d_9dd2_c51966cf85c9|clay-desktop
+9|list item|-|Open Recent Document server-first — built-in||/org/a11y/atspi/accessible/6da0aca5_0fae_425e_8d5e_57335d4ca2b4|clay-desktop
+9|list item|-|Preview Edit (Deferred) server-first — built-in||/org/a11y/atspi/accessible/f64fc412_93c5_4036_8f73_b35c134ec013|clay-desktop
+9|list item|-|Previous Tab Ctrl+Shift+Tab — client — built-in||/org/a11y/atspi/accessible/857b7f7d_304b_41f3_bd74_3d2bb65f8907|clay-desktop
+9|list item|-|Refresh Git Status server-first — built-in||/org/a11y/atspi/accessible/561dedb2_8702_4f53_afec_895045b5f5db|clay-desktop
+9|list item|-|Refresh Workspace server-first — built-in||/org/a11y/atspi/accessible/69ccdaaa_c19c_42d6_b7e1_211309186fa1|clay-desktop
+9|list item|-|Reload Configuration and Packages Ctrl+Shift+R — server-first-with-lock — built-in||/org/a11y/atspi/accessible/29ed2e89_cc62_4d5b_8a13_a48b08194d8b|clay-desktop
+9|list item|-|Resize Pane Down Ctrl+Alt+Shift+↓ — client — built-in||/org/a11y/atspi/accessible/771019d2_79ff_44ba_a503_6b133c18b13c|clay-desktop
+9|list item|-|Resize Pane Left Ctrl+Alt+Shift+← — client — built-in||/org/a11y/atspi/accessible/939208e5_e935_4672_992d_9f2b636e4240|clay-desktop
+9|list item|-|Resize Pane Right Ctrl+Alt+Shift+→ — client — built-in||/org/a11y/atspi/accessible/4e370705_025c_41b2_a0c0_ff6bd15bc0f2|clay-desktop
+9|list item|-|Resize Pane Up Ctrl+Alt+Shift+↑ — client — built-in||/org/a11y/atspi/accessible/f939a416_07df_4605_9b77_4a0cec7397ba|clay-desktop
+9|list item|-|Resume Session server-first — built-in||/org/a11y/atspi/accessible/a22c8fe8_a9fc_422b_8f6c_6efd01f01806|clay-desktop
+9|list item|-|Reveal in File Tree server-first — built-in||/org/a11y/atspi/accessible/74c53ed2_b956_4762_9ef3_284b1e998d49|clay-desktop
+9|list item|-|Search Sessions server-first — built-in||/org/a11y/atspi/accessible/764f7725_5abc_469f_87cc_e585b5e3e1a2|clay-desktop
+9|list item|-|Signature Help server-first — built-in||/org/a11y/atspi/accessible/680ee37a_61cb_4bb4_8905_96d888a883b7|clay-desktop
+9|list item|-|Split Pane Down client — built-in||/org/a11y/atspi/accessible/d3ac4552_8bc4_4e8a_af91_f4dce2a4ceb1|clay-desktop
+9|list item|-|Split Pane Horizontal Ctrl+- — client — built-in||/org/a11y/atspi/accessible/7d145c2a_b94a_4dd2_a26e_e1ba3a1dad52|clay-desktop
+9|list item|-|Split Pane Right client — built-in||/org/a11y/atspi/accessible/25936fc0_f343_422c_a8c3_9e75ed2cd9e5|clay-desktop
+9|list item|-|Split Pane Vertical Ctrl+\ — client — built-in||/org/a11y/atspi/accessible/813dc464_1c15_4288_8158_4708f15563b4|clay-desktop
+9|list item|-|Toggle File Browser Ctrl+B — server-first — built-in||/org/a11y/atspi/accessible/5e484ea5_e2b4_443a_ab93_108eec4eb32e|clay-desktop
+9|list item|-|Toggle JavaScript Line Comment server-first — @clay/javascript@0.1.0||/org/a11y/atspi/accessible/39a10477_6367_423b_a2e4_1b27fd6df299|clay-desktop
+9|list item|-|Toggle Markdown Comment server-first — @clay/markdown@0.1.0||/org/a11y/atspi/accessible/e7c1e1e9_48f0_46da_b294_4afd5e925f79|clay-desktop
+9|list item|-|Toggle Markdown List Ctrl+Shift+8 — server-first — @clay/markdown@0.1.0||/org/a11y/atspi/accessible/5375ddd5_2210_4757_adff_5a1feb6ef20c|clay-desktop
+9|list item|-|Toggle Markdown Preview Ctrl+Shift+M — server-first — @clay/markdown@0.1.0||/org/a11y/atspi/accessible/63243ce1_04e1_456d_a438_6a28a5fca94b|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/d933a7c9_ae81_4aeb_8dc0_0dfba400efce|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/4dbadf87_25ee_4123_8a8f_4f0cbd97d7fe|clay-desktop
+9|section|-|||/org/a11y/atspi/accessible/a7e091d2_34c2_4230_a40b_c94434be7592|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/cf0ca970_6f9a_444a_8277_6771ae674c1f|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/2da78483_9670_4f2c_856d_028465024658|clay-desktop
+9|section|-|||/org/a11y/atspi/accessible/7e4521b3_8b3a_4328_8b4e_54405a1d7aed|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/62d200ff_6829_406e_87e5_14bc60151923|clay-desktop
+8|status bar|-|85 results|85 results|/org/a11y/atspi/accessible/2e4b335d_302e_4ef2_a926_1987be785d40|clay-desktop

@@ -6,7 +6,13 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { ClayButton, ClayIconButton, ClayText } from "../components";
+import {
+  ClayBadge,
+  ClayButton,
+  ClayIcon,
+  ClayIconButton,
+  ClayText,
+} from "../components";
 import { accessIsEditable } from "../state/document-store";
 import { tabLabel } from "../shell/tab-store";
 import { createEditor, setReadOnly } from "./create-editor";
@@ -48,8 +54,16 @@ export function ClayEditor({ session, onOpenPath }: ClayEditorProps) {
     [session],
   );
   const [openPath, setOpenPath] = useState("");
+  const [stripOpen, setStripOpen] = useState(false);
+  const stripInput = useRef<HTMLInputElement | null>(null);
   const editable = !!meta && accessIsEditable(meta.access) && !meta.loading;
   const lastReadOnly = useRef<boolean | null>(null);
+
+  // The relative-path strip is on demand (DESIGN.md §12): focusing it on open
+  // keeps the keyboard path short — reveal, type, Enter, closed.
+  useEffect(() => {
+    if (stripOpen) stripInput.current?.focus();
+  }, [stripOpen]);
 
   useEffect(() => {
     editorPerformance.count(PERFORMANCE_STAGE.reactCommit, 0, {
@@ -131,71 +145,130 @@ export function ClayEditor({ session, onOpenPath }: ClayEditorProps) {
       ? tabLabel(path)
       : path
     : tabLabel(meta.workspaceRoot);
+  const documentName = label.split(/[\\/]/).pop() || label;
+  const documentPath = path && documentName !== path ? path : "";
+  const documentState = !editable
+    ? "read-only"
+    : meta.dirty
+      ? "dirty"
+      : "clean";
+  const canOpenPath = meta.workspaceRootId != null && openPath.length > 0;
+  const submitOpenPath = () => {
+    if (!canOpenPath) return;
+    setStripOpen(false);
+    if (onOpenPath) onOpenPath(openPath);
+    else session.open(openPath);
+  };
 
   return (
     <div className={styles.host} data-testid="clay-editor">
-      <div className={styles.chrome}>
-        <div className={styles.meta}>
-          <ClayText variant="status">{label}</ClayText>
-          <ClayText variant="detail" muted>
-            v{meta.version}
-            {meta.dirty ? " · dirty" : " · clean"}
-            {editable ? " · editable" : " · read-only"}
-            {meta.pending > 0 ? ` · pending ${meta.pending}` : ""}
-          </ClayText>
+      <div className={styles.chrome} data-clay-ds="editor.chrome">
+        <div className={styles.crumb}>
+          <span className={styles.docName} data-testid="editor-doc-name">
+            {documentName}
+          </span>
+          {documentPath ? (
+            <span className={styles.docPath}>{documentPath}</span>
+          ) : null}
+        </div>
+        <div className={styles.badges} aria-label="Document state">
+          <ClayBadge>{`v${meta.version}`}</ClayBadge>
+          <ClayBadge tone={meta.dirty ? "warning" : "success"}>
+            {documentState}
+          </ClayBadge>
+          {meta.pending > 0 ? (
+            <ClayBadge tone="muted">{`pending ${meta.pending}`}</ClayBadge>
+          ) : null}
         </div>
         <div className={styles.actions}>
-          <ClayIconButton
-            icon="document.save"
-            label="Save"
-            variant="primary"
-            isDisabled={!editable}
-            onPress={() => session.save()}
-          />
-          <ClayIconButton
-            icon="document.reload"
-            label="Reload"
-            onPress={() => session.reload(false)}
-          />
-          <ClayIconButton
-            icon="action.close"
-            label="Close"
-            variant="muted"
-            onPress={() => session.close(meta.dirty)}
-          />
-          <input
-            className={styles.path}
-            aria-label="Open path"
-            value={openPath}
-            onChange={(event) => setOpenPath(event.target.value)}
-            placeholder="relative/path"
-          />
           <ClayButton
-            isDisabled={meta.workspaceRootId == null || openPath.length === 0}
-            onPress={() =>
-              onOpenPath ? onOpenPath(openPath) : session.open(openPath)
-            }
+            variant="muted"
+            aria-expanded={stripOpen}
+            onPress={() => setStripOpen((open) => !open)}
           >
             Open
           </ClayButton>
+          <ClayButton
+            variant="muted"
+            onPress={() => session.runClientCommand("editor.clientUndo")}
+          >
+            Undo
+          </ClayButton>
+          <ClayButton
+            variant="muted"
+            onPress={() => session.runClientCommand("editor.clientRedo")}
+          >
+            Redo
+          </ClayButton>
+          <ClayIconButton
+            icon="document.reload"
+            label="Reload"
+            variant="muted"
+            onPress={() => session.reload(false)}
+          />
+          <ClayButton
+            variant="primary"
+            isDisabled={!editable}
+            onPress={() => session.save()}
+          >
+            <ClayIcon name="document.save" /> Save
+          </ClayButton>
+          <ClayIconButton
+            icon="action.close"
+            label="Close"
+            variant="danger"
+            onPress={() => session.close(meta.dirty)}
+          />
         </div>
-        {meta.loading && (
-          <div className={styles.alert} role="status">
-            <ClayText variant="status">Loading full document…</ClayText>
-          </div>
-        )}
-        {meta.diagnostic && (
-          <div className={styles.alert} role="alert">
-            <ClayText variant="status">{meta.diagnostic}</ClayText>
-          </div>
-        )}
       </div>
-      <div
-        ref={parentRef}
-        className={styles.canvas}
-        role="region"
-        aria-label={`Editor ${label}`}
-      />
+      {stripOpen ? (
+        <div className={styles.openStrip} data-testid="editor-open-strip">
+          <span className={styles.openLabel}>Open path</span>
+          <input
+            ref={stripInput}
+            className={styles.path}
+            aria-label="Open relative path"
+            value={openPath}
+            onChange={(event) => setOpenPath(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") submitOpenPath();
+              if (event.key === "Escape") setStripOpen(false);
+            }}
+            placeholder="relative/path"
+          />
+          <ClayButton isDisabled={!canOpenPath} onPress={submitOpenPath}>
+            Open
+          </ClayButton>
+          <span className={styles.openNote} role="status">
+            {`relative to ${meta.workspaceRoot || "the workspace"}`}
+          </span>
+          <span className={styles.spacer} />
+          <ClayIconButton
+            icon="action.close"
+            label="Hide open path"
+            variant="muted"
+            onPress={() => setStripOpen(false)}
+          />
+        </div>
+      ) : null}
+      {meta.loading && (
+        <div className={styles.alert} role="status">
+          <ClayText variant="status">Loading full document…</ClayText>
+        </div>
+      )}
+      {meta.diagnostic && (
+        <div className={styles.alert} role="alert">
+          <ClayText variant="status">{meta.diagnostic}</ClayText>
+        </div>
+      )}
+      <div className={styles.column}>
+        <div
+          ref={parentRef}
+          className={styles.canvas}
+          role="region"
+          aria-label={`Editor ${label}`}
+        />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,12 @@
 import { EditorState } from "@codemirror/state";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, act, fireEvent } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  act,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { BootstrapDto } from "../bridge/types";
@@ -57,7 +63,10 @@ describe("editor lifecycle", () => {
     expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
     expect(screen.getByText("ws")).toBeInTheDocument();
     expect(screen.queryByText("/tmp/ws")).not.toBeInTheDocument();
-    expect(screen.getByText(/editable/)).toBeInTheDocument();
+    // The badges are the document's real state: revision and dirty flag (this
+    // bootstrap holds an edit lease and no pending edits).
+    expect(screen.getByText(/clean/)).toBeInTheDocument();
+    expect(screen.getByText("v1")).toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: /Editor ws/ }),
     ).toBeInTheDocument();
@@ -129,7 +138,7 @@ describe("editor lifecycle", () => {
     expect(screen.getByText(/seed-full/)).toBeInTheDocument();
   });
 
-  it("migrated action row invokes exact handlers and keeps Open as text (plan 112 T8)", async () => {
+  it("invokes the exact document handlers and keeps Open as the on-demand strip", async () => {
     const user = userEvent.setup();
     const sent: string[] = [];
     const session = createDocumentSession({
@@ -151,6 +160,15 @@ describe("editor lifecycle", () => {
     const open = screen.getByRole("button", { name: "Open" });
     expect(open.querySelector("svg")).toBeNull();
     expect(open.textContent).toContain("Open");
+
+    // The relative-path field is on demand, not permanently visible.
+    expect(screen.queryByTestId("editor-open-strip")).not.toBeInTheDocument();
+    await user.click(open);
+    expect(screen.getByTestId("editor-open-strip")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Open relative path"), {
+      key: "Escape",
+    });
+    expect(screen.queryByTestId("editor-open-strip")).not.toBeInTheDocument();
 
     await user.click(save);
     await user.click(reload);

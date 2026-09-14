@@ -8,7 +8,7 @@
 :root {
   --clay-surface-main: #100f17;
   --clay-surface-panel: #21202b;
-  --clay-surface-overlay: #2a2838;
+  --clay-surface-overlay: #181720;
   --clay-surface-scrim: #000000;
   --clay-surface-control: #39354a;
   --clay-surface-list: #292835;
@@ -16,25 +16,25 @@
   --clay-surface-hover: #2d2b3d;
   --clay-surface-active: #343147;
   --clay-surface-disabled: #1b1a24;
-  --clay-surface-badge: #39354a;
-  --clay-surface-kbd: #292835;
-  --clay-surface-scrollbar: #6f6a87;
-  --clay-surface-scrollbar-track: #21202b;
+  --clay-surface-badge: #3c3836;
+  --clay-surface-kbd: #3c3836;
+  --clay-surface-scrollbar: #504945;
+  --clay-surface-scrollbar-track: #282828;
   --clay-text-primary: #eeeaff;
   --clay-text-muted: #b9b2cf;
-  --clay-text-disabled: #6f6a87;
-  --clay-text-badge: #eeeaff;
-  --clay-text-kbd: #eeeaff;
+  --clay-text-disabled: #807a9b;
+  --clay-text-badge: #ebdbb2;
+  --clay-text-kbd: #a89984;
   --clay-accent-primary: #7c6fff;
   --clay-focus-ring: #968aff;
-  --clay-border-hairline: #282638;
-  --clay-border-subtle: #2f2c40;
-  --clay-border-strong: #3d385c;
+  --clay-border-hairline: #726b9857;
+  --clay-border-subtle: #726b98;
+  --clay-border-strong: #eeeaff;
   --clay-border-focus: #7c6fff;
-  --clay-border-kbd: #2f2c40;
+  --clay-border-kbd: #504945;
   --clay-diagnostic-error: #ff6b6b;
   --clay-diagnostic-warning: #ffc66b;
-  --clay-diagnostic-success: #6bffb0;
+  --clay-diagnostic-success: #6bcf9b;
   --clay-opacity-disabled: 0.55;
   --clay-opacity-scrim: 0.5;
   --clay-spacing-xxs: 4px;
@@ -61,367 +61,871 @@
   --clay-editor-link-color: var(--clay-accent-primary);
 
   /* Host fallback design-system recipe variables (core baseline defaults).
-     Dynamic ActiveDesignSystem snapshots override these at runtime. */
-  --clay-ds-button-default-root-rest-background-color: var(
-    --clay-surface-control
+     Dynamic ActiveDesignSystem snapshots override at runtime. */
+  --clay-ds-agent-picker-default-trigger-disabled-opacity: 0.5;
+  --clay-ds-agent-picker-default-trigger-disabled-text-color: var(
+    --clay-text-disabled
   );
-  --clay-ds-button-default-root-rest-text-color: var(--clay-text-primary);
-  --clay-ds-button-default-root-rest-border-color: var(--clay-border-subtle);
-  --clay-ds-button-default-root-rest-border-width: 1px;
+  --clay-ds-agent-picker-default-trigger-expanded-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-agent-picker-default-trigger-expanded-text-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-agent-picker-default-trigger-focus-outline-color: var(
+    --clay-focus-ring
+  );
+  --clay-ds-agent-picker-default-trigger-focus-outline-offset: 2px;
+  --clay-ds-agent-picker-default-trigger-focus-outline-style: solid;
+  --clay-ds-agent-picker-default-trigger-focus-outline-width: 2px;
+  --clay-ds-agent-picker-default-trigger-hover-background-color: var(
+    --clay-surface-hover
+  );
+  --clay-ds-agent-picker-default-trigger-rest-background-color: transparent;
+  --clay-ds-agent-picker-default-trigger-rest-border-radius: 8px;
+  --clay-ds-agent-picker-default-trigger-rest-text-color: var(
+    --clay-text-primary
+  );
+  --clay-ds-agent-picker-default-trigger-rest-transition-duration: 150ms;
+  --clay-ds-agent-picker-default-trigger-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-badge-accent-root-rest-background-color: var(--clay-accent-primary);
+  --clay-ds-badge-accent-root-rest-background-opacity: 0.15;
+  --clay-ds-badge-accent-root-rest-text-color: var(--clay-accent-primary);
+  --clay-ds-badge-default-root-rest-background-color: transparent;
+  --clay-ds-badge-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-badge-default-root-rest-border-radius: 5px;
+  --clay-ds-badge-default-root-rest-border-style: solid;
+  --clay-ds-badge-default-root-rest-border-width: 1px;
+  --clay-ds-badge-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-badge-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-badge-error-root-rest-background-color: transparent;
+  --clay-ds-badge-error-root-rest-border-color: var(--clay-diagnostic-error);
+  --clay-ds-badge-error-root-rest-text-color: var(--clay-diagnostic-error);
+  --clay-ds-badge-muted-root-rest-background-color: var(--clay-surface-panel);
+  --clay-ds-badge-muted-root-rest-background-opacity: 0.55;
+  --clay-ds-badge-muted-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-badge-muted-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-badge-success-root-rest-background-color: transparent;
+  --clay-ds-badge-success-root-rest-border-color: var(
+    --clay-diagnostic-success
+  );
+  --clay-ds-badge-success-root-rest-text-color: var(--clay-diagnostic-success);
+  --clay-ds-badge-warning-root-rest-background-color: transparent;
+  --clay-ds-badge-warning-root-rest-border-color: var(
+    --clay-diagnostic-warning
+  );
+  --clay-ds-badge-warning-root-rest-text-color: var(--clay-diagnostic-warning);
+  --clay-ds-button-danger-root-active-background-color: var(
+    --clay-diagnostic-error
+  );
+  --clay-ds-button-danger-root-active-background-opacity: 0.24;
+  --clay-ds-button-danger-root-active-text-color: var(--clay-diagnostic-error);
+  --clay-ds-button-danger-root-active-transform-preset: translateY(1px);
+  --clay-ds-button-danger-root-disabled-background-color: transparent;
+  --clay-ds-button-danger-root-disabled-opacity: 0.5;
+  --clay-ds-button-danger-root-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-button-danger-root-hover-background-color: var(
+    --clay-diagnostic-error
+  );
+  --clay-ds-button-danger-root-hover-background-opacity: 0.16;
+  --clay-ds-button-danger-root-hover-text-color: var(--clay-diagnostic-error);
+  --clay-ds-button-danger-root-hover-transform-preset: none;
+  --clay-ds-button-danger-root-rest-background-color: transparent;
+  --clay-ds-button-danger-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-button-danger-root-rest-text-color: var(--clay-diagnostic-error);
+  --clay-ds-button-default-root-active-background-color: var(
+    --clay-surface-active
+  );
+  --clay-ds-button-default-root-active-transform-preset: translateY(1px);
+  --clay-ds-button-default-root-disabled-background-color: transparent;
+  --clay-ds-button-default-root-disabled-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-button-default-root-disabled-opacity: 0.5;
+  --clay-ds-button-default-root-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-button-default-root-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-button-default-root-focus-outline-offset: 2px;
+  --clay-ds-button-default-root-focus-outline-style: solid;
+  --clay-ds-button-default-root-focus-outline-width: 2px;
+  --clay-ds-button-default-root-hover-background-color: var(
+    --clay-surface-hover
+  );
+  --clay-ds-button-default-root-hover-border-color: var(--clay-border-subtle);
+  --clay-ds-button-default-root-hover-text-color: var(--clay-text-primary);
+  --clay-ds-button-default-root-hover-transform-preset: none;
+  --clay-ds-button-default-root-rest-background-color: transparent;
+  --clay-ds-button-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-button-default-root-rest-border-radius: 8px;
   --clay-ds-button-default-root-rest-border-style: solid;
-  --clay-ds-button-default-root-rest-border-radius: 0px;
-  --clay-ds-button-default-root-rest-transition-duration: 100ms;
-  --clay-ds-button-default-root-rest-transition-timing: ease-out;
+  --clay-ds-button-default-root-rest-border-width: 1px;
+  --clay-ds-button-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-button-default-root-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-button-default-root-rest-text-color: var(--clay-text-primary);
   --clay-ds-button-default-root-rest-transform-preset: none;
-
+  --clay-ds-button-default-root-rest-transition-duration: 150ms;
+  --clay-ds-button-default-root-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-button-muted-root-active-background-color: var(
+    --clay-surface-active
+  );
+  --clay-ds-button-muted-root-active-text-color: var(--clay-text-muted);
+  --clay-ds-button-muted-root-active-transform-preset: translateY(1px);
+  --clay-ds-button-muted-root-disabled-background-color: transparent;
+  --clay-ds-button-muted-root-disabled-opacity: 0.5;
+  --clay-ds-button-muted-root-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-button-muted-root-hover-background-color: var(--clay-surface-hover);
+  --clay-ds-button-muted-root-hover-text-color: var(--clay-text-primary);
+  --clay-ds-button-muted-root-hover-transform-preset: none;
+  --clay-ds-button-muted-root-rest-background-color: transparent;
+  --clay-ds-button-muted-root-rest-border-color: transparent;
+  --clay-ds-button-muted-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-button-primary-root-active-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-button-primary-root-active-text-color: var(--clay-surface-main);
+  --clay-ds-button-primary-root-active-transform-preset: translateY(1px);
+  --clay-ds-button-primary-root-disabled-background-color: var(
+    --clay-surface-disabled
+  );
+  --clay-ds-button-primary-root-disabled-opacity: 0.5;
+  --clay-ds-button-primary-root-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-button-primary-root-hover-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-button-primary-root-hover-background-opacity: 0.92;
+  --clay-ds-button-primary-root-hover-text-color: var(--clay-surface-main);
+  --clay-ds-button-primary-root-hover-transform-preset: none;
   --clay-ds-button-primary-root-rest-background-color: var(
     --clay-accent-primary
   );
+  --clay-ds-button-primary-root-rest-border-color: transparent;
   --clay-ds-button-primary-root-rest-text-color: var(--clay-surface-main);
-  --clay-ds-button-primary-root-rest-border-color: var(--clay-border-subtle);
-  --clay-ds-button-primary-root-rest-border-radius: 0px;
-
-  --clay-ds-button-muted-root-rest-background-color: transparent;
-  --clay-ds-button-muted-root-rest-text-color: var(--clay-text-muted);
-  --clay-ds-button-muted-root-rest-border-color: var(--clay-border-subtle);
-
-  --clay-ds-button-danger-root-rest-background-color: var(
-    --clay-surface-control
+  --clay-ds-collapse-default-body-rest-background-color: transparent;
+  --clay-ds-collapse-default-body-rest-padding: var(--clay-spacing-sm);
+  --clay-ds-collapse-default-header-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-collapse-default-header-focus-outline-offset: 2px;
+  --clay-ds-collapse-default-header-focus-outline-style: solid;
+  --clay-ds-collapse-default-header-focus-outline-width: 2px;
+  --clay-ds-collapse-default-header-hover-background-color: var(
+    --clay-surface-hover
   );
-  --clay-ds-button-danger-root-rest-text-color: var(--clay-diagnostic-error);
-  --clay-ds-button-danger-root-rest-border-color: transparent;
-
-  --clay-ds-text-input-default-input-rest-background-color: var(
-    --clay-surface-main
+  --clay-ds-collapse-default-header-hover-text-color: var(--clay-text-primary);
+  --clay-ds-collapse-default-header-rest-background-color: transparent;
+  --clay-ds-collapse-default-header-rest-border-radius: 8px;
+  --clay-ds-collapse-default-header-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-collapse-default-header-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-collapse-default-header-rest-text-color: var(--clay-text-primary);
+  --clay-ds-collapse-default-header-rest-transition-duration: 150ms;
+  --clay-ds-collapse-default-header-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
   );
-  --clay-ds-text-input-default-input-rest-text-color: var(--clay-text-primary);
-  --clay-ds-text-input-default-input-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-collapse-default-root-rest-background-color: transparent;
+  --clay-ds-collapse-default-root-rest-border-radius: 8px;
+  --clay-ds-command-centre-default-empty-rest-background-color: transparent;
+  --clay-ds-command-centre-default-empty-rest-padding: var(--clay-spacing-lg);
+  --clay-ds-command-centre-default-empty-rest-text-color: var(
+    --clay-text-muted
   );
-  --clay-ds-text-input-default-input-rest-border-width: 1px;
-  --clay-ds-text-input-default-input-rest-border-style: solid;
-  --clay-ds-text-input-default-input-rest-border-radius: 0px;
-  --clay-ds-text-input-default-input-focus-outline-color: var(
-    --clay-focus-ring
-  );
-  --clay-ds-text-input-default-input-focus-outline-width: 2px;
-  --clay-ds-text-input-default-input-focus-outline-offset: 1px;
-  --clay-ds-text-input-default-input-focus-outline-style: solid;
-
-  --clay-ds-modal-default-dialog-rest-background-color: var(
+  --clay-ds-command-centre-default-root-rest-background-color: var(
     --clay-surface-overlay
   );
-  --clay-ds-modal-default-dialog-rest-text-color: var(--clay-text-primary);
-  --clay-ds-modal-default-dialog-rest-border-color: var(--clay-border-strong);
-  --clay-ds-modal-default-dialog-rest-border-width: 1px;
-  --clay-ds-modal-default-dialog-rest-border-style: solid;
-  --clay-ds-modal-default-dialog-rest-border-radius: 0px;
-
-  --clay-ds-modal-default-scrim-rest-background-color: color-mix(
-    in srgb,
-    var(--clay-surface-scrim) calc(var(--clay-opacity-scrim) * 100%),
-    transparent
+  --clay-ds-command-centre-default-root-rest-border-color: var(
+    --clay-border-hairline
   );
-  --clay-ds-modal-default-scrim-rest-backdrop-blur: 0px;
-
-  --clay-ds-panel-default-root-rest-background-color: var(--clay-surface-panel);
-  --clay-ds-panel-default-root-rest-text-color: var(--clay-text-primary);
-  --clay-ds-panel-default-root-rest-border-color: var(--clay-border-subtle);
-  --clay-ds-panel-default-root-rest-border-width: 1px;
-  --clay-ds-panel-default-root-rest-border-style: solid;
-  --clay-ds-panel-default-root-rest-border-radius: 0px;
-
-  --clay-ds-dropdown-default-trigger-rest-background-color: var(
-    --clay-surface-main
+  --clay-ds-command-centre-default-root-rest-border-radius: 16px;
+  --clay-ds-command-centre-default-root-rest-border-style: solid;
+  --clay-ds-command-centre-default-root-rest-border-width: 1px;
+  --clay-ds-command-centre-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-command-centre-default-root-rest-padding: var(--clay-spacing-sm);
+  --clay-ds-command-centre-default-root-rest-shadow:
+    0px 24px 60px -16px
+      color-mix(in srgb, var(--clay-text-primary) 42%, transparent),
+    0px 2px 10px -4px
+      color-mix(in srgb, var(--clay-text-primary) 22%, transparent);
+  --clay-ds-command-centre-default-root-rest-text-color: var(
+    --clay-text-primary
   );
-  --clay-ds-dropdown-default-trigger-rest-text-color: var(--clay-text-primary);
-  --clay-ds-dropdown-default-trigger-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-command-centre-default-root-rest-transition-duration: 240ms;
+  --clay-ds-command-centre-default-root-rest-transition-timing: cubic-bezier(
+    0.2,
+    0.8,
+    0.2,
+    1
   );
-  --clay-ds-dropdown-default-trigger-rest-border-width: 1px;
-  --clay-ds-dropdown-default-trigger-rest-border-style: solid;
-  --clay-ds-dropdown-default-trigger-rest-border-radius: 0px;
-
+  --clay-ds-command-centre-default-status-rest-background-color: transparent;
+  --clay-ds-command-centre-default-status-rest-text-color: var(
+    --clay-text-muted
+  );
+  --clay-ds-divider-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-divider-default-root-rest-border-style: solid;
+  --clay-ds-divider-default-root-rest-border-width: 1px;
+  --clay-ds-dropdown-default-item-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-dropdown-default-item-focus-outline-offset: 2px;
+  --clay-ds-dropdown-default-item-focus-outline-style: solid;
+  --clay-ds-dropdown-default-item-focus-outline-width: 2px;
+  --clay-ds-dropdown-default-item-hover-background-color: var(
+    --clay-surface-hover
+  );
+  --clay-ds-dropdown-default-item-hover-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-item-rest-border-radius: 8px;
+  --clay-ds-dropdown-default-item-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-dropdown-default-item-rest-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-item-rest-transition-duration: 150ms;
+  --clay-ds-dropdown-default-item-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-dropdown-default-item-selected-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-dropdown-default-item-selected-background-opacity: 0.15;
+  --clay-ds-dropdown-default-item-selected-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-list-rest-background-color: transparent;
+  --clay-ds-dropdown-default-list-rest-padding: var(--clay-spacing-xxs);
   --clay-ds-dropdown-default-popover-rest-background-color: var(
     --clay-surface-overlay
   );
   --clay-ds-dropdown-default-popover-rest-border-color: var(
     --clay-border-hairline
   );
-  --clay-ds-dropdown-default-popover-rest-border-width: 1px;
+  --clay-ds-dropdown-default-popover-rest-border-radius: 12px;
   --clay-ds-dropdown-default-popover-rest-border-style: solid;
-  --clay-ds-dropdown-default-popover-rest-border-radius: 0px;
-
-  --clay-ds-list-default-row-rest-background-color: transparent;
-  --clay-ds-list-default-row-rest-text-color: var(--clay-text-primary);
-  --clay-ds-list-default-row-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-list-default-row-rest-border-width: 1px;
-
-  --clay-ds-collapse-default-header-rest-background-color: transparent;
-  --clay-ds-collapse-default-header-rest-text-color: var(--clay-text-primary);
-  --clay-ds-collapse-default-header-rest-border-color: var(
+  --clay-ds-dropdown-default-popover-rest-border-width: 1px;
+  --clay-ds-dropdown-default-popover-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-dropdown-default-popover-rest-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-trigger-active-background-color: var(
+    --clay-surface-active
+  );
+  --clay-ds-dropdown-default-trigger-active-border-color: var(
     --clay-border-hairline
   );
-  --clay-ds-collapse-default-header-rest-border-width: 1px;
-
-  --clay-ds-badge-default-root-rest-background-color: var(--clay-surface-badge);
-  --clay-ds-badge-default-root-rest-text-color: var(--clay-text-badge);
-  --clay-ds-badge-default-root-rest-border-radius: 2px;
-
-  --clay-ds-kbd-default-root-rest-background-color: var(--clay-surface-kbd);
-  --clay-ds-kbd-default-root-rest-text-color: var(--clay-text-kbd);
-  --clay-ds-kbd-default-root-rest-border-color: var(--clay-border-kbd);
-  --clay-ds-kbd-default-root-rest-border-width: 1px;
-  --clay-ds-kbd-default-root-rest-border-radius: 2px;
-
-  --clay-ds-divider-default-root-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-divider-default-root-rest-border-width: 1px;
-  --clay-ds-divider-default-root-rest-border-style: solid;
-
-  --clay-ds-tab-default-item-rest-background-color: var(--clay-surface-panel);
-  --clay-ds-tab-default-item-rest-text-color: var(--clay-text-muted);
-  --clay-ds-tab-default-item-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-tab-default-item-rest-border-width: 1px;
-  --clay-ds-tab-default-item-rest-border-radius: 0px;
-
-  --clay-ds-tab-bar-default-root-rest-background-color: var(
-    --clay-surface-main
+  --clay-ds-dropdown-default-trigger-active-text-color: var(
+    --clay-text-primary
   );
-
-  --clay-ds-shell-default-root-rest-background-color: var(--clay-surface-main);
-  --clay-ds-shell-default-header-rest-background-color: var(
+  --clay-ds-dropdown-default-trigger-active-transform-preset: none;
+  --clay-ds-dropdown-default-trigger-disabled-background-color: transparent;
+  --clay-ds-dropdown-default-trigger-disabled-border-color: var(
     --clay-border-hairline
   );
-  --clay-ds-shell-default-header-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-shell-default-header-rest-border-width: 1px;
-  --clay-ds-shell-default-header-rest-border-style: solid;
-  --clay-ds-shell-default-brand-rest-background-color: var(
-    --clay-surface-panel
+  --clay-ds-dropdown-default-trigger-disabled-opacity: 0.5;
+  --clay-ds-dropdown-default-trigger-disabled-text-color: var(
+    --clay-text-disabled
   );
-  --clay-ds-shell-default-brand-rest-text-color: var(--clay-text-muted);
-  --clay-ds-shell-default-brand-rest-padding: 0 var(--clay-spacing-sm, 12px);
-  --clay-ds-shell-default-working-area-rest-background-color: var(
-    --clay-surface-main
-  );
-  --clay-ds-shell-default-footer-rest-background-color: var(
-    --clay-surface-panel
-  );
-  --clay-ds-shell-default-footer-rest-text-color: var(--clay-text-muted);
-  --clay-ds-shell-default-footer-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-shell-default-footer-rest-border-width: 1px;
-  --clay-ds-shell-default-footer-rest-border-style: solid;
-  --clay-ds-shell-default-footer-rest-padding: var(--clay-spacing-xxs, 4px)
-    var(--clay-spacing-sm, 12px);
-
-  --clay-ds-status-bar-default-root-rest-background-color: var(
-    --clay-surface-panel
-  );
-  --clay-ds-status-bar-default-root-rest-text-color: var(--clay-text-muted);
-  --clay-ds-status-bar-default-root-rest-border-color: var(
-    --clay-border-hairline
-  );
-  --clay-ds-status-bar-default-root-rest-border-width: 1px;
-  --clay-ds-status-bar-default-root-rest-border-style: solid;
-  --clay-ds-status-bar-default-root-rest-padding: var(--clay-spacing-xxs, 4px)
-    var(--clay-spacing-sm, 12px);
-
-  --clay-ds-file-browser-default-root-rest-background-color: var(
-    --clay-surface-panel
-  );
-  --clay-ds-file-browser-default-root-rest-border-color: var(
-    --clay-border-subtle
-  );
-  --clay-ds-file-browser-default-root-rest-border-width: 1px;
-  --clay-ds-file-browser-default-root-rest-border-style: solid;
-
-  --clay-ds-pane-split-tree-default-group-rest-background-color: var(
-    --clay-border-hairline
-  );
-  --clay-ds-pane-split-tree-default-pane-rest-background-color: var(
-    --clay-surface-main
-  );
-  --clay-ds-pane-split-tree-default-pane-rest-outline-color: transparent;
-  --clay-ds-pane-split-tree-default-pane-rest-outline-width: 1px;
-  --clay-ds-pane-split-tree-default-pane-rest-outline-style: solid;
-  --clay-ds-pane-split-tree-default-pane-rest-border-radius: 0px;
-  --clay-ds-pane-split-tree-default-pane-active-outline-color: var(
-    --clay-border-focus
-  );
-  --clay-ds-pane-split-tree-default-handle-rest-background-color: var(
-    --clay-border-strong
-  );
-  --clay-ds-pane-split-tree-default-handle-rest-border-width: 2px;
-  --clay-ds-pane-split-tree-default-handle-focus-outline-color: var(
+  --clay-ds-dropdown-default-trigger-focus-outline-color: var(
     --clay-focus-ring
   );
-  --clay-ds-pane-split-tree-default-handle-focus-outline-width: 2px;
-  --clay-ds-pane-split-tree-default-handle-focus-outline-style: solid;
-
-  --clay-ds-editor-default-container-rest-background-color: var(
-    --clay-surface-main
+  --clay-ds-dropdown-default-trigger-focus-outline-offset: 2px;
+  --clay-ds-dropdown-default-trigger-focus-outline-style: solid;
+  --clay-ds-dropdown-default-trigger-focus-outline-width: 2px;
+  --clay-ds-dropdown-default-trigger-hover-background-color: var(
+    --clay-surface-hover
   );
-  --clay-ds-editor-default-container-rest-text-color: var(--clay-text-primary);
-  --clay-ds-editor-default-container-rest-border-radius: 0px;
-  --clay-ds-editor-default-root-rest-background-color: var(--clay-surface-main);
-  --clay-ds-editor-default-chrome-rest-background-color: var(
-    --clay-surface-panel
+  --clay-ds-dropdown-default-trigger-hover-border-color: var(
+    --clay-border-subtle
   );
-  --clay-ds-editor-default-chrome-rest-border-color: var(
+  --clay-ds-dropdown-default-trigger-hover-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-trigger-hover-transform-preset: none;
+  --clay-ds-dropdown-default-trigger-rest-background-color: transparent;
+  --clay-ds-dropdown-default-trigger-rest-border-color: var(
     --clay-border-hairline
   );
-  --clay-ds-editor-default-chrome-rest-border-width: 1px;
-  --clay-ds-editor-default-chrome-rest-border-style: solid;
-  --clay-ds-editor-default-chrome-rest-gap: var(--clay-spacing-sm, 12px);
-  --clay-ds-editor-default-chrome-rest-padding: var(--clay-spacing-xxs, 4px)
-    var(--clay-spacing-sm, 12px);
-  --clay-ds-editor-default-path-rest-background-color: var(
-    --clay-surface-control
+  --clay-ds-dropdown-default-trigger-rest-border-radius: 8px;
+  --clay-ds-dropdown-default-trigger-rest-border-style: solid;
+  --clay-ds-dropdown-default-trigger-rest-border-width: 1px;
+  --clay-ds-dropdown-default-trigger-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-dropdown-default-trigger-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-dropdown-default-trigger-rest-text-color: var(--clay-text-primary);
+  --clay-ds-dropdown-default-trigger-rest-transform-preset: none;
+  --clay-ds-dropdown-default-trigger-rest-transition-duration: 150ms;
+  --clay-ds-dropdown-default-trigger-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
   );
-  --clay-ds-editor-default-path-rest-text-color: var(--clay-text-primary);
-  --clay-ds-editor-default-path-rest-border-color: var(--clay-border-subtle);
-  --clay-ds-editor-default-path-rest-border-width: 1px;
-  --clay-ds-editor-default-path-rest-border-style: solid;
-  --clay-ds-editor-default-gutter-rest-background-color: var(
-    --clay-surface-panel
-  );
-  --clay-ds-editor-default-gutter-rest-text-color: var(--clay-text-muted);
-  --clay-ds-editor-default-gutter-rest-border-color: var(
-    --clay-border-hairline
-  );
-  --clay-ds-editor-default-gutter-rest-border-width: 1px;
-  --clay-ds-editor-default-gutter-rest-border-style: solid;
   --clay-ds-editor-default-active-line-rest-background-color: var(
     --clay-surface-hover
   );
-  --clay-ds-editor-default-active-line-rest-border-width: 0px;
   --clay-ds-editor-default-active-line-rest-border-style: none;
-  --clay-ds-editor-default-selection-rest-background-color: var(
-    --clay-surface-active
+  --clay-ds-editor-default-active-line-rest-border-width: 0px;
+  --clay-ds-editor-default-chrome-rest-background-color: transparent;
+  --clay-ds-editor-default-chrome-rest-border-color: transparent;
+  --clay-ds-editor-default-chrome-rest-border-style: none;
+  --clay-ds-editor-default-chrome-rest-border-width: 0px;
+  --clay-ds-editor-default-chrome-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-editor-default-chrome-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-editor-default-container-rest-background-color: var(
+    --clay-surface-main
   );
-  --clay-ds-editor-default-matching-bracket-rest-border-color: var(
-    --clay-border-strong
-  );
-  --clay-ds-editor-default-matching-bracket-rest-border-width: 1px;
-  --clay-ds-editor-default-matching-bracket-rest-border-style: solid;
-  --clay-ds-editor-default-matching-bracket-rest-border-radius: 0px;
+  --clay-ds-editor-default-container-rest-border-radius: 0px;
+  --clay-ds-editor-default-container-rest-border-width: 0px;
+  --clay-ds-editor-default-container-rest-text-color: var(--clay-text-primary);
   --clay-ds-editor-default-find-match-rest-background-color: var(
     --clay-accent-primary
   );
+  --clay-ds-editor-default-find-match-rest-background-opacity: 0.15;
+  --clay-ds-editor-default-gutter-rest-background-color: transparent;
+  --clay-ds-editor-default-gutter-rest-border-color: transparent;
+  --clay-ds-editor-default-gutter-rest-border-style: none;
+  --clay-ds-editor-default-gutter-rest-border-width: 0px;
+  --clay-ds-editor-default-gutter-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-editor-default-gutter-rest-text-color: var(--clay-text-muted);
+  --clay-ds-editor-default-matching-bracket-rest-background-color: transparent;
+  --clay-ds-editor-default-matching-bracket-rest-border-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-editor-default-matching-bracket-rest-border-radius: 5px;
+  --clay-ds-editor-default-matching-bracket-rest-border-style: solid;
+  --clay-ds-editor-default-matching-bracket-rest-border-width: 1px;
+  --clay-ds-editor-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-editor-default-root-rest-border-width: 0px;
+  --clay-ds-editor-default-selection-rest-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-editor-default-selection-rest-background-opacity: 0.15;
   --clay-ds-editor-default-tooltip-rest-background-color: var(
     --clay-surface-overlay
   );
-  --clay-ds-editor-default-tooltip-rest-text-color: var(--clay-text-primary);
-  --clay-ds-editor-default-tooltip-rest-border-color: var(--clay-border-strong);
-  --clay-ds-editor-default-tooltip-rest-border-width: 1px;
-  --clay-ds-editor-default-tooltip-selected-background-color: var(
-    --clay-surface-selected
+  --clay-ds-editor-default-tooltip-rest-border-color: var(
+    --clay-border-hairline
   );
+  --clay-ds-editor-default-tooltip-rest-border-radius: 8px;
+  --clay-ds-editor-default-tooltip-rest-border-style: solid;
+  --clay-ds-editor-default-tooltip-rest-border-width: 1px;
+  --clay-ds-editor-default-tooltip-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-editor-default-tooltip-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-editor-default-tooltip-rest-text-color: var(--clay-text-primary);
+  --clay-ds-editor-default-tooltip-selected-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-editor-default-tooltip-selected-background-opacity: 0.15;
   --clay-ds-editor-default-tooltip-selected-text-color: var(
     --clay-text-primary
   );
-
-  --clay-ds-chat-default-root-rest-background-color: var(--clay-surface-main);
-  --clay-ds-chat-default-root-rest-text-color: var(--clay-text-primary);
-  --clay-ds-chat-default-root-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-chat-default-root-rest-border-width: 1px;
-  --clay-ds-chat-default-root-rest-border-style: solid;
-  --clay-ds-chat-default-root-rest-border-radius: 0px;
-  --clay-ds-chat-default-root-rest-padding: 0px;
-  --clay-ds-chat-default-root-rest-gap: 0px;
-  --clay-ds-chat-default-header-rest-border-color: var(--clay-border-strong);
-  --clay-ds-chat-default-header-rest-border-width: 2px;
-  --clay-ds-chat-default-header-rest-border-style: solid;
-  --clay-ds-chat-default-header-rest-gap: var(--clay-spacing-xs, 8px);
-  --clay-ds-chat-default-header-rest-padding: var(--clay-spacing-lg, 24px)
-    var(--clay-spacing-lg, 24px) var(--clay-spacing-md, 16px);
-  --clay-ds-chat-default-actions-rest-background-color: var(
-    --clay-border-hairline
+  --clay-ds-empty-default-root-rest-background-color: transparent;
+  --clay-ds-empty-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-empty-default-root-rest-padding: var(--clay-spacing-lg);
+  --clay-ds-empty-default-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-file-browser-default-root-rest-background-color: transparent;
+  --clay-ds-file-browser-default-root-rest-border-width: 0px;
+  --clay-ds-flex-column-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-flex-default-root-rest-background-color: transparent;
+  --clay-ds-flex-default-root-rest-border-width: 0px;
+  --clay-ds-flex-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-flex-row-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-kbd-default-root-rest-background-color: var(--clay-surface-panel);
+  --clay-ds-kbd-default-root-rest-background-opacity: 0.55;
+  --clay-ds-kbd-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-kbd-default-root-rest-border-radius: 5px;
+  --clay-ds-kbd-default-root-rest-border-style: solid;
+  --clay-ds-kbd-default-root-rest-border-width: 1px;
+  --clay-ds-kbd-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-kbd-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-key-hint-default-keys-rest-gap: var(--clay-spacing-xxs);
+  --clay-ds-key-hint-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-key-hint-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-key-hint-default-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-key-hint-default-row-rest-gap: var(--clay-spacing-sm);
+  --clay-ds-key-hint-default-row-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-key-hint-default-row-rest-text-color: var(--clay-text-muted);
+  --clay-ds-label-body-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-label-caption-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-label-detail-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-label-display-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-label-section-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-label-status-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-label-title-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-row-active-background-color: var(
+    --clay-surface-active
   );
-  --clay-ds-chat-default-actions-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-chat-default-actions-rest-border-width: 1px;
-  --clay-ds-chat-default-transcript-rest-background-color: var(
-    --clay-surface-panel
-  );
-  --clay-ds-chat-default-transcript-rest-padding: var(--clay-spacing-md, 16px)
-    var(--clay-spacing-lg, 24px);
-  --clay-ds-chat-default-user-bubble-rest-background-color: var(
-    --clay-surface-badge
-  );
-  --clay-ds-chat-default-user-bubble-rest-border-color: var(
-    --clay-border-strong
-  );
-  --clay-ds-chat-default-user-bubble-rest-border-width: 1px;
-  --clay-ds-chat-default-user-bubble-rest-border-style: solid;
-  --clay-ds-chat-default-user-bubble-rest-border-radius: 0px;
-  --clay-ds-chat-default-assistant-bubble-rest-border-color: var(
+  --clay-ds-list-default-row-active-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-row-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-list-default-row-focus-outline-offset: 2px;
+  --clay-ds-list-default-row-focus-outline-style: solid;
+  --clay-ds-list-default-row-focus-outline-width: 2px;
+  --clay-ds-list-default-row-hover-background-color: var(--clay-surface-hover);
+  --clay-ds-list-default-row-hover-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-row-hover-transition-duration: 150ms;
+  --clay-ds-list-default-row-rest-background-color: transparent;
+  --clay-ds-list-default-row-rest-border-color: transparent;
+  --clay-ds-list-default-row-rest-border-radius: 8px;
+  --clay-ds-list-default-row-rest-border-width: 0px;
+  --clay-ds-list-default-row-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-list-default-row-rest-text-color: var(--clay-text-primary);
+  --clay-ds-list-default-row-rest-transition-duration: 150ms;
+  --clay-ds-list-default-row-rest-transition-timing: cubic-bezier(0, 0, 0.2, 1);
+  --clay-ds-list-default-row-selected-background-color: var(
     --clay-accent-primary
   );
-  --clay-ds-chat-default-assistant-bubble-rest-border-width: 2px;
-  --clay-ds-chat-default-assistant-bubble-rest-border-style: solid;
-  --clay-ds-chat-default-sessions-rest-border-color: var(
-    --clay-border-hairline
+  --clay-ds-list-default-row-selected-background-opacity: 0.15;
+  --clay-ds-list-default-row-selected-text-color: var(--clay-text-primary);
+  --clay-ds-menu-default-item-active-background-color: var(
+    --clay-surface-active
   );
-  --clay-ds-chat-default-sessions-rest-border-width: 1px;
-  --clay-ds-chat-default-session-row-rest-background-color: var(
+  --clay-ds-menu-default-item-active-text-color: var(--clay-text-primary);
+  --clay-ds-menu-default-item-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-menu-default-item-focus-outline-offset: 2px;
+  --clay-ds-menu-default-item-focus-outline-style: solid;
+  --clay-ds-menu-default-item-focus-outline-width: 2px;
+  --clay-ds-menu-default-item-focus-transition-duration: 150ms;
+  --clay-ds-menu-default-item-hover-background-color: var(--clay-surface-hover);
+  --clay-ds-menu-default-item-rest-background-color: transparent;
+  --clay-ds-menu-default-item-rest-border-radius: 8px;
+  --clay-ds-menu-default-item-rest-border-width: 0px;
+  --clay-ds-menu-default-item-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-menu-default-item-rest-text-color: var(--clay-text-primary);
+  --clay-ds-menu-default-item-rest-transition-duration: 150ms;
+  --clay-ds-menu-default-item-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-menu-default-item-selected-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-menu-default-item-selected-background-opacity: 0.15;
+  --clay-ds-menu-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-menu-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-menu-default-root-rest-border-radius: 12px;
+  --clay-ds-menu-default-root-rest-border-style: solid;
+  --clay-ds-menu-default-root-rest-border-width: 1px;
+  --clay-ds-menu-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-menu-default-root-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-modal-default-dialog-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-modal-default-dialog-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-modal-default-dialog-rest-border-radius: 16px;
+  --clay-ds-modal-default-dialog-rest-border-style: solid;
+  --clay-ds-modal-default-dialog-rest-border-width: 1px;
+  --clay-ds-modal-default-dialog-rest-gap: var(--clay-spacing-sm);
+  --clay-ds-modal-default-dialog-rest-padding: var(--clay-spacing-md);
+  --clay-ds-modal-default-dialog-rest-shadow:
+    0px 24px 60px -16px
+      color-mix(in srgb, var(--clay-text-primary) 42%, transparent),
+    0px 2px 10px -4px
+      color-mix(in srgb, var(--clay-text-primary) 22%, transparent);
+  --clay-ds-modal-default-dialog-rest-text-color: var(--clay-text-primary);
+  --clay-ds-modal-default-dialog-rest-transition-duration: 240ms;
+  --clay-ds-modal-default-dialog-rest-transition-timing: cubic-bezier(
+    0.2,
+    0.8,
+    0.2,
+    1
+  );
+  --clay-ds-modal-default-scrim-rest-backdrop-blur: 3px;
+  --clay-ds-modal-default-scrim-rest-background-color: var(
+    --clay-surface-scrim
+  );
+  --clay-ds-modal-default-scrim-rest-background-opacity: 0.5;
+  --clay-ds-overlay-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-overlay-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-overlay-default-root-rest-border-radius: 12px;
+  --clay-ds-overlay-default-root-rest-border-style: solid;
+  --clay-ds-overlay-default-root-rest-border-width: 1px;
+  --clay-ds-overlay-default-root-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-overlay-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-overlay-default-root-rest-transition-duration: 240ms;
+  --clay-ds-overlay-default-root-rest-transition-timing: cubic-bezier(
+    0.2,
+    0.8,
+    0.2,
+    1
+  );
+  --clay-ds-pane-split-tree-default-group-rest-background-color: var(
     --clay-surface-main
   );
-  --clay-ds-chat-default-session-list-rest-background-color: var(
+  --clay-ds-pane-split-tree-default-handle-focus-outline-color: var(
+    --clay-focus-ring
+  );
+  --clay-ds-pane-split-tree-default-handle-focus-outline-style: solid;
+  --clay-ds-pane-split-tree-default-handle-focus-outline-width: 2px;
+  --clay-ds-pane-split-tree-default-handle-rest-background-color: var(
     --clay-border-hairline
   );
-  --clay-ds-chat-default-composer-rest-border-color: var(--clay-border-strong);
-  --clay-ds-chat-default-composer-rest-border-width: 2px;
-  --clay-ds-chat-default-status-rest-background-color: var(
-    --clay-surface-panel
+  --clay-ds-pane-split-tree-default-handle-rest-border-radius: 9999px;
+  --clay-ds-pane-split-tree-default-handle-rest-transition-duration: 150ms;
+  --clay-ds-pane-split-tree-default-handle-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
   );
-  --clay-ds-chat-default-status-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-chat-default-status-rest-border-width: 1px;
-  --clay-ds-chat-default-footer-commands-rest-background-color: var(
+  --clay-ds-pane-split-tree-default-pane-active-outline-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-pane-split-tree-default-pane-active-outline-offset: 0px;
+  --clay-ds-pane-split-tree-default-pane-active-outline-style: solid;
+  --clay-ds-pane-split-tree-default-pane-active-outline-width: 1px;
+  --clay-ds-pane-split-tree-default-pane-rest-background-color: transparent;
+  --clay-ds-pane-split-tree-default-pane-rest-border-radius: 0px;
+  --clay-ds-pane-split-tree-default-pane-rest-outline-color: transparent;
+  --clay-ds-pane-split-tree-default-pane-rest-outline-style: solid;
+  --clay-ds-pane-split-tree-default-pane-rest-outline-width: 1px;
+  --clay-ds-panel-default-header-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-panel-default-header-rest-border-style: solid;
+  --clay-ds-panel-default-header-rest-border-width: 1px;
+  --clay-ds-panel-default-header-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-panel-default-header-rest-padding: var(--clay-spacing-sm);
+  --clay-ds-panel-default-header-rest-text-color: var(--clay-text-primary);
+  --clay-ds-panel-default-root-rest-background-color: var(--clay-surface-panel);
+  --clay-ds-panel-default-root-rest-background-opacity: 0.55;
+  --clay-ds-panel-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-panel-default-root-rest-border-radius: 12px;
+  --clay-ds-panel-default-root-rest-border-style: solid;
+  --clay-ds-panel-default-root-rest-border-width: 1px;
+  --clay-ds-panel-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-panel-default-root-rest-padding: var(--clay-spacing-sm);
+  --clay-ds-panel-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-panel-transient-root-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-popover-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-popover-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-popover-default-root-rest-border-radius: 12px;
+  --clay-ds-popover-default-root-rest-border-style: solid;
+  --clay-ds-popover-default-root-rest-border-width: 1px;
+  --clay-ds-popover-default-root-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-popover-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-popover-default-root-rest-transition-duration: 240ms;
+  --clay-ds-popover-default-root-rest-transition-timing: cubic-bezier(
+    0.2,
+    0.8,
+    0.2,
+    1
+  );
+  --clay-ds-portal-default-root-rest-background-color: transparent;
+  --clay-ds-portal-default-root-rest-border-width: 0px;
+  --clay-ds-scroll-default-root-rest-background-color: transparent;
+  --clay-ds-scroll-default-root-rest-border-width: 0px;
+  --clay-ds-scroll-default-scrollbar-thumb-active-background-color: var(
+    --clay-surface-scrollbar
+  );
+  --clay-ds-scroll-default-scrollbar-thumb-active-opacity: 1;
+  --clay-ds-scroll-default-scrollbar-thumb-hover-background-color: var(
+    --clay-surface-scrollbar
+  );
+  --clay-ds-scroll-default-scrollbar-thumb-hover-opacity: 0.8;
+  --clay-ds-scroll-default-scrollbar-thumb-rest-background-color: var(
+    --clay-surface-scrollbar
+  );
+  --clay-ds-scroll-default-scrollbar-thumb-rest-border-radius: 9999px;
+  --clay-ds-scroll-default-scrollbar-thumb-rest-opacity: 0.4;
+  --clay-ds-scroll-default-scrollbar-track-rest-background-color: var(
+    --clay-surface-scrollbar-track
+  );
+  --clay-ds-seg-default-item-disabled-opacity: 0.5;
+  --clay-ds-seg-default-item-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-seg-default-item-disabled-transform-preset: none;
+  --clay-ds-seg-default-item-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-seg-default-item-focus-outline-offset: 2px;
+  --clay-ds-seg-default-item-focus-outline-style: solid;
+  --clay-ds-seg-default-item-focus-outline-width: 2px;
+  --clay-ds-seg-default-item-hover-background-color: var(--clay-surface-hover);
+  --clay-ds-seg-default-item-hover-text-color: var(--clay-text-primary);
+  --clay-ds-seg-default-item-rest-background-color: transparent;
+  --clay-ds-seg-default-item-rest-border-radius: 9999px;
+  --clay-ds-seg-default-item-rest-border-width: 0px;
+  --clay-ds-seg-default-item-rest-gap: var(--clay-spacing-xxs);
+  --clay-ds-seg-default-item-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-seg-default-item-rest-text-color: var(--clay-text-muted);
+  --clay-ds-seg-default-item-rest-transition-duration: 150ms;
+  --clay-ds-seg-default-item-rest-transition-timing: cubic-bezier(0, 0, 0.2, 1);
+  --clay-ds-seg-default-item-selected-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-seg-default-item-selected-background-opacity: 0.15;
+  --clay-ds-seg-default-item-selected-text-color: var(--clay-accent-primary);
+  --clay-ds-seg-default-root-rest-background-color: transparent;
+  --clay-ds-seg-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-seg-default-root-rest-border-radius: 9999px;
+  --clay-ds-seg-default-root-rest-border-style: solid;
+  --clay-ds-seg-default-root-rest-border-width: 1px;
+  --clay-ds-seg-default-root-rest-gap: var(--clay-spacing-none);
+  --clay-ds-seg-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-session-row-default-root-focus-outline-color: var(
+    --clay-focus-ring
+  );
+  --clay-ds-session-row-default-root-focus-outline-offset: 2px;
+  --clay-ds-session-row-default-root-focus-outline-style: solid;
+  --clay-ds-session-row-default-root-focus-outline-width: 2px;
+  --clay-ds-session-row-default-root-hover-background-color: var(
+    --clay-surface-hover
+  );
+  --clay-ds-session-row-default-root-rest-background-color: transparent;
+  --clay-ds-session-row-default-root-rest-border-radius: 8px;
+  --clay-ds-session-row-default-root-rest-gap: var(--clay-spacing-sm);
+  --clay-ds-session-row-default-root-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-session-row-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-session-row-default-root-rest-transition-duration: 150ms;
+  --clay-ds-session-row-default-root-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-settings-panel-default-actions-rest-background-color: transparent;
+  --clay-ds-settings-panel-default-actions-rest-border-color: var(
     --clay-border-hairline
   );
-  --clay-ds-chat-default-footer-commands-rest-border-width: 1px;
-  --clay-ds-chat-default-footer-commands-rest-border-color: var(
+  --clay-ds-settings-panel-default-actions-rest-border-style: solid;
+  --clay-ds-settings-panel-default-actions-rest-border-width: 1px;
+  --clay-ds-settings-panel-default-actions-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-settings-panel-default-actions-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-settings-panel-default-heading-rest-background-color: transparent;
+  --clay-ds-settings-panel-default-heading-rest-border-color: var(
     --clay-border-hairline
   );
-
+  --clay-ds-settings-panel-default-heading-rest-border-style: solid;
+  --clay-ds-settings-panel-default-heading-rest-border-width: 1px;
+  --clay-ds-settings-panel-default-heading-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-settings-panel-default-heading-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-settings-panel-default-heading-rest-text-color: var(
+    --clay-text-primary
+  );
   --clay-ds-settings-panel-default-panel-rest-background-color: var(
     --clay-surface-panel
   );
+  --clay-ds-settings-panel-default-panel-rest-background-opacity: 0.55;
+  --clay-ds-settings-panel-default-panel-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-settings-panel-default-panel-rest-border-radius: 12px;
+  --clay-ds-settings-panel-default-panel-rest-border-style: solid;
+  --clay-ds-settings-panel-default-panel-rest-border-width: 1px;
+  --clay-ds-settings-panel-default-panel-rest-padding: var(--clay-spacing-md);
   --clay-ds-settings-panel-default-panel-rest-text-color: var(
     --clay-text-primary
   );
-  --clay-ds-settings-panel-default-panel-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-shell-default-brand-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-shell-default-brand-rest-text-color: var(--clay-text-primary);
+  --clay-ds-shell-default-footer-rest-background-color: transparent;
+  --clay-ds-shell-default-footer-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-shell-default-footer-rest-border-style: solid;
+  --clay-ds-shell-default-footer-rest-border-width: 1px;
+  --clay-ds-shell-default-footer-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-shell-default-footer-rest-text-color: var(--clay-text-muted);
+  --clay-ds-shell-default-header-rest-background-color: transparent;
+  --clay-ds-shell-default-header-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-shell-default-header-rest-border-style: solid;
+  --clay-ds-shell-default-header-rest-border-width: 1px;
+  --clay-ds-shell-default-root-rest-background-color: var(--clay-surface-main);
+  --clay-ds-shell-default-working-area-rest-background-color: var(
+    --clay-surface-main
   );
-  --clay-ds-settings-panel-default-panel-rest-border-width: 1px;
-  --clay-ds-settings-panel-default-panel-rest-border-style: solid;
-  --clay-ds-settings-panel-default-heading-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-shell-default-working-area-rest-border-width: 0px;
+  --clay-ds-stack-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-stat-row-default-bar-rest-background-color: var(
+    --clay-accent-primary
   );
-  --clay-ds-settings-panel-default-heading-rest-border-width: 1px;
-  --clay-ds-settings-panel-default-heading-rest-border-style: solid;
-  --clay-ds-settings-panel-default-actions-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-stat-row-default-bar-rest-border-radius: 9999px;
+  --clay-ds-stat-row-default-root-hover-background-color: var(
+    --clay-surface-hover
   );
-  --clay-ds-settings-panel-default-actions-rest-border-width: 1px;
-  --clay-ds-settings-panel-default-actions-rest-border-style: solid;
-
-  --clay-ds-command-centre-default-root-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-stat-row-default-root-rest-background-color: transparent;
+  --clay-ds-stat-row-default-root-rest-border-radius: 5px;
+  --clay-ds-stat-row-default-root-rest-border-width: 0px;
+  --clay-ds-stat-row-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-stat-row-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-stat-row-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-stat-row-default-root-rest-transition-duration: 150ms;
+  --clay-ds-stat-row-default-root-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
   );
-  --clay-ds-command-centre-default-root-rest-border-width: 1px;
-  --clay-ds-command-centre-default-root-rest-border-style: solid;
-  --clay-ds-command-centre-default-root-rest-border-radius: 0px;
-  --clay-ds-command-centre-default-root-rest-background-color: transparent;
-  --clay-ds-command-centre-default-root-rest-shadow: none;
-  --clay-ds-command-centre-default-root-rest-padding: 0px;
-  --clay-ds-command-centre-default-root-rest-text-color: var(--clay-text-muted);
-  --clay-ds-command-centre-default-root-rest-gap: var(--clay-spacing-sm, 12px);
-  --clay-ds-command-centre-default-empty-rest-border-color: var(
-    --clay-border-subtle
+  --clay-ds-status-bar-default-root-rest-background-color: transparent;
+  --clay-ds-status-bar-default-root-rest-border-color: var(
+    --clay-border-hairline
   );
-  --clay-ds-command-centre-default-empty-rest-border-width: 1px;
-  --clay-ds-command-centre-default-empty-rest-border-style: solid;
-  --clay-ds-command-centre-default-status-rest-text-color: var(
+  --clay-ds-status-bar-default-root-rest-border-style: solid;
+  --clay-ds-status-bar-default-root-rest-border-width: 1px;
+  --clay-ds-status-bar-default-root-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-status-bar-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-status-bar-default-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-status-dot-busy-root-rest-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-status-dot-error-root-rest-background-color: var(
+    --clay-diagnostic-error
+  );
+  --clay-ds-status-dot-muted-root-rest-background-color: var(--clay-text-muted);
+  --clay-ds-status-dot-muted-root-rest-border-radius: 9999px;
+  --clay-ds-status-dot-success-root-rest-background-color: var(
+    --clay-diagnostic-success
+  );
+  --clay-ds-status-dot-warning-root-rest-background-color: var(
+    --clay-diagnostic-warning
+  );
+  --clay-ds-status-item-default-root-rest-background-color: transparent;
+  --clay-ds-status-item-default-root-rest-border-radius: 5px;
+  --clay-ds-status-item-default-root-rest-padding: var(--clay-spacing-xxs);
+  --clay-ds-status-item-default-root-rest-text-color: var(--clay-text-muted);
+  --clay-ds-tab-bar-default-root-rest-background-color: transparent;
+  --clay-ds-tab-bar-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-tab-bar-default-root-rest-border-radius: 0px;
+  --clay-ds-tab-bar-default-root-rest-border-style: solid;
+  --clay-ds-tab-bar-default-root-rest-border-width: 1px;
+  --clay-ds-tab-default-item-disabled-background-color: transparent;
+  --clay-ds-tab-default-item-disabled-opacity: 0.5;
+  --clay-ds-tab-default-item-disabled-text-color: var(--clay-text-disabled);
+  --clay-ds-tab-default-item-disabled-transform-preset: none;
+  --clay-ds-tab-default-item-focus-outline-color: var(--clay-focus-ring);
+  --clay-ds-tab-default-item-focus-outline-offset: 2px;
+  --clay-ds-tab-default-item-focus-outline-style: solid;
+  --clay-ds-tab-default-item-focus-outline-width: 2px;
+  --clay-ds-tab-default-item-hover-background-color: var(--clay-surface-hover);
+  --clay-ds-tab-default-item-hover-text-color: var(--clay-text-primary);
+  --clay-ds-tab-default-item-rest-background-color: transparent;
+  --clay-ds-tab-default-item-rest-border-radius: 9999px;
+  --clay-ds-tab-default-item-rest-gap: var(--clay-spacing-xxs);
+  --clay-ds-tab-default-item-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-tab-default-item-rest-text-color: var(--clay-text-muted);
+  --clay-ds-tab-default-item-rest-transition-duration: 150ms;
+  --clay-ds-tab-default-item-rest-transition-timing: cubic-bezier(0, 0, 0.2, 1);
+  --clay-ds-tab-default-item-selected-background-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-tab-default-item-selected-background-opacity: 0.15;
+  --clay-ds-tab-default-item-selected-text-color: var(--clay-accent-primary);
+  --clay-ds-text-input-default-description-rest-text-color: var(
     --clay-text-muted
+  );
+  --clay-ds-text-input-default-error-rest-border-width: 0px;
+  --clay-ds-text-input-default-error-rest-text-color: var(
+    --clay-diagnostic-error
+  );
+  --clay-ds-text-input-default-field-rest-background-color: transparent;
+  --clay-ds-text-input-default-field-rest-border-radius: 12px;
+  --clay-ds-text-input-default-field-rest-border-width: 0px;
+  --clay-ds-text-input-default-field-rest-gap: var(--clay-spacing-xs);
+  --clay-ds-text-input-default-input-disabled-background-color: var(
+    --clay-surface-disabled
+  );
+  --clay-ds-text-input-default-input-disabled-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-text-input-default-input-disabled-opacity: 0.5;
+  --clay-ds-text-input-default-input-disabled-text-color: var(
+    --clay-text-disabled
+  );
+  --clay-ds-text-input-default-input-focus-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-input-focus-border-color: var(
+    --clay-accent-primary
+  );
+  --clay-ds-text-input-default-input-focus-outline-color: var(
+    --clay-focus-ring
+  );
+  --clay-ds-text-input-default-input-focus-outline-offset: 2px;
+  --clay-ds-text-input-default-input-focus-outline-style: none;
+  --clay-ds-text-input-default-input-focus-outline-width: 2px;
+  --clay-ds-text-input-default-input-focus-shadow: 0px 0px 0px 3px
+    color-mix(in srgb, var(--clay-accent-primary) 15%, transparent);
+  --clay-ds-text-input-default-input-focus-text-color: var(--clay-text-primary);
+  --clay-ds-text-input-default-input-hover-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-input-hover-border-color: var(
+    --clay-border-subtle
+  );
+  --clay-ds-text-input-default-input-hover-text-color: var(--clay-text-primary);
+  --clay-ds-text-input-default-input-hover-transition-duration: 150ms;
+  --clay-ds-text-input-default-input-hover-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-text-input-default-input-invalid-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-input-invalid-border-color: var(
+    --clay-diagnostic-error
+  );
+  --clay-ds-text-input-default-input-rest-background-color: var(
+    --clay-surface-control
+  );
+  --clay-ds-text-input-default-input-rest-border-color: var(
+    --clay-border-hairline
+  );
+  --clay-ds-text-input-default-input-rest-border-radius: 8px;
+  --clay-ds-text-input-default-input-rest-border-style: solid;
+  --clay-ds-text-input-default-input-rest-border-width: 1px;
+  --clay-ds-text-input-default-input-rest-padding: var(--clay-spacing-xs);
+  --clay-ds-text-input-default-input-rest-text-color: var(--clay-text-primary);
+  --clay-ds-text-input-default-input-rest-transition-duration: 150ms;
+  --clay-ds-text-input-default-input-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
+  );
+  --clay-ds-text-input-default-label-rest-text-color: var(--clay-text-muted);
+  --clay-ds-tooltip-default-root-rest-background-color: var(
+    --clay-surface-overlay
+  );
+  --clay-ds-tooltip-default-root-rest-border-color: var(--clay-border-hairline);
+  --clay-ds-tooltip-default-root-rest-border-radius: 8px;
+  --clay-ds-tooltip-default-root-rest-border-style: solid;
+  --clay-ds-tooltip-default-root-rest-border-width: 1px;
+  --clay-ds-tooltip-default-root-rest-padding: var(--clay-spacing-tooltip);
+  --clay-ds-tooltip-default-root-rest-shadow:
+    0px 14px 34px -14px
+      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
+    0px 1px 3px -1px
+      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+  --clay-ds-tooltip-default-root-rest-text-color: var(--clay-text-primary);
+  --clay-ds-tooltip-default-root-rest-transition-duration: 150ms;
+  --clay-ds-tooltip-default-root-rest-transition-timing: cubic-bezier(
+    0,
+    0,
+    0.2,
+    1
   );
 }

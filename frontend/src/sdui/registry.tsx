@@ -95,9 +95,15 @@ export function PackageComponent({
           {...recipeAttributes("panel", "root", node.style?.variant)}
         >
           {node.title && (
-            <ClayText id={`${node.id}-title`} variant="title" role={role(node)}>
-              {node.title}
-            </ClayText>
+            <header className={styles.panelHeader}>
+              <ClayText
+                id={`${node.id}-title`}
+                variant="title"
+                role={role(node)}
+              >
+                {node.title}
+              </ClayText>
+            </header>
           )}
           {children}
         </section>
@@ -196,7 +202,13 @@ export function PackageComponent({
     case "flex":
       return (
         <div
-          className={node.direction === "row" ? styles.row : styles.column}
+          className={
+            node.direction === "row"
+              ? styles.row
+              : node.direction === "column"
+                ? styles.column
+                : styles.flexDefault
+          }
           style={style}
           {...recipeAttributes("flex", "root")}
         >
@@ -216,7 +228,7 @@ export function PackageComponent({
     case "overlay":
       return (
         <div
-          className={styles.stack}
+          className={styles.overlayLayer}
           style={style}
           {...recipeAttributes("overlay", "root")}
         >
@@ -226,7 +238,7 @@ export function PackageComponent({
     case "portal":
       return (
         <div
-          className={styles.stack}
+          className={styles.portalLayer}
           style={style}
           {...recipeAttributes("portal", "root")}
         >
@@ -320,11 +332,7 @@ function PackageTabList({ node, uiVersion, send }: RegistryProps) {
       ),
       disabled: item.disabled,
       content: panel ? (
-        <PackageComponent
-          node={panel}
-          uiVersion={uiVersion}
-          send={send}
-        />
+        <PackageComponent node={panel} uiVersion={uiVersion} send={send} />
       ) : undefined,
     };
   });

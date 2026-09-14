@@ -8561,7 +8561,7 @@ fn clay_module_loader_denies_unallowlisted_first_party_url() {
     let loader = loader_with_allowlist(&[], None);
     for url in [
         "clay://packages/@clay/markdown/dist/load.js",
-        "clay://packages/@clay/chat/dist/load.js",
+        "clay://packages/@clay/coding-agent/dist/load.js",
         "clay://packages/@clay/evil/x.js",
         "clay://packages/anything",
     ] {
@@ -8943,32 +8943,30 @@ async fn settings_package_registers_catalog_only_panel() {
 }
 
 #[test]
-fn first_party_example_loads_chat_with_one_uncommented_line() {
+fn first_party_example_loads_coding_agent_with_one_uncommented_line() {
     let source = fs::read_to_string("examples/config/packages/first-party.js").unwrap();
     assert!(
-        source.contains(r#"await loadPackage("@clay/chat");"#),
-        "canonical first-party module must opt into Chat with one uncommented load"
+        source.contains(r#"await loadPackage("@clay/coding-agent");"#),
+        "canonical first-party module must opt into the agent with one uncommented load"
     );
     for line in source.lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with("//") {
             continue;
         }
-        if trimmed.contains(r#"loadPackage("@clay/chat")"#) {
+        if trimmed.contains(r#"loadPackage("@clay/coding-agent")"#) {
             return;
         }
     }
-    panic!("@clay/chat load must not be comment-only");
+    panic!("@clay/coding-agent load must not be comment-only");
 }
 
 #[test]
-fn chat_load_entry_is_execute_only() {
-    let load = fs::read_to_string("packages/chat/dist/load.js").unwrap();
+fn coding_agent_load_entry_is_execute_only() {
+    let load = fs::read_to_string("packages/coding-agent/dist/load.js").unwrap();
     assert!(!load.contains("Deno.core"));
-    assert!(!load.contains("clay:agent"));
-    assert!(!load.contains("serverRegisterCommand"));
     assert!(
-        load.contains("export default loadChatPackage"),
+        load.contains("export default loadCodingAgentPackage"),
         "loadPackage must invoke the package-owned default export"
     );
 }
@@ -9022,15 +9020,15 @@ fn coding_agent_load_entry_registers_profile_without_hardcoded_skills() {
 }
 
 #[tokio::test]
-async fn third_party_cannot_import_trusted_chat_modules() {
+async fn third_party_cannot_import_trusted_package_modules() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
     let service = ClayJsRuntimeService::default();
     let error = service
         .evaluate_third_party_module(
-            r#"import { loadChatPackage } from "clay://packages/@clay/chat/dist/load.js";"#,
+            r#"import { loadCodingAgentPackage } from "clay://packages/@clay/coding-agent/dist/load.js";"#,
         )
         .await
-        .expect_err("third-party runtime must not import trusted chat modules");
+        .expect_err("third-party runtime must not import trusted package modules");
     assert!(
         error.to_string().contains("runtime.invalid_import")
             || error.to_string().contains("denied"),
@@ -9038,114 +9036,74 @@ async fn third_party_cannot_import_trusted_chat_modules() {
     );
 }
 
+/// Plan 118 Part D: the launcher owns the window's landing, the coding agent
+/// keeps its named `pane` surface, and neither competes for the other's slot.
 #[tokio::test]
-async fn chat_package_registers_profile_and_empty_tab_entry() {
-    let root = config_fixture("chat-package-e2e");
+async fn launcher_claims_the_empty_tab_landing_and_the_agent_keeps_its_pane() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let root = config_fixture("launcher-empty-tab-landing");
     fs::write(
         root.join("init.js"),
         r#"
         import { loadPackage } from "clay:packages";
-        await loadPackage("@clay/chat");
+        await loadPackage("@clay/launcher");
+        await loadPackage("@clay/coding-agent");
         "#,
     )
     .unwrap();
-    let service = ClayJsRuntimeService::default();
-    let result = service
+    let result = ClayJsRuntimeService::default()
         .load_configuration_from_root(root)
         .await
-        .expect("@clay/chat must load");
-    let entry = result
+        .expect("both first-party packages load");
+    // Resolved exactly as the wire snapshot resolves it: bundled packages are
+    // trusted, so the host renders the compiled launcher panel for it.
+    let wire = result
         .ui_contributions
-        .empty_tab()
-        .expect("one empty-tab winner")
-        .expect("chat.entry must register");
-    assert_eq!(entry.id, "chat.entry");
-    assert_eq!(entry.package_name, "@clay/chat");
-    let contribution = result
-        .ui_contributions
-        .pane_contents
-        .iter()
-        .find(|content| content.id == "chat.entry")
-        .expect("chat.entry contribution");
-    assert!(
-        contribution
-            .action_targets
+        .wire_snapshot(1, |_| crate::protocol::PackageUiTrustDomain::Trusted)
+        .expect("no election conflict");
+    let winner = wire.empty_tab.expect("the launcher claims the empty tab");
+    assert_eq!(winner.id, "launcher.start");
+    assert_eq!(winner.package_name, "@clay/launcher");
+    assert_eq!(
+        winner.provenance.trust_domain,
+        crate::protocol::PackageUiTrustDomain::Trusted
+    );
+    // The landing carries only the inert folder-dialog action.
+    assert_eq!(
+        winner.action_targets,
+        vec!["workspace.clientOpenFolderDialog".to_string()]
+    );
+
+    assert_eq!(
+        wire.surfaces
             .iter()
-            .any(|id| id == "chat.submit")
+            .map(|surface| surface.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["coding-agent.surface"],
+        "the agent keeps exactly its named pane surface"
     );
     assert!(
-        contribution
-            .action_targets
+        result
+            .ui_contributions
+            .pane_contents
             .iter()
-            .any(|id| id == "agent.clientOpenModelPicker")
-    );
-    assert!(
-        contribution
-            .action_targets
-            .iter()
-            .any(|id| id == "chat.cancel")
-    );
-    assert!(
-        contribution
-            .action_targets
-            .iter()
-            .any(|id| id == "documents.clientOpenFileDialog")
-    );
-    assert!(
-        contribution
-            .action_targets
-            .iter()
-            .any(|id| id == "workspace.clientOpenFolderDialog")
-    );
-    let mut kinds: Vec<&str> = Vec::new();
-    collect_kinds(&contribution.component_tree, &mut kinds);
-    assert!(kinds.contains(&"panel"));
-    assert!(kinds.contains(&"label"));
-    assert!(kinds.contains(&"button"));
-    assert!(kinds.contains(&"textInput"));
-    assert!(
-        contribution
-            .component_tree
-            .children
-            .iter()
-            .any(|child| { child.text.as_deref() == Some("What do you want to do today?") }),
-        "greeting copy lives in the package tree"
-    );
-    assert!(
-        contribution.component_tree.children.iter().any(|child| {
-            child
-                .text
-                .as_deref()
-                .is_some_and(|text| text.contains("Configure a provider"))
-        }),
-        "unconfigured provider is instructional"
-    );
-    assert!(
-        contribution
-            .component_tree
-            .children
-            .iter()
-            .any(|child| { child.kind == "textInput" && child.id == "chat.composer" }),
-        "composer is present"
-    );
-    let (trusted, third_party) = service.command_registry_snapshots();
-    assert!(
-        trusted
-            .iter()
-            .any(|command| command.command_id == "chat.profile" && command.display_name == "Chat"),
-        "one-line load must register the Chat profile command"
-    );
-    assert!(
-        third_party
-            .iter()
-            .all(|command| !command.command_id.starts_with("chat.")),
-        "@clay/chat stays in the trusted domain"
+            .filter(|entry| entry.activation == "empty-tab")
+            .all(|entry| entry.id == "launcher.start"),
+        "the agent never competes for the empty tab"
     );
 }
 
 #[tokio::test]
-async fn chat_package_absent_restores_core_empty_tab_fallback() {
-    let root = config_fixture("chat-package-unloaded");
+async fn chat_package_removal_leaves_the_core_empty_tab_fallback() {
+    // Plan 118: `@clay/chat` is deleted from the bundled inventory and its
+    // load line is gone from the canonical first-party module, so the shipped
+    // configuration contributes no empty-tab landing at all: the empty tab
+    // renders the core Open File / Open Folder fallback (and the launcher
+    // package takes the landing in a later plan 118 task). Loading the retired
+    // specifier now fails as an unknown package instead of silently installing
+    // a landing.
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let root = config_fixture("chat-package-removed");
     fs::write(root.join("init.js"), "// no packages\n").unwrap();
     let service = ClayJsRuntimeService::default();
     let result = service
@@ -9155,14 +9113,33 @@ async fn chat_package_absent_restores_core_empty_tab_fallback() {
     assert_eq!(
         result.ui_contributions.empty_tab().expect("no conflict"),
         None,
-        "no chat contribution → core Welcome fallback"
+        "no package contribution → core empty-tab fallback"
     );
     let (trusted, _) = service.command_registry_snapshots();
     assert!(
         trusted
             .iter()
-            .all(|command| command.command_id != "chat.profile"),
-        "no loadPackage → no Chat profile"
+            .all(|command| !command.command_id.starts_with("chat.")),
+        "no loadPackage → no chat commands"
+    );
+
+    let root = config_fixture("chat-package-retired-specifier");
+    fs::write(
+        root.join("init.js"),
+        r#"
+        import { loadPackage } from "clay:packages";
+        await loadPackage("@clay/chat");
+        "#,
+    )
+    .unwrap();
+    let service = ClayJsRuntimeService::default();
+    let error = service
+        .load_configuration_from_root(root)
+        .await
+        .expect_err("a retired bundled specifier must not load");
+    assert!(
+        format!("{error:?}").contains("chat"),
+        "the failure names the requested specifier: {error:?}"
     );
 }
 
@@ -10507,6 +10484,55 @@ async fn persisted_preferences_design_system_applied() {
 }
 
 #[tokio::test]
+async fn persisted_removed_design_system_preference_falls_back_with_a_bounded_diagnostic() {
+    // Plan 118 task 20: an upgrade can leave a persisted preference naming a
+    // design system this generation removed. That is a rename the user did not
+    // cause, so startup must keep loading: nothing is installed partially, the
+    // previous/default state stays active, and one bounded diagnostic names both
+    // the rejected specifier and what stays active. The specifier is assembled so
+    // the plan-118 absence guard sees no literal of a removed package name.
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let removed = format!("@clay/design-{}", "neobrutal");
+    let root = config_fixture("persisted-removed-design-system-pref");
+    fs::write(root.join("init.js"), "// no explicit setDesignSystem\n").unwrap();
+    fs::write(
+        root.join("preferences.json"),
+        serde_json::json!({ "designSystem": removed }).to_string(),
+    )
+    .unwrap();
+
+    let result = ClayJsRuntimeService::default()
+        .load_configuration_from_root(root)
+        .await
+        .expect("a removed design-system preference must not fail the generation");
+
+    assert!(
+        result.active_design_system.is_none(),
+        "a rejected preference installs nothing"
+    );
+    let design_system_records = result
+        .op_records
+        .iter()
+        .filter(|record| record.contains("designSystem"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        design_system_records.len(),
+        1,
+        "exactly one bounded diagnostic: {:?}",
+        result.op_records
+    );
+    let diagnostic = design_system_records[0];
+    assert!(
+        diagnostic.contains(&removed),
+        "diagnostic names the rejected specifier: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("rejected") && diagnostic.contains("kept `@clay/core`"),
+        "diagnostic names the active system: {diagnostic}"
+    );
+}
+
+#[tokio::test]
 async fn agent_facade_fails_closed_without_an_attached_host() {
     // No AgentHostHandle::install_global() call in this test process section:
     // the facade must fail closed with a typed error, not hang or leak authority.
@@ -10640,7 +10666,7 @@ await loadPackage("@clay/coding-agent");
     // The named pane surface (activation "pane") registers in the UI
     // registry immediately (a process-local op, no daemon): the wire snapshot
     // carries it as a named pane surface, never as the empty-tab landing
-    // (which stays @clay/chat).
+    // (the launcher package owns that in a later plan 118 task).
     let wire = service
         .test_op_state()
         .ui_contributions()
@@ -10659,7 +10685,7 @@ await loadPackage("@clay/coding-agent");
     );
     assert!(
         wire.empty_tab.is_none(),
-        "empty-tab landing stays @clay/chat"
+        "the agent package never claims the empty-tab landing"
     );
 }
 
@@ -10704,7 +10730,7 @@ await loadPackage("@clay/coding-agent");
 }
 
 /// Without the load line the package contributes nothing: no command, no
-/// residue (Chat fallback stays untouched).
+/// residue (another package's contributions stay untouched).
 #[tokio::test]
 async fn coding_agent_absent_load_line_leaves_no_residue() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
@@ -10714,7 +10740,7 @@ async fn coding_agent_absent_load_line_leaves_no_residue() {
         root.join("init.js"),
         r#"
 import { loadPackage } from "clay:packages";
-await loadPackage("@clay/chat");
+await loadPackage("@clay/markdown");
 "#,
     )
     .unwrap();
@@ -10723,7 +10749,7 @@ await loadPackage("@clay/chat");
     service
         .load_configuration_from_root(root)
         .await
-        .expect("chat-only init.js must load");
+        .expect("markdown-only init.js must load");
 
     let commands = service.test_op_state().command_registry_snapshot();
     assert!(

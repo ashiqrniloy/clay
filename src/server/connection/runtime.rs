@@ -112,19 +112,6 @@ pub(super) async fn execute_command_intent(
         });
     }
 
-    if crate::server::command_execution::is_chat_command(&request.command_id) {
-        return match executor.execute_chat(request) {
-            Ok(_) => None,
-            Err(error) => Some(ServerMessage::Error {
-                code: ProtocolErrorCode::InvalidMessage,
-                message: format!(
-                    "command execution rejected: {:?}: {}",
-                    error.rule, error.message
-                ),
-            }),
-        };
-    }
-
     // Phase 2 (plan 108 task 8): Coding Agent surface launch/close. The
     // intent is user-authorized (Command Centre catalogue entry or a declared
     // package action target); the toggle itself is client-local, so the
@@ -359,10 +346,13 @@ fn intent_thinking_level(intent: &SduiActionIntent) -> Option<String> {
         })
 }
 
-/// Host-owned agent controls have no static SDUI node: their host-rendered
-/// composer is authorized by the active tab session below.
+/// Host-owned agent controls: the agent surface's composer is rendered by the
+/// host, not by a package-declared SDUI node, so its submit/cancel/steer
+/// intents are authorized by the active tab session below. Plan 118: the ids
+/// carry agent naming (they were `chat.*` while the chat landing owned the
+/// composer); the transport is their single owner.
 fn is_agent_run_action(command_id: &str) -> bool {
-    matches!(command_id, "chat.submit" | "chat.cancel" | "chat.steer")
+    matches!(command_id, "agent.submit" | "agent.cancel" | "agent.steer")
 }
 
 pub(super) fn sdui_command_request(intent: &SduiActionIntent) -> CommandExecutionRequest {
@@ -713,9 +703,9 @@ where
     if is_agent_run_action(&intent.command_id) {
         if let Some(host) = reload_server.map(|server| &server.agent) {
             let tab = bound_tab_id.unwrap_or(client_id);
-            let message = if intent.command_id == "chat.cancel" {
+            let message = if intent.command_id == "agent.cancel" {
                 host.cancel_tab(tab).await
-            } else if intent.command_id == "chat.steer" {
+            } else if intent.command_id == "agent.steer" {
                 host.steer_tab(tab, &intent_text(&intent)).await
             } else {
                 host.begin_prompt_with_effort(
@@ -916,15 +906,6 @@ where
                 stream,
                 &ServerMessage::ShellClientCommandRequest { command_id },
             )
-            .await?;
-        return Ok(());
-    }
-    if command_id == "chat.cancel"
-        && let Some(host) = reload_server.map(|server| &server.agent)
-    {
-        let message = host.cancel_tab(bound_tab_id.unwrap_or(client_id)).await;
-        codec
-            .write_server_message(stream, &ServerMessage::Agent(Box::new(message)))
             .await?;
         return Ok(());
     }
@@ -1255,37 +1236,41 @@ mod tests {
 
     #[test]
     fn host_agent_actions_do_not_require_a_static_sdui_node() {
-        assert!(is_agent_run_action("chat.submit"));
-        assert!(is_agent_run_action("chat.cancel"));
-        assert!(is_agent_run_action("chat.steer"));
+        assert!(is_agent_run_action("agent.submit"));
+        assert!(is_agent_run_action("agent.cancel"));
+        assert!(is_agent_run_action("agent.steer"));
         assert!(!is_agent_run_action("shell.run"));
+        // Plan 118: the retired chat ids are not an authorization path.
+        assert!(!is_agent_run_action("chat.submit"));
+        assert!(!is_agent_run_action("chat.cancel"));
+        assert!(!is_agent_run_action("chat.steer"));
     }
 
     #[test]
-    fn chat_submit_webview_payload_deserializes_with_prompt_text() {
+    fn agent_submit_webview_payload_deserializes_with_prompt_text() {
         let json = r#"{
             "family":"sduiAction",
             "payload":{
                 "clientId":0,
                 "uiVersion":4,
                 "intent":{
-                    "commandId":"chat.submit",
+                    "commandId":"agent.submit",
                     "source":{"button":{"nodeId":1}},
                     "arguments":[{"name":"value","value":{"string":"hello"}}]
                 }
             }
         }"#;
         let message: crate::protocol::ClientMessage =
-            serde_json::from_str(json).expect("webview chat.submit payload");
+            serde_json::from_str(json).expect("webview agent.submit payload");
         let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
             panic!("expected sduiAction");
         };
-        assert_eq!(intent.command_id, "chat.submit");
+        assert_eq!(intent.command_id, "agent.submit");
         assert_eq!(intent_text(&intent), "hello");
     }
 
     #[test]
-    fn chat_submit_intent_carries_optional_thinking_level() {
+    fn agent_submit_intent_carries_optional_thinking_level() {
         // Plan 109 I4: the prompt's portable thinking level rides the
         // intent as a second named argument; absent keeps the current
         // effort, non-string arguments are ignored (the daemon fail-closes
@@ -1296,7 +1281,7 @@ mod tests {
                 "clientId":0,
                 "uiVersion":4,
                 "intent":{
-                    "commandId":"chat.submit",
+                    "commandId":"agent.submit",
                     "source":{"button":{"nodeId":1}},
                     "arguments":[
                         {"name":"value","value":{"string":"hello"}},
@@ -1306,7 +1291,7 @@ mod tests {
             }
         }"#;
         let message: crate::protocol::ClientMessage =
-            serde_json::from_str(with_level).expect("webview chat.submit payload");
+            serde_json::from_str(with_level).expect("webview agent.submit payload");
         let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
             panic!("expected sduiAction");
         };
@@ -1319,14 +1304,14 @@ mod tests {
                 "clientId":0,
                 "uiVersion":4,
                 "intent":{
-                    "commandId":"chat.submit",
+                    "commandId":"agent.submit",
                     "source":{"button":{"nodeId":1}},
                     "arguments":[{"name":"value","value":{"string":"hello"}}]
                 }
             }
         }"#;
         let message: crate::protocol::ClientMessage =
-            serde_json::from_str(without_level).expect("webview chat.submit payload");
+            serde_json::from_str(without_level).expect("webview agent.submit payload");
         let crate::protocol::ClientMessage::SduiAction { intent, .. } = message else {
             panic!("expected sduiAction");
         };

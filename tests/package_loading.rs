@@ -2886,13 +2886,14 @@ fn third_party_replacement_withdraws_trusted_target_atomically() {
 }
 
 #[test]
-fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
+fn third_party_replacement_withdraws_the_coding_agent_and_stays_untrusted() {
     let manifest: Value = serde_json::from_str(
-        &std::fs::read_to_string("packages/chat/package.json").expect("read chat manifest"),
+        &std::fs::read_to_string("packages/coding-agent/package.json")
+            .expect("read coding-agent manifest"),
     )
-    .expect("chat manifest parses");
-    let record = assemble_package_record(&manifest).expect("@clay/chat record assembles");
-    assert_eq!(record.manifest.name, "@clay/chat");
+    .expect("coding-agent manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/coding-agent record assembles");
+    assert_eq!(record.manifest.name, "@clay/coding-agent");
     assert_eq!(
         record.manifest.clay.permissions,
         vec![PackagePermission::CommandRegistration]
@@ -2902,8 +2903,9 @@ fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
             .contributions
             .commands
             .iter()
-            .any(|command| command.id == "chat.profile" && command.display_name == "Chat"),
-        "Chat profile is a package command, not a core stub"
+            .any(|command| command.id == "coding-agent.profile"
+                && command.display_name == "Coding Agent"),
+        "the agent profile is a package command, not a core stub"
     );
     assert!(
         record
@@ -2911,33 +2913,33 @@ fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
             .clay
             .extension_points
             .iter()
-            .any(|point| point.id == "chat.entrySurface")
+            .any(|point| point.id == "coding-agent.chromeActions")
     );
 
     let mut service = PackageService::new(
-        "/tmp/clay-chat-replacement-store",
+        "/tmp/clay-coding-agent-replacement-store",
         Box::new(FakeBackend::new()),
     );
     service
-        .install_from_value_at_root(manifest, "packages/chat".into())
+        .install_from_value_at_root(manifest, "packages/coding-agent".into())
         .unwrap();
     service
-        .authorize_bundled_defaults("@clay/chat", "clay-bundled-default")
+        .authorize_bundled_defaults("@clay/coding-agent", "clay-bundled-default")
         .unwrap();
-    service.enable("@clay/chat").unwrap();
+    service.enable("@clay/coding-agent").unwrap();
 
     let replacement = serde_json::json!({
-        "name": "@vendor/chat-repl",
+        "name": "@vendor/agent-repl",
         "version": "1.0.0",
         "type": "module",
         "clay": {
-            "apiPrefix": "vchat",
+            "apiPrefix": "vagent",
             "entry": "./dist/index.js",
             "loadEntry": "./dist/load.js",
             "capabilities": [],
             "permissions": ["command-registration"],
-            "modes": ["vchat"],
-            "replaces": ["@clay/chat"],
+            "modes": ["vagent"],
+            "replaces": ["@clay/coding-agent"],
             "docs": "./docs/index.md"
         }
     });
@@ -2947,7 +2949,7 @@ fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
     let repl_record = assemble_package_record(&replacement).unwrap();
     service
         .authorize_package(
-            "@vendor/chat-repl",
+            "@vendor/agent-repl",
             [
                 repl_record.manifest.clay.permissions.clone(),
                 vec![PackagePermission::PackageControl],
@@ -2958,29 +2960,29 @@ fn third_party_replacement_withdraws_chat_and_stays_untrusted() {
         )
         .unwrap();
     service
-        .approve_package("@vendor/chat-repl", "test")
+        .approve_package("@vendor/agent-repl", "test")
         .unwrap();
     service
-        .enable("@vendor/chat-repl")
-        .expect("approved replacement enables over @clay/chat");
+        .enable("@vendor/agent-repl")
+        .expect("approved replacement enables over @clay/coding-agent");
 
     assert!(
-        !service.inspect("@clay/chat").unwrap().is_enabled,
-        "@clay/chat withdraws atomically"
+        !service.inspect("@clay/coding-agent").unwrap().is_enabled,
+        "@clay/coding-agent withdraws atomically"
     );
     let winner = service
         .enabled_records()
-        .find(|record| record.manifest.name == "@vendor/chat-repl")
+        .find(|record| record.manifest.name == "@vendor/agent-repl")
         .expect("replacement enabled record");
     assert!(
         format!("{winner:?}").contains("ThirdParty"),
         "replacement must not enter the trusted runtime"
     );
 
-    let rolled_back = service.rollback_replacement("@clay/chat").unwrap();
-    assert_eq!(rolled_back, "@vendor/chat-repl");
-    assert!(service.inspect("@clay/chat").unwrap().is_enabled);
-    assert!(!service.inspect("@vendor/chat-repl").unwrap().is_enabled);
+    let rolled_back = service.rollback_replacement("@clay/coding-agent").unwrap();
+    assert_eq!(rolled_back, "@vendor/agent-repl");
+    assert!(service.inspect("@clay/coding-agent").unwrap().is_enabled);
+    assert!(!service.inspect("@vendor/agent-repl").unwrap().is_enabled);
 }
 
 /// Plan 061 task 12: a replacement never inherits the replaced target's
@@ -3292,9 +3294,10 @@ fn coding_agent_bundled_manifest_assembles_without_claiming_the_empty_tab() {
             .any(|command| command.id == "coding-agent.profile"),
         "chrome identity command is a package command"
     );
-    // The empty-tab winner stays @clay/chat: the agent claims a `pane`
-    // surface (declared in the raw manifest; runtime-registered by the load
-    // entry — not an assembled-record field), not the empty-tab landing.
+    // The agent claims a `pane` surface (declared in the raw manifest;
+    // runtime-registered by the load entry — not an assembled-record field),
+    // never the empty-tab landing (the launcher package owns that in a later
+    // plan 118 task).
     let pane_contents = clay
         .get("contributions")
         .and_then(|contributions| contributions.get("ui"))
@@ -3308,4 +3311,54 @@ fn coding_agent_bundled_manifest_assembles_without_claiming_the_empty_tab() {
         record.contributions.ui_components.is_empty() && record.contributions.ui_panels.is_empty(),
         "coding-agent must not claim an empty-tab pane"
     );
+}
+
+#[test]
+fn launcher_bundled_manifest_claims_the_empty_tab() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/launcher/package.json").expect("read launcher manifest"),
+    )
+    .expect("launcher manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/launcher record assembles");
+    assert_eq!(record.manifest.name, "@clay/launcher");
+    assert_eq!(record.manifest.clay.api_prefix, "launcher");
+    // The landing needs no permission: the pane-content registration API
+    // requires none, and the launcher only opens the folder dialog.
+    assert!(
+        record.manifest.clay.permissions.is_empty(),
+        "the launcher claims no authority"
+    );
+    let clay = manifest.get("clay").expect("clay metadata");
+    assert_eq!(
+        clay.get("apiDependencies")
+            .and_then(Value::as_array)
+            .expect("apiDependencies array")
+            .iter()
+            .map(|id| id.as_str().expect("string id"))
+            .collect::<Vec<_>>(),
+        vec!["ui.serverRegisterPaneContentContribution"]
+    );
+    let pane_contents = clay
+        .get("contributions")
+        .and_then(|contributions| contributions.get("ui"))
+        .and_then(|ui| ui.get("paneContents"))
+        .and_then(Value::as_array)
+        .expect("paneContents array");
+    assert_eq!(pane_contents.len(), 1, "one landing declaration");
+    assert_eq!(pane_contents[0]["id"], "launcher.start");
+    assert_eq!(
+        pane_contents[0]["activation"], "empty-tab",
+        "the launcher is the window's landing"
+    );
+    assert_eq!(
+        pane_contents[0]["actionTargets"],
+        Value::Array(vec![Value::String(
+            "workspace.clientOpenFolderDialog".to_string()
+        )]),
+        "the landing's only action is the host folder dialog"
+    );
+    // The declared tree is inert fallback for the generic SDUI renderer: no
+    // dynamic rows, no package-provided path data.
+    assert_eq!(pane_contents[0]["component"]["kind"], "panel");
+    assert_eq!(pane_contents[0]["component"]["id"], "launcher.root");
 }

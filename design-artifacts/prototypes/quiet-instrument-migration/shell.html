@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Shell (migration prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+/* the shell page: window chrome with a two-pane working area */
+.shell-split { min-height: 0; display: grid; grid-template-columns: 262px 11px minmax(0, 1fr); }
+.shell-side { width: 262px; flex: none; border-right: 1px solid var(--hairline); display: flex; flex-direction: column; min-height: 0; }
+.shell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.welcome { flex: 1; min-height: 0; }
+.welcome-keys { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.welcome-key { display: flex; align-items: center; gap: 8px; color: var(--c-text-3); font: 400 var(--fs-xs) / 1.5 var(--font-ui); }
+.welcome-key kbd { flex: none; }
+.shell-tabbar { display: flex; align-items: stretch; gap: 2px; padding: 0 4px; margin-left: 10px; min-width: 0; overflow: hidden; }
+.shell-tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; padding: 0 10px; white-space: nowrap;
+  border-radius: var(--r-sm) var(--r-sm) 0 0; color: var(--c-text-3); font-size: var(--fs-sm); transition: background var(--t-fast), color var(--t-fast); }
+.shell-tab:hover { background: var(--c-hover); color: var(--c-text-2); }
+.shell-tab[data-active='true'] { background: var(--c-accent-soft); color: var(--c-accent); }
+.shell-tab .dot { width: 6px; height: 6px; }
+.shell-tab--add { color: var(--c-text-3); }
+.shell-tab--add:hover { color: var(--c-text); }
+.shell-tab, .shell-tab > span { white-space: nowrap; }
+.shell-tabbar { overflow-x: auto; scrollbar-width: none; }
+.shell-tabbar::-webkit-scrollbar { display: none; }
+.shell-tab-close { display: inline-flex; opacity: 0; transition: opacity var(--t-fast); }
+.shell-tab:hover .shell-tab-close, .shell-tab[data-active='true'] .shell-tab-close { opacity: 1; }
+</style>
+</head>
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Quiet Instrument — Shell</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">migration prototype</span>
+  </span>
+  <nav class="proto-nav" data-nav aria-label="Prototype pages"><a class="proto-link" href="start.html">Start</a><a class="proto-link" href="shell.html">Shell</a><a class="proto-link" href="workspace.html">Workspace</a><a class="proto-link" href="agent-landing.html">Agent</a><a class="proto-link" href="settings.html">Settings</a><a class="proto-link" href="agent-settings.html">Agent files</a><a class="proto-link" href="command-centre.html">Command centre</a><a class="proto-link" href="package-workspace.html">Packages</a><a class="proto-link" href="overlays.html">Overlays</a><a class="proto-link" href="themes.html">Theme values</a></nav>
+  <span class="proto-note">The window: one tab per workspace, each tab holding two views (Workspace | Agent), and a blank pane that says which tab it belongs to. New tabs open on the launcher.</span>
+  <div class="proto-actions">
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    
+    <span class="seg" role="radiogroup" aria-label="Row density">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="comfortable">comfortable</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="compact">compact</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+<div class="proto-stage">
+  <div class="proto-frame">
+
+<div class="win" role="application" aria-label="Clay" data-clay-ds="shell.default.root.rest">
+  <header class="titlebar" data-clay-ds="shell.default.header.rest">
+    <span class="tb-brand" data-clay-ds="shell.default.brand.rest">Clay</span>
+  <div class="shell-tabbar tabbar" role="tablist" aria-label="Workspace tabs" data-clay-ds="tabBar.default.root.rest">
+    <button class="shell-tab tab" type="button" role="tab" aria-selected="true" data-active="true" title="/home/arn/Projects/clay — one tab, two views" data-clay-ds="tab.default.item.rest">
+      <span>clay</span>
+      <span class="tab-agent">agent</span>
+      <span class="dot dot--busy" aria-hidden="true"></span>
+      <span class="shell-tab-close" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+    </button>
+    <button class="shell-tab tab" type="button" role="tab" aria-selected="false" title="/home/arn/Projects/prism" data-clay-ds="tab.default.item.rest">
+      <span>prism</span>
+      <span class="shell-tab-close" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+    </button>
+    <button class="shell-tab tab" type="button" role="tab" aria-selected="false" title="/home/arn/Projects/synapta-core" data-clay-ds="tab.default.item.rest">
+      <span>synapta-core</span>
+      <span class="shell-tab-close" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></span>
+    </button>
+    <a class="shell-tab tab shell-tab--add" href="start.html" title="New tab — the launcher (⌘T)" aria-label="New tab" data-clay-ds="tab.default.item.rest"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></a>
+  </div>
+  <span class="seg viewswitch" role="tablist" aria-label="Tab view" data-viewswitch="workspace">
+    <a class="seg-item" role="tab" aria-selected="true" data-active="true" href="workspace.html" title="Workspace view — the editor (⌘1)">Workspace</a>
+    <a class="seg-item" role="tab" href="agent-landing.html" title="Agent view — the agent (⌘2)">Agent</a>
+  </span>
+    <nav class="tb-actions" aria-label="Application controls" style="margin-left:auto">
+      <button class="tb-btn" type="button" data-open="palette" title="Command palette" data-clay-ds="button.muted.root.rest">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+        <kbd class="kbd kbd--sm" data-kbd="mod+k" data-clay-ds="kbd.default.root.rest"></kbd>
+      </button>
+      <button class="tb-btn" type="button" data-open="shortcuts" title="Keyboard map" data-clay-ds="button.muted.root.rest"><kbd class="kbd kbd--sm" data-clay-ds="kbd.default.root.rest">?</kbd></button>
+      <button class="tb-btn" type="button" data-toggle="inspector" aria-expanded="false" title="Toggle inspector" data-clay-ds="button.muted.root.rest">
+        <span>Inspector</span>
+      </button>
+      <div class="win-btns">
+        <button class="win-btn" type="button" title="Minimise window" aria-label="Minimise window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <button class="win-btn" type="button" title="Maximise window" aria-label="Maximise window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg></button>
+        <button class="win-btn win-btn--close" type="button" title="Close window" aria-label="Close window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+    </nav>
+  </header>
+
+  <div class="app shell-split" data-app data-sidebar="expanded" data-inspector="collapsed" data-clay-ds="shell.default.workingArea.rest">
+    <div class="split-pane shell-side" data-clay-ds="paneSplitTree.default.pane.rest">
+      <aside class="side" data-focus-zone=".side" aria-label="Workspace files" style="border:0">
+        <div class="side-head">
+          <h2 class="side-title">Workspace</h2>
+          <p class="side-kicker">clay · redesign/uiux</p>
+        </div>
+        <div class="side-tools">
+          <label class="field" data-clay-ds="textInput.default.field.rest">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+            <input type="search" data-filter-for="files" placeholder="Filter files" aria-label="Filter files" autocomplete="off" spellcheck="false">
+            <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">/</kbd>
+          </label>
+        </div>
+        <div class="side-body">
+          <nav class="tree" data-tree="files" id="shell-tree" role="tree" aria-label="Workspace file tree"></nav>
+        </div>
+        <div class="side-foot">
+          <span class="t-caption" data-file-count data-clay-ds="label.caption.root.rest">0 files</span>
+        </div>
+      </aside>
+    </div>
+
+    <button class="split-handle" type="button" aria-label="Resize panes" data-focus-zone=".shell-main" data-clay-ds="paneSplitTree.default.handle.rest"></button>
+
+    <div class="split-pane shell-main" data-focus-zone=".shell-main" tabindex="-1" data-clay-ds="paneSplitTree.default.pane.rest">
+      <div class="welcome empty">
+        <p class="empty-title">No document open</p>
+        <p class="empty-text">Nothing open in <strong>clay</strong> yet. This tab is bound to the folder, whatever it shows: the editor here, the agent on <kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+2" data-clay-ds="kbd.default.root.rest"></kbd>. A new tab starts on the launcher.</p>
+        <div class="empty-keys welcome-keys">
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+o" data-clay-ds="kbd.default.root.rest"></kbd> open a path</span>
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+k" data-clay-ds="kbd.default.root.rest"></kbd> command palette</span>
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+1" data-clay-ds="kbd.default.root.rest"></kbd> <kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+2" data-clay-ds="kbd.default.root.rest"></kbd> switch this tab's view</span>
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+t" data-clay-ds="kbd.default.root.rest"></kbd> new tab (the launcher)</span>
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+b" data-clay-ds="kbd.default.root.rest"></kbd> toggle the file list</span>
+          <span class="welcome-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd="alt+1" data-clay-ds="kbd.default.root.rest"></kbd> … <kbd class="kbd kbd--sm kbd--flat" data-kbd="alt+4" data-clay-ds="kbd.default.root.rest"></kbd> content theme</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="statusbar" data-clay-ds="statusBar.default.root.rest">
+    <span class="status-seg" data-clay-ds="statusItem.default.root.rest"><span class="dot dot--ok"></span>/workspace</span>
+    <span class="status-seg status-seg--muted" data-clay-ds="statusItem.default.root.rest">Connected</span>
+    <span class="status-seg status-seg--muted" data-shell-count data-clay-ds="statusItem.default.root.rest"></span>
+    <span class="status-hints">
+      <button class="status-key" type="button" data-open="palette"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+k" data-clay-ds="kbd.default.root.rest"></kbd> palette</button>
+      <button class="status-key" type="button"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+o" data-clay-ds="kbd.default.root.rest"></kbd> open path</button>
+      <button class="status-key" type="button"><kbd class="kbd kbd--sm kbd--flat" data-kbd="alt+grave" data-clay-ds="kbd.default.root.rest"></kbd> theme</button>
+      <button class="status-key" type="button" data-open="shortcuts"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">?</kbd> keys</button>
+    </span>
+  </footer>
+</div>
+
+  </div>
+</div>
+<script src="workspace-data.js"></script>
+
+<script src="ds.js"></script>
+<script>
+
+(function () {
+  'use strict';
+  var data = window.CLAY_WORKSPACE;
+  ClayDS.renderTree(document.getElementById('shell-tree'), data.tree, { selected: 'VENT.md', sources: data.sources });
+  var count = document.querySelector('[data-file-count]');
+  var bar = document.querySelector('[data-shell-count]');
+  if (count) count.textContent = data.files.length + ' files';
+  if (bar) bar.textContent = data.files.length + ' files · main';
+})();
+
+</script>
+</body>
+</html>

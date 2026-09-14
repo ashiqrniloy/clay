@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Packages (migration prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+/* packages: the trust domain, listed */
+.pk-shell { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); }
+.pk-list { border-right: 1px solid var(--hairline); display: flex; flex-direction: column; min-height: 0; }
+.pk-list-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 10px; }
+.pk-rows { flex: 1; min-height: 0; overflow: auto; padding: 0 6px 12px; display: flex; flex-direction: column; gap: 1px; }
+.pk-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border: 0;
+  border-radius: var(--r-sm); background: transparent; text-align: left; transition: background var(--t-fast); }
+.pk-row:hover { background: var(--c-hover); }
+.pk-name { font: 400 var(--fs-sm) / 1.4 var(--font-mono); color: var(--c-text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-ver { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.pk-detail { min-height: 0; overflow: auto; padding: 20px 22px 60px; }
+.pk-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.pk-facts { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 6px 14px; margin: 16px 0 0; align-items: baseline; }
+.pk-facts dt { font: 500 10px / 1.6 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+.pk-facts dd { margin: 0; font: 400 var(--fs-sm) / 1.5 var(--font-mono); color: var(--c-text-2); }
+.pk-contrib { display: flex; flex-wrap: wrap; gap: 6px; }
+.pk-files { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.pk-file { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: var(--r-sm); }
+</style>
+</head>
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Quiet Instrument — Packages</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">migration prototype</span>
+  </span>
+  <nav class="proto-nav" data-nav aria-label="Prototype pages"><a class="proto-link" href="start.html">Start</a><a class="proto-link" href="shell.html">Shell</a><a class="proto-link" href="workspace.html">Workspace</a><a class="proto-link" href="agent-landing.html">Agent</a><a class="proto-link" href="settings.html">Settings</a><a class="proto-link" href="agent-settings.html">Agent files</a><a class="proto-link" href="command-centre.html">Command centre</a><a class="proto-link" href="package-workspace.html">Packages</a><a class="proto-link" href="overlays.html">Overlays</a><a class="proto-link" href="themes.html">Theme values</a></nav>
+  <span class="proto-note">The trust domain as a surface: what is bundled, what is only a helper, and what happens when a fingerprint does not match.</span>
+  <div class="proto-actions">
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    
+    <span class="seg" role="radiogroup" aria-label="Row density">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="comfortable">comfortable</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="compact">compact</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+<div class="proto-stage">
+  <div class="proto-frame">
+
+<div class="app pk-shell" data-app data-clay-ds="shell.default.workingArea.rest">
+  <aside class="pk-list" data-focus-zone=".pk-list" aria-label="Packages">
+    <div class="pk-list-head">
+      <h2 class="t-section" data-clay-ds="label.section.root.rest">Packages</h2>
+      <span class="spacer"></span>
+      <span class="badge" data-clay-ds="badge.default.root.rest">20 roots · 1 helper</span>
+    </div>
+    <div class="pk-rows" role="listbox" aria-label="Package roots">
+      <button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/chat</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/coding-agent</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/design-glass</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/design-neobrutal</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/git</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/icons-phosphor-duotone</span><span class="pk-ver">2.0.8</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/icons-phosphor-regular</span><span class="pk-ver">2.0.8</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/javascript</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/lsp-javascript</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/lsp-markdown</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/lsp-rust</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/lsp-typescript</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-active="true" data-fx="selected-accent" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/markdown</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/rust</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/settings</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/theme-gruvbox-material-dark</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/theme-gruvbox-material-light</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/theme-modus-operandi</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/theme-modus-vivendi</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">@clay/typescript</span><span class="pk-ver">0.1.0</span></button><button class="pk-row row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="pk-name">lsp-shared</span><span class="pk-ver">0.1.0</span></button>
+    </div>
+  </aside>
+
+  <div class="pk-detail" data-focus-zone=".pk-detail">
+    <div class="pk-title">
+      <h1 class="t-title" data-clay-ds="label.title.root.rest">@clay/markdown</h1>
+      <span class="badge badge--accent" data-clay-ds="badge.accent.root.rest">root</span>
+      <span class="badge badge--muted" data-clay-ds="badge.muted.root.rest">0.1.0</span>
+    </div>
+    <p class="t-body" style="margin:8px 0 0" data-clay-ds="label.body.root.rest">8 contributions and 15 files shipped from this root, pinned by the bundled inventory. Nothing here is loadable until its fingerprint matches what the inventory recorded.</p>
+    <p class="t-caption" style="margin:6px 0 0" data-clay-ds="label.caption.root.rest">Every fact on this page is read from a manifest, the inventory, or the file on disk.</p>
+
+    <dl class="pk-facts">
+      <dt>Root</dt><dd>packages/markdown</dd>
+      <dt>Inventory</dt><dd>root = "markdown" (src/packages/bundled-inventory.toml)</dd>
+      <dt>Trust</dt><dd>name, version, root and manifest fingerprint must all match</dd>
+      <dt>Contributes</dt>
+      <dd class="pk-contrib"><span class="chip">commands</span><span class="chip">completionProviders</span><span class="chip">decorations</span><span class="chip">keyRouting</span><span class="chip">modePatterns</span><span class="chip">sdui</span><span class="chip">textTransforms</span><span class="chip">ui</span></dd>
+    </dl>
+
+    <div style="border-top:1px solid var(--hairline);margin:20px 0 0;padding-top:14px">
+      <span class="t-micro" data-clay-ds="label.default.root.rest">Package files</span>
+      <ul class="pk-files"><li class="pk-file"><span class="file-name">dist/index.js</span><span class="file-meta"><span class="file-size">6845 B</span></span></li><li class="pk-file"><span class="file-name">dist/load.js</span><span class="file-meta"><span class="file-size">1263 B</span></span></li><li class="pk-file"><span class="file-name">dist/parser.js</span><span class="file-meta"><span class="file-size">23980 B</span></span></li><li class="pk-file"><span class="file-name">dist/sdui.js</span><span class="file-meta"><span class="file-size">5796 B</span></span></li><li class="pk-file"><span class="file-name">docs/index.md</span><span class="file-meta"><span class="file-size">9081 B</span></span></li><li class="pk-file"><span class="file-name">grammars/PROVENANCE.md</span><span class="file-meta"><span class="file-size">654 B</span></span></li><li class="pk-file"><span class="file-name">grammars/README.md</span><span class="file-meta"><span class="file-size">381 B</span></span></li><li class="pk-file"><span class="file-name">package.json</span><span class="file-meta"><span class="file-size">2721 B</span></span></li><li class="pk-file"><span class="file-name">queries/highlights.scm</span><span class="file-meta"><span class="file-size">1644 B</span></span></li><li class="pk-file"><span class="file-name">queries/injections.scm</span><span class="file-meta"><span class="file-size">795 B</span></span></li><li class="pk-file"><span class="file-name">queries/inline-highlights.scm</span><span class="file-meta"><span class="file-size">449 B</span></span></li><li class="pk-file"><span class="file-name">src/index.js</span><span class="file-meta"><span class="file-size">34 B</span></span></li><li class="pk-file"><span class="file-name">src/load.js</span><span class="file-meta"><span class="file-size">33 B</span></span></li><li class="pk-file"><span class="file-name">src/parser.js</span><span class="file-meta"><span class="file-size">35 B</span></span></li><li class="pk-file"><span class="file-name">src/sdui.js</span><span class="file-meta"><span class="file-size">130 B</span></span></li></ul>
+    </div>
+
+    <div style="border-top:1px solid var(--hairline);margin:20px 0 0;padding-top:14px">
+      <span class="t-micro" data-clay-ds="label.default.root.rest">Not loadable</span>
+      <ul class="pk-files">
+        <li class="pk-file"><span class="file-name">lsp-shared</span><span class="file-meta"><span class="badge badge--muted" data-clay-ds="badge.muted.root.rest">helper</span></span></li>
+        <li class="pk-file"><span class="file-name">@clay/chat</span><span class="file-meta"><span class="badge badge--warning" data-clay-ds="badge.warning.root.rest">removed by plan 118</span></span></li>
+        
+      </ul>
+      <p class="t-caption" style="margin:6px 0 0" data-clay-ds="label.caption.root.rest">A directory that is not listed in the inventory is never trusted, however it got there.</p>
+    </div>
+
+    <div style="border-top:1px solid var(--hairline);margin:20px 0 0;padding-top:14px">
+      <span class="t-micro" data-clay-ds="label.default.root.rest">Failed verification</span>
+      <div class="card" data-fx="invalid-error" style="margin-top:8px;max-width:520px" data-clay-ds="card.default.root.rest">
+        <span class="t-section" data-clay-ds="label.section.root.rest">Manifest fingerprint mismatch</span>
+        <span class="t-detail" data-clay-ds="label.detail.root.rest">The package on disk is not the one the inventory pinned. Refusing to load it.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+  </div>
+</div>
+
+<script src="ds.js"></script>
+
+</body>
+</html>

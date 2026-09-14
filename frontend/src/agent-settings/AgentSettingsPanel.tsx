@@ -1,4 +1,4 @@
-import { ClayText } from "../components";
+import { ClayBadge, ClayText, recipeAttributes } from "../components";
 
 import styles from "./agent-settings.module.css";
 
@@ -17,7 +17,14 @@ export interface AgentSettingsFileInfo {
  *  Settings tab. Lists the files the daemon seeds with built-in-vs-edited
  *  provenance; selecting one opens it into the normal document pipeline.
  *  The tab frame (and its close affordance) belongs to the tab strip, not
- *  here. */
+ *  here.
+ *
+ *  Composition (approved `agent-settings.html`, plan 118): one column — the
+ *  caption states where the numbers come from, then hairline-separated file
+ *  rows with the size as data (mono) and provenance as a badge. The listing
+ *  has no error scene: the server treats an unreadable skills directory as an
+ *  empty listing (`src/server/agent_settings.rs`), so inventing one here would
+ *  be a state the product cannot reach. */
 export function AgentSettingsPanel({
   files,
   loading,
@@ -29,46 +36,59 @@ export function AgentSettingsPanel({
 }) {
   return (
     <div className={styles.body}>
-      <ClayText variant="caption" muted>
-        Delivered agent files. Edits to skills apply on the next daemon start.
-      </ClayText>
-      {loading && files == null && (
-        <ClayText variant="body" muted>
-          Loading…
+      <div className={styles.column} data-agent-settings-column>
+        <ClayText
+          variant="caption"
+          muted
+          className={styles.caption}
+          data-agent-settings-caption
+        >
+          Delivered agent files. Edits to skills apply on the next daemon start.
+          Skill sizes are read from{" "}
+          <span className={styles.mono}>.agents/skills/*/SKILL.md</span>;{" "}
+          <span className={styles.mono}>SYSTEM.md</span> is written by the
+          daemon at runtime.
         </ClayText>
-      )}
-      {files != null && files.length === 0 && (
-        <ClayText variant="body" muted>
-          No agent files delivered yet.
-        </ClayText>
-      )}
-      {files != null && files.length > 0 && (
-        <ul className={styles.files} aria-label="Agent files">
-          {files.map((file) => (
-            <li key={file.name}>
-              <button
-                type="button"
-                className={styles.fileButton}
-                onClick={() => onOpen(file.name)}
-              >
-                <span className={styles.name}>{file.name}</span>
-                <span className={styles.meta}>
-                  <ClayText variant="detail" muted>
-                    {formatSize(file.sizeBytes)}
-                  </ClayText>
-                  <span
-                    className={
-                      file.edited ? styles.badgeEdited : styles.badgeBuiltin
-                    }
-                  >
-                    {file.edited ? "edited" : "built-in"}
+        {loading && files == null && (
+          <ClayText variant="body" muted>
+            Loading…
+          </ClayText>
+        )}
+        {files != null && files.length === 0 && (
+          <div className={styles.empty} data-agent-settings-empty>
+            <p className={styles.emptyTitle}>No agent files yet.</p>
+            <p className={styles.emptyText}>
+              The daemon seeds <span className={styles.mono}>SYSTEM.md</span>{" "}
+              and one file per bundled skill the first time this agent starts.
+              Until then there is nothing to list.
+            </p>
+          </div>
+        )}
+        {files != null && files.length > 0 && (
+          <ul className={styles.files} aria-label="Agent files">
+            {files.map((file) => (
+              <li key={file.name}>
+                <button
+                  type="button"
+                  className={styles.fileRow}
+                  onClick={() => onOpen(file.name)}
+                  {...recipeAttributes("list", "row")}
+                >
+                  <span className={styles.fileName}>{file.name}</span>
+                  <span className={styles.fileMeta}>
+                    <ClayText variant="detail" role="monospace" muted>
+                      {formatSize(file.sizeBytes)}
+                    </ClayText>
+                    <ClayBadge tone={file.edited ? "warning" : "muted"}>
+                      {file.edited ? "edited" : "built-in"}
+                    </ClayBadge>
                   </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

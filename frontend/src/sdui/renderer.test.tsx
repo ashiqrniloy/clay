@@ -85,11 +85,7 @@ it("projects semantic icon references on labels, buttons, and list rows (plan 11
     ],
   });
   const view = render(
-    <SduiRenderer
-      state={state}
-      send={send}
-      editorSlot={<div>editor</div>}
-    />,
+    <SduiRenderer state={state} send={send} editorSlot={<div>editor</div>} />,
   );
   expect(
     view.container.querySelector('svg[data-icon-name="file.folder"]'),

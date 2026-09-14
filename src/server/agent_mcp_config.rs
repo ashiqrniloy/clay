@@ -150,10 +150,18 @@ fn parse_file(text: &str, key: &str, source: &str) -> Vec<(String, RawMcpServer)
 pub(crate) fn build_mcp_allow_list(
     config_root: Option<&Path>,
     workspace_root: Option<&Path>,
+    agent_type: Option<&str>,
 ) -> Vec<AgentMcpAllowListEntry> {
     let mut sources: Vec<(String, &str)> = Vec::new();
     if let Some(root) = config_root {
-        let file = root.join("agents").join("coding-agent").join("mcp.json");
+        // Plan 118 task 35: the user file follows the *agent's* config root,
+        // so each agent type declares its own servers and a switch cannot
+        // hand one agent's grants to another.
+        let agent = agent_type
+            .map(str::trim)
+            .filter(|agent| !agent.is_empty())
+            .unwrap_or(super::agent_settings::DEFAULT_AGENT_TYPE);
+        let file = root.join("agents").join(agent).join("mcp.json");
         sources.push((file.to_string_lossy().into_owned(), "servers"));
     }
     if let Some(root) = workspace_root {
@@ -219,7 +227,7 @@ mod tests {
             &dir,
             r#"{"servers":{"graft":{"command":"/usr/local/bin/graft","args":["mcp"],"env":{"GRAFT_MODE":"pull"},"cwd":"/tmp"}}}"#,
         );
-        let list = build_mcp_allow_list(Some(&root), None);
+        let list = build_mcp_allow_list(Some(&root), None, None);
         assert_eq!(list.len(), 1);
         let entry = &list[0];
         assert_eq!(entry.server_id, "graft");
@@ -240,7 +248,7 @@ mod tests {
             &dir,
             r#"{"mcpServers":{"sh":{"command":"sh","args":["-c","echo hi"]}}}"#,
         );
-        let list = build_mcp_allow_list(None, Some(&dir));
+        let list = build_mcp_allow_list(None, Some(&dir), None);
         assert_eq!(list.len(), 1, "sh exists on every CI host");
         let canonical = std::fs::canonicalize("/bin/sh").map(|p| p.to_string_lossy().into_owned());
         match canonical {
@@ -262,7 +270,7 @@ mod tests {
             &dir,
             r#"{"mcpServers":{"rel":{"command":"./bin/serve"},"ghost":{"command":"definitely-not-on-path-8153"},"ok":{"command":"sh"}}}"#,
         );
-        let list = build_mcp_allow_list(None, Some(&dir));
+        let list = build_mcp_allow_list(None, Some(&dir), None);
         assert_eq!(
             list.len(),
             1,
@@ -282,7 +290,7 @@ mod tests {
             r#"{"servers":{"dup":{"command":"/usr/bin/env"},"solo":{"command":"/usr/bin/env"}}}"#,
         );
         write_repo(&dir, r#"{"mcpServers":{"dup":{"command":"sh"}}}"#);
-        let list = build_mcp_allow_list(Some(&root), Some(&dir));
+        let list = build_mcp_allow_list(Some(&root), Some(&dir), None);
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].server_id, "dup");
         assert_eq!(
@@ -300,7 +308,7 @@ mod tests {
         fs::create_dir_all(&dir).expect("mkdir");
         let root = write_config(&dir, r#"{"servers": broken"#);
         write_repo(&dir, r#"{"mcpServers":{"sh":{"command":"sh"}}}"#);
-        let list = build_mcp_allow_list(Some(&root), Some(&dir));
+        let list = build_mcp_allow_list(Some(&root), Some(&dir), None);
         assert_eq!(list.len(), 1, "malformed user file never fails startup");
         assert_eq!(list[0].server_id, "sh");
         let _ = fs::remove_dir_all(&dir);
@@ -317,7 +325,7 @@ mod tests {
         }
         let body = format!("{{\"servers\":{{{}}}}}", servers.join(","));
         let root = write_config(&dir, &body);
-        let list = build_mcp_allow_list(Some(&root), None);
+        let list = build_mcp_allow_list(Some(&root), None, None);
         assert_eq!(list.len(), MAX_MCP_SERVERS);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -327,7 +335,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("clay-mcp-none-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
-        assert!(build_mcp_allow_list(Some(&dir), Some(&dir)).is_empty());
+        assert!(build_mcp_allow_list(Some(&dir), Some(&dir), None).is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -336,7 +344,7 @@ mod tests {
         // The canonical example a new user copies must stay valid against
         // the actual parser, not just the README prose (plan 117 config task).
         let config_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/config");
-        let list = build_mcp_allow_list(Some(&config_root), None);
+        let list = build_mcp_allow_list(Some(&config_root), None, None);
         assert!(list.is_empty(), "example ships no servers by default");
     }
 }

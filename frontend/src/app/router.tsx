@@ -41,9 +41,16 @@ export function createAppRouter(
   initialPath = import.meta.env.DEV
     ? // DEV fixtures: /?fixture=<id> boots straight into that fixture route
       // (plain-browser visual/accessibility review without the Tauri webview).
-      (new URLSearchParams(window.location.search).get("fixture")
-        ? `/fixture/${new URLSearchParams(window.location.search).get("fixture")}`
-        : "/workspace")
+      // The remaining query parameters carry to the memory router, so a fixture
+      // can be opened in a named state: /?fixture=coding-agent&state=conversation.
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+        const fixture = params.get("fixture");
+        if (!fixture) return "/workspace";
+        params.delete("fixture");
+        const rest = params.toString();
+        return `/fixture/${fixture}${rest ? `?${rest}` : ""}`;
+      })()
     : "/workspace",
 ) {
   const allRoutes: RouteObject[] = [
@@ -51,8 +58,6 @@ export function createAppRouter(
       path: "/",
       element: (
         <AppShell
-          tabs={[{ id: "main", label: "Workspace" }]}
-          activeTabId="main"
           status={
             callbacks.connection
               ? callbacks.connection.phase === "ready"

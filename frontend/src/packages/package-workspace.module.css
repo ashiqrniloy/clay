@@ -1,3 +1,9 @@
+/* Package workspace (SDUI host): a page region on the canvas — zones are
+ * separated by the divider recipe's single hairline weight, never by a
+ * per-zone colour, and a package-delivered surface inside it is a catalog
+ * panel (same recipe as the registry's). Appearance values live in
+ * `styles/tokens.css`. */
+
 .workspace {
   position: relative;
   height: 100%;
@@ -5,10 +11,8 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   overflow: hidden;
-  background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  border-width: var(--clay-ds-shell-default-working-area-rest-border-width);
 }
 
 .top {
@@ -41,7 +45,7 @@
 .right {
   width: clamp(
     var(--clay-dimension-panel-side-min, 48px),
-    var(--clay-dimension-panel-side-default, 240px),
+    var(--clay-dimension-panel-side-default, 244px),
     var(--clay-dimension-panel-side-max, 480px)
   );
   min-width: 0;
@@ -50,43 +54,25 @@
 }
 
 .left {
-  border-right: var(
-      --clay-ds-file-browser-default-root-rest-border-width,
-      var(
-        --clay-ds-panel-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-    )
-    var(
-      --clay-ds-file-browser-default-root-rest-border-style,
-      var(--clay-ds-panel-default-root-rest-border-style, solid)
-    )
-    var(
-      --clay-ds-file-browser-default-root-rest-border-color,
-      var(
-        --clay-ds-panel-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      )
-    );
-  background: var(
-    --clay-ds-file-browser-default-root-rest-background-color,
-    var(
-      --clay-ds-panel-default-root-rest-background-color,
-      transparent
-    )
-  );
+  background: var(--clay-ds-file-browser-default-root-rest-background-color);
+  border-width: var(--clay-ds-file-browser-default-root-rest-border-width);
+  border-right: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
 }
 
 .right {
-  border-left: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-subtle)
-    );
+  border-left: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+/* A Clay-native fixed slot owns its own width (the settings panel is 340px, or
+ * 312px mid-width, or a drawer). Package panels keep the clamped package width
+ * above; this modifier only widens the track to the slot's content so the
+ * panel is never clipped by the grid. */
+.rightFixed {
+  width: auto;
 }
 
 .bottom {
@@ -100,27 +86,15 @@
 }
 
 .top {
-  border-bottom: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-subtle)
-    );
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
 }
 
 .bottom {
-  border-top: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-subtle)
-    );
+  border-top: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
 }
 
 .status {
@@ -128,33 +102,13 @@
   min-height: var(--clay-spacing-row, 26px);
   display: flex;
   align-items: center;
-  gap: var(--clay-spacing-sm, 12px);
-  padding-inline: var(--clay-spacing-sm, 12px);
-  border-top: var(
-      --clay-ds-status-bar-default-root-rest-border-width,
-      var(
-        --clay-ds-panel-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-    )
-    var(
-      --clay-ds-status-bar-default-root-rest-border-style,
-      var(--clay-ds-panel-default-root-rest-border-style, solid)
-    )
-    var(
-      --clay-ds-status-bar-default-root-rest-border-color,
-      var(
-        --clay-ds-panel-default-root-rest-border-color,
-        var(--clay-border-hairline)
-      )
-    );
-  background: var(
-    --clay-ds-status-bar-default-root-rest-background-color,
-    var(
-      --clay-ds-panel-default-root-rest-background-color,
-      var(--clay-surface-panel)
-    )
-  );
+  gap: var(--clay-ds-status-bar-default-root-rest-gap);
+  padding-inline: var(--clay-ds-status-bar-default-root-rest-padding);
+  border-top: var(--clay-ds-status-bar-default-root-rest-border-width)
+    var(--clay-ds-status-bar-default-root-rest-border-style)
+    var(--clay-ds-status-bar-default-root-rest-border-color);
+  background: var(--clay-ds-status-bar-default-root-rest-background-color);
+  color: var(--clay-ds-status-bar-default-root-rest-text-color);
 }
 
 .overlay {
@@ -205,26 +159,14 @@
   }
 
   .left {
-    border-bottom: var(
-        --clay-ds-panel-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-      var(--clay-ds-panel-default-root-rest-border-style, solid)
-      var(
-        --clay-ds-panel-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      );
+    border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+      var(--clay-ds-divider-default-root-rest-border-style)
+      var(--clay-ds-divider-default-root-rest-border-color);
   }
 
   .right {
-    border-top: var(
-        --clay-ds-panel-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-      var(--clay-ds-panel-default-root-rest-border-style, solid)
-      var(
-        --clay-ds-panel-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      );
+    border-top: var(--clay-ds-divider-default-root-rest-border-width)
+      var(--clay-ds-divider-default-root-rest-border-style)
+      var(--clay-ds-divider-default-root-rest-border-color);
   }
 }

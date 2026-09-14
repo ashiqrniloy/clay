@@ -64,7 +64,7 @@ vi.mock("../bridge/client", () => ({
 }));
 
 import { TauriClayAgent } from "./TauriClayAgent";
-import { chatAgent, resetChatAgentForTests } from "./state";
+import { agentSession, resetAgentSessionForTests } from "./state";
 
 const emit = harness.emit as (event: AgentStreamEvent) => void;
 
@@ -75,7 +75,7 @@ const frame = () => new Promise<void>((resolve) => setTimeout(resolve, 40));
 
 beforeEach(() => {
   harness.sendRequestCalls.length = 0;
-  resetChatAgentForTests();
+  resetAgentSessionForTests();
 });
 
 afterEach(() => {
@@ -135,7 +135,7 @@ describe("TauriClayAgent transport", () => {
     expect(agent.messages[1]?.content).toBe("ponder");
   });
 
-  it("sends the validated chat.submit intent with composer text", async () => {
+  it("sends the validated agent.submit intent with composer text", async () => {
     const agent = new TauriClayAgent({});
     agent.setUiVersion(9);
     agent.sendPrompt("hi there");
@@ -160,7 +160,7 @@ describe("TauriClayAgent transport", () => {
     };
     expect(payload.family).toBe("sduiAction");
     expect(payload.payload.uiVersion).toBe(9);
-    expect(payload.payload.intent.commandId).toBe("chat.submit");
+    expect(payload.payload.intent.commandId).toBe("agent.submit");
     expect(payload.payload.intent.arguments[0]?.name).toBe("value");
   });
 
@@ -173,7 +173,7 @@ describe("TauriClayAgent transport", () => {
   });
 
   it("maps wire errors to RUN_ERROR and surfaces status", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     try {
       await flush();
@@ -191,18 +191,18 @@ describe("TauriClayAgent transport", () => {
     }
   });
 
-  it("cancel sends the chat.cancel intent through abortRun", () => {
+  it("cancel sends the agent.cancel intent through abortRun", () => {
     const agent = new TauriClayAgent({});
     agent.abortRun();
     expect(harness.sendRequestCalls).toHaveLength(1);
     const payload = JSON.parse(String(harness.sendRequestCalls[0]));
-    expect(payload.payload.intent.commandId).toBe("chat.cancel");
+    expect(payload.payload.intent.commandId).toBe("agent.cancel");
   });
 });
 
-describe("chat state glue", () => {
+describe("agent state glue", () => {
   it("applies out-of-run snapshots via the agent's public API", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     await flush();
     try {
@@ -236,7 +236,7 @@ describe("chat state glue", () => {
   });
 
   it("tracks streaming status across run lifecycle events", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     await flush();
     try {
@@ -262,7 +262,7 @@ describe("chat state glue", () => {
   });
 
   it("forwards clay.diagnostic customs into status", async () => {
-    const store = chatAgent;
+    const store = agentSession;
     const release = store.start();
     await flush();
     try {

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Command centre (migration prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+/* command centre: the palette as a page — results, scopes, empty, path scope */
+.cc-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; display: flex; align-items: flex-start; justify-content: center; padding: 40px 20px 0; }
+.cc-backdrop { position: absolute; inset: 0; background: color-mix(in oklab, var(--c-bg) 50%, transparent); backdrop-filter: blur(3px); }
+.cc-host { position: relative; z-index: 1; width: min(720px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.cc-palette { display: flex; flex-direction: column; max-height: min(68vh, 640px); border: 1px solid var(--hairline);
+  border-radius: var(--r-lg); background: var(--c-surface); box-shadow: var(--shadow-overlay); overflow: hidden; }
+.cc-palette .pal-list { min-height: 0; overflow: auto; }
+.cc-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--hairline); }
+.cc-input { flex: 1; border: 0; background: transparent; color: var(--c-text); font: 400 var(--fs-md) / 1.5 var(--font-ui); outline: none; }
+.cc-input::placeholder { color: var(--c-text-3); }
+.cc-group { padding: 4px 6px; }
+.cc-group-label { display: block; padding: 7px 8px 4px; font: 500 10px / 1 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+.cc-empty { padding: 26px 14px; text-align: center; }
+.cc-path { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--r-md); background: color-mix(in oklab, var(--c-surface-2) 70%, transparent); }
+.cc-scope-note { font: 400 var(--fs-xs) / 1.5 var(--font-ui); color: var(--c-text-3); }
+</style>
+</head>
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Quiet Instrument — Command centre</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">migration prototype</span>
+  </span>
+  <nav class="proto-nav" data-nav aria-label="Prototype pages"><a class="proto-link" href="start.html">Start</a><a class="proto-link" href="shell.html">Shell</a><a class="proto-link" href="workspace.html">Workspace</a><a class="proto-link" href="agent-landing.html">Agent</a><a class="proto-link" href="settings.html">Settings</a><a class="proto-link" href="agent-settings.html">Agent files</a><a class="proto-link" href="command-centre.html">Command centre</a><a class="proto-link" href="package-workspace.html">Packages</a><a class="proto-link" href="overlays.html">Overlays</a><a class="proto-link" href="themes.html">Theme values</a></nav>
+  <span class="proto-note">The palette with its scopes, groups, live filter, empty state, and the path scope that replaced a permanent path bar.</span>
+  <div class="proto-actions">
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    
+    <span class="seg" role="radiogroup" aria-label="Row density">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="comfortable">comfortable</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="compact">compact</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+<div class="proto-stage">
+  <div class="proto-frame">
+
+<div class="app" data-app style="grid-template-columns: minmax(0,1fr)" data-clay-ds="shell.default.workingArea.rest">
+  <div class="cc-stage" data-focus-zone=".cc-stage">
+    <div class="cc-backdrop scrim" aria-hidden="true" data-clay-ds="modal.default.scrim.rest"></div>
+    <div class="cc-host">
+      <div class="cc-palette palette" data-clay-ds="commandCentre.default.root.rest">
+        <div class="cc-head">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+          <input class="cc-input" type="text" data-cc-input value="" placeholder="Type a command or a file path" aria-label="Command palette" autocomplete="off" spellcheck="false">
+          <span class="seg" role="radiogroup" aria-label="Scope">
+            <button class="seg-item" type="button" role="radio" aria-checked="true" data-active="true">all</button>
+            <button class="seg-item" type="button" role="radio" aria-checked="false">Session</button>
+            <button class="seg-item" type="button" role="radio" aria-checked="false">Skills</button>
+            <button class="seg-item" type="button" role="radio" aria-checked="false">MCP</button>
+          </span>
+        </div>
+
+        <div class="pal-list" data-cc-list>
+          <div class="cc-group" data-cc-group>
+            <span class="cc-group-label">Session</span>
+            <button class="pal-item" type="button" role="option" data-active="true" data-cc-row="New Session coding-agent.new" data-clay-ds="list.default.row.rest">
+              <span>New Session</span><span class="pal-meta">coding-agent.new</span><kbd class="kbd kbd--sm" data-kbd="mod+n" data-clay-ds="kbd.default.root.rest"></kbd>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Compact Session coding-agent.compact" data-clay-ds="list.default.row.rest">
+              <span>Compact Session</span><span class="pal-meta">coding-agent.compact</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Resume Session coding-agent.resume" data-clay-ds="list.default.row.rest">
+              <span>Resume Session</span><span class="pal-meta">coding-agent.resume</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Open Session by ID coding-agent.openSession" data-clay-ds="list.default.row.rest">
+              <span>Open Session by ID</span><span class="pal-meta">coding-agent.openSession</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Checkout Branch Point coding-agent.branch" data-clay-ds="list.default.row.rest">
+              <span>Checkout Branch Point</span><span class="pal-meta">coding-agent.branch</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Fork Session coding-agent.fork" data-clay-ds="list.default.row.rest">
+              <span>Fork Session</span><span class="pal-meta">coding-agent.fork</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="Discard Branch coding-agent.discard" data-clay-ds="list.default.row.rest">
+              <span>Discard Branch</span><span class="pal-meta">coding-agent.discard</span>
+            </button>
+          </div>
+          <div class="cc-group" data-cc-group>
+            <span class="cc-group-label">Document</span>
+            <button class="pal-item" type="button" role="option" data-cc-row="markdown.togglePreview toggle preview" data-clay-ds="list.default.row.rest">
+              <span>markdown.togglePreview</span><span class="pal-meta">@clay/markdown</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="markdown.toggleComment toggle comment" data-clay-ds="list.default.row.rest">
+              <span>markdown.toggleComment</span><span class="pal-meta">@clay/markdown</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="rust.toggleLineComment toggle line comment" data-clay-ds="list.default.row.rest">
+              <span>rust.toggleLineComment</span><span class="pal-meta">@clay/rust</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="settings.open open settings" data-clay-ds="list.default.row.rest">
+              <span>settings.open</span><span class="pal-meta">@clay/settings</span><kbd class="kbd kbd--sm" data-kbd="mod+comma" data-clay-ds="kbd.default.root.rest"></kbd>
+            </button>
+          </div>
+          <div class="cc-group" data-cc-group>
+            <span class="cc-group-label">Files</span>
+            <button class="pal-item" type="button" role="option" data-cc-row="DESIGN.md design system spec" data-clay-ds="list.default.row.rest">
+              <span>DESIGN.md</span><span class="pal-meta">clay</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="VENT.md decision log" data-clay-ds="list.default.row.rest">
+              <span>VENT.md</span><span class="pal-meta">clay</span>
+            </button>
+            <button class="pal-item" type="button" role="option" data-cc-row="plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md" data-clay-ds="list.default.row.rest">
+              <span>plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md</span><span class="pal-meta">clay</span>
+            </button>
+          </div>
+          <div class="cc-empty pal-empty" data-cc-empty hidden data-clay-ds="commandCentre.default.empty.rest">
+            <p class="empty-title">No matches</p>
+            <p class="empty-text">Nothing in this scope matches the query. Clear it with <kbd class="kbd kbd--sm kbd--flat" data-kbd="esc" data-clay-ds="kbd.default.root.rest"></kbd>, or widen the scope.</p>
+          </div>
+        </div>
+
+        <div class="pal-foot" data-clay-ds="commandCentre.default.status.rest">
+          <span class="hint"><kbd class="kbd kbd--sm kbd--flat" data-kbd="up" data-clay-ds="kbd.default.root.rest"></kbd><kbd class="kbd kbd--sm kbd--flat" data-kbd="down" data-clay-ds="kbd.default.root.rest"></kbd> navigate</span>
+          <span class="hint"><kbd class="kbd kbd--sm kbd--flat" data-kbd="enter" data-clay-ds="kbd.default.root.rest"></kbd> run</span>
+          <span class="hint"><kbd class="kbd kbd--sm kbd--flat" data-kbd="esc" data-clay-ds="kbd.default.root.rest"></kbd> close</span>
+          <span class="spacer"></span>
+          <span class="hint"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">&gt;</kbd> commands</span>
+          <span class="hint"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">/</kbd> files</span>
+        </div>
+      </div>
+
+      <div class="cc-path">
+        <span class="t-micro" data-clay-ds="label.default.root.rest">Path scope</span>
+        <label class="field field--quiet" data-clay-ds="textInput.default.field.rest">
+          <span class="mono faint" aria-hidden="true">./</span>
+          <input type="text" value="DESIGN.md" placeholder="relative/path" aria-label="Open relative path" autocomplete="off" spellcheck="false">
+        </label>
+        <button class="btn" type="button" data-clay-ds="button.default.root.rest"><span>Open</span></button>
+        <span class="cc-scope-note" role="status">relative to /workspace · Tab completes</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+  </div>
+</div>
+
+<script src="ds.js"></script>
+<script>
+
+(function () {
+  'use strict';
+  var input = document.querySelector('[data-cc-input]');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('[data-cc-row]'));
+  var empty = document.querySelector('[data-cc-empty]');
+  var groups = Array.prototype.slice.call(document.querySelectorAll('[data-cc-group]'));
+
+  function filter() {
+    var q = input.value.trim().toLowerCase();
+    var hits = 0;
+    rows.forEach(function (row) {
+      var hay = (row.dataset.ccRow + ' ' + row.textContent).toLowerCase();
+      var show = !q || hay.indexOf(q) !== -1;
+      row.hidden = !show;
+      if (show) hits += 1;
+    });
+    groups.forEach(function (group) {
+      var visible = Array.prototype.slice.call(group.querySelectorAll('[data-cc-row]')).filter(function (r) { return !r.hidden; });
+      group.hidden = visible.length === 0;
+    });
+    empty.hidden = hits !== 0;
+    var first = rows.filter(function (r) { return !r.hidden; })[0];
+    rows.forEach(function (r) { r.dataset.active = r === first ? 'true' : 'false'; });
+  }
+  input.addEventListener('input', filter);
+  filter();
+})();
+
+</script>
+</body>
+</html>

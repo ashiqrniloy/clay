@@ -32,7 +32,9 @@ const MAX_VIEWBOX_SIDE = 512;
  * legitimate (host fallback subset active), everything else must carry the
  * canonical shape with finite numbers.
  */
-export function isValidIconPackSnapshot(pack: unknown): pack is IconPackSnapshot {
+export function isValidIconPackSnapshot(
+  pack: unknown,
+): pack is IconPackSnapshot {
   if (pack === null) return true;
   if (typeof pack !== "object") return false;
   const candidate = pack as Partial<IconPackSnapshot>;
@@ -60,7 +62,10 @@ function isValidIconGeometry(geometry: unknown): geometry is IconGeometry {
     !Array.isArray(candidate.viewBox) ||
     candidate.viewBox.length !== 4 ||
     candidate.viewBox.some(
-      (v) => typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) > MAX_COORDINATE,
+      (v) =>
+        typeof v !== "number" ||
+        !Number.isFinite(v) ||
+        Math.abs(v) > MAX_COORDINATE,
     )
   ) {
     return false;
@@ -75,15 +80,20 @@ function isValidIconGeometry(geometry: unknown): geometry is IconGeometry {
   ) {
     return false;
   }
-  if (!Array.isArray(candidate.paths) || candidate.paths.length === 0) return false;
+  if (!Array.isArray(candidate.paths) || candidate.paths.length === 0)
+    return false;
   if (candidate.paths.length > MAX_PATHS) return false;
   return candidate.paths.every((path) => {
     if (typeof path !== "object" || path === null) return false;
     const p = path as { d?: unknown; opacity?: unknown };
-    if (typeof p.d !== "string" || p.d === "" || p.d.length > 2048) return false;
+    if (typeof p.d !== "string" || p.d === "" || p.d.length > 2048)
+      return false;
     if (
       p.opacity !== undefined &&
-      (typeof p.opacity !== "number" || !Number.isFinite(p.opacity) || p.opacity < 0 || p.opacity > 1)
+      (typeof p.opacity !== "number" ||
+        !Number.isFinite(p.opacity) ||
+        p.opacity < 0 ||
+        p.opacity > 1)
     )
       return false;
     return true;

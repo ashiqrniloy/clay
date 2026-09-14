@@ -123,7 +123,7 @@ Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contrib
 - `serverRegisterThemeToken(manifest, declaration)` validates package-prefixed typed theme tokens with same-type Clay core fallbacks.
 - Package metadata validation accepts `clay.contributions.ui.panels`, `ui.components`, `ui.overlays`, `ui.paneContents`, and `themeTokens` descriptors for load-time diagnostics/conflicts.
 - Runtime composition maps accepted fixed panels to Clay-owned `PaneSlotLayout` state and transient overlays to a separate overlay layer; the editor remains in the mandatory `main` slot.
-- Empty/new-tab `main` is a pane-content contribution (`ui.serverRegisterPaneContentContribution`, activation `empty-tab`). One winner. No contribution → core Open File / Open Folder fallback (`WelcomeWidget`). First-party default landing is `@clay/chat` (`loadPackage("@clay/chat")`). See [Phase 25 authoring contract](#phase-25-authoring-contract-product-landing-and-pane-content).
+- Empty/new-tab `main` is a pane-content contribution (`ui.serverRegisterPaneContentContribution`, activation `empty-tab`). One winner. No contribution → core Open File / Open Folder fallback (`WelcomeWidget`). The landing is its own first-party package (plan 118: the launcher surface); `@clay/chat` held it until plan 118 removed it. See [Phase 25 authoring contract](#phase-25-authoring-contract-product-landing-and-pane-content).
 
 Still planned for package authors:
 
@@ -725,7 +725,7 @@ token, manifest field, or JS API, and no package-facing `Completion` or
   `documents.clientOpenFileDialog` and `workspace.clientOpenFolderDialog`
   client commands. Packages cannot replace or inject this core fallback widget
   and receive no native dialog authority. The loaded product landing is a
-  package pane-content contribution (`@clay/chat` by default); replace or
+  package pane-content contribution (the launcher package, plan 118); replace or
   extend that package, not `WelcomeWidget`.
 - **Completion projection:** package completion providers contribute only the
   existing bounded inert result data. Clay projects non-empty results through
@@ -1282,7 +1282,7 @@ A theme package declares no permissions and no modes. It contributes style data 
 | `background` | optional | `#rgb`, `#rrggbb`, or `#rrggbbaa` tint painted behind the glyph run (between selection rects and text). Resolves per `DecorationKind` (Quote, CodeBlock, Deprecated, Diagnostic, SearchMatch) in `StyleRegistry::background_for`; syntax/prose targets paint as a run background. Phase 26.3. |
 | `scale` | optional | Per-token-type font-size multiplier (a finite number in `(0, 4.0]`). Multiplies the resolved profile size for Syntax and Semantic decorations only (Diagnostic/SearchMatch always scale `1.0`); the heading ladder defaults H1=1.50 … H6=0.92, CodeSpan=0.90. Phase 26.4. |
 
-Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`.
+Base UI keys are: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, `accent` (the shell accent), and `borderHairline` / `borderSubtle` / `borderStrong` (the structural border ladder; absent, all three project from `scrollbar`).
 
 Token names are the `TokenType` variant names from the vocabulary contract: `Namespace`, `Type`, `Class`, `Enum`, `Interface`, `Struct`, `TypeParameter`, `Parameter`, `Variable`, `Property`, `EnumMember`, `Event`, `Function`, `Method`, `Macro`, `Keyword`, `Modifier`, `Comment`, `String`, `Number`, `Regexp`, `Operator`, `Decorator`, `Heading1`, `Heading2`, `Heading3`, `Heading4`, `Heading5`, `Heading6`, `ListItem`, `Quote`, `CodeBlock`, `CodeSpan`, `Link`, `Paragraph`.
 
@@ -1383,7 +1383,7 @@ See [UI Design Systems](../ui-design-systems.md) and [theme.setDesignSystem](../
 - **Strict Color Authority Invariant:** All color properties (`backgroundColor`, `textColor`, `borderColor`, `outlineColor`, `shadow[].colorRole`, `innerHighlight.colorRole`) must be valid active-theme color-role references (e.g. `surface.control`, `text.primary`, `accent.primary`, `border.focus`, `diagnostic.error`) or `transparent`. Literal hex codes, `rgb()`/`hsl()` functions, named colors, and package-owned color palettes are strictly rejected at load time.
 - **Namespaced Non-Color Values:** Reusable scalars (radii, border widths, dimensions, opacities, blur, saturation, motion durations) are declared under `values` with strict domain validation.
 - **Payload Budget:** The serialized declaration is checked against `UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES` (64 KiB) at record assembly time.
-- **Deterministic Fallback Inheritance:** Unspecified recipe properties inherit down a deterministic 5-step fallback chain (exact recipe -> rest state -> default variant -> parent `extends` system -> Neobrutal core fallbacks).
+- **Deterministic Fallback Inheritance:** Unspecified recipe properties inherit down a deterministic 5-step fallback chain (exact recipe -> rest state -> default variant -> parent `extends` system -> `@clay/core` fallbacks).
 - **Activation API:** End users and packages activate a design system via `import { setDesignSystem } from "clay:theme"`; the Settings panel and `settings.setDesignSystem` persist the choice and reload the runtime.
 
 #### Canonical recipe keys and consumption-tested contract (plan 110)
@@ -1397,43 +1397,74 @@ Package recipe keys must use the canonical, CSS-consumed slot names (plan 110 ta
 | `modal.default.{dialog,scrim}.rest` | `modal.default.root.*` / `modal.default.surface.*` | `dialog` is the canonical surface slot |
 | `textInput.default.input.*` | `textInput.default.root.*` | The field wrapper keeps `textInput.default.field.rest` |
 
-**Consumption-tested contract:** a shipped recipe key exists only if host CSS consumes it. `frontend/src/test/design-system-consumption.test.ts` enforces, permanently, that every `tokens.css` `--clay-ds-*` fallback variable has a CSS consumer and that the fallback set matches the DS package key set — zero unconsumed fallbacks. The host matrix (`docs/development/ui-design-system-recipe-matrix.md`) is the source of truth for slot names; misspelled or speculative package keys are drift, not extensibility, and fail the gates.
+**Consumption-tested contract:** a shipped recipe key exists only if host CSS consumes it. `frontend/src/test/design-system-consumption.test.ts` enforces, permanently, that every `tokens.css` `--clay-ds-*` fallback variable has a CSS consumer or an emitted package recipe, that every consumed recipe key is consumed by its recorded owning module, and that the fallback set matches the DS package key set. The keys still awaiting host adoption are recorded exactly in `frontend/src/test/fixtures/design-system-adoption-backlog.json`; the migration shrinks that recording to empty (and deletes it), and the gate fails on any drift in the meantime. The host matrix (`docs/development/ui-design-system-recipe-matrix.md`) is the source of truth for slot names; misspelled or speculative package keys are drift, not extensibility, and fail the gates. The mirror case is marked there too: a host slot with no recipe in the shipped package carries `†` (`dropdown.triggerLabel`, `list.rowTitle`, `modal.body`, `editorChrome.*` and the rest) and resolves to the core fallback, so a package is not required to declare it — and a CSS module must not expect a variable for it.
 
-**Chrome-slot coverage expectations:** design systems are whole-shell contracts, not control skins. Both reference packages ship 142 recipes covering, beyond the interactive controls, the chrome and agent surfaces: `shell.*` (root/header/brand/workingArea/footer), `editor.*` (10 chrome slots incl. gutter, activeLine, selection, findMatch, tooltip), `chat.*` (12 slots incl. transcript, userBubble, assistantBubble, composer), `commandCentre.*`, `settingsPanel.*`, `paneSplitTree.*`, `fileBrowser.*`, `statusBar.*`, `menu.*`, `card`, `popover`, `badge`/`kbd`/`divider`/`tooltip`, `tab`/`tabBar`, and `statusItem`. `tests/package_ui_conformance.rs` pins the 142-recipe baseline and both packages' mutual key consistency; a design system that skips chrome surfaces leaves those regions on core fallbacks, which is a visible downgrade, not an error.
+**Chrome-slot coverage expectations:** design systems are whole-shell contracts, not control skins. The shipped package declares 165 recipes covering, beyond the interactive controls, the chrome and target-IA surfaces: `shell.*` (root/header/brand/workingArea/footer), `editor.*` (10 chrome slots incl. gutter, activeLine, selection, findMatch, tooltip), `commandCentre.*`, `settingsPanel.*`, `paneSplitTree.*`, `fileBrowser.*`, `statusBar.*`, `menu.*`, `card`, `popover`, `badge`/`kbd`/`divider`/`tooltip`, `tab`/`tabBar`, `statusItem`, the launcher/tab-model families (`recentRow`, `seg`, `agentPicker`, `sessionRow`), and the auxiliary surfaces (`toast`, `empty`, `statusDot`, `keyHint`, `swatch`, `statRow`). `tests/package_ui_conformance.rs` pins that key set; a design system that skips chrome surfaces leaves those regions on core fallbacks, which is a visible downgrade, not an error.
 
-**Legible-neobrutal direction (plan 110):** the default `@clay/design-neobrutal` system keeps its identity — 0px radii, 1px structural borders, 2px hard offset shadows with 0px blur, 100ms snappy motion — while prioritizing legibility: distinct surface hierarchy (text inputs fill `surface.main`, visually distinct from `surface.control` controls), transparent list rows with hairline separators and `surface.hover`/`surface.selected` state fills, muted buttons as bordered ghosts (1px `border.subtle`) instead of flat panel fills, and a slightly larger default UI type hierarchy (title 15/13, detail 12/13, ui base 13px) with medium-weight labels. New design systems should treat these as the legibility floor, not as a style to imitate.
+**Design language and legibility floor:** Clay's approved design language is **Quiet Instrument** ([`DESIGN.md`](../../../DESIGN.md)) — 1px hairline zoning on a single surface, radii from the 5/8/12/16/pill ladder, elevation only on transient surfaces, accent only for state, monospace for data, and 150ms/240ms decelerating motion with a 620ms keyboard-focus pulse. Package work targets that profile (values, per-surface recipes, and the retired-pattern list are normative there).
+
+`@clay/design-instrument` is the only shipped first-party design system; `@clay/core` supplies the built-in baseline recipes. The former `@clay/design-neobrutal` and `@clay/design-glass` packages were removed by the Quiet Instrument migration. Every design system must still meet the legibility floor: contrast-validated theme roles, distinct surface hierarchy, transparent or clearly-filled rows with visible hover/selected states, and visible focus rings in every theme. Geometry/material/motion values are package data; a host CSS module or component that hardcodes appearance is drift.
+
+**Theme-side role contract (plan 118 tasks 13–14).** A theme package supplies the color half of that language as typed `clay.contributions.designTokens` overrides; the four shipped themes declare the same thirteen roles, each derived from their own palette and validated against the composited contrast floors:
+
+| Role | Source per theme | Floor |
+| --- | --- | --- |
+| `border.hairline` | the theme's border grey at 34% | decorative: `HAIRLINE_VISIBILITY_MIN` 1.2, and strictly quieter than `border.subtle` |
+| `border.subtle` | the same border grey at full strength | 3.0 against `surface.main` and `surface.panel` |
+| `border.strong` | the theme's ink at full strength | 3.0 |
+| `surface.scrim` | the theme's dim plane | 3.0 against text painted on the dim |
+| `accent.primary`, `accent.muted` | the accent / the accent at 75% | 3.0 against the surface behind them |
+| `focus.ring`, `border.focus` | the accent | 3.0, visible on every surface the ring can sit on |
+| `text.muted`, `text.disabled` | attenuated ink | prose 4.5 (`text.disabled` measured before the host's `opacity.disabled` attenuation) |
+| `surface.hover`, `surface.active`, `surface.selected` | fill steps | 3.0 against the text on the fill, measured composited (fill over its surface, then text over the fill) |
+
+Every pair is measured **composited** (alpha over its backdrop) at theme activation: `validate_active_theme_contrast` behind `enforce_contrast` refuses a below-floor theme, records a `theme.contrast` diagnostic naming the specifier, pair, ratio and threshold, and leaves the previously active theme installed. A theme that declares no `designTokens` is still resolved — its border roles fall back to the core catalog — but it is then *measured on those fallbacks*, not exempted: omit a role only when the fallback is genuinely the color the theme wants. Binding values, rationale and per-theme measured tables: `design-artifacts/approved/quiet-instrument-migration/theme-values.{json,md}` and [UI Design Systems §7](../ui-design-systems.md).
 
 ```json
 {
-  "name": "@clay/design-neobrutal",
+  "name": "@clay/design-instrument",
   "version": "0.1.0",
   "clay": {
-    "apiPrefix": "design-neobrutal",
-    "entry": "./dist/index.js",
+    "apiPrefix": "design-instrument",
     "contributions": {
       "uiDesignSystem": {
         "schemaVersion": 1,
-        "id": "@clay/design-neobrutal",
-        "displayName": "Restrained Neobrutal (Default)",
+        "id": "@clay/design-instrument",
+        "displayName": "Quiet Instrument (Default)",
         "values": {
-          "border.structural": { "type": "border-width", "value": 1.0 },
-          "radius.sharp": { "type": "radius", "value": 0.0 }
+          "border.hairline": { "type": "border-width", "value": 1.0 },
+          "radius.control": { "type": "radius", "value": 8.0 },
+          "motion.fast": { "type": "motion-duration", "value": 150.0 },
+          "opacity.veil": { "type": "opacity", "value": 0.55 }
         },
         "recipes": {
           "button.default.root.rest": {
-            "backgroundColor": "surface.control",
+            "backgroundColor": "transparent",
             "borderWidth": 1.0,
-            "borderRadius": 0.0,
-            "borderColor": "border.subtle",
+            "borderRadius": 8.0,
+            "borderColor": "border.hairline",
+            "textColor": "text.primary",
+            "padding": "spacing.xs",
+            "gap": "spacing.xs",
+            "transitionDuration": 150.0,
+            "transitionTiming": "ease-out",
+            "transformPreset": "none",
+            "shadow": []
+          },
+          "list.default.row.selected": {
+            "backgroundColor": "accent.primary",
+            "backgroundOpacity": 0.15,
+            "textColor": "text.primary",
+            "borderRadius": 8.0,
             "shadow": [
               {
                 "x": 2.0,
-                "y": 2.0,
+                "y": 0.0,
                 "blur": 0.0,
                 "spread": 0.0,
-                "colorRole": "border.strong",
+                "colorRole": "accent.primary",
                 "opacity": 1.0,
-                "inset": false
+                "inset": true
               }
             ]
           }
@@ -1488,7 +1519,7 @@ Validation rejects: missing/wrong package prefix on `id`, duplicate `id`, invali
 
 Phase 20.4 restyles every implemented `ComponentKind` to the minimalist design language using the Phase 20.1 tokens and Phase 20.2 primitives, **without changing component kinds, style-variable schemas, or token names**. It is a restyle, not a catalog expansion: no new kind, no new style variable, no new token was added.
 
-**Active-theme routing**: SDUI component paint reads the active `ResolvedUiTheme` (the design-token registry layered over the core fallback catalog and optional legacy `textStyles` base palette by the active theme/configuration), not core fallbacks. The prior `SduiThemeStyle::default()` core-fallback paint path is gone; `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` resolves typed values from the active theme at each `&self` paint entry point. Theme packages that contribute `clay.contributions.designTokens` overrides win over the compatibility projection automatically; legacy-only themes remain usable without a manifest change.
+**Active-theme routing**: SDUI component paint reads the active `ResolvedUiTheme` (the design-token registry layered over the core fallback catalog and optional legacy `textStyles` base palette by the active theme/configuration), not core fallbacks. The prior `SduiThemeStyle::default()` core-fallback paint path is gone; `SduiThemeStyle::from_ui_theme(&ResolvedUiTheme)` resolves typed values from the active theme at each `&self` paint entry point. Theme packages that contribute `clay.contributions.designTokens` overrides win over the compatibility projection automatically; a legacy-only theme stays usable without a manifest change only if its base palette already clears the composited contrast floors above (all four shipped themes declare the roles, so this is the third-party case).
 
 **State-complete components**: every interactive component derives all five `InteractionState` variants from state tokens:
 
@@ -1579,7 +1610,7 @@ the working area or pane/split tree, own fixed-slot geometry, contribute tab or
 pane chrome, replace the core `WelcomeWidget` fallback / file-browser / status
 surfaces, or open/drive the Clay-owned completion and centered Command Centre
 surfaces. Native file/folder dialogs and the tab bar stay host-owned. The
-loaded empty-tab landing is package-owned (`@clay/chat` or a user-approved
+loaded empty-tab landing is package-owned (the launcher package or a user-approved
 replacement). Fixed package panels
 compose into Clay's mandatory `main` slot plus optional `left`, `right`, `top`,
 and `bottom` slots; transient package overlays remain limited to
@@ -2644,10 +2675,15 @@ See [`completion.serverDisableCompletion`](../clay-js-api/completion/server-disa
 
 ## Phase 25 authoring contract: product landing and pane content
 
-The empty/new-tab landing is a first-party package, not compiled chrome.
-`@clay/chat` is the default. Clay still owns the tab bar, Command Centre,
-native file/folder dialogs, catalog widgets, Prism/`clay-agent`, and the
-core `WelcomeWidget` fallback.
+The empty/new-tab landing is a first-party package, not compiled chrome. The
+launcher surface is that package (plan 118); it replaced `@clay/chat`, which
+held the empty tab until plan 118 removed it. The approved target information
+architecture makes the tab the unit: one tab holds one workspace plus one agent
+and renders one of two views at a time (Workspace | Agent, switched from tab
+chrome — `DESIGN.md` §12), and the launcher sets a tab's first state rather
+than its only state. Clay still owns the tab bar,
+Command Centre, native file/folder dialogs, catalog widgets,
+Prism/`clay-agent`, and the core `WelcomeWidget` fallback.
 
 ### Pane-content contribution
 
@@ -2664,36 +2700,44 @@ the first consumer: `coding-agent.profile` opens it, `coding-agent.close`
 closes it; both answer with one `ShellClientCommandRequest` the client
 re-parses deny-by-default). Surfaces ride `PackageUiSnapshot.surfaces`; the
 empty-tab election ignores them, and the bundled `@clay/coding-agent` surface
-uses the compiled-trusted-presentation precedent (like `ChatPanel` and
+uses the compiled-trusted-presentation precedent (like `CodingAgentPanel` and
 `SettingsPanel`) — third-party `pane` surfaces render through the unchanged
 generic SDUI renderer.
 
+A pane-content contribution does not have to be a compiled panel: the landing
+itself is the compiled host panel for the bundled launcher's trusted
+provenance, and the declared tree stays the inert fallback for the generic SDUI
+renderer. Host data (recent workspaces, configured agent types) is requested
+over the validated session path, never packed into the manifest.
+
 ```js
 import { loadPackage } from "clay:packages";
-await loadPackage("@clay/chat");
+await loadPackage("@clay/launcher");     // the empty-tab landing
+await loadPackage("@clay/coding-agent"); // a named `pane` surface
 ```
 
-Without that line, empty tabs stay `WelcomeWidget` (Open File / Open Folder
-only). Load grants no filesystem, network, shell, daemon, or AI-mutation.
+Without a landing package, empty tabs stay `WelcomeWidget` (Open File / Open
+Folder only) — no product-named landing lives in core. Load grants no
+filesystem, network, shell, daemon, or AI-mutation.
 
 ### Replace and extend
 
 ```json
 {
   "clay": {
-    "replaces": ["@clay/chat"],
+    "replaces": ["@clay/coding-agent"],
     "extensionPoints": [
-      { "id": "chat.entrySurface", "operations": ["append", "replace"] },
-      { "id": "chat.chromeActions", "operations": ["append", "replace"] }
+      { "id": "coding-agent.chromeActions", "operations": ["append", "replace"] }
     ]
   }
 }
 ```
 
-`clay.replaces: ["@clay/chat"]` needs exact user approval. The replacement
-stays in the third-party runtime; it cannot import trusted `@clay/chat`
-modules. `chat.entrySurface` / `chat.chromeActions` extend the first-party
-package without replacing it. Rollback restores `@clay/chat`.
+`clay.replaces` needs exact user approval. The replacement stays in the
+third-party runtime; it cannot import the trusted modules of the package it
+replaces. An extension point such as `coding-agent.chromeActions` extends the
+first-party package without replacing it. Rollback restores the replaced
+package.
 
 Core/bootstrap and `clay-agent` are not package-replaceable. Packages cannot
 create widgets or replace Command Centre, the tab bar, or native
@@ -2714,9 +2758,9 @@ stays internal to the server.
 - Credentials never appear as agent events: `CredentialAck` carries only
   provider/name/stored, and secrets are set exclusively through the existing
   credential API.
-- A package that replaces `@clay/chat` removes the Chat landing and profile;
-  it does not gain agent authority, daemon access, or Tauri APIs. The stream,
-  transcript bounds, and prompt validation stay core-owned.
+- A package that replaces a landing or agent package removes that package's
+  contributions; it does not gain agent authority, daemon access, or Tauri
+  APIs. The stream, transcript bounds, and prompt validation stay core-owned.
 
 ## Phase 28 authoring contract: editor commands, folding, decoration intent, and inlay hints
 
@@ -3352,7 +3396,7 @@ Do not:
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
 - Request or declare the Clay-internal `centered` or `Completion` overlay anchors, caret-native bounds, or a completion-specific widget.
 - Treat package-authored accessibility labels as a path/HTML escape hatch; Clay sanitizes and bounds them before accessibility publication.
-- Treat the core `WelcomeWidget` fallback, native file/folder dialogs, tab bar, or Command Centre as package-owned UI or dialog authority. The loaded empty-tab landing is package-owned via `ui.paneContents`; replace `@clay/chat`, not those host surfaces.
+- Treat the core `WelcomeWidget` fallback, native file/folder dialogs, tab bar, or Command Centre as package-owned UI or dialog authority. The loaded empty-tab landing is package-owned via `ui.paneContents`; replace the landing package, not those host surfaces.
 - Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom client widget.
 - Treat multi-document sessions, dirty/save status chrome, conflict recovery menus, or pending-edit/disconnect/resync recovery as package-owned layout surfaces, native widgets, or clipboard/filesystem authority grants.
 - Open native save dialogs, write arbitrary files, invent package clipboard-contents APIs, or run reconnect/resync loops from package UI in place of Clay's documented command IDs and recovery menus.

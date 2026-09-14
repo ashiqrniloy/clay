@@ -223,7 +223,7 @@ async fn deferred_initial_state_waits_for_tab_binding() {
     };
     assert!(tree.nodes.iter().any(|node| matches!(
         &node.kind,
-        SduiNodeKind::List { items } if items.iter().any(|item| item.label == "selected.txt")
+        SduiNodeKind::List { items, .. } if items.iter().any(|item| item.label == "selected.txt")
     )));
 
     codec
@@ -273,7 +273,7 @@ async fn deferred_initial_state_waits_for_tab_binding() {
     };
     assert!(tree.nodes.iter().any(|node| matches!(
         &node.kind,
-        SduiNodeKind::List { items } if items.iter().any(|item| item.label == "selected.txt")
+        SduiNodeKind::List { items, .. } if items.iter().any(|item| item.label == "selected.txt")
     )));
 
     codec

@@ -10,31 +10,31 @@ afterEach(cleanup);
 
 function surface(greeting: string): PackageSurface {
   return {
-    id: "chat.entry",
-    actionTargets: ["chat.submit"],
+    id: "example.surface",
+    actionTargets: ["example.submit"],
     provenance: {
-      packageName: "@clay/chat",
+      packageName: "@vendor/example",
       packageVersion: "0.1.0",
-      apiPrefix: "chat",
+      apiPrefix: "example",
       trustDomain: "trusted",
     },
     component: {
-      id: "chat.root",
+      id: "example.root",
       kind: "panel",
-      title: "Chat",
+      title: "Example",
       children: [
-        { id: "chat.greeting", kind: "label", text: greeting },
+        { id: "example.greeting", kind: "label", text: greeting },
         {
-          id: "chat.section",
+          id: "example.section",
           kind: "collapse",
           title: "Details",
-          children: [{ id: "chat.detail", kind: "label", text: "Body" }],
+          children: [{ id: "example.detail", kind: "label", text: "Body" }],
         },
         {
-          id: "chat.composer",
+          id: "example.composer",
           kind: "textInput",
           title: "Message",
-          action: { commandId: "chat.submit" },
+          action: { commandId: "example.submit" },
         },
       ],
     },
@@ -88,7 +88,7 @@ describe("package component registry", () => {
       payload: {
         uiVersion: 9,
         intent: {
-          commandId: "chat.submit",
+          commandId: "example.submit",
           arguments: [
             { name: "value", value: { string: "hello" } },
             { name: "text", value: { string: "hello" } },
@@ -104,7 +104,7 @@ describe("package component registry", () => {
       <PackageSurfaceView surface={hostile} uiVersion={1} send={vi.fn()} />,
     );
     expect(
-      screen.getByText("Provided by @clay/chat (trusted package)"),
+      screen.getByText("Provided by @vendor/example (trusted package)"),
     ).toBeVisible();
     expect(
       screen.getByText("<script>window.pwned = true</script>"),

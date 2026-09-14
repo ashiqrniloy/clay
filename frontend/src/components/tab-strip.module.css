@@ -1,7 +1,9 @@
-/* Catalog `tabList` kind (plan 108 G2, plan 110 task 5):
- * Unified tab strip & panels component.
- * Shrink-to-fit cards, hairline dividers, active/hover states from recipe tokens.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Catalog `tab` (item) + `tabBar` (root) — one strip for the shell's window
+ * tabs, the SDUI tab list, and the agent inspector's sections.
+ *
+ * The selection signal is the fill alone: the retired tab underline
+ * (DESIGN.md §14.13) is gone, and every visual property is a `--clay-ds-*`
+ * recipe value or a `--clay-*` theme role. Layout stays host-owned. */
 
 .container {
   min-height: 0;
@@ -9,137 +11,117 @@
 
 .withPanels {
   display: grid;
+  /* The tab row scrolls and the actions stay put: five inspector sections in a
+   * 340px column would otherwise push the hide toggle out of the window. */
+  grid-template-columns: minmax(0, 1fr) auto;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  border: var(
-    --clay-dimension-border-hairline,
-    1px
-  ) solid var(--clay-border-hairline);
-  background: var(--clay-surface-panel);
+  border-width: var(--clay-ds-tab-bar-default-root-rest-border-width);
+  border-style: var(--clay-ds-tab-bar-default-root-rest-border-style);
+  border-color: var(--clay-ds-tab-bar-default-root-rest-border-color);
+  border-radius: var(--clay-ds-tab-bar-default-root-rest-border-radius);
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
 }
 
-.stripOnly {
+.stripOnly,
+.stripWrapper,
+.emptyContainer {
   display: flex;
   align-items: stretch;
-  gap: 1px;
+  gap: 2px;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  background: var(
-    --clay-ds-tab-bar-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
+  scrollbar-width: none;
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
 }
 
 .stripWrapper {
-  display: flex;
-  align-items: stretch;
-  gap: 1px;
-  overflow-x: auto;
-  background: var(
-    --clay-ds-tab-bar-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
-  border-bottom: var(
-    --clay-ds-tab-default-item-rest-border-width,
-    var(--clay-dimension-border-hairline, 1px)
-  ) solid var(
-    --clay-ds-tab-default-item-rest-border-color,
-    var(--clay-border-hairline)
-  );
+  border-bottom-width: var(--clay-ds-tab-bar-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-tab-bar-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-tab-bar-default-root-rest-border-color);
+}
+
+/* Inside the titlebar the chrome owns the hairline and the strip centers its
+ * pills instead of stretching them to the row height. */
+.inline {
+  align-items: center;
+  border-bottom-width: 0;
+}
+
+.stripOnly::-webkit-scrollbar,
+.stripWrapper::-webkit-scrollbar,
+.emptyContainer::-webkit-scrollbar {
+  display: none;
 }
 
 .tabStrip {
-  display: contents;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabPanel {
+  grid-column: 1 / -1;
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: var(--clay-ds-tab-default-item-rest-gap, var(--clay-spacing-xs, 8px));
-  background: var(
-    --clay-ds-tab-default-item-rest-background-color,
-    var(--clay-surface-panel)
-  );
-  color: var(
-    --clay-ds-tab-default-item-rest-text-color,
-    var(--clay-text-muted)
-  );
-  border: none;
-  border-right: var(
-      --clay-ds-tab-default-item-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    solid
-    var(
-      --clay-ds-tab-default-item-rest-border-color,
-      var(--clay-border-hairline)
-    );
-  border-radius: var(--clay-ds-tab-default-item-rest-border-radius, 0);
-  padding: var(
-    --clay-ds-tab-default-item-rest-padding,
-    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
-  );
+  gap: var(--clay-ds-tab-default-item-rest-gap);
+  padding: var(--clay-ds-tab-default-item-rest-padding);
   min-width: fit-content;
   cursor: pointer;
   font-family: inherit;
   font-size: var(--clay-text-detail-size);
-  box-shadow: var(--clay-ds-tab-default-item-rest-shadow, none);
+
+  border: 0;
+  border-radius: var(--clay-ds-tab-default-item-rest-border-radius);
+  --fill: var(--clay-ds-tab-default-item-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-tab-default-item-rest-text-color);
   transition:
-    background-color
-      var(
-        --clay-ds-tab-default-item-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-tab-default-item-rest-transition-timing, linear),
-    color
-      var(
-        --clay-ds-tab-default-item-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-tab-default-item-rest-transition-timing, linear);
+    background-color var(--clay-ds-tab-default-item-rest-transition-duration)
+      var(--clay-ds-tab-default-item-rest-transition-timing),
+    color var(--clay-ds-tab-default-item-rest-transition-duration)
+      var(--clay-ds-tab-default-item-rest-transition-timing);
 }
 
-.tab[data-hovered] {
-  background: var(
-    --clay-ds-tab-default-item-hover-background-color,
-    var(--clay-surface-hover)
-  );
-  color: var(
-    --clay-ds-tab-default-item-hover-text-color,
-    var(--clay-text-primary)
-  );
+.tab[data-hovered]:not([data-selected]) {
+  --fill: var(--clay-ds-tab-default-item-hover-background-color);
+  color: var(--clay-ds-tab-default-item-hover-text-color);
 }
 
 .tab[data-selected] {
-  background: var(
-    --clay-ds-tab-default-item-selected-background-color,
-    var(--clay-surface-selected)
+  --fill: var(--clay-ds-tab-default-item-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-tab-default-item-selected-background-opacity,
+    1
   );
-  color: var(
-    --clay-ds-tab-default-item-selected-text-color,
-    var(--clay-text-primary)
-  );
-  box-shadow: var(
-    --clay-ds-tab-default-item-selected-shadow,
-    inset 0 calc(-1 * var(--clay-dimension-border-thin, 2px)) 0 0
-      var(--clay-accent-primary)
-  );
+  color: var(--clay-ds-tab-default-item-selected-text-color);
 }
 
 .tab[data-focused],
 .tab:focus-visible {
-  outline: var(--clay-ds-tab-default-item-focus-outline-width, 2px)
-    var(--clay-ds-tab-default-item-focus-outline-style, solid)
-    var(--clay-ds-tab-default-item-focus-outline-color, var(--clay-focus-ring));
-  outline-offset: var(--clay-ds-tab-default-item-focus-outline-offset, -2px);
+  outline: var(--clay-ds-tab-default-item-focus-outline-width)
+    var(--clay-ds-tab-default-item-focus-outline-style)
+    var(--clay-ds-tab-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-tab-default-item-focus-outline-offset);
 }
 
 .tab[data-disabled] {
-  opacity: var(
-    --clay-ds-tab-default-item-disabled-opacity,
-    var(--clay-opacity-disabled, 0.5)
-  );
+  --fill: var(--clay-ds-tab-default-item-disabled-background-color);
+  color: var(--clay-ds-tab-default-item-disabled-text-color);
+  opacity: var(--clay-ds-tab-default-item-disabled-opacity);
+  transform: var(--clay-ds-tab-default-item-disabled-transform-preset);
   cursor: default;
 }
 
@@ -147,7 +129,7 @@
   min-height: 0;
   overflow: auto;
   padding: var(--clay-spacing-md, 16px);
-  background: var(--clay-surface-panel);
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
 }
 
 .close {
@@ -165,21 +147,39 @@
   align-items: center;
 }
 
-.emptyContainer {
-  display: flex;
-  align-items: stretch;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  background: var(
-    --clay-ds-tab-bar-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
-}
-
 .dirty {
+  flex: none;
   width: 0.45rem;
   height: 0.45rem;
+  border-radius: var(--clay-ds-tab-default-item-rest-border-radius);
   background: var(--clay-accent-primary);
+}
+
+/* Agent marker (plan 118 task 33): the approved mono word inside the tab, not
+ * a second badge — the tab stays one signal (DESIGN.md §14.4). While the agent
+ * works the word pulses; reduced-motion hosts drop the animation via the
+ * design system's 0.01ms fallback. */
+.agent {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.02em;
+  color: var(--clay-ds-tab-default-item-rest-text-color);
+  opacity: 0.75;
+}
+
+.agent[data-busy="true"] {
+  color: var(--clay-accent-primary);
+  animation: agentPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes agentPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
 }

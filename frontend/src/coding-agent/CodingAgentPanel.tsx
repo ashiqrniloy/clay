@@ -1,10 +1,10 @@
 // Coding Agent split surface (plan 108 task 8) — binding-spec presentation
 // for the bundled `@clay/coding-agent` package.
 //
-// Provenance-exact host rendering, mirroring the ChatPanel/SettingsPanel
+// Provenance-exact host rendering, mirroring the SettingsPanel
 // precedent: static copy comes from the package's declared component tree;
-// every dynamic value rides the ONE core-owned AG-UI stream (`chatAgent` —
-// same daemon session as chat); every interaction emits declared inert
+// every dynamic value rides the ONE core-owned AG-UI stream (`agentSession`
+// — the tab's daemon session); every interaction emits declared inert
 // command intents. Third-party replacements render through the unchanged
 // generic SDUI renderer (PaneTree), never this module.
 //
@@ -27,31 +27,39 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
-
 import {
+  ClayBadge,
   ClayButton,
   ClayDropdown,
   ClayIcon,
   ClayIconButton,
+  ClayKbd,
   ClayTabStrip,
   ClayText,
   ClayTextField,
 } from "../components";
 import type { DropdownOption } from "../components";
-import { chatAgent } from "../agent/state";
+import { agentSession } from "../agent/state";
 import { sendRequest } from "../bridge/client";
 import { sduiActionPayload } from "../sdui/actions";
-import type {
-  PackageComponentNode,
-  PackageSurface,
-} from "../sdui/types";
-import { ClayEditor } from "../editor/ClayEditor";
+import type { PackageComponentNode, PackageSurface } from "../sdui/types";
+import { recipeAttributes } from "../components/recipe-attributes";
+import { agentInspector } from "../shell/layout-state";
 import type { DocumentSession } from "../editor/sync/session";
+import {
+  SESSION_FILE_MARK,
+  sessionFiles,
+  splitSessionFilePath,
+  type SessionFileRecord,
+} from "../agent/session-files";
 import {
   AgentSettingsPanel,
   type AgentSettingsFileInfo,
 } from "../agent-settings/AgentSettingsPanel";
+import {
+  launcherEntriesFrom,
+  type LauncherAgentEntry,
+} from "../launcher/LauncherPanel";
 
 import styles from "./coding-agent.module.css";
 
@@ -65,7 +73,10 @@ import styles from "./coding-agent.module.css";
  * beside their intercepts in `submit`, never daemon-dispatched — are
  * declared here.
  */
-const CLIENT_SLASH_COMMANDS: ReadonlyArray<{ name: string; description: string }> = [
+const CLIENT_SLASH_COMMANDS: ReadonlyArray<{
+  name: string;
+  description: string;
+}> = [
   {
     name: "/model",
     description: "Choose a model from all configured providers.",
@@ -106,7 +117,9 @@ const CHARS_PER_TOKEN_BY_FAMILY: ReadonlyArray<readonly [RegExp, number]> = [
 ];
 
 function charsPerToken(model: string): number {
-  return CHARS_PER_TOKEN_BY_FAMILY.find(([pattern]) => pattern.test(model))?.[1] ?? 4;
+  return (
+    CHARS_PER_TOKEN_BY_FAMILY.find(([pattern]) => pattern.test(model))?.[1] ?? 4
+  );
 }
 
 /** Occupancy estimate when no provider usage has been reported: total
@@ -162,13 +175,7 @@ export function groupModelsByProvider(
 }
 
 type TranscriptKind =
-  | "user"
-  | "assistant"
-  | "reasoning"
-  | "usage"
-  | "error"
-  | "tool"
-  | "skill";
+  "user" | "assistant" | "reasoning" | "usage" | "error" | "tool" | "skill";
 
 interface TranscriptBox {
   id: string;
@@ -177,6 +184,28 @@ interface TranscriptBox {
   content: string;
   /** Tool rows only: the tool name for Context-tab category counts. */
   toolName?: string;
+  /** Plan 118 task 35: the agent type that produced the turn, when the
+   *  server stamped one (rows carry their producer's name across a switch). */
+  agent?: string;
+}
+
+/** `reviewer` → `Reviewer` (the launcher's label rule, client side). */
+function agentLabel(type: string): string {
+  return type
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/** Per-turn agent attribution (plan 118 task 35): read from the message
+ *  metadata the server projects per transcript row. */
+function agentOf(message: unknown): string | undefined {
+  const agent =
+    typeof message === "object" && message !== null
+      ? (message as { metadata?: { agent?: unknown } }).metadata?.agent
+      : undefined;
+  return typeof agent === "string" && agent.length > 0 ? agent : undefined;
 }
 
 function findNode(
@@ -223,93 +252,179 @@ function toolMeta(message: unknown): { toolName: string; skillName: string } {
 }
 
 /**
- * Uniform-height truncated transcript boxes (fixed 3-line clamp — the
- * metadata-driven fixed-line-count truncation from the plan), colored by
- * content type from typed theme tokens. Selection shows the full content in
- * the right pane.
+ * The transcript is turns, not cards (DESIGN.md §12): one hairline-separated
+ * block per entry with a turn head — role micro-label left, kind right — and
+ * either prose (the conversation) or a uniform truncated tool box (machine
+ * output). The AG-UI message carries no timestamp, so none is shown rather
+ * than invented. Selecting a turn opens its full content in Session Info.
  */
-/** Pinned skills card: catalog skills (name + description) discovered by
- *  the daemon, rendered above the transcript — first card in the empty
- *  state, persists at the top once the conversation starts. Non-
- *  interactive (catalog is reference data, not a transcript box). */
-const SkillsCard = memo(function SkillsCard({
-  skills,
-}: {
-  skills: ReadonlyArray<{ name: string; description: string }>;
-}) {
-  if (skills.length === 0) return null;
-  return (
-    <div className={styles.skillsCard} aria-label="Skills loaded">
-      <span className={styles.boxLabel}>Skills loaded</span>
-      <ul className={styles.skillsList}>
-        {skills.map((skill) => (
-          <li key={skill.name} className={styles.skillsRow}>
-            <ClayText variant="caption">{skill.name}</ClayText>
-            {skill.description.length > 0 && (
-              <ClayText variant="caption" muted>
-                {skill.description}
-              </ClayText>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-});
+const TURN_HEADS: Record<TranscriptKind, { role: string; note: string }> = {
+  user: { role: "you", note: "prompt" },
+  assistant: { role: "agent", note: "turn" },
+  reasoning: { role: "thinking", note: "reasoning" },
+  tool: { role: "tool", note: "call" },
+  skill: { role: "skill", note: "skill" },
+  usage: { role: "usage", note: "tokens" },
+  error: { role: "error", note: "failed" },
+};
 
-/** Pinned MCP card: per-server connect outcomes from the daemon's
- *  environment, same slot as the skills card — hidden when no server is
- *  configured/connected. Display-only (no restart/connect actions;
- *  explicitly out of scope, plan 117). */
-const McpCard = memo(function McpCard({
-  servers,
-}: {
-  servers: ReadonlyArray<{ serverId: string; connected: boolean; tools: number; error: string }>;
-}) {
-  if (servers.length === 0) return null;
-  return (
-    <div className={styles.mcpCard} aria-label="MCP servers connected">
-      <span className={styles.boxLabel}>MCP servers</span>
-      <ul className={styles.mcpList}>
-        {servers.map((server) => (
-          <li key={server.serverId} className={styles.mcpRow}>
-            <ClayText variant="caption">{server.serverId}</ClayText>
-            {server.connected ? (
-              <ClayText variant="caption" muted>
-                {server.tools} {server.tools === 1 ? "tool" : "tools"}
-              </ClayText>
-            ) : (
-              <ClayText variant="caption" className={styles.mcpError}>
-                {server.error.length > 0 ? `hidden: ${server.error}` : "hidden"}
-              </ClayText>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-});
+/** Machine output is clamped to a fixed line count so box height never depends
+ *  on content; the conversation reads in full. */
+const BOXED_KINDS = new Set<TranscriptKind>([
+  "tool",
+  "skill",
+  "usage",
+  "error",
+]);
 
-const TranscriptBoxRow = memo(function TranscriptBoxRow({
+const TranscriptTurn = memo(function TranscriptTurn({
   box,
   selected,
+  showAgent,
+  agentChangedFrom,
   onSelect,
 }: {
   box: TranscriptBox;
   selected: boolean;
+  /** More than one agent produced this transcript: label every turn with its
+   *  own agent so a switch is readable turn by turn (plan 118 task 35). */
+  showAgent: boolean;
+  /** The agent the previous turn ran as, when it differs (the switch note). */
+  agentChangedFrom?: string;
   onSelect: (id: string) => void;
 }) {
+  const head = TURN_HEADS[box.kind];
+  // Tool/skill rows name the thing that ran where the generic kind would be.
+  const note =
+    box.kind === "tool" || box.kind === "skill" ? box.label : head.note;
   return (
     <button
       type="button"
-      className={`${styles.box} ${styles[`box_${box.kind}`]}`}
+      className={styles.turn}
+      data-role={box.kind}
+      data-selected={selected}
+      data-agent={box.agent ?? undefined}
       aria-pressed={selected}
       aria-label={`${box.label} ${box.content}`}
       onClick={() => onSelect(selected ? "" : box.id)}
     >
-      <span className={styles.boxLabel}>{box.label}</span>
-      <span className={styles.boxContent}>{box.content}</span>
+      {agentChangedFrom && box.agent ? (
+        <span className={styles.turnSwitch} data-turn-switch>
+          {`Switched to ${agentLabel(box.agent)}`}
+        </span>
+      ) : null}
+      <span className={styles.turnHead}>
+        <span className={styles.turnRole}>
+          {showAgent && box.agent ? agentLabel(box.agent) : head.role}
+        </span>
+        <span className={styles.spacer} />
+        <span className={styles.turnNote}>{note}</span>
+      </span>
+      {BOXED_KINDS.has(box.kind) ? (
+        <span className={styles.turnBox}>
+          <span className={styles.turnBoxText}>{box.content}</span>
+        </span>
+      ) : (
+        <span className={styles.turnBody}>{box.content}</span>
+      )}
     </button>
+  );
+});
+
+/**
+ * Capability inventories — the session's skill catalog and its MCP servers.
+ * Reference data, so it lives in the inspector's Context tab and never in the
+ * transcript (DESIGN.md §12). Display-only: no restart/connect actions.
+ */
+const CapabilitySections = memo(function CapabilitySections({
+  skills,
+  servers,
+}: {
+  skills: ReadonlyArray<{ name: string; description: string }>;
+  servers: ReadonlyArray<{
+    serverId: string;
+    connected: boolean;
+    tools: number;
+    error: string;
+  }>;
+}) {
+  if (skills.length === 0 && servers.length === 0) return null;
+  return (
+    <>
+      {skills.length > 0 && (
+        <section className={styles.section} aria-label="Skills loaded">
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionLabel}>Skills</span>
+            <ClayBadge tone="muted">{skills.length}</ClayBadge>
+          </div>
+          <ul className={styles.skillRows}>
+            {skills.map((skill) => (
+              <li key={skill.name} className={styles.skillRow}>
+                <span className={styles.rowMain}>
+                  <span className={styles.rowName}>{skill.name}</span>
+                  {skill.description.length > 0 && (
+                    <span className={styles.rowDetail}>
+                      {skill.description}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {servers.length > 0 && (
+        <section className={styles.section} aria-label="MCP servers connected">
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionLabel}>MCP servers</span>
+            <ClayBadge tone="muted">{servers.length}</ClayBadge>
+          </div>
+          <ul className={styles.skillRows}>
+            {servers.map((server) => (
+              <li key={server.serverId} className={styles.serverRow}>
+                <span className={styles.rowName}>{server.serverId}</span>
+                <span
+                  className={styles.rowDetail}
+                  data-tone={server.connected ? "ok" : "err"}
+                >
+                  {server.connected
+                    ? `${server.tools} ${server.tools === 1 ? "tool" : "tools"}`
+                    : server.error.length > 0
+                      ? `hidden: ${server.error}`
+                      : "hidden"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+});
+
+/** The first-run state: the keyboard path, and nothing pretending to be a
+ *  conversation (DESIGN.md §12 — real values only). */
+const EmptyTranscript = memo(function EmptyTranscript() {
+  return (
+    <div className={styles.empty} role="status">
+      <p className={styles.emptyTitle}>No conversation yet.</p>
+      <p className={styles.emptyText}>
+        Ask a question, or drive the session from the keyboard. Skills and tools
+        live in the Context tab until they are needed.
+      </p>
+      <div className={styles.keyHints}>
+        <span className={styles.keyHint}>
+          <ClayKbd>/</ClayKbd> commands
+        </span>
+        <span className={styles.keyHint}>
+          <ClayKbd>@</ClayKbd> files &amp; skills
+        </span>
+        <span className={styles.keyHint}>
+          <ClayKbd>⇧</ClayKbd>
+          <ClayKbd>↵</ClayKbd> newline
+        </span>
+      </div>
+    </div>
   );
 });
 
@@ -329,15 +444,27 @@ export interface CodingAgentPanelProps {
   uiVersion: number;
   /** Workspace path for the status row. */
   workspaceRoot: string;
-  /** The pane's document session; the Files tab hosts its editor view
-   *  (plan 109 I6: content follows workspace selection — the workspace
-   *  browser tree lives only in the left workspace tab). */
+  /** The pane's document session: the Settings tab lists the agent's
+   *  delivered files through it. The Files tab no longer hosts an editor
+   *  (plan 118 task 36 — it is the session's file history). */
   session?: DocumentSession | null;
   /** Intent sender for the agent session relay. */
   send?: (payload: string) => Promise<void>;
   /** Effective effort-cycle chord from the behavior manifest
    *  (`coding-agent.clientCycleEffort`); default `Shift+Tab`. */
   effortChord?: EffortChord | null;
+  /** The tab strip marks this tab's agent while it works (plan 118 task 33). */
+  onBusyChange?: (busy: boolean) => void;
+  /** Plan 118 task 35: the agent the tab runs (`null` = none picked yet).
+   *  The header's picker reads it; the session's own STATE (`agent`) wins
+   *  when the daemon reports one, so a resumed session shows its producer. */
+  agentType?: string | null;
+  /** Switch the tab's agent (tab chrome: the shell sends the server-validated
+   *  command). `null` detaches the agent. */
+  onPickAgent?: ((agent: string | null) => void) | null;
+  /** Plan 118 task 36: open a path in the tab's *workspace* view — the Files
+   *  tab's row action (the shell switches the view and opens the document). */
+  onOpenInWorkspace?: ((path: string) => void) | null;
 }
 
 export function CodingAgentPanel({
@@ -347,20 +474,30 @@ export function CodingAgentPanel({
   session = null,
   send,
   effortChord = null,
+  onBusyChange,
+  agentType = null,
+  onPickAgent = null,
+  onOpenInWorkspace = null,
 }: CodingAgentPanelProps) {
+  // Stable across renders so the inspector's rows do not re-bind; a panel
+  // without a shell (fixtures) keeps the rows but they lead nowhere.
+  const openInWorkspace = useCallback(
+    (path: string) => onOpenInWorkspace?.(path),
+    [onOpenInWorkspace],
+  );
   const snapshot = useSyncExternalStore(
-    chatAgent.subscribe,
-    chatAgent.getSnapshot,
-    chatAgent.getSnapshot,
+    agentSession.subscribe,
+    agentSession.getSnapshot,
+    agentSession.getSnapshot,
   );
 
   useEffect(() => {
-    chatAgent.agent.setUiVersion(uiVersion);
+    agentSession.agent.setUiVersion(uiVersion);
   }, [uiVersion]);
   useEffect(() => {
-    if (send) chatAgent.agent.setSender(send);
+    if (send) agentSession.agent.setSender(send);
   }, [send]);
-  useEffect(() => chatAgent.start(), []);
+  useEffect(() => agentSession.start(), []);
   useEffect(() => {
     void sendRequest(agentCommandPayload("listSessions"));
     // Plan 117 follow-up: ask for the tab's STATE at mount. Nothing else
@@ -374,6 +511,64 @@ export function CodingAgentPanel({
   const transcriptTitle = useMemo(
     () => findNode(declared, "coding-agent.transcriptTitle")?.text ?? "Agent",
     [declared],
+  );
+
+  // Plan 118 task 35: the configured agent types come from the same
+  // server-resolved listing the launcher renders (one directory scan, no
+  // package load). Fetched once here so the header's picker can offer them.
+  const [agentEntries, setAgentEntries] = useState<LauncherAgentEntry[]>([]);
+  useEffect(() => {
+    if (!session) return;
+    const apply = (event: { kind?: string; data?: unknown }) => {
+      if (event.kind !== "launcherEntries") return;
+      const entries = launcherEntriesFrom(event.data);
+      if (entries) setAgentEntries(entries.agents);
+    };
+    for (const envelope of session.featureSnapshot())
+      apply(envelope.data as { kind?: string; data?: unknown });
+    const unsubscribe = session.subscribeFeatures((envelope) => {
+      apply(envelope.data as { kind?: string; data?: unknown });
+    });
+    session.listLauncherEntries();
+    return unsubscribe;
+  }, [session]);
+
+  // The session's own agent (server-reported) wins over the tab's identity:
+  // resuming another agent's session shows the agent that produced it.
+  const sessionAgent =
+    typeof snapshot.state["agent"] === "string"
+      ? (snapshot.state["agent"] as string)
+      : null;
+  const currentAgent = sessionAgent ?? agentType;
+  // Plan 118 task 35: a session that already runs an agent (a resume) adopts
+  // it into an agent-less tab, so the tab's record and the view agree. Only
+  // from the *unknown* side: a pick the user just made is never reverted while
+  // the session catches up.
+  useEffect(() => {
+    if (!onPickAgent || agentType !== null || !sessionAgent) return;
+    onPickAgent(sessionAgent);
+  }, [agentType, onPickAgent, sessionAgent]);
+
+  // The menu never lists an agent the server did not list; a tab whose agent
+  // is gone (deleted folder) still shows its own row so the state is visible.
+  const agentOptions = useMemo(() => {
+    const rows = agentEntries.map((entry) => ({
+      id: entry.name,
+      label: entry.label,
+    }));
+    if (currentAgent && !rows.some((row) => row.id === currentAgent)) {
+      rows.unshift({ id: currentAgent, label: agentLabel(currentAgent) });
+    }
+    // No agent picked yet and nothing listed: the surface's own title is the
+    // honest trigger text (the fallback the picker shows as its value).
+    if (rows.length === 0) rows.push({ id: "", label: transcriptTitle });
+    return rows;
+  }, [agentEntries, currentAgent, transcriptTitle]);
+  const skillCount = useMemo(
+    () =>
+      agentEntries.find((entry) => entry.name === currentAgent)?.skillCount ??
+      null,
+    [agentEntries, currentAgent],
   );
 
   const [draft, setDraft] = useState("");
@@ -400,6 +595,16 @@ export function CodingAgentPanel({
   // invalidation: every run finish / compaction / entry append lands a
   // transcript entry and bumps the server's context version).
   const [activeTab, setActiveTab] = useState("files");
+  // The inspector is the agent view's right column (DESIGN.md §12) and its
+  // visibility is the tab's own layout state (plan 118 task E2): one owner
+  // (`agentInspector`), persisted per tab with the rail, so two tabs can keep
+  // different shapes across a restart.
+  const inspectorVisible = useSyncExternalStore(
+    agentInspector.subscribe,
+    agentInspector.isVisible,
+  );
+  const setInspectorVisible = (next: boolean) =>
+    agentInspector.setVisible(next);
   // Plan 109 I10: the tab a card selection came from, restored on
   // deselect (Back or re-click).
   const previousTabRef = useRef("files");
@@ -446,11 +651,19 @@ export function CodingAgentPanel({
         }>)
       : [];
     return stateList
-      .filter((server) => typeof server.serverId === "string" && server.serverId.length > 0)
+      .filter(
+        (server) =>
+          typeof server.serverId === "string" && server.serverId.length > 0,
+      )
       .map((server) => ({
         serverId: server.serverId as string,
         connected: server.connected === true,
-        tools: typeof server.tools === "number" && Number.isInteger(server.tools) && server.tools >= 0 ? server.tools : 0,
+        tools:
+          typeof server.tools === "number" &&
+          Number.isInteger(server.tools) &&
+          server.tools >= 0
+            ? server.tools
+            : 0,
         error: typeof server.error === "string" ? server.error : "",
       }));
   }, [snapshot.state]);
@@ -467,11 +680,13 @@ export function CodingAgentPanel({
       ? (snapshot.state["models"] as ModelInfo[])
       : [];
     const active = models.find(
-      (candidate) => candidate.provider === provider && candidate.model === model,
+      (candidate) =>
+        candidate.provider === provider && candidate.model === model,
     );
     const levels = Array.isArray(active?.thinkingLevels)
       ? (active?.thinkingLevels as unknown[]).filter(
-          (level): level is string => typeof level === "string" && level.length > 0,
+          (level): level is string =>
+            typeof level === "string" && level.length > 0,
         )
       : [];
     return levels.length > 0 ? levels : null;
@@ -495,8 +710,7 @@ export function CodingAgentPanel({
       ),
     [snapshot.state["models"], snapshot.state["providers"]],
   );
-  const activeModelId =
-    provider && model ? `model:${provider}/${model}` : null;
+  const activeModelId = provider && model ? `model:${provider}/${model}` : null;
   const onModelSelect = useCallback((id: string) => {
     // Same selection payload the Command Centre picker emits; the server
     // applies it through select_picker with this tab (I2 per-workspace
@@ -521,7 +735,8 @@ export function CodingAgentPanel({
       ? (snapshot.state["models"] as ModelInfo[])
       : [];
     const active = models.find(
-      (candidate) => candidate.provider === provider && candidate.model === model,
+      (candidate) =>
+        candidate.provider === provider && candidate.model === model,
     );
     return typeof active?.contextWindow === "number" && active.contextWindow > 0
       ? active.contextWindow
@@ -529,7 +744,8 @@ export function CodingAgentPanel({
   }, [snapshot.state, provider, model]);
   // Usage unreported (no provider turn yet, or a provider that never
   // reports): estimate occupancy from transcript size (plan 117).
-  const meterTokens = contextTokens ?? estimateContextTokens(snapshot.messages, model);
+  const meterTokens =
+    contextTokens ?? estimateContextTokens(snapshot.messages, model);
 
   const transcript = useMemo<TranscriptBox[]>(() => {
     const boxes: TranscriptBox[] = [];
@@ -538,10 +754,13 @@ export function CodingAgentPanel({
       if (!kind) continue;
       const content =
         typeof message.content === "string" ? message.content : "";
-      const meta = kind === "tool" || kind === "skill" ? toolMeta(message) : null;
+      const meta =
+        kind === "tool" || kind === "skill" ? toolMeta(message) : null;
+      const agent = agentOf(message);
       boxes.push({
         id: message.id,
         kind,
+        ...(agent ? { agent } : {}),
         label:
           kind === "usage"
             ? "usage"
@@ -560,6 +779,16 @@ export function CodingAgentPanel({
     }
     return boxes;
   }, [snapshot.messages]);
+
+  // Plan 118 task 35: the agent types present in this transcript. With more
+  // than one, every turn shows its producer and the switch gets a note row
+  // (derived from the stamped rows, so it survives a reload).
+  const transcriptAgents = useMemo(() => {
+    const seen = new Set<string>();
+    for (const box of transcript) if (box.agent) seen.add(box.agent);
+    return seen;
+  }, [transcript]);
+  const multiAgent = transcriptAgents.size > 1;
 
   // Session token meter (plan 117): compact occupancy vs the model's
   // ceiling — `220k/270k`. Theme thresholds only: warning above 60%,
@@ -604,7 +833,8 @@ export function CodingAgentPanel({
       )
       .map((command) => ({
         name: command.name as string,
-        description: typeof command.description === "string" ? command.description : "",
+        description:
+          typeof command.description === "string" ? command.description : "",
       }));
     const merged = new Map<string, { name: string; description: string }>();
     for (const command of [...CLIENT_SLASH_COMMANDS, ...daemon]) {
@@ -623,10 +853,13 @@ export function CodingAgentPanel({
         }>)
       : [];
     return stateList
-      .filter((skill) => typeof skill.name === "string" && skill.name.length > 0)
+      .filter(
+        (skill) => typeof skill.name === "string" && skill.name.length > 0,
+      )
       .map((skill) => ({
         name: skill.name as string,
-        description: typeof skill.description === "string" ? skill.description : "",
+        description:
+          typeof skill.description === "string" ? skill.description : "",
       }));
   }, [snapshot.state]);
 
@@ -654,7 +887,10 @@ export function CodingAgentPanel({
     if (completionDismissed) return null;
     const match = /(?:^|\s)@([^\s]*)$/.exec(draft);
     if (!match) return null;
-    return { query: match[1] ?? "", start: match.index + match[0].lastIndexOf("@") };
+    return {
+      query: match[1] ?? "",
+      start: match.index + match[0].lastIndexOf("@"),
+    };
   }, [completionDismissed, draft]);
   const mentionMatches = useMemo(() => {
     if (!mentionToken) return null;
@@ -683,7 +919,14 @@ export function CodingAgentPanel({
     });
     const sections = [
       ...(skillQuery !== null
-        ? [section("Skills", skills.map((skill) => skill.name), "skill", skillQuery)]
+        ? [
+            section(
+              "Skills",
+              skills.map((skill) => skill.name),
+              "skill",
+              skillQuery,
+            ),
+          ]
         : []),
       ...(fileQuery !== null && files.length > 0
         ? [section("Files", files, "file", fileQuery)]
@@ -695,22 +938,20 @@ export function CodingAgentPanel({
   // First @-token of a session fetches the bounded workspace listing once;
   // the reply rides the clay.agentRpc custom event into agent state.
   useEffect(() => {
-    if (!mentionToken || !sessionId || filesFetchedFor.current === sessionId) return;
+    if (!mentionToken || !sessionId || filesFetchedFor.current === sessionId)
+      return;
     filesFetchedFor.current = sessionId;
     void sendRequest(agentCommandPayload({ workspaceFiles: { sessionId } }));
   }, [mentionToken, sessionId]);
-  const embedMention = useCallback(
-    (kind: "skill" | "file", name: string) => {
-      setDraft((current) => {
-        const match = /(?:^|\s)@([^\s]*)$/.exec(current);
-        if (!match) return current;
-        const start = match.index + match[0].lastIndexOf("@");
-        return `${current.slice(0, start)}@${kind}:${name} `;
-      });
-      setCompletionDismissed(true);
-    },
-    [],
-  );
+  const embedMention = useCallback((kind: "skill" | "file", name: string) => {
+    setDraft((current) => {
+      const match = /(?:^|\s)@([^\s]*)$/.exec(current);
+      if (!match) return current;
+      const start = match.index + match[0].lastIndexOf("@");
+      return `${current.slice(0, start)}@${kind}:${name} `;
+    });
+    setCompletionDismissed(true);
+  }, []);
 
   const sendIntent = useCallback(
     (commandId: string) => {
@@ -760,18 +1001,18 @@ export function CodingAgentPanel({
         // Mid-run queue (pi-parity steer): the daemon folds the message into
         // the active run; the transcript keeps streaming. The pending effort
         // level stays pending — it applies to the next fresh prompt.
-        chatAgent.agent.steer(trimmed);
+        agentSession.agent.steer(trimmed);
         return;
       }
       // Plan 109 I4: the pending effort rides the prompt (daemon fail-closes
       // invalid strings at its boundary and applies the model-aware Prism
       // 0.5.0 mapping per run). Once sent, it is the session's active level.
       const effortForRun = pendingEffort ?? undefined;
-      chatAgent.agent.sendPrompt(trimmed, effortForRun);
+      agentSession.agent.sendPrompt(trimmed, effortForRun);
       // Plan 109 I5: the store flushes the deferred server snapshot once the
       // run pipeline is quiescent, so the server transcript wins at the
       // boundary.
-      void chatAgent.runTurn().catch(() => {
+      void agentSession.runTurn().catch(() => {
         // Failures already landed as RUN_ERROR status.
       });
     },
@@ -790,7 +1031,13 @@ export function CodingAgentPanel({
       // Plan 109 I4: the manifest-bound effort chord (default Shift+Tab)
       // cycles declared levels — a no-op (no focus change) when the model
       // declares none or the chord is unbound.
-      const chord = effortChord ?? { shift: true, ctrl: false, alt: false, meta: false, key: "Tab" };
+      const chord = effortChord ?? {
+        shift: true,
+        ctrl: false,
+        alt: false,
+        meta: false,
+        key: "Tab",
+      };
       if (
         event.key === chord.key &&
         event.shiftKey === chord.shift &&
@@ -804,8 +1051,14 @@ export function CodingAgentPanel({
             shownEffort !== null && effortLevels.includes(shownEffort)
               ? shownEffort
               : effortLevels[effortLevels.length - 1];
-          const index = current ? effortLevels.indexOf(current) : effortLevels.length - 1;
-          setPendingEffort(effortLevels[(index + 1) % effortLevels.length] ?? effortLevels[0] ?? null);
+          const index = current
+            ? effortLevels.indexOf(current)
+            : effortLevels.length - 1;
+          setPendingEffort(
+            effortLevels[(index + 1) % effortLevels.length] ??
+              effortLevels[0] ??
+              null,
+          );
         }
         return;
       }
@@ -844,14 +1097,23 @@ export function CodingAgentPanel({
         setCompletionDismissed(true);
       }
     },
-    [effortChord, effortLevels, shownEffort, slashMatches, mentionMatches, completionIndex, embedMention],
+    [
+      effortChord,
+      effortLevels,
+      shownEffort,
+      slashMatches,
+      mentionMatches,
+      completionIndex,
+      embedMention,
+    ],
   );
 
   const onComposerSubmit = useCallback(
     (value: string) => {
       if (slashMatches && slashMatches.length > 0) {
         const exact = slashMatches.find((command) => command.name === value);
-        const highlighted: string | undefined = slashMatches[completionIndex]?.name;
+        const highlighted: string | undefined =
+          slashMatches[completionIndex]?.name;
         if (exact || highlighted) {
           submit(exact?.name ?? highlighted ?? "");
           return;
@@ -862,13 +1124,10 @@ export function CodingAgentPanel({
     [completionIndex, slashMatches, submit],
   );
 
-  const complete = useCallback(
-    (commandName: string) => {
-      setDraft(commandName);
-      setCompletionIndex(0);
-    },
-    [],
-  );
+  const complete = useCallback((commandName: string) => {
+    setDraft(commandName);
+    setCompletionIndex(0);
+  }, []);
 
   // Tool approval (durable runs): Allow/Deny strip for suspended runs.
   const pendingApproval = snapshot.pendingApproval;
@@ -887,16 +1146,16 @@ export function CodingAgentPanel({
         }),
       );
       // Optimistic clear; the resumed run re-announces via RUN_STARTED.
-      chatAgent.clearPendingApproval();
+      agentSession.clearPendingApproval();
     },
     [pendingApproval],
   );
-  // Session list/resume (plan 117): the workspace-scoped, labeled
-  // resumable list (first words of the first user message — daemon
-  // `session.resumable`); resume rides the same rich load the picker uses.
-  const resumableSessions = Array.isArray(snapshot.state["resumableSessions"])
-    ? (snapshot.state["resumableSessions"] as Array<Record<string, unknown>>)
-    : [];
+  // Plan 118 task 36: the Files tab's one data source — the session's file
+  // records, projected from the transcript's tool rows.
+  const sessionFileList = useMemo(
+    () => sessionFiles(snapshot.messages),
+    [snapshot.messages],
+  );
   // Fallback readout when no model ceiling resolves (inventory absent):
   // the raw usage box text, else nothing.
   const lastUsageText = meter ? "" : lastUsage;
@@ -906,6 +1165,27 @@ export function CodingAgentPanel({
     ? (snapshot.state["contextView"] as ContextView)
     : null;
 
+  // Plan 118 task 33: report the run state up to the shell so the tab strip's
+  // agent marker can pulse. The panel is the only writer of this fact.
+  useEffect(() => {
+    onBusyChange?.(streaming === true);
+  }, [onBusyChange, streaming]);
+
+  // State strip (DESIGN.md §12): the dot, the session's own status line, and a
+  // note that is a fact about the run — never invented progress.
+  const stateTone = !configured
+    ? "muted"
+    : streaming
+      ? "busy"
+      : snapshot.status.status === null
+        ? "success"
+        : "warning";
+  const stateText = streaming ? "Working" : (snapshot.status.status ?? "Ready");
+  const stateNote = pendingApproval
+    ? "tool call needs approval"
+    : streaming
+      ? "steer or stop from the composer"
+      : "agent idle";
 
   return (
     <section
@@ -913,79 +1193,189 @@ export function CodingAgentPanel({
       aria-label="Coding Agent"
       data-coding-agent-surface
     >
-      <Group
-        orientation="horizontal"
-        className={styles.split}
-        aria-label="Coding Agent split"
+      <div
+        className={styles.agent}
+        data-inspector={inspectorVisible ? "expanded" : "collapsed"}
       >
-        <Panel
-          defaultSize="50%"
-          minSize="20%"
-          maxSize="80%"
-          className={styles.leftPane}
-        >
-          <div className={styles.left}>
-            <header className={styles.header}>
-              <ClayText variant="title">{transcriptTitle}</ClayText>
-              <span className={styles.headerMeta}>
+        <main className={styles.agentColumn}>
+          <header className={styles.agentHead}>
+            {/* Plan 118 task 35: the title *is* the agent-type picker — one
+             *  tab holds one agent, and this is where it changes. The menu
+             *  lists the configured types (the same server enumeration the
+             *  launcher shows), marks the current one, and names where more
+             *  come from. */}
+            <span className={styles.agentPick} data-agent-pick>
+              <ClayDropdown
+                label="Agent type"
+                triggerFamily="agentPicker"
+                selectedHint="current"
+                options={agentOptions}
+                selectedId={currentAgent}
+                disabled={!onPickAgent || agentOptions.length === 0}
+                onSelect={(id) => {
+                  if (!onPickAgent || id === currentAgent) return;
+                  // Switching resets the effort control: the level belonged
+                  // to the previous agent's model (the model itself follows
+                  // the new agent's own default from the server).
+                  setPendingEffort(null);
+                  onPickAgent(id);
+                }}
+                footer={
+                  currentAgent
+                    ? `${currentAgent} · ${
+                        skillCount === null
+                          ? "skills unknown"
+                          : `${skillCount} skill${skillCount === 1 ? "" : "s"}`
+                      } · from ~/.clay/agents/`
+                    : "Agent types are folders under ~/.clay/agents/"
+                }
+              />
+            </span>
+            <span className={styles.agentControls}>
+              {configured && modelGroups.length > 0 ? (
+                <ClayDropdown
+                  label="Model"
+                  options={[]}
+                  groups={modelGroups}
+                  selectedId={activeModelId}
+                  onSelect={onModelSelect}
+                />
+              ) : (
                 <ClayText variant="caption" muted>
                   {configured
-                    ? `${String(snapshot.state["profile"] ?? "coding")} ·`
+                    ? provider && model
+                      ? `${provider}/${model}`
+                      : String(snapshot.state["profile"] ?? "coding")
                     : "Configure a provider to start."}
                 </ClayText>
-                {configured && modelGroups.length > 0 && (
-                  <ClayDropdown
-                    label="Model"
-                    options={[]}
-                    groups={modelGroups}
-                    selectedId={activeModelId}
-                    onSelect={onModelSelect}
-                  />
-                )}
-              </span>
-            </header>
-
-            <div
-              className={styles.transcript}
-              role="log"
-              aria-label="Transcript"
-              aria-live="polite"
-            >
-              <SkillsCard skills={skills} />
-              <McpCard servers={mcpServers} />
-              {transcript.length > 0 ? (
-                transcript.map((box) => (
-                  <TranscriptBoxRow
-                    key={box.id}
-                    box={box}
-                    selected={box.id === selectedId}
-                    onSelect={selectCard}
-                  />
-                ))
+              )}
+              {meter ? (
+                <span className={styles.meter}>
+                  <span className={styles.meterTrack} aria-hidden>
+                    <span
+                      className={styles.meterFill}
+                      style={{ width: `${meter.percent}%` }}
+                    />
+                  </span>
+                  <span
+                    className={
+                      meter.tone === "error"
+                        ? styles.meterError
+                        : meter.tone === "warning"
+                          ? styles.meterWarning
+                          : styles.meterValue
+                    }
+                    title={`Context usage: ${meter.percent}% of ceiling`}
+                  >
+                    {meter.text}
+                  </span>
+                </span>
               ) : (
-                <p className={styles.empty} role="status">
-                  <ClayText variant="body" muted>
-                    No conversation yet.
+                lastUsageText.length > 0 && (
+                  <span className={styles.meterValue}>{lastUsageText}</span>
+                )
+              )}
+              {/* Plan 109 I4: cataloged ClayDropdown for declared levels;
+               * the selected level rides the next prompt. */}
+              {effortLevels && effortLevels.length > 0 ? (
+                <ClayDropdown
+                  label="Effort"
+                  options={effortLevels.map((level) => ({
+                    id: level,
+                    label: level,
+                  }))}
+                  selectedId={shownEffort}
+                  onSelect={setPendingEffort}
+                />
+              ) : (
+                activeEffort && (
+                  <ClayText variant="caption" muted>
+                    {`effort ${activeEffort}`}
                   </ClayText>
-                </p>
+                )
+              )}
+              {!inspectorVisible && (
+                <ClayIconButton
+                  icon="preview.toggle"
+                  label="Show inspector"
+                  variant="muted"
+                  onPress={() => setInspectorVisible(true)}
+                />
+              )}
+            </span>
+          </header>
+
+          <div
+            className={styles.transcript}
+            role="log"
+            aria-label="Transcript"
+            aria-live="polite"
+          >
+            <div className={styles.transcriptInner}>
+              {transcript.length > 0 ? (
+                transcript.map((box, index) => {
+                  const previous = transcript
+                    .slice(0, index)
+                    .reverse()
+                    .find((candidate) => candidate.agent)?.agent;
+                  return (
+                    <TranscriptTurn
+                      key={box.id}
+                      box={box}
+                      selected={box.id === selectedId}
+                      showAgent={multiAgent}
+                      agentChangedFrom={
+                        multiAgent && box.agent && previous !== box.agent
+                          ? previous
+                          : undefined
+                      }
+                      onSelect={selectCard}
+                    />
+                  );
+                })
+              ) : (
+                <EmptyTranscript />
               )}
             </div>
+          </div>
 
-            <footer className={styles.composerArea}>
-              {pendingApproval && (
-                <div className={styles.approvalStrip} role="alertdialog" aria-label="Tool approval">
-                  <ClayText variant="caption">
-                    Tool “{pendingApproval.toolName}” needs approval
-                  </ClayText>
-                  <ClayButton onPress={() => resolveApproval("allow_once")}>Allow</ClayButton>
-                  <ClayButton onPress={() => resolveApproval("reject_once")}>Deny</ClayButton>
-                </div>
-              )}
-              <p className={styles.statusLine} role="status">
-                <ClayText variant="status">
-                  {streaming ? "Streaming" : (snapshot.status.status ?? "Ready")}
+          <div className={styles.stateStrip} role="status">
+            <span
+              className={styles.statusDot}
+              data-tone={stateTone}
+              aria-hidden
+              {...recipeAttributes("statusDot", "root")}
+            />
+            <span className={styles.stateText}>{stateText}</span>
+            <span className={styles.spacer} />
+            <span className={styles.stateNote}>{stateNote}</span>
+          </div>
+
+          <footer className={styles.composerArea}>
+            {pendingApproval && (
+              <div
+                className={styles.approvalStrip}
+                role="alertdialog"
+                aria-label="Tool approval"
+              >
+                <ClayText variant="caption">
+                  Tool “{pendingApproval.toolName}” needs approval
                 </ClayText>
-              </p>
+                <ClayButton onPress={() => resolveApproval("allow_once")}>
+                  Allow
+                </ClayButton>
+                <ClayButton onPress={() => resolveApproval("reject_once")}>
+                  Deny
+                </ClayButton>
+              </div>
+            )}
+            <form
+              className={styles.composer}
+              onSubmit={(event) => {
+                event.preventDefault();
+                onComposerSubmit(draft);
+              }}
+            >
               {slashMatches && slashMatches.length > 0 && (
                 <ul
                   className={styles.completions}
@@ -1004,9 +1394,9 @@ export function CodingAgentPanel({
                         <span className={styles.completionName}>
                           {command.name}
                         </span>
-                        <ClayText variant="caption" muted>
+                        <span className={styles.completionDetail}>
                           {command.description}
-                        </ClayText>
+                        </span>
                       </button>
                     </li>
                   ))}
@@ -1033,8 +1423,9 @@ export function CodingAgentPanel({
                               type="button"
                               role="option"
                               aria-selected={
-                                mentionMatches.flat[completionIndex % mentionMatches.flat.length]
-                                  ?.name === item.name
+                                mentionMatches.flat[
+                                  completionIndex % mentionMatches.flat.length
+                                ]?.name === item.name
                               }
                               className={styles.completionRow}
                               onClick={() => embedMention(item.kind, item.name)}
@@ -1050,238 +1441,202 @@ export function CodingAgentPanel({
                   ))}
                 </ul>
               )}
-              <form
-                className={styles.composer}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onComposerSubmit(draft);
+              <ClayTextField
+                label="Message"
+                value={draft}
+                onChange={(value) => {
+                  setDraft(value);
+                  setCompletionIndex(0);
+                  setCompletionDismissed(false);
                 }}
-              >
-                <ClayTextField
-                  label="Message"
-                  value={draft}
-                  onChange={(value) => {
-                    setDraft(value);
-                    setCompletionIndex(0);
-                    setCompletionDismissed(false);
-                  }}
-                  multiline
-                  autoGrow
-                  placeholder={
-                    configured
-                      ? streaming
-                        ? "Steer the agent, or wait"
-                        : "Ask, or type / or @"
-                      : "Configure a provider first"
-                  }
-                  disabled={!configured}
-                  onKeyDown={onComposerKeyDown}
-                  onSubmit={onComposerSubmit}
-                />
-                <span className={styles.composerActions}>
-                  {streaming ? (
+                multiline
+                autoGrow
+                variant="composer"
+                placeholder={
+                  configured
+                    ? streaming
+                      ? "Steer the agent, or wait"
+                      : "Ask, or type / or @"
+                    : "Configure a provider first"
+                }
+                disabled={!configured}
+                onKeyDown={onComposerKeyDown}
+                onSubmit={onComposerSubmit}
+                endContent={
+                  <span className={styles.composerActions}>
+                    {streaming ? (
+                      <ClayIconButton
+                        icon="generation.stop"
+                        label="Stop"
+                        onPress={() => agentSession.agent.abortRun()}
+                      />
+                    ) : (
+                      <ClayIconButton
+                        icon="message.send"
+                        label="Send"
+                        type="submit"
+                        isDisabled={!configured || !draft.trim()}
+                      />
+                    )}
                     <ClayIconButton
-                      icon="generation.stop"
-                      label="Stop"
-                      onPress={() => chatAgent.agent.abortRun()}
+                      icon="action.close"
+                      label="Close"
+                      variant="muted"
+                      onPress={() => sendIntent("coding-agent.close")}
                     />
-                  ) : (
-                    <ClayIconButton
-                      icon="message.send"
-                      label="Send"
-                      type="submit"
-                      isDisabled={!configured || !draft.trim()}
-                    />
-                  )}
-                  <ClayIconButton
-                    icon="action.close"
-                    label="Close"
-                    variant="muted"
-                    onPress={() => sendIntent("coding-agent.close")}
-                  />
+                  </span>
+                }
+              />
+              <div className={styles.composerHints}>
+                <span className={styles.keyHint}>
+                  <ClayKbd>/</ClayKbd> commands
                 </span>
-              </form>
-              {mcpServers.length > 0 && (
-                <ul className={styles.mcpSection} aria-label="MCP connections">
-                  {mcpServers.map((server) => (
-                    <li key={server.serverId} className={styles.mcpSectionRow}>
-                      <ClayText variant="caption" muted>
-                        {server.serverId}
-                      </ClayText>
-                      {server.connected ? (
-                        <ClayText variant="caption" muted>
-                          {server.tools} {server.tools === 1 ? "tool" : "tools"}
-                        </ClayText>
-                      ) : (
-                        <ClayText variant="caption" className={styles.mcpError}>
-                          {server.error.length > 0 ? `hidden: ${server.error}` : "hidden"}
-                        </ClayText>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </footer>
-
-            <div className={styles.statusRow} role="status">
-              <span className={styles.statusLeft}>
-                {/* Plan 109 R2: the workspace's real git branch (bounded
-                 * server-side `.git` read riding session state); `—` when
-                 * not a repo or not yet read. */}
-                <ClayText variant="caption" muted>
-                  {workspaceRoot} · git {gitBranch || "—"}
-                </ClayText>
-              </span>
-              <span className={styles.statusRight}>
-                <ClayText variant="caption" muted>
-                  {configured ? `${provider}/${model}` : "no provider"}
-                  {meter ? (
-                    <>
-                      {" · "}
-                      {/* Token meter (plan 117): occupancy vs ceiling;
-                       * threshold tones ride diagnostic tokens only. */}
-                      <span
-                        className={
-                          meter.tone === "error"
-                            ? styles.meterError
-                            : meter.tone === "warning"
-                              ? styles.meterWarning
-                              : undefined
-                        }
-                        title={`Context usage: ${meter.percent}% of ceiling`}
-                      >
-                        {meter.text}
-                      </span>
-                    </>
-                  ) : lastUsageText ? (
-                    ` · ${lastUsageText}`
-                  ) : (
-                    ""
-                  )}
-                </ClayText>
-                {/* Plan 109 I4: cataloged ClayDropdown for declared levels;
-                 * plain caption readout otherwise. The selected level rides
-                 * the next prompt. */}
-                {effortLevels && effortLevels.length > 0 ? (
-                  <ClayDropdown
-                    label="Effort"
-                    options={effortLevels.map((level) => ({
-                      id: level,
-                      label: level,
-                    }))}
-                    selectedId={shownEffort}
-                    onSelect={setPendingEffort}
-                  />
-                ) : (
-                  activeEffort && (
-                    <ClayText variant="caption" muted>
-                      {` · effort ${activeEffort}`}
-                    </ClayText>
-                  )
+                <span className={styles.keyHint}>
+                  <ClayKbd>@</ClayKbd> mention file or skill
+                </span>
+                <span className={styles.keyHint}>
+                  <ClayKbd>↵</ClayKbd> send
+                </span>
+                <span className={styles.keyHint}>
+                  <ClayKbd>⇧</ClayKbd>
+                  <ClayKbd>↵</ClayKbd> newline
+                </span>
+                <span className={styles.spacer} />
+                {draft.trim().length > 0 && (
+                  <span className={styles.hintCount}>
+                    {draft.trim().length} chars
+                  </span>
                 )}
-              </span>
-            </div>
+              </div>
+            </form>
+          </footer>
 
-            <div className={styles.extensionStrip} aria-label="Extensions">
-              {/* Plan 109 R3: actual active extensions from daemon state;
-               * the segment is omitted when none report. */}
-              {extensions.length > 0 && (
-                <ClayText variant="caption" muted>
-                  Extensions: {extensions.join(", ")}
-                </ClayText>
-              )}
-              <ClayText variant="caption" muted>
-                MCP: {connectedMcpServers.length > 0 ? connectedMcpServers.join(", ") : "none"}
-              </ClayText>
-            </div>
+          <div
+            className={styles.agentFoot}
+            data-clay-ds="shell.footer"
+            aria-label="Session environment"
+          >
+            <span>{workspaceRoot}</span>
+            <span className={styles.footFaint}>·</span>
+            <span>{`git ${gitBranch || "—"}`}</span>
+            {extensions.length > 0 && (
+              <>
+                <span className={styles.footFaint}>·</span>
+                <span>{`extensions ${extensions.join(", ")}`}</span>
+              </>
+            )}
+            <span className={styles.spacer} />
+            {/* One summary segment: the per-server detail is the Context
+             *  tab's, and this line only says what is connected. */}
+            <span data-tone={connectedMcpServers.length > 0 ? "ok" : "muted"}>
+              {mcpServers.length > 0
+                ? `MCP ${mcpServers
+                    .map((server) =>
+                      server.connected
+                        ? `${server.serverId} · ${server.tools} ${
+                            server.tools === 1 ? "tool" : "tools"
+                          }`
+                        : `${server.serverId} · hidden`,
+                    )
+                    .join(" · ")}`
+                : "MCP none"}
+            </span>
           </div>
-        </Panel>
+        </main>
 
-        <Separator className={styles.separator} aria-label="Resize split" />
-
-        <Panel minSize="20%" maxSize="80%" className={styles.rightPane}>
-          <div className={styles.right}>
-            <ClayTabStrip
-              className={styles.tabs}
-              activeId={activeTab}
-              onActivate={setActiveTab}
-              ariaLabel="Agent detail"
-              tabs={[
-                {
-                  id: "files",
-                  label: "Files",
-                  content: (
-                    <FilesTab
-                      session={session}
-                      sendIntent={sendIntent}
-                      sessions={resumableSessions}
-                    />
-                  ),
-                },
-                {
-                  id: "memory",
-                  label: "Memory",
-                  content: (
-                    <MemoryTab
-                      sessionId={sessionId}
-                      open={activeTab === "memory"}
-                      transcriptLength={transcript.length}
-                      view={omView}
-                      modelGroups={modelGroups}
-                    />
-                  ),
-                },
-                {
-                  id: "context",
-                  label: "Context",
-                  content: (
-                    <ContextTab
-                      sessionId={sessionId}
-                      open={activeTab === "context"}
-                      transcriptLength={transcript.length}
-                      view={contextView}
-                      detail={
-                        isContextItemDetail(snapshot.state["contextItemDetail"])
-                          ? (snapshot.state["contextItemDetail"] as ContextItemDetail)
-                          : null
-                      }
-                    />
-                  ),
-                },
-                {
-                  // Plan 109 I10: card-detail destination. Selecting a
-                  // transcript card auto-switches here and renders that
-                  // entry's full redacted content from the already-loaded
-                  // transcript — no refetch.
-                  id: "session-info",
-                  label: "Session Info",
-                  content: (
-                    <SessionInfoTab
-                      selected={selected}
-                      onBack={() => selectCard(selectedId)}
-                    />
-                  ),
-                },
-                {
-                  // Plan 117 follow-up: the agent's delivered config files.
-                  // Replaces the shell-owned side panel — the listing rides
-                  // this pane's own document session, so the shell keeps no
-                  // agent-settings state.
-                  id: "settings",
-                  label: "Settings",
-                  content: (
-                    <SettingsTab
-                      session={session}
-                      open={activeTab === "settings"}
-                      sendIntent={sendIntent}
-                    />
-                  ),
-                },
-              ]}
-            />
-          </div>
-        </Panel>
-      </Group>
+        <aside className={styles.inspector} aria-label="Agent inspector">
+          <ClayTabStrip
+            className={styles.tabs}
+            activeId={activeTab}
+            onActivate={setActiveTab}
+            ariaLabel="Agent detail"
+            actions={
+              <ClayIconButton
+                icon="preview.toggle"
+                label="Hide inspector"
+                variant="muted"
+                onPress={() => setInspectorVisible(false)}
+              />
+            }
+            tabs={[
+              {
+                id: "files",
+                label: "Files",
+                content: (
+                  <FilesTab
+                    records={sessionFileList}
+                    open={activeTab === "files"}
+                    onOpen={openInWorkspace}
+                  />
+                ),
+              },
+              {
+                id: "memory",
+                label: "Memory",
+                content: (
+                  <MemoryTab
+                    sessionId={sessionId}
+                    open={activeTab === "memory"}
+                    transcriptLength={transcript.length}
+                    view={omView}
+                    modelGroups={modelGroups}
+                  />
+                ),
+              },
+              {
+                id: "context",
+                label: "Context",
+                content: (
+                  <ContextTab
+                    sessionId={sessionId}
+                    open={activeTab === "context"}
+                    transcriptLength={transcript.length}
+                    view={contextView}
+                    skills={skills}
+                    servers={mcpServers}
+                    detail={
+                      isContextItemDetail(snapshot.state["contextItemDetail"])
+                        ? (snapshot.state[
+                            "contextItemDetail"
+                          ] as ContextItemDetail)
+                        : null
+                    }
+                  />
+                ),
+              },
+              {
+                // Plan 109 I10: card-detail destination. Selecting a
+                // transcript card auto-switches here and renders that
+                // entry's full redacted content from the already-loaded
+                // transcript — no refetch.
+                id: "session-info",
+                label: "Session Info",
+                content: (
+                  <SessionInfoTab
+                    selected={selected}
+                    onBack={() => selectCard(selectedId)}
+                  />
+                ),
+              },
+              {
+                // Plan 117 follow-up: the agent's delivered config files.
+                // Replaces the shell-owned side panel — the listing rides
+                // this pane's own document session, so the shell keeps no
+                // agent-settings state.
+                id: "settings",
+                label: "Settings",
+                content: (
+                  <SettingsTab
+                    session={session}
+                    open={activeTab === "settings"}
+                    sendIntent={sendIntent}
+                  />
+                ),
+              },
+            ]}
+          />
+        </aside>
+      </div>
     </section>
   );
 }
@@ -1404,102 +1759,139 @@ function SessionInfoTab({
 }
 
 /**
- * Files tab (plan 109 I6): hosts the same ClayEditor surface the shell
- * uses, bound to the pane's document session — content follows workspace
- * selection with no second document pipeline and no coding-agent editor
- * branch. The workspace browser tree lives only in the left workspace
- * tab. No file selected → the empty state with Open file actions.
+ * Files tab (plan 118 task 36): the files *this session* has touched, newest
+ * first — session history, never a file browser (the tree lives in the
+ * workspace view, and so does the editor). A row opens in the tab's workspace
+ * view, which is the dual-view payoff: the agent keeps its transcript and the
+ * workspace takes the file. Rows come from the transcript's own tool records,
+ * so the list survives a resume and clears with the session.
  */
 function FilesTab({
-  session,
-  sendIntent,
-  sessions,
+  records,
+  open,
+  onOpen,
 }: {
-  session: DocumentSession | null;
-  sendIntent: (commandId: string) => void;
-  sessions: readonly Record<string, unknown>[];
+  records: readonly SessionFileRecord[];
+  /** The inspector tab is showing (the panel mounts every tab's content). */
+  open: boolean;
+  /** Open a path in the tab's workspace view. */
+  onOpen: (path: string) => void;
 }) {
-  // Plan 117: fetch the labeled, workspace-scoped resumable list when the
-  // empty state mounts (bounded server walk, root from the tab registry).
+  const [query, setQuery] = useState("");
+  const filterRef = useRef<HTMLInputElement | null>(null);
+  // The filter's chord, scoped to the panel that shows it and inert while a
+  // field has the keyboard (the artifact's `F` hint is a real binding).
   useEffect(() => {
-    void sendRequest(agentCommandPayload("resumableSessions"));
-  }, []);
-  const meta = useSyncExternalStore(
-    session ? session.store.subscribe : () => () => undefined,
-    session ? session.store.get : () => null,
-    () => null,
-  );
-  if (!session || (!meta?.path && session.snapshotDoc().length === 0)) {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "f") return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName.toLowerCase();
+      if (
+        tag === "input" ||
+        tag === "textarea" ||
+        target?.isContentEditable === true
+      ) {
+        return;
+      }
+      event.preventDefault();
+      filterRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  const needle = query.trim().toLowerCase();
+  const visible =
+    needle.length === 0
+      ? records
+      : records.filter((record) => record.path.toLowerCase().includes(needle));
+
+  if (records.length === 0) {
+    // The approved empty state: what this panel is, and the two keystrokes
+    // that move the session forward instead.
     return (
-      <div className={styles.tabEmpty}>
+      <div className={styles.sessionFilesEmpty}>
+        <ClayText variant="title">No files in this session yet</ClayText>
         <ClayText variant="body" muted>
-          Open a file to work on it alongside the agent.
+          Files the agent reads, writes or searches appear here, newest first.
+          Opening one is a keystroke: it switches the tab to its workspace view
+          at that file.
         </ClayText>
-        <ClayButton onPress={() => sendIntent("documents.clientOpenFileDialog")}>
-          Open file
-        </ClayButton>
-        <ClayButton
-          variant="muted"
-          onPress={() => sendIntent("agent.clientOpenSessionPicker")}
-        >
-          Resume session
-        </ClayButton>
-        <ClayButton
-          variant="muted"
-          onPress={() => sendIntent("agent.clientOpenSessionSearchPicker")}
-        >
-          Search sessions…
-        </ClayButton>
-        {sessions.length > 0 && (
-          <ul className={styles.sessionList} aria-label="Recent sessions">
-            {sessions.slice(0, 5).map((record) => {
-              const id = String(record["sessionId"] ?? record["id"] ?? "");
-              const label =
-                typeof record["label"] === "string" && record["label"].length > 0
-                  ? record["label"]
-                  : "Untitled session";
-              // Plan 117 follow-up: the row needs both halves of the identity —
-              // the opening prompt (label) and when the session was last
-              // active. The stamp is the daemon's local-time rendering, so the
-              // hour matches the user's clock rather than UTC.
-              const stamp =
-                typeof record["updatedAtLabel"] === "string"
-                  ? record["updatedAtLabel"]
-                  : "";
-              return (
-                <li key={id} className={styles.sessionRow}>
-                  <span className={styles.sessionLabel}>
-                    <ClayText variant="detail">{label}</ClayText>
-                    {stamp.length > 0 && (
-                      <ClayText variant="caption" muted>
-                        {stamp}
-                      </ClayText>
-                    )}
-                  </span>
-                  <ClayIconButton
-                    icon="session.resume"
-                    label={`Resume ${label} (${stamp || id.slice(0, 12)})`}
-                    variant="muted"
-                    onPress={() =>
-                      void sendRequest(
-                        agentCommandPayload({
-                          resumeSession: { sessionId: id },
-                        }),
-                      )
-                    }
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <div className={styles.sessionFileKeys}>
+          <span className={styles.keyHint}>
+            <ClayKbd>@</ClayKbd> mention a file
+          </span>
+          <span className={styles.keyHint}>
+            <ClayKbd>Ctrl</ClayKbd>
+            <ClayKbd>1</ClayKbd> workspace view
+          </span>
+        </div>
       </div>
     );
   }
-  // Same document surface the shell mounts for the pane; the pane's
-  // editor is unmounted while the agent surface is open, so this is the
-  // session's only EditorView (one view per mount).
-  return <ClayEditor session={session} />;
+
+  return (
+    <section className={styles.section} aria-label="Session files">
+      <div className={styles.sectionHead}>
+        <span className={styles.sectionLabel}>Session files</span>
+        <ClayBadge tone="muted">{visible.length}</ClayBadge>
+        <span className={styles.spacer} />
+        <span className={styles.sessionFilter}>
+          <input
+            ref={filterRef}
+            type="search"
+            className={styles.sessionFilterInput}
+            placeholder="Filter"
+            aria-label="Filter session files"
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            {...recipeAttributes("textInput", "input")}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <ClayKbd>F</ClayKbd>
+        </span>
+      </div>
+      <ul
+        className={styles.sessionList}
+        aria-label="Files this session has touched"
+      >
+        {visible.map((record) => {
+          const { name, dir } = splitSessionFilePath(record.path);
+          return (
+            <li key={record.path}>
+              <button
+                type="button"
+                className={styles.sessionRow}
+                data-role={record.role}
+                aria-label={`Open ${record.path} in the workspace view`}
+                onClick={() => onOpen(record.path)}
+                {...recipeAttributes("sessionRow", "root")}
+              >
+                <span className={styles.sessionMark} aria-hidden>
+                  {SESSION_FILE_MARK[record.role]}
+                </span>
+                <span className={styles.rowMain}>
+                  <span className={styles.rowName}>{name}</span>
+                  {dir.length > 0 && (
+                    <span className={styles.rowDetail}>{dir}</span>
+                  )}
+                </span>
+                <span className={styles.sessionRole}>{record.role}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className={styles.rowDetail}>
+        Files this session has read, written or searched. Opening one switches
+        the tab to its workspace view at that file; this is session history, not
+        a file browser — the tree lives in the workspace view.
+      </p>
+    </section>
+  );
 }
 
 /** Plan 109 I7: server-authoritative context view (daemon `session.context`).
@@ -1590,16 +1982,15 @@ function OmWorkerDropdown({
   // `options` when `groups` is present, so the clear entry is prepended to
   // the first group (or stands alone when no models are configured).
   const firstGroup = groups[0];
-  const groupsWithClear =
-    firstGroup
-      ? [
-          {
-            label: firstGroup.label,
-            options: [clearOption, ...firstGroup.options],
-          },
-          ...groups.slice(1),
-        ]
-      : undefined;
+  const groupsWithClear = firstGroup
+    ? [
+        {
+          label: firstGroup.label,
+          options: [clearOption, ...firstGroup.options],
+        },
+        ...groups.slice(1),
+      ]
+    : undefined;
   return (
     <div className={styles.omWorkerRow}>
       <ClayText variant="caption" muted>
@@ -1639,21 +2030,22 @@ function MemoryTab({
       },
     );
   }, [open, sessionId, transcriptLength]);
-  const selectWorker = (worker: "observation" | "reflection") => (id: string) => {
-    if (!sessionId) return;
-    const clear = id === OM_WORKER_CLEAR;
-    void sendRequest(
-      agentCommandPayload({
-        selectWorker: {
-          worker,
-          id: clear ? "" : id,
-          sessionId,
-        },
-      }),
-    ).catch(() => {
-      // Same failure surface as the read fetch.
-    });
-  };
+  const selectWorker =
+    (worker: "observation" | "reflection") => (id: string) => {
+      if (!sessionId) return;
+      const clear = id === OM_WORKER_CLEAR;
+      void sendRequest(
+        agentCommandPayload({
+          selectWorker: {
+            worker,
+            id: clear ? "" : id,
+            sessionId,
+          },
+        }),
+      ).catch(() => {
+        // Same failure surface as the read fetch.
+      });
+    };
   if (!sessionId) {
     return (
       <div className={styles.tabEmpty}>
@@ -1663,7 +2055,8 @@ function MemoryTab({
       </div>
     );
   }
-  const stale = view && typeof view.sessionId === "string" && view.sessionId !== sessionId;
+  const stale =
+    view && typeof view.sessionId === "string" && view.sessionId !== sessionId;
   const activity = (!stale && view?.activity) || [];
   const attached = !stale && view?.attached === true;
   return (
@@ -1692,9 +2085,9 @@ function MemoryTab({
           {activity.map((row) => (
             <li key={row.id} className={styles.omActivityRow}>
               <span
-                className={`${styles.omKind} ${styles[
-                  `omKind_${row.kind}` as keyof typeof styles
-                ] ?? ""}`}
+                className={`${styles.omKind} ${
+                  styles[`omKind_${row.kind}` as keyof typeof styles] ?? ""
+                }`}
               >
                 {row.kind}
               </span>
@@ -1728,14 +2121,26 @@ function ContextTab({
   open,
   transcriptLength,
   view,
+  skills,
+  servers,
   detail,
 }: {
   sessionId: string;
   open: boolean;
   transcriptLength: number;
   view: ContextView | null;
+  /** Capability inventories: reference data, so it lives here and not in the
+   *  transcript (DESIGN.md §12). */
+  skills: ReadonlyArray<{ name: string; description: string }>;
+  servers: ReadonlyArray<{
+    serverId: string;
+    connected: boolean;
+    tools: number;
+    error: string;
+  }>;
   detail: ContextItemDetail | null;
 }) {
+  const capabilities = <CapabilitySections skills={skills} servers={servers} />;
   const [drawer, setDrawer] = useState<string | null>(null);
   const [requestedItem, setRequestedItem] = useState<string | null>(null);
   useEffect(() => {
@@ -1759,20 +2164,25 @@ function ContextTab({
   const drawerCategory =
     drawer !== null ? categories.find((c) => c.kind === drawer) : undefined;
   // The drawer detail follows the last requested item id.
-  const shownDetail =
-    detail && requestedItem === detail.itemId ? detail : null;
+  const shownDetail = detail && requestedItem === detail.itemId ? detail : null;
 
   if (!sessionId) {
     return (
-      <div className={styles.tabEmpty}>
-        <ClayText variant="body" muted>
-          No active agent session.
-        </ClayText>
+      <div className={styles.contextTab}>
+        {capabilities}
+        <div className={styles.tabEmpty}>
+          <ClayText variant="body" muted>
+            No active agent session.
+          </ClayText>
+        </div>
       </div>
     );
   }
   // First response not in yet (or stale view from a previous session).
-  if (!view || (typeof view.sessionId === "string" && view.sessionId !== sessionId)) {
+  if (
+    !view ||
+    (typeof view.sessionId === "string" && view.sessionId !== sessionId)
+  ) {
     return (
       <div className={styles.tabEmpty} role="status">
         <ClayText variant="body" muted>
@@ -1783,98 +2193,122 @@ function ContextTab({
   }
   if (drawerCategory) {
     return (
-      <div className={styles.contextDrawer}>
-        <div className={styles.detailHeader}>
-          <ClayText variant="caption">{drawerCategory.label}</ClayText>
-          <ClayButton
-            variant="muted"
-            onPress={() => {
-              setDrawer(null);
-              setRequestedItem(null);
-            }}
-          >
-            <ClayIcon name="navigation.back" />
-            Back
-          </ClayButton>
-        </div>
-        {shownDetail ? (
-          <div className={styles.contextDetail}>
-            <ClayText variant="detail">{shownDetail.title}</ClayText>
-            <BoundedText text={shownDetail.content ?? ""} />
-            <ClayButton variant="muted" onPress={() => setRequestedItem(null)}>
+      <div className={styles.contextTab}>
+        {capabilities}
+        <div className={styles.contextDrawer}>
+          <div className={styles.detailHeader}>
+            <ClayText variant="caption">{drawerCategory.label}</ClayText>
+            <ClayButton
+              variant="muted"
+              onPress={() => {
+                setDrawer(null);
+                setRequestedItem(null);
+              }}
+            >
               <ClayIcon name="navigation.back" />
-              Back to list
+              Back
             </ClayButton>
           </div>
-        ) : (
-          <ul
-            className={styles.contextScroll}
-            aria-label={`${drawerCategory.label} items`}
-          >
-            {drawerCategory.items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={styles.contextItem}
-                  onClick={() => openItem(item.id)}
-                >
-                  <ClayText variant="detail">{item.title}</ClayText>
+          {shownDetail ? (
+            <div className={styles.contextDetail}>
+              <ClayText variant="detail">{shownDetail.title}</ClayText>
+              <BoundedText text={shownDetail.content ?? ""} />
+              <ClayButton
+                variant="muted"
+                onPress={() => setRequestedItem(null)}
+              >
+                <ClayIcon name="navigation.back" />
+                Back to list
+              </ClayButton>
+            </div>
+          ) : (
+            <ul
+              className={styles.contextScroll}
+              aria-label={`${drawerCategory.label} items`}
+            >
+              {drawerCategory.items.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={styles.contextItem}
+                    onClick={() => openItem(item.id)}
+                  >
+                    <ClayText variant="detail">{item.title}</ClayText>
+                    <ClayText variant="caption" muted>
+                      {item.preview}
+                    </ClayText>
+                  </button>
+                </li>
+              ))}
+              {drawerCategory.count > drawerCategory.items.length && (
+                <li className={styles.contextMore}>
                   <ClayText variant="caption" muted>
-                    {item.preview}
+                    …and {drawerCategory.count - drawerCategory.items.length}{" "}
+                    more (not listed)
                   </ClayText>
-                </button>
-              </li>
-            ))}
-            {drawerCategory.count > drawerCategory.items.length && (
-              <li className={styles.contextMore}>
-                <ClayText variant="caption" muted>
-                  …and {drawerCategory.count - drawerCategory.items.length} more
-                  (not listed)
-                </ClayText>
-              </li>
-            )}
-          </ul>
-        )}
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
       </div>
     );
   }
+  // Count bars are relative to the largest real count on screen — a share of
+  // the session's own context, never a fabricated ceiling.
+  const maxCount = categories.reduce(
+    (max, category) => Math.max(max, category.count),
+    0,
+  );
   return (
-    <dl className={styles.contextList}>
-      {categories.map((category) => (
-        <div key={category.kind} className={styles.contextRow}>
-          <dt>
-            <button
-              type="button"
-              className={styles.contextItem}
-              onClick={() => setDrawer(category.kind)}
-            >
-              {category.label}
-            </button>
-          </dt>
-          <dd>
-            <ClayText variant="detail" muted>
-              {category.count}
-            </ClayText>
-          </dd>
-        </div>
-      ))}
+    <div className={styles.contextTab}>
+      {capabilities}
+      {categories.length > 0 && (
+        <section className={styles.section} aria-label="Context items">
+          <div className={styles.sectionHead}>
+            <span className={styles.sectionLabel}>Context items</span>
+          </div>
+          <ul className={styles.statRows}>
+            {categories.map((category) => (
+              <li key={category.kind} className={styles.statRow}>
+                <button
+                  type="button"
+                  className={styles.statButton}
+                  onClick={() => setDrawer(category.kind)}
+                >
+                  <span className={styles.statLabel}>{category.label}</span>
+                  <span className={styles.statValue}>{category.count}</span>
+                </button>
+                <span className={styles.statBar} aria-hidden>
+                  <span
+                    className={styles.statBarFill}
+                    style={{
+                      width: `${maxCount > 0 ? Math.round((category.count / maxCount) * 100) : 0}%`,
+                    }}
+                  />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {categories.length === 0 && (
-        <div className={styles.contextRow}>
-          <dt>
-            <ClayText variant="detail" muted>
-              Loading context…
-            </ClayText>
-          </dt>
+        <div className={styles.tabEmpty}>
+          <ClayText variant="body" muted>
+            Loading context…
+          </ClayText>
         </div>
       )}
-    </dl>
+    </div>
   );
 }
 
 /** Typed agent-family request through the validated bridge path. Unit
  *  variants ride the bare-string form — `{ listSessions: {} }` fails serde
  *  deserialization (map content where a unit is expected). */
-function agentCommandPayload(command: Record<string, unknown> | string): string {
+function agentCommandPayload(
+  command: Record<string, unknown> | string,
+): string {
   return JSON.stringify({
     family: "agent",
     payload: { clientId: 0, command },

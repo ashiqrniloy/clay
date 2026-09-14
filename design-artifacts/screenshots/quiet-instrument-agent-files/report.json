@@ -1,0 +1,91 @@
+{
+  "base": "http://localhost:5199",
+  "viewport": {
+    "w": 1500,
+    "h": 950
+  },
+  "checks": {
+    "rowsAreSessionHistory": true,
+    "rowsUseSessionRowFamily": true,
+    "rowsPaintTheRecipe": true,
+    "basenameFirstWithDirectory": true,
+    "rowsCarryTheirRoleWord": true,
+    "marksAreTonedByRole": true,
+    "countMatchesTheRows": true,
+    "filterNarrowsTheList": true,
+    "filterIsAQuietFieldWithOneRing": true,
+    "zeroHorizontalOverflow": true
+  },
+  "probe": {
+    "tabSelected": "true",
+    "counts": [
+      "3"
+    ],
+    "rows": [
+      {
+        "family": "sessionRow/root",
+        "role": "created",
+        "mark": "A",
+        "markColor": "rgb(107, 207, 155)",
+        "name": "start.html",
+        "dir": "design-artifacts/approved/quiet-instrument-migration",
+        "roleText": "created",
+        "label": "Open design-artifacts/approved/quiet-instrument-migration/start.html in the workspace view",
+        "radius": 8,
+        "padding": 8,
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 61
+      },
+      {
+        "family": "sessionRow/root",
+        "role": "modified",
+        "mark": "M",
+        "markColor": "rgb(255, 198, 107)",
+        "name": "coding-agent.module.css",
+        "dir": "frontend/src/coding-agent",
+        "roleText": "modified",
+        "label": "Open frontend/src/coding-agent/coding-agent.module.css in the workspace view",
+        "radius": 8,
+        "padding": 8,
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 61
+      },
+      {
+        "family": "sessionRow/root",
+        "role": "read",
+        "mark": "R",
+        "markColor": "rgb(185, 178, 207)",
+        "name": "118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md",
+        "dir": "plans",
+        "roleText": "read",
+        "label": "Open plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md in the workspace view",
+        "radius": 8,
+        "padding": 8,
+        "background": "rgba(0, 0, 0, 0)",
+        "height": 61
+      }
+    ],
+    "filterPaint": {
+      "borderWidth": 1,
+      "radius": 8,
+      "outline": "none"
+    },
+    "filtered": {
+      "visible": 1,
+      "labels": [
+        "Open plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md in the workspace view"
+      ],
+      "counts": [
+        "1"
+      ]
+    },
+    "overflow": 0,
+    "inspector": {
+      "x": 1160,
+      "y": 40,
+      "w": 340,
+      "h": 739
+    }
+  },
+  "passed": true
+}

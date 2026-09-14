@@ -169,7 +169,7 @@ impl StaticSduiState {
                     return Err(SduiValidationError::UnknownActionNode(*node_id));
                 };
                 match &node.kind {
-                    SduiNodeKind::List { items } => items
+                    SduiNodeKind::List { items, .. } => items
                         .iter()
                         .find(|item| item.id == *item_id)
                         .and_then(|item| item.action.as_ref())
@@ -294,6 +294,7 @@ pub(crate) fn default_document_tree(
             SduiNode::new(
                 DOCUMENT_LIST_ID,
                 SduiNodeKind::List {
+                    filter: None,
                     items: vec![SduiListItem {
                         id: "active-document".to_string(),
                         label: format!("Document {document_id}"),
@@ -397,7 +398,7 @@ fn validate_editor_binding(
 fn tree_declares_action_command(tree: &SduiTree, command_id: &str) -> bool {
     tree.nodes.iter().any(|node| match &node.kind {
         SduiNodeKind::Button { action, .. } => action.command_id == command_id,
-        SduiNodeKind::List { items } => items
+        SduiNodeKind::List { items, .. } => items
             .iter()
             .filter_map(|item| item.action.as_ref())
             .any(|action| action.command_id == command_id),

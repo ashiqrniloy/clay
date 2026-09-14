@@ -7,14 +7,15 @@
 
 use clay::client::ClientConnectionEvent;
 use clay::protocol::{
-    AgentClientCommand, AgentPickerKind, AgentServerMessage, ClientMessage,
+    AgentClientCommand, AgentPickerKind, AgentServerMessage, AgentSettingsFileInfo, ClientMessage,
     CompletionReplacementRange, CompletionRequest, CompletionTrigger, DecorationKind,
     DecorationProvenance, DecorationSet, DiagnosticSet, DiagnosticSeverity, DiagnosticSpan,
     DocumentChunkRejection, DocumentMetadata, DocumentTextHead, FontProfile,
-    LanguageIntelligenceFeature, LanguageIntelligenceRequest, ProtocolErrorCode, RuntimeDiagnostic,
-    SduiActionIntent, SduiActionSource, SduiNode, SduiNodeKind, SduiTree, SduiTreeUpdate,
-    SelectionQuery, SelectionQueryCursor, SelectionQueryRequest, ServerMessage, TabCommand,
-    TabEntry, TabRegistrySnapshot, TextThemeOverride, TextobjectDirection, TextobjectKind,
+    LanguageIntelligenceFeature, LanguageIntelligenceRequest, LauncherAgentEntry, LauncherEntries,
+    LauncherWorkspaceEntry, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent,
+    SduiActionSource, SduiNode, SduiNodeKind, SduiTree, SduiTreeUpdate, SelectionQuery,
+    SelectionQueryCursor, SelectionQueryRequest, ServerMessage, TabCommand, TabEntry,
+    TabRegistrySnapshot, TextThemeOverride, TextobjectDirection, TextobjectKind,
     TransientMenuActivationData, TransientMenuFocusPolicyData, TransientMenuOriginData,
     TransientMenuSnapshotData, TransientMenuStatusData, WrapPolicy,
 };
@@ -225,6 +226,16 @@ fn client_samples() -> Vec<ClientMessage> {
                 thinking_level: None,
             }),
         },
+        ClientMessage::ListAgentSettingsFiles { client_id: 2 },
+        ClientMessage::OpenAgentSettingsFile {
+            client_id: 2,
+            name: "skills/create-plan/SKILL.md".into(),
+        },
+        ClientMessage::ListLauncherEntries { client_id: 2 },
+        ClientMessage::RemoveLauncherRecent {
+            client_id: 2,
+            index: 3,
+        },
     ]
 }
 
@@ -263,6 +274,10 @@ fn client_family(message: &ClientMessage) -> &'static str {
         ClientMessage::MenuActivate { .. } => "menuActivate",
         ClientMessage::MenuCancel { .. } => "menuCancel",
         ClientMessage::Agent { .. } => "agent",
+        ClientMessage::ListAgentSettingsFiles { .. } => "listAgentSettingsFiles",
+        ClientMessage::OpenAgentSettingsFile { .. } => "openAgentSettingsFile",
+        ClientMessage::ListLauncherEntries { .. } => "listLauncherEntries",
+        ClientMessage::RemoveLauncherRecent { .. } => "removeLauncherRecent",
     }
 }
 
@@ -439,6 +454,32 @@ fn server_samples() -> Vec<ServerMessage> {
             kind: AgentPickerKind::Model,
             items: Vec::new(),
         })),
+        ServerMessage::AgentSettingsFiles {
+            client_id: 2,
+            files: vec![AgentSettingsFileInfo {
+                name: "SYSTEM.md".into(),
+                display_path: "/home/dev/.clay/agents/coding-agent/SYSTEM.md".into(),
+                size_bytes: 4096,
+                modified_ms: Some(1_700_000_000_000),
+                edited: false,
+            }],
+        },
+        ServerMessage::LauncherEntries {
+            client_id: 2,
+            entries: Box::new(LauncherEntries {
+                workspaces: vec![LauncherWorkspaceEntry {
+                    name: "clay".into(),
+                    root: "~/Projects/clay".into(),
+                }],
+                agents: vec![LauncherAgentEntry {
+                    name: "coding-agent".into(),
+                    label: "Coding Agent".into(),
+                    config_root: "~/.clay/agents/coding-agent".into(),
+                    skill_count: 4,
+                }],
+                pruned: 1,
+            }),
+        },
         ServerMessage::ViewportRenderPatch(clay::protocol::ViewportRenderPatch {
             request_id: 9,
             document_id: 1,
@@ -500,6 +541,8 @@ fn server_family(message: &ServerMessage) -> &'static str {
         ServerMessage::TransientMenuClosed { .. } => "transientMenuClosed",
         ServerMessage::ShellClientCommandRequest { .. } => "shellClientCommandRequest",
         ServerMessage::Agent(_) => "agent",
+        ServerMessage::AgentSettingsFiles { .. } => "agentSettingsFiles",
+        ServerMessage::LauncherEntries { .. } => "launcherEntries",
     }
 }
 
@@ -697,10 +740,10 @@ fn design_system_snapshot_dto_round_trip_and_variables() {
     use clay_desktop_lib::bridge::DesignSystemSnapshotDto;
 
     let mut ads = ActiveDesignSystem::core_fallback(7);
-    ads.specifier = "@clay/design-glass".to_string();
+    ads.specifier = "@clay/design-instrument".to_string();
 
     // Add rich recipe with all non-color properties, shadows, and inner highlight
-    let custom_key = RecipeKey::new("modal", "glass", "surface", RecipeState::Rest);
+    let custom_key = RecipeKey::new("modal", "alpha", "surface", RecipeState::Rest);
     let custom_recipe = ResolvedComponentRecipe {
         background_color: ThemeColorRef("surface.overlay".to_string()),
         background_opacity: 0.85,
@@ -742,7 +785,7 @@ fn design_system_snapshot_dto_round_trip_and_variables() {
     let json = serde_json::to_value(&dto).expect("serialize to value");
 
     // Verify metadata
-    assert_eq!(json["specifier"], "@clay/design-glass");
+    assert_eq!(json["specifier"], "@clay/design-instrument");
     assert_eq!(json["schemaVersion"], 1);
     assert_eq!(json["generation"], 7);
     assert_eq!(json["provenance"]["packageName"], "core");

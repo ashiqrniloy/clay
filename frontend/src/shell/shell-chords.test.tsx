@@ -21,6 +21,7 @@ vi.mock("../bridge/client", () => ({
   sendRequest: vi.fn(async () => undefined),
 }));
 
+import { workspaceRail } from "./layout-state";
 import { createWorkspace } from "./workspace-controller";
 import type { BootstrapDto } from "../bridge/types";
 import { useShellChords } from "./use-shell-chords";
@@ -248,5 +249,46 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
     expect(sent).toEqual(["controlCenter.open"]);
     view.destroy();
     host.remove();
+  });
+});
+
+describe("Ctrl+I toggles the workspace rail (plan 118: shell and Workspace)", () => {
+  it("fires from window focus, wherever the caret sits", async () => {
+    const ws = createWorkspace({ send: async () => undefined });
+    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE]));
+
+    function Host() {
+      useShellChords(ws, true);
+      return <div data-testid="host" />;
+    }
+    render(<Host />);
+    workspaceRail.setVisible(true);
+    const press = () =>
+      act(() => {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "i", ctrlKey: true }),
+        );
+      });
+    press();
+    expect(workspaceRail.isVisible()).toBe(false);
+    press();
+    expect(workspaceRail.isVisible()).toBe(true);
+    workspaceRail.setVisible(true);
+  });
+
+  it("does not consume a plain `i` (editor text stays text)", async () => {
+    const ws = createWorkspace({ send: async () => undefined });
+    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE]));
+
+    function Host() {
+      useShellChords(ws, true);
+      return <div data-testid="host" />;
+    }
+    render(<Host />);
+    workspaceRail.setVisible(true);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "i" }));
+    });
+    expect(workspaceRail.isVisible()).toBe(true);
   });
 });

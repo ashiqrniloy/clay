@@ -153,8 +153,18 @@ pub(super) fn apply_persisted_preferences(
     if let Some(specifier) = &prefs.design_system
         && let Err(error) = crate::server::ops::theme::apply_design_system(op_state, specifier)
     {
+        // Plan 118 task 20: a persisted preference may name a design system that
+        // a later generation removed — a rename or deletion the user did not
+        // cause — so startup keeps loading. `apply_design_system` leaves the slot
+        // untouched on error (no partial install) and the committed snapshot
+        // falls back to the core baseline; this one bounded record names both the
+        // rejected specifier and what stays active.
+        let active = op_state
+            .active_design_system()
+            .map(|active| active.specifier)
+            .unwrap_or_else(|| "@clay/core".to_string());
         op_state.record(format!(
-            "preferences: designSystem `{specifier}` rejected: {error}"
+            "preferences: designSystem `{specifier}` rejected: {error}; kept `{active}`"
         ));
     }
     if let Some(specifier) = &prefs.icon_pack

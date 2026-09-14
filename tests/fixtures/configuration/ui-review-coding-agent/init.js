@@ -3,8 +3,13 @@
 // (extension strip truth), and auto-opens the coding-agent surface
 // through the Command Centre command catalogue.
 
+import { loadPackage } from "clay:packages";
 import { profileRegister, commandDispatch } from "clay:agent";
 import { knowledgeSetOptions } from "clay:agent";
+
+// Plan 118: the landing is the launcher package, so the agent surface needs the
+// agent package loaded before the profile command can activate its pane.
+await loadPackage("@clay/coding-agent");
 
 await profileRegister({
   name: "chat",

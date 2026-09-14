@@ -114,14 +114,6 @@ export async function openFolderDialog(tabId?: number): Promise<boolean> {
   }
 }
 
-export async function openTabDialog(): Promise<BootstrapDto | null> {
-  try {
-    return await invoke<BootstrapDto | null>("tab_open_dialog");
-  } catch (error) {
-    throw normalizeBridgeError(error);
-  }
-}
-
 export async function loadLayout(): Promise<unknown> {
   try {
     return await invoke("layout_load");

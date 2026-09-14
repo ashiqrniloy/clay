@@ -1,0 +1,1137 @@
+{
+ "matrix": [
+  {
+   "width": 1500,
+   "theme": "modus-operandi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 340,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "1160px 340px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(135, 135, 135, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1024,
+   "theme": "modus-operandi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 312,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "712px 312px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(135, 135, 135, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 960,
+   "theme": "modus-operandi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 400,
+    "position": "fixed",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "960px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(135, 135, 135, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(0, 0, 0) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1500,
+   "theme": "modus-vivendi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 340,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "1160px 340px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1024,
+   "theme": "modus-vivendi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 312,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "712px 312px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 960,
+   "theme": "modus-vivendi",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 400,
+    "position": "fixed",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "960px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(255, 255, 255) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1500,
+   "theme": "gruvbox-material-dark",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 340,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "1160px 340px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(146, 131, 116, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1024,
+   "theme": "gruvbox-material-dark",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 312,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "712px 312px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(146, 131, 116, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 960,
+   "theme": "gruvbox-material-dark",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 400,
+    "position": "fixed",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "960px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(146, 131, 116, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(212, 190, 152) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1500,
+   "theme": "gruvbox-material-light",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 340,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "1160px 340px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(138, 122, 99, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 1024,
+   "theme": "gruvbox-material-light",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 312,
+    "position": "static",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "712px 312px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(138, 122, 99, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  },
+  {
+   "width": 960,
+   "theme": "gruvbox-material-light",
+   "overflow": 0,
+   "transcriptMeasure": 535,
+   "transcriptMaxWidth": "535.392px",
+   "turns": 4,
+   "separators": 3,
+   "toolBoxes": 1,
+   "toolBoxHeight": 57,
+   "composerBoundaries": 1,
+   "composerFieldRadius": 12,
+   "composerFieldBorder": 1,
+   "innerInputOutline": "none",
+   "innerInputBorder": 0,
+   "composerHeight": 131,
+   "inspector": {
+    "w": 400,
+    "position": "fixed",
+    "borderLeft": 1,
+    "tabs": [
+     "Files",
+     "Memory",
+     "Context",
+     "Session Info",
+     "Settings"
+    ]
+   },
+   "gridColumns": "960px",
+   "foot": [
+    "/tmp/project",
+    "·",
+    "git —",
+    "",
+    "MCP none"
+   ],
+   "strip": "Readyagent idle",
+   "inspectorVisible": true,
+   "inspectorDisplay": "flex",
+   "inspectorAttr": "expanded",
+   "selectedTab": "Files",
+   "turnStyles": [
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "0px outset rgb(0, 0, 0)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    },
+    {
+     "cls": "_turn_1jum6_127",
+     "borderTop": "1px solid rgba(138, 122, 99, 0.34)",
+     "borderBottom": "0px rgb(0, 0, 0)",
+     "radius": "0px",
+     "bg": "rgba(0, 0, 0, 0)",
+     "outline": "rgb(80, 73, 64) none 3px",
+     "boxShadow": "none",
+     "parentCls": "_transcriptInner_1jum6_119",
+     "parentBg": "rgba(0, 0, 0, 0)"
+    }
+   ],
+   "paint": []
+  }
+ ],
+ "probes": [
+  {
+   "name": "hide inspector target",
+   "after": {
+    "x": 1467,
+    "y": 41,
+    "w": 32,
+    "h": 32
+   }
+  },
+  {
+   "name": "hide inspector",
+   "after": {
+    "overflow": 0,
+    "transcriptMeasure": 535,
+    "transcriptMaxWidth": "535.392px",
+    "turns": 4,
+    "separators": 3,
+    "toolBoxes": 1,
+    "toolBoxHeight": 57,
+    "composerBoundaries": 1,
+    "composerFieldRadius": 12,
+    "composerFieldBorder": 1,
+    "innerInputOutline": "none",
+    "innerInputBorder": 0,
+    "composerHeight": 131,
+    "inspector": {
+     "w": 0,
+     "position": "static",
+     "borderLeft": 1,
+     "tabs": [
+      "Files",
+      "Memory",
+      "Context",
+      "Session Info",
+      "Settings"
+     ]
+    },
+    "gridColumns": "1500px",
+    "foot": [
+     "/tmp/project",
+     "·",
+     "git —",
+     "",
+     "MCP none"
+    ],
+    "strip": "Readyagent idle",
+    "inspectorVisible": false,
+    "inspectorDisplay": "none",
+    "inspectorAttr": "collapsed",
+    "selectedTab": "Files",
+    "turnStyles": [
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "0px outset rgb(0, 0, 0)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     },
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     }
+    ],
+    "paint": []
+   }
+  },
+  {
+   "name": "show inspector target",
+   "after": {
+    "x": 1450,
+    "y": 54,
+    "w": 32,
+    "h": 32
+   }
+  },
+  {
+   "name": "show inspector",
+   "after": {
+    "overflow": 0,
+    "transcriptMeasure": 535,
+    "transcriptMaxWidth": "535.392px",
+    "turns": 4,
+    "separators": 3,
+    "toolBoxes": 1,
+    "toolBoxHeight": 57,
+    "composerBoundaries": 1,
+    "composerFieldRadius": 12,
+    "composerFieldBorder": 1,
+    "innerInputOutline": "none",
+    "innerInputBorder": 0,
+    "composerHeight": 131,
+    "inspector": {
+     "w": 340,
+     "position": "static",
+     "borderLeft": 1,
+     "tabs": [
+      "Files",
+      "Memory",
+      "Context",
+      "Session Info",
+      "Settings"
+     ]
+    },
+    "gridColumns": "1160px 340px",
+    "foot": [
+     "/tmp/project",
+     "·",
+     "git —",
+     "",
+     "MCP none"
+    ],
+    "strip": "Readyagent idle",
+    "inspectorVisible": true,
+    "inspectorDisplay": "flex",
+    "inspectorAttr": "expanded",
+    "selectedTab": "Files",
+    "turnStyles": [
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "0px outset rgb(0, 0, 0)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     },
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     }
+    ],
+    "paint": []
+   }
+  },
+  {
+   "name": "context tab target",
+   "after": {
+    "x": 1276,
+    "y": 41,
+    "w": 63,
+    "h": 32
+   }
+  },
+  {
+   "name": "context capabilities",
+   "after": {
+    "hasSkills": false,
+    "hasMcp": false,
+    "statRows": 0,
+    "contextItems": false
+   }
+  },
+  {
+   "name": "composer focus target",
+   "after": {
+    "x": 27,
+    "y": 787,
+    "w": 1030,
+    "h": 48
+   }
+  },
+  {
+   "name": "composer focus",
+   "after": {
+    "overflow": 0,
+    "transcriptMeasure": 535,
+    "transcriptMaxWidth": "535.392px",
+    "turns": 4,
+    "separators": 3,
+    "toolBoxes": 1,
+    "toolBoxHeight": 57,
+    "composerBoundaries": 1,
+    "composerFieldRadius": 12,
+    "composerFieldBorder": 1,
+    "innerInputOutline": "none",
+    "innerInputBorder": 0,
+    "composerHeight": 131,
+    "inspector": {
+     "w": 340,
+     "position": "static",
+     "borderLeft": 1,
+     "tabs": [
+      "Files",
+      "Memory",
+      "Context",
+      "Session Info",
+      "Settings"
+     ]
+    },
+    "gridColumns": "1160px 340px",
+    "foot": [
+     "/tmp/project",
+     "·",
+     "git —",
+     "",
+     "MCP none"
+    ],
+    "strip": "Readyagent idle",
+    "inspectorVisible": true,
+    "inspectorDisplay": "flex",
+    "inspectorAttr": "expanded",
+    "selectedTab": "Context",
+    "turnStyles": [
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "0px outset rgb(0, 0, 0)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     },
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     }
+    ],
+    "paint": []
+   }
+  },
+  {
+   "name": "select turn target",
+   "after": {
+    "x": 328,
+    "y": 94,
+    "w": 503,
+    "h": 77
+   }
+  },
+  {
+   "name": "select turn",
+   "after": {
+    "overflow": 0,
+    "transcriptMeasure": 535,
+    "transcriptMaxWidth": "535.392px",
+    "turns": 4,
+    "separators": 3,
+    "toolBoxes": 1,
+    "toolBoxHeight": 57,
+    "composerBoundaries": 1,
+    "composerFieldRadius": 12,
+    "composerFieldBorder": 1,
+    "innerInputOutline": "none",
+    "innerInputBorder": 0,
+    "composerHeight": 131,
+    "inspector": {
+     "w": 340,
+     "position": "static",
+     "borderLeft": 1,
+     "tabs": [
+      "Files",
+      "Memory",
+      "Context",
+      "Session Info",
+      "Settings"
+     ]
+    },
+    "gridColumns": "1160px 340px",
+    "foot": [
+     "/tmp/project",
+     "·",
+     "git —",
+     "",
+     "MCP none"
+    ],
+    "strip": "Readyagent idle",
+    "inspectorVisible": true,
+    "inspectorDisplay": "flex",
+    "inspectorAttr": "expanded",
+    "selectedTab": "Context",
+    "turnStyles": [
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "0px outset rgb(0, 0, 0)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     },
+     {
+      "cls": "_turn_1jum6_127",
+      "borderTop": "1px solid rgba(111, 111, 111, 0.34)",
+      "borderBottom": "0px rgb(0, 0, 0)",
+      "radius": "0px",
+      "bg": "rgba(0, 0, 0, 0)",
+      "outline": "rgb(255, 255, 255) none 3px",
+      "boxShadow": "none",
+      "parentCls": "_transcriptInner_1jum6_119",
+      "parentBg": "rgba(0, 0, 0, 0)"
+     }
+    ],
+    "paint": []
+   }
+  }
+ ],
+ "failures": []
+}

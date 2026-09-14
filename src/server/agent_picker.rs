@@ -651,11 +651,9 @@ fn filter_items(items: Vec<TransientMenuItem>, query: &str, skip: bool) -> Vec<T
 
 pub(crate) fn picker_kind_for_command(command_id: &str) -> Option<AgentPickerKind> {
     match command_id {
-        "agent.clientOpenProviderPicker" | "chat.openProviderPicker" => {
-            Some(AgentPickerKind::Provider)
-        }
-        "agent.clientOpenModelPicker" | "chat.openModelPicker" => Some(AgentPickerKind::Model),
-        "agent.clientOpenAgentPicker" | "chat.openAgentPicker" => Some(AgentPickerKind::Agent),
+        "agent.clientOpenProviderPicker" => Some(AgentPickerKind::Provider),
+        "agent.clientOpenModelPicker" => Some(AgentPickerKind::Model),
+        "agent.clientOpenAgentPicker" => Some(AgentPickerKind::Agent),
         "agent.clientOpenProviderSetup" => Some(AgentPickerKind::ProviderSetup),
         "agent.clientOpenSessionPicker" | "coding-agent.resume" => Some(AgentPickerKind::Session),
         "agent.clientOpenSessionSearchPicker" => Some(AgentPickerKind::SessionSearch),
@@ -862,7 +860,7 @@ mod tests {
             1,
             AgentPickerKind::Agent,
             inventory(),
-            vec![("chat.profile".into(), "Chat".into())],
+            vec![("sample.profile".into(), "Sample Agent".into())],
         );
         let labels: Vec<_> = picker
             .session()
@@ -870,7 +868,7 @@ mod tests {
             .iter()
             .map(|item| item.label.clone())
             .collect();
-        assert!(labels.iter().any(|label| label == "Chat"));
+        assert!(labels.iter().any(|label| label == "Sample Agent"));
         assert!(!labels.iter().any(|label| label.contains("Coding")));
     }
 

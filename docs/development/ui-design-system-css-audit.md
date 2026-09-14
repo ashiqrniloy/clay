@@ -1,5 +1,21 @@
 # UI Design-System CSS Audit and Declaration Ownership Ledger
 
+Diagnostic record: this ledger classifies the declarations that existed when the
+recipe boundary was introduced (Plans 101–104, plan 110). The *target* design
+language and its per-surface values are normative in
+[`DESIGN.md`](../../DESIGN.md) (Quiet Instrument); where a declaration below
+reflects the appearance of the design systems removed in plan 118 task 9, so it
+is a **historical record** — read it for the declaration taxonomy, not for current
+values. `DESIGN.md`, `packages/design-instrument/package.json` and the active
+recipe variables supersede every appearance claim below. The component modules
+audited here were adopted to the shipped recipes by plan 118's shared-component-CSS
+task (the `frontend/src/components/*.module.css` files now consume `--clay-ds-*`
+recipe values without inline literals and carry no retired pattern); the rows below
+still describe the pre-adoption declarations, which is why several of them read as
+"Map to …" work items. The invariant taxonomy below (structural layout
+stays host-owned; color comes from theme roles; geometry/material/motion come
+from recipes; typography stays user-owned) is unchanged.
+
 Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.  
 Plan reference: `plans/103-UI-Design-System-Component-and-Surface-Migration.md` (Task 1).  
 Recipe Matrix: `docs/development/ui-design-system-recipe-matrix.md`.  

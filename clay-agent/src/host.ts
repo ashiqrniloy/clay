@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   type Agent,
@@ -190,6 +190,15 @@ const graftSkill = {
  *  check. Disk discovery skips these reserved names, so seeding + gated
  *  activation is the only delivery path. */
 const MAX_AGENT_SKILL_FILE_BYTES = 256 * 1024;
+
+/** Plan 118 task 35: agent types are directory names, never paths. Bounded
+ *  and separator-free, so a name can only ever address a direct child of the
+ *  `agents/` root the default agent lives in. */
+const AGENT_TYPE_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Loaded agent roots kept in memory (config is small; the cap is abuse
+ *  protection for a hand-made `agents/` folder). */
+const MAX_AGENT_ROOTS = 16;
 /** Plan 117 @-mentions: attached files cap at the same 256 KiB discipline as
  *  agent skill files; the workspace listing for the mention dropdown is
  *  bounded in entries and walk depth (client-side filter, debounced fetch). */
@@ -485,6 +494,20 @@ export interface HostOptions {
   };
 }
 
+/** Plan 118 task 35: one agent type's config, loaded once per root.
+ *  Everything the daemon reads per agent — tool caps, skills config, the
+ *  seeded skill files, and the disk-discovered skill names of that root's
+ *  `skills/` — lives here, so a session is built entirely from its own
+ *  agent's files and a switch cannot widen one agent's grants with
+ *  another's. */
+interface AgentRootConfig {
+  readonly root: string;
+  readonly toolCaps: { caps: RepositoryToolCaps; file: string };
+  readonly skillsConfig: SkillsConfig;
+  readonly configSkillNames: readonly string[];
+  readonly skillFiles: ReadonlyMap<string, Skill>;
+}
+
 interface LiveSession {
   session: AgentSession;
   agent: Agent;
@@ -493,6 +516,16 @@ interface LiveSession {
   provider: string;
   model: string;
   readonly workspaceRoot: string;
+  /** Plan 118 task 35: the agent type this session runs as, and the config
+   *  root it resolved to (`~/.clay/agents/<type>`). A switch rewrites both
+   *  through `session.setAgent`, which keeps the session id and its branch
+   *  and re-reads only that agent's config. `agentType` is undefined for the
+   *  daemon's default agent (a session created without an agent). */
+  agentType: string | undefined;
+  agentRoot: string;
+  /** Server-built MCP allow-list for this session's agent (plan 118 task
+   *  35): each agent type declares its own servers. */
+  mcpAllowList: readonly unknown[];
   /** Plan 117 @-mentions: skills manually triggered this session. They ride
    *  every run's `skills` option (profile config union) so their loaded
    *  bodies keep rendering across turns. */
@@ -782,14 +815,30 @@ function labelFirstPromptEntry(entry: SessionEntry): SessionEntry {
 
 /** The session store Prism writes through, with the resume label stamped on
  *  the opening entry. Read paths stay on the underlying store. */
-function labelFirstPromptStore(store: SqlitePersistence): SqlitePersistence {
+function labelFirstPromptStore(
+  store: SqlitePersistence,
+  agentOf: (sessionId: string) => string | undefined,
+): SqlitePersistence {
   return new Proxy(store, {
     get(target, property, receiver) {
       if (property !== "append") return Reflect.get(target, property, receiver);
       return (entry: SessionEntry, options?: unknown) =>
-        target.append(labelFirstPromptEntry(entry), options as never);
+        target.append(agentStampedEntry(labelFirstPromptEntry(entry), agentOf(entry.sessionId)), options as never);
     },
   });
+}
+
+/**
+ * Plan 118 task 35: stamp the agent type that produced an entry into its
+ * metadata. One tab can change its agent, so a transcript spanning a switch
+ * must label each turn with its producer; the Rust server reads
+ * `metadata.agentType` per entry (and falls back to the session's recorded
+ * agent for entries written before the stamp existed). Sessions with no agent
+ * type (the daemon default) are left untouched.
+ */
+function agentStampedEntry(entry: SessionEntry, agentType: string | undefined): SessionEntry {
+  if (!agentType || entry.metadata?.agentType === agentType) return entry;
+  return { ...entry, metadata: { ...(entry.metadata ?? {}), agentType } };
 }
 
 /** Local `YYYY-MM-DD HH:MM` for the resume list's second line. The daemon runs
@@ -850,10 +899,26 @@ export class ClayAgentHost {
   private configSkillNames: readonly string[] | undefined;
   private homeSkillNames: readonly string[] | undefined;
   private readonly workspaceSkillNames = new Map<string, readonly string[]>();
+  /** The daemon's default agent root (the shipped coding agent). Sessions
+   *  created without an agent use it; named agents resolve as its siblings
+   *  under the same `agents/` directory. */
   private readonly agentConfigRoot: string;
   private readonly homeSkillsRoot: string;
   private readonly skillsConfig: SkillsConfig;
-  /** Connected MCP bridges (empty allow-list = never populated). */
+  /** Plan 118 task 35: per-agent config, loaded once per root (bounded). */
+  private readonly agentRoots = new Map<string, Promise<AgentRootConfig>>();
+  /** Plan 118 task 35: MCP bridges + outcomes per agent root, so switching
+   *  an agent connects that agent's servers and never inherits another's. */
+  private readonly mcpByRoot = new Map<
+    string,
+    { mcp?: ConnectedMcpServers; outcomes: readonly McpServerOutcome[] }
+  >();
+  /** Plan 118 task 35: the server-built allow-list last seen per agent root
+   *  (sessions + the switch carry it; a restore re-uses it). */
+  private readonly mcpAllowListByRoot = new Map<string, readonly unknown[]>();
+  /** Connected MCP bridges of the default agent root (empty allow-list =
+   *  never populated). Kept for the default-agent paths (initialize
+   *  handshake, tests) and mirrored by `mcpByRoot`. */
   private mcp: ConnectedMcpServers | undefined;
   /** Per-server MCP connect outcomes (last connect), for the UI surfaces. */
   private mcpOutcomes: readonly McpServerOutcome[] = [];
@@ -917,7 +982,10 @@ export class ClayAgentHost {
     this.agentConfigRoot = agentConfigRoot;
     this.homeSkillsRoot = homeSkillsRoot;
     this.skillsConfig = skillsConfig;
-    this.labeledStore = labelFirstPromptStore(persistence);
+    this.labeledStore = labelFirstPromptStore(
+      persistence,
+      (sessionId) => this.live.get(sessionId)?.agentType,
+    );
   }
 
   static async create(options: HostOptions): Promise<ClayAgentHost> {
@@ -1032,17 +1100,29 @@ export class ClayAgentHost {
    * sent a malformed allow-list); connection failures hide the capability —
    * a server that will not connect simply provides no tools.
    */
-  private ensureCapabilities(): Promise<void> {
-    if (!this.capabilitiesPromise) {
-      this.capabilitiesPromise = (async () => {
-        if (this.mcpAllowList.length > 0 && !this.mcp) {
+  private ensureCapabilities(
+    agentRoot: string = this.agentConfigRoot,
+    allowList: readonly unknown[] = this.mcpAllowList,
+  ): Promise<void> {
+    if (agentRoot === this.agentConfigRoot && this.capabilitiesPromise) {
+      // The default agent's capabilities keep their single lazy promise
+      // (initialize-order semantics unchanged).
+      return this.capabilitiesPromise;
+    }
+    if (!this.mcpByRoot.has(agentRoot)) this.mcpByRoot.set(agentRoot, { outcomes: [] });
+    const pending = (async () => {
+        if (allowList.length > 0 && !this.mcpByRoot.get(agentRoot)?.mcp) {
           try {
-            const connected = await connectAllowListedMcpServers(this.mcpAllowList);
-            this.mcp = connected;
-            this.mcpOutcomes = connected.outcomes;
+            const connected = await connectAllowListedMcpServers(allowList);
+            this.mcpByRoot.set(agentRoot, { mcp: connected, outcomes: connected.outcomes });
+            if (agentRoot === this.agentConfigRoot) {
+              // The initialize-time list stays the default agent's bridge.
+              this.mcp = connected;
+              this.mcpOutcomes = connected.outcomes;
+            }
           } catch (error) {
             if ((error as { rpcCode?: number }).rpcCode === -32602) throw error;
-            this.mcp = undefined;
+            this.mcpByRoot.set(agentRoot, { outcomes: [] });
           }
         }
         if (!this.obscura) {
@@ -1056,18 +1136,28 @@ export class ClayAgentHost {
           }
         }
       })();
+    if (agentRoot === this.agentConfigRoot) {
+      // Keep the documented single-promise default path (callers await it
+      // again); per-agent roots await their own connect.
+      this.capabilitiesPromise = pending;
     }
-    return this.capabilitiesPromise;
+    return pending;
   }
 
   /** Capability tools for a coding session; undefined shapes stay allowed. */
-  private capabilityTools(): ToolDefinition[] {
-    return [...(this.mcp?.tools ?? []), ...(this.obscura?.tools ?? [])];
+  private capabilityTools(agentRoot: string = this.agentConfigRoot): ToolDefinition[] {
+    const bridge = this.mcpByRoot.get(agentRoot)?.mcp ?? (agentRoot === this.agentConfigRoot ? this.mcp : undefined);
+    return [...(bridge?.tools ?? []), ...(this.obscura?.tools ?? [])];
   }
 
-  /** Per-server MCP connect outcomes for the environment/UI (bounded, trimmed). */
-  private mcpServerOutcomes(): JsonObject[] {
-    return this.mcpOutcomes.slice(0, MAX_MCP_SERVERS).map((outcome) => ({
+  /** Per-server MCP connect outcomes for the environment/UI (bounded,
+   *  trimmed). Plan 118 task 35: scoped to an agent root — a switched
+   *  session reports the servers it actually has. */
+  private mcpServerOutcomes(agentRoot: string = this.agentConfigRoot): JsonObject[] {
+    const outcomes =
+      this.mcpByRoot.get(agentRoot)?.outcomes ??
+      (agentRoot === this.agentConfigRoot ? this.mcpOutcomes : []);
+    return outcomes.slice(0, MAX_MCP_SERVERS).map((outcome) => ({
       serverId: outcome.serverId.slice(0, MAX_COMPLETION_NAME_CHARS),
       connected: outcome.connected,
       tools: outcome.tools,
@@ -1139,6 +1229,8 @@ export class ClayAgentHost {
       // dropdown (client-side filter, server-side walk inside the root).
       case "workspace.files":
         return this.workspaceListFiles(asRecord(params));
+      case "session.setAgent":
+        return this.sessionSetAgent(asRecord(params));
       case "session.resume":
         return this.sessionResume(asRecord(params));
       case "session.delete":
@@ -1197,7 +1289,7 @@ export class ClayAgentHost {
       case "command.dispatch":
         return this.commandDispatch(asRecord(params));
       case "environment.list":
-        return this.environmentList();
+        return this.environmentList(asRecord(params));
       case "knowledge.setOptions":
         return this.knowledgeSetOptions(asRecord(params));
       case "run.setOptions":
@@ -1205,6 +1297,101 @@ export class ClayAgentHost {
       default:
         throw rpcError(-32601, `unknown method: ${method}`);
     }
+  }
+
+  /**
+   * Plan 118 task 35: resolve one agent type to its config root.
+   *
+   * The name is a bare directory name (`AGENT_TYPE_RE`), so it cannot escape
+   * the `agents/` root — the root is a direct child of the default root's
+   * parent. An explicit name that does not resolve is rejected fail-closed
+   * (never silently the default agent: that would run one agent's config
+   * under another's name). An absent name means the default agent.
+   */
+  private resolveAgentRoot(agent: unknown): string {
+    if (agent === undefined || agent === null) return this.agentConfigRoot;
+    if (typeof agent !== "string") {
+      throw rpcError(-32602, "agent must be a string when present");
+    }
+    const name = agent.trim();
+    if (name === "") return this.agentConfigRoot;
+    if (!AGENT_TYPE_RE.test(name)) {
+      throw rpcError(-32602, `invalid agent type: ${JSON.stringify(agent)}`);
+    }
+    const root = join(dirname(this.agentConfigRoot), name);
+    let resolved = false;
+    try {
+      resolved = statSync(root).isDirectory();
+    } catch {
+      resolved = false;
+    }
+    if (!resolved) {
+      throw rpcError(-32602, `agent type ${name} is not configured`);
+    }
+    return root;
+  }
+
+  /** The allow-list known for one agent root: the last one the server sent
+   *  for it, else the initialize-time list (default agent) or none. */
+  private mcpAllowListFor(root: string): readonly unknown[] {
+    return (
+      this.mcpAllowListByRoot.get(root) ??
+      (root === this.agentConfigRoot ? this.mcpAllowList : [])
+    );
+  }
+
+  /** The default agent's config as the host loaded it at create time (the
+   *  synchronous recreate paths need no await). */
+  private defaultAgentConfig(): AgentRootConfig {
+    return {
+      root: this.agentConfigRoot,
+      toolCaps: { caps: this.toolCaps, file: this.capsFile },
+      skillsConfig: this.skillsConfig,
+      configSkillNames: this.configSkillNames ?? [],
+      skillFiles: this.agentSkillFiles,
+    };
+  }
+
+  /** The type name for a root: the default agent is `undefined` (the server
+   *  records no name for it). */
+  private agentTypeOf(root: string): string | undefined {
+    return root === this.agentConfigRoot ? undefined : basename(root);
+  }
+
+  /**
+   * Plan 118 task 35: load (once) the config of one agent root — seeding its
+   * SYSTEM.md and delivered skills first, then tool caps, `skills.json`, the
+   * delivered skill files, and the root's discovered skill names. Bounded by
+   * `MAX_AGENT_ROOTS`: past the cap a root loads uncached (correct, just
+   * re-read) rather than dropping the session.
+   */
+  private agentRootConfig(root: string): Promise<AgentRootConfig> {
+    const cached = this.agentRoots.get(root);
+    if (cached) return cached;
+    const pending = (async (): Promise<AgentRootConfig> => {
+      await seedUserSystemPrompt(root).catch((error) => {
+        process.stderr.write(
+          `[system] seeding SYSTEM.md for ${root} failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      });
+      const toolCaps = await loadToolCaps(root, this.dataDir);
+      const skillsConfig = (await loadSkillsConfig(root, this.homeSkillsRoot)).config;
+      const skillFiles = await loadAgentSkillFiles(root);
+      // User-added skills of this root register here (the delivered
+      // wiki/graft files do not: their own activation paths own those gates).
+      const configSkillNames = skillsConfig.configRootEnabled
+        ? await this.scanSkillsDir(join(root, "skills"))
+        : [];
+      return { root, toolCaps, skillsConfig, configSkillNames, skillFiles };
+    })();
+    if (this.agentRoots.size >= MAX_AGENT_ROOTS) {
+      process.stderr.write(
+        `[agent] agent root cap of ${MAX_AGENT_ROOTS} reached; ${root} loads uncached\n`,
+      );
+      return pending;
+    }
+    this.agentRoots.set(root, pending);
+    return pending;
   }
 
   /** Test/introspection accessor: current autonomy flag for a live session. */
@@ -1244,9 +1431,19 @@ export class ClayAgentHost {
     if (omWorkers) omWorkerModels.set(id, omWorkers);
     // Capabilities activate on the first session that declares coding tools
     // (never on import, never for Chat-only initialize).
+    // Plan 118 task 35: the session's agent (its config root + that agent's
+    // MCP allow-list). Absent = the daemon's default agent; an unknown or
+    // malformed name fails closed here.
+    const agentRoot = this.resolveAgentRoot(params.agent);
+    const agentType = this.agentTypeOf(agentRoot);
+    const agent = await this.agentRootConfig(agentRoot);
+    const allowList = Array.isArray(params.mcpAllowList)
+      ? (params.mcpAllowList as readonly unknown[])
+      : this.mcpAllowListFor(agentRoot);
+    this.mcpAllowListByRoot.set(agentRoot, allowList);
     const wantsCoding = this.profileWantsCodingTools(profile);
     if (wantsCoding) {
-      await this.ensureCapabilities();
+      await this.ensureCapabilities(agentRoot, allowList);
       // Graft is available by default (plan 117): first coding session for
       // a workspace attempts the pull-mode binding once per root per
       // daemon. Chat sessions never trigger it.
@@ -1257,6 +1454,8 @@ export class ClayAgentHost {
       workspaceRoot,
       fullAutonomy,
       observationalMemory,
+      agent,
+      mcpAllowList: allowList,
     });
     const now = new Date().toISOString();
     if (typeof this.persistence.appendSession !== "function") {
@@ -1276,6 +1475,7 @@ export class ClayAgentHost {
         fullAutonomy,
         // Stable workspace identity for workspace-scoped search (decision 2201).
         [SESSION_SEARCH_WORKSPACE_METADATA_KEY]: workspaceRoot,
+        ...(agentType ? { agentType } : {}),
         ...(omWorkers ? { omWorkers } : {}),
       },
     });
@@ -1287,6 +1487,9 @@ export class ClayAgentHost {
       provider,
       model: modelId,
       workspaceRoot,
+      agentType,
+      agentRoot,
+      mcpAllowList: allowList,
       fullAutonomy,
       observationalMemory,
       tools: created.tools,
@@ -1298,6 +1501,8 @@ export class ClayAgentHost {
       provider,
       model: modelId,
       workspaceRoot,
+      agent: agentType,
+      agentRoot,
       fullAutonomy,
       observationalMemory,
       tools: created.tools.map((tool) => tool.name),
@@ -1309,7 +1514,16 @@ export class ClayAgentHost {
     profile: string,
     provider: string,
     modelId: string,
-    options: { workspaceRoot: string; fullAutonomy: boolean; observationalMemory: boolean },
+    options: {
+      workspaceRoot: string;
+      fullAutonomy: boolean;
+      observationalMemory: boolean;
+      /** Plan 118 task 35: the session's agent config (root, tool caps,
+       *  skills config + files) — never the host's default. */
+      agent: AgentRootConfig;
+      /** Server-built MCP allow-list for that agent (empty = none). */
+      mcpAllowList: readonly unknown[];
+    },
   ): {
     session: AgentSession;
     agent: Agent;
@@ -1325,7 +1539,7 @@ export class ClayAgentHost {
     // the workspace AGENTS.md app layer (Prism source rank user < app).
     // def.systemPrompt === false disables contributions entirely — the
     // user layer is suppressed with them.
-    const userSystemText = loadUserSystemPrompt(this.agentConfigRoot);
+    const userSystemText = loadUserSystemPrompt(options.agent.root);
     const agentsText = loadWorkspaceAgentsPrompt(options.workspaceRoot);
     // Locked layer order (plan 117): base instructions → SYSTEM.md (user)
     // → AGENTS.md (app). Prism's composeSystemPrompt sorts contributions
@@ -1400,11 +1614,16 @@ export class ClayAgentHost {
     sessionId: string,
     provider: string,
     modelId: string,
+    agent?: AgentRootConfig,
   ): LiveSession {
     const recreated = this.createSession(sessionId, live.profile, provider, modelId, {
       workspaceRoot: live.workspaceRoot,
       fullAutonomy: live.fullAutonomy,
       observationalMemory: live.observationalMemory,
+      // Plan 118 task 35: the session's own agent config (loaded by the
+      // caller); the default-agent path reuses the host's loaded values.
+      agent: agent ?? this.defaultAgentConfig(),
+      mcpAllowList: live.mcpAllowList,
     });
     // The created session is already bound to the branch's current leaf
     // (the leaf this recreate carries over), and it is the OM-attached
@@ -1439,12 +1658,19 @@ export class ClayAgentHost {
   private sessionTools(
     def: AgentDefinition,
     sessionId: string,
-    options: { workspaceRoot: string; fullAutonomy: boolean; observationalMemory: boolean },
+    options: {
+      workspaceRoot: string;
+      fullAutonomy: boolean;
+      observationalMemory: boolean;
+      agent: AgentRootConfig;
+      mcpAllowList: readonly unknown[];
+    },
   ): ToolDefinition[] {
     const built = this.buildSessionTools(def, sessionId, options) ?? [];
     // Capabilities ride along with coding sessions (they were activated for
-    // the coding profile; Chat profiles with no tools stay no-tools).
-    const capabilities = built.length > 0 ? this.capabilityTools() : [];
+    // the coding profile; Chat profiles with no tools stay no-tools). Plan
+    // 118 task 35: the agent's own bridge, so a switch swaps its servers.
+    const capabilities = built.length > 0 ? this.capabilityTools(options.agent.root) : [];
     // Opt-in wiki knowledge tools ride along with coding sessions in the
     // enabled workspace (decision 2156); absent entirely when disabled.
     const wiki = built.length > 0 ? this.wikiTools(options.workspaceRoot) : [];
@@ -1617,7 +1843,7 @@ export class ClayAgentHost {
   private resolveSkills(
     def: AgentDefinition,
     tools: readonly ToolDefinition[],
-    options?: { workspaceRoot?: string },
+    options?: { workspaceRoot?: string; agent?: AgentRootConfig },
   ): readonly Skill[] | undefined {
     const names = def.skills ? [...def.skills] : [];
     if (options?.workspaceRoot !== undefined && this.wiki?.workspaceRoot === options.workspaceRoot) {
@@ -1632,8 +1858,10 @@ export class ClayAgentHost {
     // SKILL.md cannot brick session start.
     if (options?.workspaceRoot !== undefined) {
       const activeToolNames = new Set(tools.map((tool) => tool.name));
+      // Plan 118 task 35: the config-root names come from the session's own
+      // agent (the home and workspace roots are host/workspace scoped).
       const discovered = [
-        ...(this.configSkillNames ?? []),
+        ...(options.agent?.configSkillNames ?? this.configSkillNames ?? []),
         ...(this.homeSkillNames ?? []),
         ...(this.workspaceSkillNames.get(options.workspaceRoot) ?? []),
       ];
@@ -2080,7 +2308,8 @@ export class ClayAgentHost {
     // mid-session model switch.
     const live = this.live.get(sessionId);
     if (live?.observationalMemory) {
-      this.recreateSessionModel(live, sessionId, live.provider, live.model);
+      const agent = await this.agentRootConfig(live.agentRoot);
+      this.recreateSessionModel(live, sessionId, live.provider, live.model, agent);
     }
     const stored = omWorkerModels.get(sessionId) ?? {};
     return {
@@ -2182,10 +2411,106 @@ export class ClayAgentHost {
     return clipUtf8(this.redactor.redact(firstLine), MAX_OM_SUMMARY_CHARS);
   }
 
+  /**
+   * Plan 118 task 35: switch a live session's agent type in place.
+   *
+   * The agent decides the system prompt, the skill roots, the tool caps and
+   * the MCP servers a run uses, so the live agent is rebuilt over the *same*
+   * session branch (the mid-session model-switch mechanism): the session id,
+   * its transcript and its leaf survive, and only the config the next run
+   * reads changes. The caller's workspace is untouched. The agent name is
+   * validated here as well (contained to the `agents/` root next to the
+   * default agent), so a bad name fails closed instead of silently running
+   * the default agent's config.
+   */
+  private async sessionSetAgent(params: Record<string, unknown>): Promise<unknown> {
+    const sessionId = reqString(params, "sessionId");
+    const live = await this.ensureLive(sessionId);
+    const agentRoot = this.resolveAgentRoot(params.agent);
+    const agentType = this.agentTypeOf(agentRoot);
+    const agent = await this.agentRootConfig(agentRoot);
+    const allowList = Array.isArray(params.mcpAllowList)
+      ? (params.mcpAllowList as readonly unknown[])
+      : this.mcpAllowListFor(agentRoot);
+    this.mcpAllowListByRoot.set(agentRoot, allowList);
+    const overProvider = optString(params, "provider");
+    const overModel = optString(params, "model");
+    const provider = overProvider ?? live.provider;
+    const model = overModel ?? live.model;
+    if (!this.kernel.registries.providers.get(provider)) {
+      throw rpcError(-32000, `Unknown provider: ${provider}`);
+    }
+    // Bind the new agent *before* the rebuild: the rebuilt session's tools
+    // and capability set come from these fields.
+    live.agentRoot = agentRoot;
+    live.agentType = agentType;
+    live.mcpAllowList = allowList;
+    this.recreateSessionModel(live, sessionId, provider, model, agent);
+    const omWorkers = this.parseOmWorkers(params.observationalMemoryWorkers);
+    if (omWorkers) {
+      omWorkerModels.set(sessionId, omWorkers);
+      await this.persistOmWorkers(sessionId);
+    }
+    if (this.profileWantsCodingTools(live.profile)) {
+      await this.ensureCapabilities(agentRoot, allowList);
+    }
+    await this.persistAgentType(sessionId, agentType, provider, model);
+    return {
+      sessionId,
+      agent: agentType,
+      agentRoot,
+      profile: live.profile,
+      provider,
+      model,
+      tools: live.tools.map((tool) => tool.name),
+    };
+  }
+
+  /** Best-effort persistence of the switch (same advisory pattern as
+   *  `persistProviderModel`): the live session already runs the new agent,
+   *  and the record keeps resume consistent. */
+  private async persistAgentType(
+    sessionId: string,
+    agentType: string | undefined,
+    provider: string,
+    model: string,
+  ): Promise<void> {
+    if (typeof this.persistence.appendSession !== "function") return;
+    try {
+      const page = await this.persistence.querySessions({ id: sessionId, tenantId: TENANT, limit: 1 });
+      const record = page.items[0];
+      if (!record) return;
+      const metadata: Record<string, unknown> = {
+        ...((record.metadata ?? {}) as Record<string, unknown>),
+        provider,
+        model,
+      };
+      if (agentType) metadata.agentType = agentType;
+      else delete metadata.agentType;
+      await this.persistence.appendSession({
+        ...record,
+        metadata,
+        updatedAt: new Date().toISOString(),
+      });
+    } catch {
+      // Metadata persistence is advisory; the live switch already applied.
+    }
+  }
+
   private async sessionResume(params: Record<string, unknown>): Promise<unknown> {
     const sessionId = reqString(params, "sessionId");
     const live = await this.ensureLive(sessionId);
-    return { sessionId, profile: live.profile, provider: live.provider, model: live.model, leafId: live.session.leafId };
+    return {
+      sessionId,
+      profile: live.profile,
+      provider: live.provider,
+      model: live.model,
+      // Plan 118 task 35: the session's agent rides the resume reply so the
+      // server keeps labelling turns with their producer after a restart.
+      agent: live.agentType,
+      agentRoot: live.agentRoot,
+      leafId: live.session.leafId,
+    };
   }
 
   private async ensureLive(sessionId: string): Promise<LiveSession> {
@@ -2202,11 +2527,20 @@ export class ClayAgentHost {
     const observationalMemory = this.resolveOmFlag(profile, metadata.observationalMemory);
     const restoredWorkers = this.parseOmWorkers(metadata.omWorkers);
     if (restoredWorkers) omWorkerModels.set(sessionId, restoredWorkers);
+    // Plan 118 task 35: a restored session runs the agent recorded with it
+    // (absent for sessions written before agent types — the default agent).
+    const agentRoot = this.resolveAgentRoot(
+      typeof metadata.agentType === "string" ? metadata.agentType : undefined,
+    );
+    const agentType = this.agentTypeOf(agentRoot);
+    const agent = await this.agentRootConfig(agentRoot);
     await this.ensureSkillDiscovery(process.cwd());
     const created = this.createSession(sessionId, profile, provider, model, {
       workspaceRoot: process.cwd(),
       fullAutonomy: metadata.fullAutonomy !== false,
       observationalMemory,
+      agent,
+      mcpAllowList: this.mcpAllowListFor(agentRoot),
     });
     const live: LiveSession = {
       session: created.session,
@@ -2216,6 +2550,9 @@ export class ClayAgentHost {
       provider,
       model,
       workspaceRoot: process.cwd(),
+      agentType,
+      agentRoot,
+      mcpAllowList: this.mcpAllowListFor(agentRoot),
       fullAutonomy: false,
       observationalMemory,
       tools: created.tools,
@@ -2307,7 +2644,13 @@ export class ClayAgentHost {
       // authority — the provider rejects genuinely unknown ids at call time.
       // (The book may reference a model discovery has not listed yet.)
       if (provider !== live.provider || model !== live.model) {
-        live = this.recreateSessionModel(live, sessionId, provider, model);
+        live = this.recreateSessionModel(
+          live,
+          sessionId,
+          provider,
+          model,
+          await this.agentRootConfig(live.agentRoot),
+        );
         await persistProviderModel(this.persistence, sessionId, provider, model);
       }
     }
@@ -3255,7 +3598,7 @@ ${prompt}`;
    *  post-boot (init.js) commands appear on the next fetch; the Rust
    *  server caches per daemon generation and invalidates on
    *  command.register / knowledge.setOptions. */
-  private environmentList(): JsonObject {
+  private environmentList(params: Record<string, unknown> = {}): JsonObject {
     const commands: JsonObject[] = [];
     for (const command of this.kernel.registries.commands.list()) {
       if (commands.length >= MAX_COMPLETION_COMMANDS) break;
@@ -3277,11 +3620,25 @@ ${prompt}`;
     // surface): bounded name/description pairs, same caps as commands.
     // Per-server MCP connect outcomes ride too (MCP card / composer
     // section): id, connected, tool count, and the hidden-because error.
+    // Plan 118 task 35: the inventories follow the session's agent when one
+    // is named (the Context tab's skills + MCP cards after a switch);
+    // without a session the default agent's view is the honest answer.
+    const sessionId = optString(params, "sessionId");
+    const agentRoot = sessionId
+      ? (this.live.get(sessionId)?.agentRoot ?? this.agentConfigRoot)
+      : // The Rust server caches per agent type and asks by name; an absent
+        // agent is the default one.
+        this.resolveAgentRoot(params.agent);
     return {
       commands,
       extensions,
+      // Ceiling (plan 118 task 35): the skill registry is host-wide, so the
+      // catalog can list a skill another agent root discovered. A run's
+      // *active* skills/tools come from the session's own agent config, which
+      // is what the switch changes; per-root catalogs need a source tag on
+      // the registry, which Prism's skill registry does not carry.
       skills: this.visibleSkills(),
-      mcpServers: this.mcpServerOutcomes(),
+      mcpServers: this.mcpServerOutcomes(agentRoot),
     };
   }
 

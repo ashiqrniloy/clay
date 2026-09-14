@@ -14,7 +14,7 @@ owner: client
 phase: Phase 22.4
 visibility: public
 permissions: []
-key_bindings: ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"]
+key_bindings: ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "Ctrl+Alt+4", "Ctrl+Alt+5", "Ctrl+Alt+6", "Ctrl+Alt+7", "Ctrl+Alt+8", "Ctrl+Alt+9"]
 custom_properties: []
 security: Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned tab state via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.
 agent_guidance: "Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only."
@@ -49,15 +49,15 @@ Use this API when a user wants to bind an alternate next-tab chord in `~/.clay/i
 import { clientTabActivate } from "clay:shell";
 import { bindKey } from "clay:keybindings";
 
-bindKey("Ctrl+1", clientTabActivate(1), { scope: "global" });
+bindKey("Ctrl+Alt+1", clientTabActivate(1), { scope: "global" });
 
-bindKey("Ctrl+9", clientTabActivate(9), { scope: "global" });
+bindKey("Ctrl+Alt+9", clientTabActivate(9), { scope: "global" });
 ```
 
 The equivalent string form is also valid:
 
 ```ts
-bindKey("Ctrl+1", "shell.clientTabActivate.1", { scope: "global" });
+bindKey("Ctrl+Alt+1", "shell.clientTabActivate.1", { scope: "global" });
 ```
 
 ## Example
@@ -67,12 +67,12 @@ bindKey("Ctrl+1", "shell.clientTabActivate.1", { scope: "global" });
 import { clientTabActivate } from "clay:shell";
 import { bindKey } from "clay:keybindings";
 
-bindKey("Ctrl+1", clientTabActivate(1), { scope: "global" });
+bindKey("Ctrl+Alt+1", clientTabActivate(1), { scope: "global" });
 
-bindKey("Ctrl+9", clientTabActivate(9), { scope: "global" });
+bindKey("Ctrl+Alt+9", clientTabActivate(9), { scope: "global" });
 ```
 
-The default `Ctrl+1`..`Ctrl+9` chords ship in Clay's `default_keymaps()` with `Global` context. This API exists for documented keybinding/configuration metadata and alternate chords.
+The default `Ctrl+Alt+1`..`Ctrl+Alt+9` chords ship in Clay's `default_keymaps()` with `Global` context (`Ctrl+1`/`Ctrl+2` are the tab's view switcher since plan 118 task 33). This API exists for documented keybinding/configuration metadata and alternate chords.
 
 ## Options
 
@@ -80,7 +80,7 @@ The default `Ctrl+1`..`Ctrl+9` chords ship in Clay's `default_keymaps()` with `G
 
 ## Key bindings
 
-Default: `Ctrl+1`..`Ctrl+9` (Global context). Additional bindings may be configured with `bindKey`.
+Default: `Ctrl+Alt+1`..`Ctrl+Alt+9` (Global context). Additional bindings may be configured with `bindKey`.
 
 ## Custom properties
 
@@ -116,6 +116,6 @@ Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to r
 - User-facing name: Activate Tab
 - Kind: `clay-js-api`
 - Module/export: `clay:shell` / `clientTabActivate`
-- Default key bindings: `Ctrl+1`..`Ctrl+9`
+- Default key bindings: `Ctrl+Alt+1`..`Ctrl+Alt+9`
 - Custom properties: none
 - Tags: `[shell, tabs, keybindings, js-api]`

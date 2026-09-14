@@ -135,7 +135,7 @@ See [Creating Clay Packages: complete first-party language packages](../packages
 
 Theme packages declare inert `clay.contributions.textStyles` entries. Each entry targets either:
 
-- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, `searchMatch`, `unused`, `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch`; or
+- a base UI key: `shellBg`, `panelBg`, `text`, `placeholder`, `selection`, `caret`, `scrollbar`, `scrollbarTrack`, `statusBg`, `statusText`, `diagnosticError`, `diagnosticWarning`, `diagnosticInfo`, `searchMatch`, `unused`, `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch`, `accent`, `borderHairline`, `borderSubtle`, `borderStrong`; or
 - a `TokenType` variant name such as `Keyword`, `String`, `Function`, `Heading1`, or `Paragraph`.
 
 Each entry may set any subset of:
@@ -154,6 +154,7 @@ Each entry may set any subset of:
 | Background fill | Quote / CodeBlock / SearchMatch / Deprecated only | `textStyles[].background` or base key `searchMatch` |
 | Size `scale` | H1 1.50 … H6 0.92, CodeSpan 0.90, else 1.0 | `textStyles[].scale` |
 | Chrome | `gutterFg`, `gutterFgActive`, `lineHighlight`, `indentGuide`, `bracketMatch` | matching base UI keys |
+| Shell accent / boundary | `caret` (accent stand-in), `scrollbar` (flat boundary) | `accent`, `borderHairline`, `borderSubtle`, `borderStrong` |
 
 Theme resolution happens at configuration/package-load time. `setTheme("@clay/theme-gruvbox-material-dark")` selects one active first-party theme, the server sends an inert `ActiveTheme` snapshot, and the client builds `StyleRegistry` before first paint. Paint reads the resolved registry only.
 

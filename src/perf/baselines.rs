@@ -244,6 +244,7 @@ pub fn representative_sdui_tree() -> SduiTree {
             SduiNode::new(
                 list_id,
                 SduiNodeKind::List {
+                    filter: None,
                     items: vec![SduiListItem {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),

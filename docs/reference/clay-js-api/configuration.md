@@ -54,8 +54,10 @@ Configuration runs outside interaction hot paths. One changed complete value pro
 ```js
 import { setDesignSystem } from "clay:theme";
 
-setDesignSystem("@clay/design-glass");
-// omission or revocation falls back to default @clay/design-neobrutal (built-in core baseline)
+setDesignSystem("@clay/design-instrument");
+// omission or revocation falls back to the default design system
+// (@clay/design-instrument — Quiet Instrument — once the migration makes it
+// the implicit default), with @clay/core as the built-in baseline
 ```
 
 Selection resolves only during configuration evaluation and is validated against the package service's enabled records before the candidate generation commits: reload swaps atomically, an invalid or revoked selection preserves the previous generation and records a `theme.load_failed` diagnostic, and re-delivering an identical generation causes no frontend DOM writes. Selection installs nothing and grants no package, filesystem, network, shell, extension, raw-op, or client-side JavaScript authority; recipe data stays inert and color authority remains with the active theme.
@@ -1046,7 +1048,7 @@ On every startup and reload, `init.js` evaluates first; persisted `ui-session` p
 
 ### Settings command flow
 
-`settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` validate the value, merge it into `preferences.json` (atomic tmp + rename), and reload the runtime (`settings.setDesignSystem` accepts `@clay/core` or a bundled `@clay/design-*` contributor and persists the `designSystem` preference; see [`settings.setDesignSystem`](clay-js-api/settings/set-design-system.md)). `settings.setTypography` parses and fully revalidates the complete typography JSON argument (`arguments.typography`) before persisting and reloading. `settings.reset` clears the store and reloads. `settings.open` / `settings.close` validate and acknowledge without persistence. A corrupted, oversized, or manually-edited `preferences.json` is dropped field-by-field (or wholesale when unreadable/oversized/not an object) with a diagnostic at load time so startup never breaks, and every persisted value is revalidated at persist time before the atomic write; the next reload applies the store immediately after `init.js` evaluation so a UI choice always overrides the equivalent `init.js` call.
+`settings.setTheme` / `settings.setAppearance` / `settings.setDesignSystem` validate the value, merge it into `preferences.json` (atomic tmp + rename), and reload the runtime (`settings.setDesignSystem` accepts `@clay/core` or a bundled `@clay/design-*` contributor and persists the `designSystem` preference; see [`settings.setDesignSystem`](settings/set-design-system.md)). `settings.setTypography` parses and fully revalidates the complete typography JSON argument (`arguments.typography`) before persisting and reloading. `settings.reset` clears the store and reloads. `settings.open` / `settings.close` validate and acknowledge without persistence. A corrupted, oversized, or manually-edited `preferences.json` is dropped field-by-field (or wholesale when unreadable/oversized/not an object) with a diagnostic at load time so startup never breaks, and every persisted value is revalidated at persist time before the atomic write; the next reload applies the store immediately after `init.js` evaluation so a UI choice always overrides the equivalent `init.js` call.
 
 ### Example
 
@@ -1307,3 +1309,160 @@ tests verify that result. The security boundary remains unchanged: no
 filesystem, network, shell, extension-loading, package-control, AI, workspace,
 parser-artifact, raw-op, native-widget, or client-side JavaScript authority is
 introduced.
+
+## Plan 118 design-system, theme, and chat-surface configuration review
+
+Plan 118 (Quiet Instrument migration) changed **values**, not the configuration
+API. It promotes no new `clay:configuration` export, adds no `init.js` key, and
+adds no hidden JSON/TOML knob: the two selection surfaces stay
+[`theme.setDesignSystem`](theme/set-design-system.md) (one-line `init.js`
+selection) and [`settings.setDesignSystem`](settings/set-design-system.md)
+(persisted interactive preference), and theme selection stays
+[`theme.setTheme`](theme/set-theme.md) with
+[`theme.setAppearance`](theme/set-appearance.md) for the light/dark/system
+mode. `theme.setTheme` and `theme.setDesignSystem` are independent: swapping
+one preserves the other, and neither changes typography, icon pack, key
+bindings, or package enablement.
+
+### Shipped configuration surfaces
+
+Every user-facing selection below is reachable from `~/.clay/init.js` **and**
+from the Settings panel. The panel sends the same Clay-owned `settings.*`
+commands, which validate the value, persist it to `~/.clay/preferences.json`,
+and reload the runtime; the persisted choice wins over an equivalent `init.js`
+call because preference apply runs after `init.js` evaluation on every reload.
+
+| Setting | `init.js` API | Settings command | Persisted key | Allowed values |
+|---|---|---|---|---|
+| Theme | [`theme.setTheme`](theme/set-theme.md) | `settings.setTheme` | `theme` | A first-party `@clay/theme-*` specifier (the four shipped themes) |
+| Appearance | [`theme.setAppearance`](theme/set-appearance.md) | `settings.setAppearance` | `appearance` | `light`, `dark`, `system` |
+| Design system | [`theme.setDesignSystem`](theme/set-design-system.md) | `settings.setDesignSystem` | `designSystem` | `@clay/core` or a bundled/enabled `clay.contributions.uiDesignSystem` contributor |
+| Typography | [`theme.setTypography`](theme/set-typography.md) | `settings.setTypography` | `typography` | One complete `monospace` + `proportional` + `ui` profile set (plus optional `hierarchy`) |
+| Reset selections | — | `settings.reset` | clears the file | Restores defaults (no call: canonical defaults already apply) |
+
+`settings.open` and `settings.close` only show and hide the panel; they change
+no setting and persist nothing. The panel's option lists come from the server's
+`ui_choices` snapshot, so the dropdowns cannot offer a specifier the active
+generation would reject.
+
+### Shipped choice set
+
+Four first-party content themes ship; each is a color-only package whose values
+are verified against the contrast floors and recorded in
+`design-artifacts/approved/quiet-instrument-migration/theme-values.md`:
+
+| Specifier | Role |
+|---|---|
+| `@clay/theme-modus-operandi` | Canonical light default (`setAppearance("light")`, `setAppearance("system")` on a light OS) |
+| `@clay/theme-modus-vivendi` | Canonical dark default (`setAppearance("dark")`, `setAppearance("system")` on a dark OS) |
+| `@clay/theme-gruvbox-material-dark` | Shipped dark alternative |
+| `@clay/theme-gruvbox-material-light` | Shipped light alternative |
+
+Design-system choices are exactly `@clay/core` (the built-in baseline, listed
+first, never a package record) plus any bundled or enabled package that
+contributes `clay.contributions.uiDesignSystem`:
+
+| Specifier | Role |
+|---|---|
+| `@clay/core` | Built-in baseline: the host-consumed subset of the shipped language, always selectable, resolves without a record |
+| `@clay/design-instrument` | Shipped first-party contributor and approved default (Quiet Instrument, `DESIGN.md`) |
+
+The Settings dropdowns render the server-enumerated `ui_choices` snapshot
+(`UiChoicesSnapshot`), not a hand-maintained list: a bundled design-system
+contributor is listed even when it has not been loaded yet — bundled manifests
+are read, never installed or enabled by enumeration — so the shipped system is
+reachable on a fresh install, and `settings.setDesignSystem` accepts it and
+resolves the first-party record on demand. Removed or unknown specifiers are
+never listed, and re-delivering an identical generation causes no client DOM
+write.
+
+The canonical example tree (`cp -r examples/config/. ~/.clay/`) selects
+`@clay/design-instrument` on active line one and keeps `@clay/core` as the
+commented alternative, so a copy starts on the shipped language with the full
+recipe set while the baseline stays one edit away. Selection is a bundled
+record lookup, so the example needs no `loadPackage` for it and grants no new
+package authority. Omitting the call entirely is equally valid: the baseline is
+the same language's host-consumed subset, which is what makes the swap
+geometry-neutral.
+
+### Removed-specifier fallback
+
+A specifier can stop resolving after it was written — a rename, a deletion, or
+a migration that retires a shipped system. Both paths stay fail-safe and are
+recorded rather than fatal:
+
+| Path | Behavior |
+|---|---|
+| `init.js` `setTheme("<removed>")` | Throws `theme.load_failed` during evaluation; the previous complete state stays active, and when no generation had an explicit selection the canonical default theme applies |
+| `init.js` `setDesignSystem("<removed>")` | Throws `theme.load_failed`; the previous valid design system is preserved and missing recipes keep resolving through `@clay/core` fallbacks |
+| Persisted preference naming a removed specifier | Startup keeps loading, the design-system slot is left untouched (no partial install), and exactly one bounded diagnostic records the rejected specifier plus the specifier that stays active; with nothing active, `@clay/core` applies. The preference is not silently rewritten |
+| Persisted `theme` preference naming a removed theme | The canonical default for the persisted appearance applies and one bounded diagnostic names the rejected specifier |
+
+`@clay/design-neobrutal` and `@clay/design-glass` are retired and are no longer
+valid configuration values anywhere; the design systems they implemented are
+gone, not merely unselected. Historical mentions in the design documentation
+are marked as retired.
+
+### Removed chat-surface options
+
+The chat surface was removed, so its configuration surface is gone with it: no
+`chat.*` command is callable (any such id is unknown), no chat package is loaded
+or implied by configuration, and there is no chat preference key, chat panel
+option, chat landing-package line, or chat recipe selection to set. The empty
+tab resolves from the installed panes (today the Coding Agent surface), not from
+a configuration key. Those names are rejected configuration keys, not defaults:
+the chat surface and its `landingPackage` and `startup.pane` keys were removed,
+and the removed `chatPanel` key went with them.
+
+### Rejected hidden configuration keys
+
+No hidden or parallel key system is valid for design-system or theme selection.
+Examples rejected by the closed configuration boundary include:
+
+- `theme.default`, `themeOverride`, `defaultTheme`, `theme.palette`, `themes.<name>.textStyles`
+- `designSystem`, `designSystem.default`, `defaultDesignSystem`, `designSystem.enabled`, `designSystem.path`, `designSystem.recipes`, `ui.recipes`, `recipe.*`
+- `designTokens` written as a top-level `init.js` key (typed UI overrides are a theme package's `clay.contributions.designTokens` manifest contribution, applied through `setTheme`)
+- Raw recipe/color/style blobs, inline CSS, per-theme palette JSON, or renderer callbacks
+- Removed chat-surface keys: `chat.*`, `chatPanel.*`, `chat.enabled`, `chat.landing`, `landingPackage`, `startup.pane`
+- Any attempt to select a design system or theme that is not enumerated: selection resolves against the package service's records and the bundled inventory, never from a path, URL, or inline declaration
+
+### Compiled budgets (not configurable)
+
+| Budget | Constant | Value |
+|---|---|---|
+| Design-system payload | `UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES` | 64 KiB |
+| Max recipes per design system | `MAX_RECIPES` | 512 |
+| Max values per design system | `MAX_VALUES` | 128 |
+| Max shadow layers | `MAX_SHADOW_LAYERS` | 3 |
+| Max radius | `MAX_RADIUS_PX` (standard radius ceiling `MAX_STANDARD_RADIUS_PX`) | 9999 px (pill) |
+| Max border width | `MAX_BORDER_WIDTH_PX` | 8 px |
+| Max motion duration | `MAX_MOTION_MILLIS` | 1000 ms |
+
+These are security/performance boundaries defined in `src/perf/budgets.rs` and
+`src/shell/design_system.rs`; raising them from `init.js` would undermine the
+limit they enforce.
+
+### Authority
+
+Plan 118 grants no new configuration authority. Selecting a theme or design
+system installs nothing, adopts no package trust, enables no capability, and
+expands no permission: `@clay/*` specifiers resolve through the existing
+first-party bundled record path (manifest bytes read, nothing installed), and a
+third-party specifier still has to pass the package service's existing
+enable/trust validation — `setDesignSystem` never promotes trust, and the op is
+registered in the trusted runtime extension only, so package callers cannot
+hijack the user-global selection. `settings.setDesignSystem` persists an inert
+preference string. Recipe data stays inert and carries no concrete colors, so
+color authority remains with the active theme and no raw CSS is expressible.
+None of these paths grant filesystem, network, shell, package-manager,
+extension-loading, AI mutation, workspace mutation, clipboard, native-widget,
+WASM, raw-op, client-side JavaScript, renderer-callback, or package-control
+authority.
+
+Configuration evaluation remains startup, package-load, reload, or explicit
+setting-change work. Plan 118 adds no file-watch, polling, or reload work: the
+existing bounded configuration-root watcher and the single
+`runtime.reloadConfiguration` command are unchanged, and paint, keypress,
+layout, scroll, pointer, text-event, edit-acknowledgement, and
+decoration-rendering paths execute no configuration JavaScript and recompute no
+selection.

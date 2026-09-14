@@ -90,20 +90,34 @@ setTheme("@clay/theme-gruvbox-material-dark");
 // on top of the active theme. Content themes supply every concrete UI/editor
 // color; recipes map semantic color roles and cannot declare raw CSS or colors.
 // Allowed values (validated by the server; anything else fails closed):
-//   "@clay/core"               built-in core baseline recipes (no package needed)
-//   "@clay/design-neobrutal"   default restrained neobrutal recipes
-//   "@clay/design-glass"       luminous frosted glass reference recipes
-// Bundled restrained Neobrutal recipes (@clay/design-neobrutal) are the default
-// design system (0px radii, 1px structural borders, 2px hard offset shadows);
-// omission keeps the built-in @clay/core baseline, so no call is needed by default.
-// To try a non-default system, install and adopt its package first
-// (selection itself installs nothing and grants no new package authority),
-// then uncomment exactly one line:
-// setDesignSystem("@clay/design-glass");     // glass reference
+//   "@clay/design-instrument"  Quiet Instrument — the approved default language
+//                              (DESIGN.md). Bundled, so the selection resolves
+//                              from the compiled inventory with no loadPackage
+//                              call: load ≠ select, and selection itself installs
+//                              nothing.
+//   "@clay/core"               the built-in @clay/core baseline: the same Quiet
+//                              Instrument language as the host-consumed subset,
+//                              which is what a config that never selects paints.
+// Every new design decision follows DESIGN.md (Quiet Instrument: 1px hairlines,
+// 8px control radii, veil fills). The design systems this language replaced are
+// gone, not merely unselected: the Settings panel never offers a removed
+// specifier, and one named by hand is rejected at apply time.
+//
+// The selection below is the shipped default made explicit — copy-safe, and
+// visually identical to the baseline (the swap is geometry-neutral), while
+// activating the package's full recipe set:
+setDesignSystem("@clay/design-instrument");
+// setDesignSystem("@clay/core"); // baseline alternative: same language, no package
+// Omission keeps the built-in @clay/core baseline. To select a third-party
+// system, install and adopt its package first — selection itself installs
+// nothing and grants no new package authority — then select it by specifier.
 // An interactive switch (Settings panel or settings.setDesignSystem) persists
 // the choice in preferences.json and wins over this call on every reload.
-// A missing, revoked, or invalid selection keeps the previous working
-// generation, records a diagnostic, and never blocks startup.
+// Failure is closed and non-fatal: a missing, revoked, or invalid specifier
+// keeps the previous working generation with a theme.load_failed diagnostic; a
+// persisted preference naming a removed or unknown specifier lets startup
+// proceed unchanged (no partial install), names the rejected specifier in one
+// bounded diagnostic, and leaves the previous selection active.
 
 // setIconPack selects the UI icon style — bounded, host-validated vector
 // geometry keyed by semantic names (action.close, document.save, git.branch,
@@ -325,8 +339,10 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 //   New:          shell.clientTabNew             Ctrl+T          same flow as "+"
 //   Close:        shell.clientTabClose           Ctrl+Shift+W    last tab protected;
 //                                                                    dirty tabs confirm
-//   Activate:     shell.clientTabActivate.<N>    Ctrl+<N>        1-based, N in 1..=9;
+//   Activate:     shell.clientTabActivate.<N>    Ctrl+Alt+<N>    1-based, N in 1..=9;
 //                                                                    beyond count = no-op
+//                 (Ctrl+<N> is the tab's view switcher: Ctrl+1 workspace view,
+//                  Ctrl+2 agent view — plan 118 task 33, DESIGN.md §12.)
 //   Move:         shell.clientTabMoveLeft        Ctrl+Shift+[    boundary = no-op
 //                 shell.clientTabMoveRight       Ctrl+Shift+]    boundary = no-op
 //                 shell.clientTabMoveTo.<N>      Ctrl+Shift+<N>  1-based, N in 1..=9;
@@ -454,15 +470,15 @@ bindKey({
     "Ctrl+Shift+W": "shell.clientTabClose",
     "Ctrl+Shift+[": "shell.clientTabMoveLeft",
     "Ctrl+Shift+]": "shell.clientTabMoveRight",
-    "Ctrl+1": "shell.clientTabActivate.1",
-    "Ctrl+2": "shell.clientTabActivate.2",
-    "Ctrl+3": "shell.clientTabActivate.3",
-    "Ctrl+4": "shell.clientTabActivate.4",
-    "Ctrl+5": "shell.clientTabActivate.5",
-    "Ctrl+6": "shell.clientTabActivate.6",
-    "Ctrl+7": "shell.clientTabActivate.7",
-    "Ctrl+8": "shell.clientTabActivate.8",
-    "Ctrl+9": "shell.clientTabActivate.9",
+    "Ctrl+Alt+1": "shell.clientTabActivate.1",
+    "Ctrl+Alt+2": "shell.clientTabActivate.2",
+    "Ctrl+Alt+3": "shell.clientTabActivate.3",
+    "Ctrl+Alt+4": "shell.clientTabActivate.4",
+    "Ctrl+Alt+5": "shell.clientTabActivate.5",
+    "Ctrl+Alt+6": "shell.clientTabActivate.6",
+    "Ctrl+Alt+7": "shell.clientTabActivate.7",
+    "Ctrl+Alt+8": "shell.clientTabActivate.8",
+    "Ctrl+Alt+9": "shell.clientTabActivate.9",
     "Ctrl+Shift+1": "shell.clientTabMoveTo.1",
     "Ctrl+Shift+2": "shell.clientTabMoveTo.2",
     "Ctrl+Shift+3": "shell.clientTabMoveTo.3",
@@ -643,23 +659,24 @@ await loadConfigurationModule({
 });
 
 // ----------------------------------------------------------------------------
-// 12. Agent setup guidance — clay-agent host + @clay/chat
+// 12. Agent setup guidance — the clay-agent host
 // ----------------------------------------------------------------------------
-// Clay's agent (chat) capability is server-owned end to end; this file
-// configures NO provider credentials, profiles, or models:
+// Clay's agent capability is server-owned end to end; this file configures
+// NO provider credentials, profiles, or models:
 //
 //   - The Clay server manages its own Node >= 20 child process (`clay-agent`)
 //     that hosts Prism sessions (one daemon per server). Package JavaScript
 //     can never spawn or speak to it.
-//   - Provider/profile/model selection stays server-owned in the chat UI;
-//     credentials live in an encrypted vault / OS keychain (set on first
-//     use), never in `process.env` and never in this file. Do NOT paste API
-//     keys, tokens, or other secrets into init.js or package modules — they
-//     would become plaintext configuration and violate Clay's authority
+//   - Provider/profile/model selection stays server-owned in the agent
+//     surface; credentials live in an encrypted vault / OS keychain (set on
+//     first use), never in `process.env` and never in this file. Do NOT paste
+//     API keys, tokens, or other secrets into init.js or package modules —
+//     they would become plaintext configuration and violate Clay's authority
 //     model.
-//   - The chat landing surface is the @clay/chat first-party package, loaded
-//     in packages/first-party.js (section 11): omit that loadPackage line to
-//     get the core Open File/Folder empty tab instead.
+//   - The agent surface is the @clay/coding-agent first-party package, loaded
+//     in packages/first-party.js (section 11). The empty-tab landing is the
+//     launcher surface, loaded in the same file; a config that loads no
+//     landing package gets the core Open File/Folder empty tab.
 //   - Agent host controls ship as the trusted-only `clay:agent` facade
 //     (`agent.compact`, `agent.searchSessions`, `agent.setFullAutonomy`,
 //     `agent.resumeRun`, `agent.sessionTree`). They forward to the agent
@@ -680,7 +697,7 @@ await loadConfigurationModule({
 // await setRunOptions({
 //   maxInputTokens: null,
 //   maxOutputTokens: null,
-//   // Example fence for chat-like hosts (all optional):
+//   // Example fence for agent hosts (all optional):
 //   maxTurns: 64,
 //   maxWallTimeMs: 1_800_000,
 //   compactAfterTokens: 800_000,

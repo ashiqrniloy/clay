@@ -1,5 +1,10 @@
+/* SDUI layout shell: the renderer's row/column/stack/panel kinds. Panels are
+ * catalog panels here too — same recipe as the registry's, so a manifest-driven
+ * layout and its React equivalent cannot drift. */
+
 .row,
 .column,
+.flexDefault,
 .stack,
 .panel {
   min-width: 0;
@@ -13,7 +18,20 @@
 }
 
 .row > .panel {
-  flex: 0 0 var(--clay-dimension-sidebar-default, 240px);
+  flex: 0 0 var(--clay-dimension-sidebar-default, 244px);
+}
+
+/* A region the server sized by token (plan 118 task E1): the workspace sidebar
+ * is 244px, 224px at ≤1240px (DESIGN.md §5). The host owns both the token
+ * mapping and the values; an unknown token falls back to the row's flex share. */
+.row > .stack[data-clay-size="dimension.sidebar.default"] {
+  flex: 0 0 var(--clay-dimension-sidebar-default, 244px);
+}
+
+@media (max-width: 1240px) {
+  .row > .stack[data-clay-size="dimension.sidebar.default"] {
+    flex-basis: var(--clay-dimension-sidebar-compact, 224px);
+  }
 }
 
 .row > :not(.panel) {
@@ -22,14 +40,34 @@
 }
 
 .column,
+.flexDefault,
 .stack,
 .panel {
   display: flex;
   flex-direction: column;
-  gap: var(--clay-spacing-xs, 8px);
+}
+
+.panel {
+  gap: var(--clay-ds-panel-default-root-rest-gap);
+}
+
+.column {
+  gap: var(--clay-ds-flex-column-root-rest-gap);
+}
+
+/* An absent `direction` wears the family's default recipe, not the column's. */
+.flexDefault {
+  gap: var(--clay-ds-flex-default-root-rest-gap);
+  background: var(--clay-ds-flex-default-root-rest-background-color);
+  border-width: var(--clay-ds-flex-default-root-rest-border-width);
+}
+
+.stack {
+  gap: var(--clay-ds-stack-default-root-rest-gap);
 }
 
 .column,
+.flexDefault,
 .stack {
   flex: 1;
 }
@@ -37,20 +75,18 @@
 .panel {
   height: 100%;
   overflow: auto;
-  padding: var(--clay-spacing-md, 16px);
-  background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-panel)
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-panel-default-root-rest-background-color)
+      calc(var(--clay-ds-panel-default-root-rest-background-opacity, 1) * 100%),
+    transparent
   );
-  border-right: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-panel-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-subtle)
-    );
+  color: var(--clay-ds-panel-default-root-rest-text-color);
+  padding: var(--clay-ds-panel-default-root-rest-padding);
+  border: var(--clay-ds-panel-default-root-rest-border-width)
+    var(--clay-ds-panel-default-root-rest-border-style)
+    var(--clay-ds-panel-default-root-rest-border-color);
+  border-radius: var(--clay-ds-panel-default-root-rest-border-radius);
 }
 
 @media (max-width: 720px) {
@@ -61,18 +97,5 @@
   .row > .panel {
     flex-basis: auto;
     max-height: 36%;
-  }
-
-  .panel {
-    border-right: 0;
-    border-bottom: var(
-        --clay-ds-panel-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-      var(--clay-ds-panel-default-root-rest-border-style, solid)
-      var(
-        --clay-ds-panel-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      );
   }
 }

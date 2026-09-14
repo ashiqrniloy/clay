@@ -682,6 +682,12 @@ fn stamp_client_id(
         ClientMessage::OpenAgentSettingsFile { name, .. } => {
             ClientMessage::OpenAgentSettingsFile { client_id, name }
         }
+        ClientMessage::ListLauncherEntries { .. } => {
+            ClientMessage::ListLauncherEntries { client_id }
+        }
+        ClientMessage::RemoveLauncherRecent { index, .. } => {
+            ClientMessage::RemoveLauncherRecent { client_id, index }
+        }
         ClientMessage::AddSelectedWorkspaceRoot {
             capability,
             selected_path,

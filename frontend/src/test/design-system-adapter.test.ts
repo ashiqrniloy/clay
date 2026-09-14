@@ -15,14 +15,14 @@ import {
 import type { DesignSystemSnapshot } from "../theme/types";
 
 const sampleSnapshot: DesignSystemSnapshot = {
-  specifier: "@clay/design-glass",
+  specifier: "@thirdparty/design-sample",
   schemaVersion: 1,
   generation: 4,
   provenance: {
-    packageName: "@clay/design-glass",
+    packageName: "@thirdparty/design-sample",
     packageVersion: "0.1.0",
-    apiPrefix: "glass",
-    trustDomain: "trusted",
+    apiPrefix: "design-sample",
+    trustDomain: "thirdParty",
   },
   recipes: {
     "button.primary.root.rest": {
@@ -138,8 +138,8 @@ describe("design system adapter: naming & formatting", () => {
       recipeVariableToCssName("button.primary.root.rest.borderRadius"),
     ).toBe("--clay-ds-button-primary-root-rest-border-radius");
     expect(
-      recipeVariableToCssName("modal.glass.surface.rest.backdropBlur"),
-    ).toBe("--clay-ds-modal-glass-surface-rest-backdrop-blur");
+      recipeVariableToCssName("modal.default.scrim.rest.backdropBlur"),
+    ).toBe("--clay-ds-modal-default-scrim-rest-backdrop-blur");
     expect(
       recipeVariableToCssName("panel.default.root.rest.transitionDuration"),
     ).toBe("--clay-ds-panel-default-root-rest-transition-duration");
@@ -335,7 +335,9 @@ describe("design system store & DOM installation", () => {
     store.setDesignSystem(sampleSnapshot);
 
     expect(listenerCalls).toBe(1);
-    expect(store.get().designSystem?.specifier).toBe("@clay/design-glass");
+    expect(store.get().designSystem?.specifier).toBe(
+      "@thirdparty/design-sample",
+    );
     expect(
       properties.get("--clay-ds-button-primary-root-rest-background-color"),
     ).toBe("var(--clay-accent-primary)");
@@ -422,7 +424,6 @@ describe("design system store & DOM installation", () => {
       "kbd",
       "divider",
       "tab",
-      "chat",
       "commandCentre",
       "settings",
       "editor",
@@ -479,14 +480,17 @@ describe("accessibility and effect bounds fallbacks", () => {
     expect(variableToCssValue({ type: "border-width", value: 1 })).toBe("1px");
   });
 
-  it("ensures glass material effects provide solid surface fallback values", () => {
-    // Backdrop blur properties have valid CSS representations that fall back
-    // to solid active content theme surface roles under reduced transparency
-    const blurCss = variableToCssValue({ type: "backdrop-blur", value: 16 });
-    expect(blurCss).toBe("16px");
+  it("projects veil material into a blur plus a theme-role fill the opener can make opaque", () => {
+    // A veil's blur and its fill are separate projections: the blur is a length
+    // the reduced-transparency layer switches off (§13.7), and the fill resolves
+    // to a content-theme surface role, so the fallback stays opaque and themed.
+    const blurCss = variableToCssValue({ type: "backdrop-blur", value: 3 });
+    expect(blurCss).toBe("3px");
+    expect(variableToCssValue({ type: "backdrop-blur", value: 0 })).toBe("0px");
 
-    // All solid fallback colors reference active theme variables
     const solidFallback = formatColorRole("surface.overlay");
     expect(solidFallback).toBe("var(--clay-surface-overlay)");
+    const scrimFallback = formatColorRole("surface.scrim");
+    expect(scrimFallback).toBe("var(--clay-surface-scrim)");
   });
 });

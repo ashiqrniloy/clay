@@ -1163,3 +1163,134 @@ fn check_script_pins_quick_and_full_gates_and_ci_parity() {
         "CI must invoke the same full gate script"
     );
 }
+
+/// Plan 118 task 9: the review harness captures the shipped design system and
+/// outright rejects the removed Neobrutal/Glass fixture names.
+#[test]
+fn plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = root.join("scripts/capture-ui-review.sh");
+    let output = std::env::temp_dir().join(format!("clay-ds-harness-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&output);
+
+    let run = |fixture: &str| {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .arg("--fixture")
+            .arg(fixture)
+            .arg("--output")
+            .arg(&output)
+            .output()
+            .unwrap_or_else(|err| panic!("run capture-ui-review.sh for {fixture}: {err}"))
+    };
+
+    // 1. The removed states are rejected by the argument check (exit 2), never
+    //    silently captured as something else.
+    for fixture in [
+        "ui-review-design-neobrutal",
+        "ui-review-design-neobrutal-light",
+        "ui-review-design-glass",
+        "ui-review-design-glass-light",
+    ] {
+        let result = run(fixture);
+        assert_eq!(result.status.code(), Some(2), "{fixture} must exit 2");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            stderr.contains("unknown --fixture"),
+            "{fixture} must be rejected as unknown: {stderr}"
+        );
+    }
+
+    // 2. The shipped fixture is accepted by the argument check. It may still end
+    //    UNRESOLVED off a desktop (exit 2 for a prereq), but never as unknown.
+    let shipped = run("ui-review-design-system");
+    let shipped_stderr = String::from_utf8_lossy(&shipped.stderr);
+    assert!(
+        !shipped_stderr.contains("unknown --fixture"),
+        "ui-review-design-system must remain a valid fixture: {shipped_stderr}"
+    );
+
+    // 3. Its fixture selects the shipped design system, and the removed fixture
+    //    directories are gone.
+    let init = root.join("tests/fixtures/configuration/ui-review-design-system/init.js");
+    let init_text = std::fs::read_to_string(&init).expect("read design-system review fixture");
+    assert!(
+        init_text.contains("@clay/design-instrument"),
+        "the review fixture must activate the shipped design system"
+    );
+    for slug in [
+        "ui-review-design-neobrutal",
+        "ui-review-design-neobrutal-light",
+        "ui-review-design-glass",
+        "ui-review-design-glass-light",
+    ] {
+        let dir = root.join("tests/fixtures/configuration").join(slug);
+        assert!(!dir.exists(), "{slug} fixture directory must be deleted");
+    }
+
+    // 3b. The landing fixture loads the bundled launcher (plan 118) and the
+    //     help text lists it, so the landing is capturable on a real build.
+    let launcher_fixture = root.join("tests/fixtures/configuration/ui-review-launcher/init.js");
+    let launcher_text =
+        std::fs::read_to_string(&launcher_fixture).expect("read launcher review fixture");
+    assert!(
+        launcher_text.contains("loadPackage(\"@clay/launcher\")"),
+        "the landing fixture must load the bundled launcher"
+    );
+    let launcher_run = run("ui-review-launcher");
+    assert!(
+        !String::from_utf8_lossy(&launcher_run.stderr).contains("unknown --fixture"),
+        "ui-review-launcher must remain a valid fixture"
+    );
+
+    // 3c. The canonical-example leg (plan 118): `--example-config` copies the
+    //     shipped examples/config tree instead of a fixture init.js, and it is
+    //     refused for fixtures whose checks assert their own panel content — a
+    //     mismatched pair would be captured as a false pass.
+    let run_args = |args: &[&str]| {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .args(args)
+            .output()
+            .unwrap_or_else(|err| panic!("run capture-ui-review.sh {args:?}: {err}"))
+    };
+    let mismatched = run_args(&[
+        "--fixture",
+        "ui-review-design-system",
+        "--example-config",
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert_eq!(mismatched.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&mismatched.stderr).contains("--example-config is only valid"),
+        "--example-config must refuse a fixture with its own panel content"
+    );
+
+    // 4. The help text documents the shipped state and no removed one.
+    let help = std::process::Command::new("bash")
+        .arg(&script)
+        .arg("--help")
+        .output()
+        .expect("run capture-ui-review.sh --help");
+    assert!(help.status.success(), "--help must succeed");
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help_text.contains("ui-review-design-system"),
+        "help must list the shipped design-system fixture"
+    );
+    assert!(
+        help_text.contains("ui-review-launcher"),
+        "help must list the launcher landing fixture"
+    );
+    assert!(
+        help_text.contains("--example-config"),
+        "help must document the canonical-example leg"
+    );
+    assert!(
+        !help_text.contains("neobrutal") && !help_text.contains("design-glass"),
+        "help must not list removed design-system fixtures"
+    );
+
+    let _ = std::fs::remove_dir_all(&output);
+}

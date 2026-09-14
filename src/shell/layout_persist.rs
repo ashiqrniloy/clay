@@ -105,11 +105,44 @@ fn apply_slot_entries(layout: &mut WorkingAreaLayout, slots: &[Value]) {
 // Phase 22.5: versioned multi-tab window state (layout.json v2)
 // ---------------------------------------------------------------------------
 
+/// A tab's agent identity (plan 118 task 33). Inert display data: the tab
+/// shows the marker and the view; nothing here grants authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistedTabAgent {
+    /// Agent registry key (its directory name).
+    pub agent_type: String,
+    /// Agent config folder; may be empty when the entry predates it.
+    pub config_root: String,
+}
+
+/// Which of a tab's two views was up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistedTabView {
+    Workspace,
+    Agent,
+}
+
+impl PersistedTabView {
+    fn as_str(self) -> &'static str {
+        match self {
+            PersistedTabView::Workspace => "workspace",
+            PersistedTabView::Agent => "agent",
+        }
+    }
+}
+
 /// One tab's persisted window state. Widget-free value type: the binary
 /// assembles it from the shell + pane views; the lib serializes/applies it.
 pub struct PersistedTabState {
-    /// Absolute workspace root (validated at restore, never at parse).
+    /// The folder the tab is about. Empty is legal for a tab that has picked
+    /// nothing yet (its landing is the launcher) as long as it has an agent;
+    /// a tab with neither is not a tab and is skipped at parse.
     pub workspace_root: String,
+    /// Agent half, `None` when none is attached.
+    pub agent: Option<PersistedTabAgent>,
+    /// Active view; `Workspace` for documents written before the two-view
+    /// model (the field is optional on the wire).
+    pub view: PersistedTabView,
     /// Active pane id; normalized to a tree member at parse.
     pub active_pane: PaneId,
     /// Validated split tree; `None` restores the default single-pane layout.
@@ -118,6 +151,11 @@ pub struct PersistedTabState {
     pub slots: Vec<Value>,
     /// Per-pane workspace-relative document path (`None` = empty pane).
     pub panes: BTreeMap<PaneId, Option<String>>,
+    /// The tab's workspace rail was visible (plan 118 task E2). Absent on
+    /// older documents, where the default is visible.
+    pub rail_visible: bool,
+    /// The tab's agent inspector was visible; absent means visible.
+    pub inspector_visible: bool,
 }
 
 /// Whole-window persisted state.
@@ -144,9 +182,19 @@ pub(crate) fn serialize_window_state(state: &PersistedWindowState) -> Value {
         .map(|tab| {
             json!({
                 "workspaceRoot": tab.workspace_root,
+                "agent": tab
+                    .agent
+                    .as_ref()
+                    .map(|agent| json!({
+                        "type": agent.agent_type,
+                        "configRoot": agent.config_root,
+                    })),
+                "view": tab.view.as_str(),
                 "activePane": tab.active_pane.0,
                 "splitTree": tab.tree.as_ref().map(serialize_split_node).unwrap_or(Value::Null),
                 "slots": tab.slots,
+                "railVisible": tab.rail_visible,
+                "inspectorVisible": tab.inspector_visible,
                 "panes": tab.panes
                     .iter()
                     .map(|(id, doc)| (id.0.to_string(), json!(doc)))
@@ -189,10 +237,24 @@ pub(crate) fn parse_window_state(value: &Value) -> Option<PersistedWindowState> 
 }
 
 fn parse_tab_state(value: &Value) -> Option<PersistedTabState> {
-    let workspace_root = value.get("workspaceRoot")?.as_str()?.to_string();
-    if workspace_root.is_empty() {
+    let workspace_root = value
+        .get("workspaceRoot")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let agent = parse_tab_agent(value.get("agent"));
+    // A tab is a workspace and/or an agent. Neither half means the entry is
+    // not a tab at all: it is skipped (never a panic, never a half-adopted
+    // tab), which is what makes a hand-edited or hostile document safe.
+    if workspace_root.is_empty() && agent.is_none() {
         return None;
     }
+    let view = match value.get("view").and_then(|v| v.as_str()) {
+        Some("agent") => PersistedTabView::Agent,
+        // Unknown or absent view falls back to the workspace: a future view
+        // name must not turn into an unrenderable tab.
+        _ => PersistedTabView::Workspace,
+    };
     // Invalid/missing tree degrades to the default single-pane layout, never
     // a partial tree (hostile or hand-edited files skip silently).
     let tree = value
@@ -235,10 +297,40 @@ fn parse_tab_state(value: &Value) -> Option<PersistedTabState> {
     }
     Some(PersistedTabState {
         workspace_root,
+        agent,
+        view,
         active_pane,
         tree,
         slots,
         panes,
+        // Absent means visible (a v2 document written before plan 118 task E2).
+        rail_visible: value
+            .get("railVisible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        inspector_visible: value
+            .get("inspectorVisible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+    })
+}
+
+/// Parse one tab's agent identity. Malformed entries are dropped whole: a
+/// half-read agent (a type with no config root) would be a second, invented
+/// identity.
+fn parse_tab_agent(value: Option<&Value>) -> Option<PersistedTabAgent> {
+    let value = value?.as_object()?;
+    let agent_type = value.get("type")?.as_str()?.to_string();
+    if agent_type.is_empty() {
+        return None;
+    }
+    Some(PersistedTabAgent {
+        agent_type,
+        config_root: value
+            .get("configRoot")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
     })
 }
 
@@ -628,6 +720,91 @@ mod tests {
 
     // -- Phase 22.5: versioned multi-tab window state --
 
+    /// Plan 118 task 33: the tab record carries an agent identity and a view,
+    /// and a tab with neither half is skipped rather than half-restored.
+    #[test]
+    fn window_state_round_trips_agent_identity_and_view() {
+        let document = json!({
+            "version": 2,
+            "activeTab": 1,
+            "tabs": [
+                {
+                    "workspaceRoot": "/home/dev/clay",
+                    "agent": { "type": "coding-agent", "configRoot": "~/.clay/agents/coding-agent" },
+                    "view": "agent",
+                    "activePane": 1,
+                    "splitTree": { "leaf": { "paneId": 1 } },
+                    "slots": [],
+                    "panes": { "1": "docs/notes.md" }
+                },
+                {
+                    // Agent only: no folder picked yet, so the workspace half
+                    // is empty on purpose.
+                    "workspaceRoot": "",
+                    "agent": { "type": "coding-agent", "configRoot": "" },
+                    "view": "workspace",
+                    "activePane": 1,
+                    "splitTree": { "leaf": { "paneId": 1 } },
+                    "slots": [],
+                    "panes": { "1": null }
+                },
+                // Neither half: not a tab. Skipped with the rest intact.
+                { "workspaceRoot": "", "view": "agent", "splitTree": null, "slots": [], "panes": {} }
+            ]
+        });
+        let parsed = parse_window_state_json(&document).expect("two usable tabs survive");
+        let tabs = parsed["tabs"].as_array().expect("tabs array");
+        assert_eq!(tabs.len(), 2, "the empty entry is not a tab");
+        assert_eq!(tabs[0]["view"], json!("agent"));
+        assert_eq!(tabs[0]["agent"]["type"], json!("coding-agent"));
+        assert_eq!(
+            tabs[0]["agent"]["configRoot"],
+            json!("~/.clay/agents/coding-agent")
+        );
+        assert_eq!(tabs[1]["workspaceRoot"], json!(""));
+        assert_eq!(tabs[1]["agent"]["type"], json!("coding-agent"));
+        // `activeTab` indexes the surviving tabs, and the dropped entry cannot
+        // shift a valid index past the end.
+        assert_eq!(parsed["activeTab"], json!(1));
+    }
+
+    /// A v2 document written before the two-view model still loads: no `view`
+    /// key means the workspace view, and no `agent` means no agent half.
+    #[test]
+    fn window_state_without_view_defaults_to_the_workspace_view() {
+        let document = json!({
+            "version": 2,
+            "activeTab": 0,
+            "tabs": [{
+                "workspaceRoot": "/home/dev/alpha",
+                "activePane": 1,
+                "splitTree": { "leaf": { "paneId": 1 } },
+                "slots": [],
+                "panes": { "1": null }
+            }]
+        });
+        let parsed = parse_window_state_json(&document).expect("legacy v2 tab survives");
+        assert_eq!(parsed["tabs"][0]["view"], json!("workspace"));
+        assert_eq!(parsed["tabs"][0]["agent"], Value::Null);
+    }
+
+    /// A malformed agent is dropped whole; the tab then needs a folder to be a
+    /// tab at all (no invented identity, no panic).
+    #[test]
+    fn malformed_agent_identity_is_dropped_not_invented() {
+        let document = json!({
+            "version": 2,
+            "tabs": [
+                { "workspaceRoot": "/tmp/ws", "agent": { "configRoot": "/tmp/x" }, "splitTree": null, "slots": [], "panes": {} },
+                { "workspaceRoot": "", "agent": { "type": "" }, "splitTree": null, "slots": [], "panes": {} }
+            ]
+        });
+        let parsed = parse_window_state_json(&document).expect("the folder tab survives");
+        assert_eq!(parsed["tabs"].as_array().expect("tabs").len(), 1);
+        assert_eq!(parsed["tabs"][0]["workspaceRoot"], json!("/tmp/ws"));
+        assert_eq!(parsed["tabs"][0]["agent"], Value::Null);
+    }
+
     fn round_trip_tab_state(
         workspace_root: &str,
         active_pane: PaneId,
@@ -637,11 +814,45 @@ mod tests {
     ) -> PersistedTabState {
         PersistedTabState {
             workspace_root: workspace_root.to_string(),
+            agent: None,
+            view: PersistedTabView::Workspace,
             active_pane,
             tree,
             slots,
             panes,
+            rail_visible: true,
+            inspector_visible: true,
         }
+    }
+
+    /// Plan 118 task E2: rail/inspector visibility round-trips per tab, and a
+    /// document written before the fields existed means visible.
+    #[test]
+    fn tab_visibility_round_trips_and_defaults_to_visible() {
+        let mut tab =
+            round_trip_tab_state("/tmp/ws", DEFAULT_PANE_ID, None, vec![], BTreeMap::new());
+        tab.rail_visible = false;
+        tab.inspector_visible = true;
+        let document = serialize_window_state(&PersistedWindowState {
+            tabs: vec![tab],
+            active_tab: Some(0),
+        });
+        assert_eq!(document["tabs"][0]["railVisible"], json!(false));
+        assert_eq!(document["tabs"][0]["inspectorVisible"], json!(true));
+
+        let parsed = parse_window_state(&document).expect("round trip");
+        assert!(!parsed.tabs[0].rail_visible);
+        assert!(parsed.tabs[0].inspector_visible);
+
+        // Pre-E2 document: both fields absent.
+        let legacy = json!({
+            "version": 2,
+            "activeTab": 0,
+            "tabs": [{ "workspaceRoot": "/tmp/ws", "activePane": 1 }]
+        });
+        let parsed = parse_window_state(&legacy).expect("legacy v2 loads");
+        assert!(parsed.tabs[0].rail_visible);
+        assert!(parsed.tabs[0].inspector_visible);
     }
 
     #[test]

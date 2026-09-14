@@ -1,13 +1,12 @@
 # Loadable first-party package roots under packages/.
 # Unlisted directories (stray extras) are never trusted.
-root = "chat"
 root = "coding-agent"
-root = "design-glass"
-root = "design-neobrutal"
+root = "design-instrument"
 root = "git"
 root = "icons-phosphor-duotone"
 root = "icons-phosphor-regular"
 root = "javascript"
+root = "launcher"
 root = "lsp-javascript"
 root = "lsp-markdown"
 root = "lsp-rust"

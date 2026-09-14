@@ -14,7 +14,7 @@
     "modes": [],
     "docs": "./docs/index.md",
     "performance": {
-      "estimatedManifestBytes": 2600,
+      "estimatedManifestBytes": 6500,
       "hotPathPolicy": "inert style data parsed at load; no hot-path JS"
     },
     "contributions": {
@@ -231,6 +231,60 @@
         {
           "token": "searchMatch",
           "color": "#b5761455"
+        }
+      ],
+      "designTokens": [
+        {
+          "token": "border.hairline",
+          "value": "#8a7a6357"
+        },
+        {
+          "token": "border.subtle",
+          "value": "#8a7a63"
+        },
+        {
+          "token": "border.strong",
+          "value": "#504940"
+        },
+        {
+          "token": "surface.scrim",
+          "value": "#504940"
+        },
+        {
+          "token": "accent.primary",
+          "value": "#076678"
+        },
+        {
+          "token": "accent.muted",
+          "value": "#076678bf"
+        },
+        {
+          "token": "focus.ring",
+          "value": "#076678"
+        },
+        {
+          "token": "border.focus",
+          "value": "#076678"
+        },
+        {
+          "token": "text.muted",
+          "value": "#6b5c48"
+        },
+        {
+          "token": "text.disabled",
+          "value": "#71624b"
+        },
+        {
+          "token": "surface.hover",
+          "value": "#ece0b6"
+        },
+        {
+          "token": "surface.active",
+          "value": "#e3d3a5"
+        },
+        {
+          "token": "surface.selected",
+          "value": "#dbdfae"
         }
       ]
     },

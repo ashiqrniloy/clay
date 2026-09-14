@@ -18,11 +18,21 @@ Use before writing or updating any Clay plan.
 - **Phase boundary:** If enforcement is deferred, describe it as a scoped limitation of the approved architecture, not a competing model.
 - **Decision-log feedback:** After logging a decision, update the smallest relevant `clay-execution` reference file if the decision creates reusable planning guidance (see `SKILL.md` → Plan Creation and Decision-Log Integration).
 
+## UI Prototype and Approval Duty
+
+Source: user instruction 2026-09-11 (see `create-plan/references/clay.md` → UI Prototype and Explicit User Approval Task).
+
+- Any plan touching app UI lists, in order: a prototype task (`design-artifacts/prototypes/<slug>/`), a freeze/approval task (`design-artifacts/approved/<slug>/`, explicit user approval required), then implementation tasks that cite the approved artifact path.
+- If an approved artifact already covers the exact surface and state set, cite it and skip the prototype; a missing state stops and requests one.
+- Approved artifacts are append-only and tracked in git; implementation deviations are fixed or re-approved, never silent.
+- `design-artifacts/README.md` states the contract (prototype = no authority, approved = binding, `DESIGN.md` = normative language).
+
 ## Visual and Accessibility Review Duty
 
 Source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.
 
 - Every UI-changing plan includes one post-implementation visual and accessibility review task before final docs/wiki work.
+- That review also compares the running UI against the plan's approved artifacts, surface by surface, and records each deviation with its disposition (fixed to match, or explicitly re-approved).
 - Launch representative states, capture and inspect screenshots, retain their paths and findings in completion evidence.
 - When `computer-use-linux` is available, call `get_app_state` first and verify accessibility tree semantics, keyboard flow, visible focus, modal containment, and announcements for changed controls.
 - If live review tooling is unavailable, record the exact blocker and leave manual acceptance unresolved; structural tests are not visual proof.

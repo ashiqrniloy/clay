@@ -12,18 +12,18 @@ import type { Message } from "@ag-ui/core";
 import { TauriClayAgent } from "./TauriClayAgent";
 import { agentStream, pipeRelay, type AgentStreamEvent } from "./events";
 
-export interface ChatStatus {
+export interface AgentStatus {
   streaming: boolean;
-  /** Last diagnostic/error line (native `chat.status` parity). */
+  /** Last diagnostic/error line (native `agent.status` parity). */
   status: string | null;
 }
 
-interface ChatAgentModule {
+interface AgentSessionModule {
   readonly agent: TauriClayAgent;
   /** Subscribe to versioned notifications for useSyncExternalStore. */
   subscribe(listener: () => void): () => void;
   getVersion(): number;
-  getSnapshot(): ChatSnapshot;
+  getSnapshot(): AgentSnapshot;
   /** Optimistic clear after the panel dispatches a resume decision. */
   clearPendingApproval(): void;
   /** Test seam: clear the shared instance in place. */
@@ -61,9 +61,9 @@ function parseAgentRpcResult(value: unknown): Record<string, unknown> | null {
   return null;
 }
 
-export interface ChatSnapshot {
+export interface AgentSnapshot {
   messages: Message[];
-  status: ChatStatus;
+  status: AgentStatus;
   /** Agent/conversation state from STATE_SNAPSHOT events. */
   state: Record<string, unknown>;
   /** Pending tool approval from a suspended durable run; cleared when the
@@ -76,15 +76,15 @@ export interface ChatSnapshot {
   } | null;
 }
 
-function createChatAgent(): ChatAgentModule {
+function createAgentSession(): AgentSessionModule {
   const agent = new TauriClayAgent({});
   let version = 0;
   const listeners = new Set<() => void>();
-  let status: ChatStatus = { streaming: false, status: null };
+  let status: AgentStatus = { streaming: false, status: null };
   /** Last server transcript seen mid-run; flushed when the run settles. */
   let pendingServerMessages: Message[] | null = null;
-  let pendingApproval: ChatSnapshot["pendingApproval"] = null;
-  let snapshot: ChatSnapshot = {
+  let pendingApproval: AgentSnapshot["pendingApproval"] = null;
+  let snapshot: AgentSnapshot = {
     messages: [],
     state: {},
     status,
@@ -143,7 +143,9 @@ function createChatAgent(): ChatAgentModule {
       // run's rows can already be represented in the snapshot — keep only
       // in-flight run messages the server list does not contain yet.
       const represented = new Set(
-        incoming.map((message) => `${message.role}:${String(message.content ?? "")}`),
+        incoming.map(
+          (message) => `${message.role}:${String(message.content ?? "")}`,
+        ),
       );
       const inFlight = live.messages.filter(
         (message) =>
@@ -158,9 +160,7 @@ function createChatAgent(): ChatAgentModule {
     },
     onCustomEvent: ({ event, messages }) => {
       if (event.name !== "clay.toolPhase") return undefined;
-      const value = (
-        event as { value?: Record<string, unknown> }
-      ).value;
+      const value = (event as { value?: Record<string, unknown> }).value;
       if (!value) return undefined;
       const name = typeof value.name === "string" ? value.name : "";
       const toolCallId =
@@ -173,8 +173,7 @@ function createChatAgent(): ChatAgentModule {
       }
       const id = `clay-tool-${toolCallId}`;
       const existing = messages.find((message) => message.id === id);
-      const args =
-        typeof value.argsDigest === "string" ? value.argsDigest : "";
+      const args = typeof value.argsDigest === "string" ? value.argsDigest : "";
       const output =
         typeof value.outputDigest === "string" ? value.outputDigest : "";
       const prior =
@@ -187,6 +186,18 @@ function createChatAgent(): ChatAgentModule {
           : `${prior.replace(/ - running$/, "") || name}${
               output ? ` -> ${output}` : ""
             }`;
+      // Plan 118 task 36: the file this call touches rides the live row in the
+      // same shape the server's snapshot rows carry, so the Files tab counts a
+      // call the moment its started phase arrives.
+      const file = value.sessionFile as
+        { path?: unknown; op?: unknown } | undefined;
+      const sessionFile =
+        typeof file?.path === "string" &&
+        file.path.length > 0 &&
+        typeof file.op === "string" &&
+        file.op.length > 0
+          ? { path: file.path, op: file.op }
+          : null;
       const row = {
         id,
         role: "tool",
@@ -201,6 +212,7 @@ function createChatAgent(): ChatAgentModule {
           value.skillName
             ? { skillName: value.skillName }
             : {}),
+          ...(sessionFile ? { sessionFile } : {}),
         },
       } as Message;
       return {
@@ -256,8 +268,9 @@ function createChatAgent(): ChatAgentModule {
         break;
       }
       case "STATE_SNAPSHOT": {
-        const incoming = (event as unknown as { snapshot: Record<string, unknown> })
-          .snapshot;
+        const incoming = (
+          event as unknown as { snapshot: Record<string, unknown> }
+        ).snapshot;
         const current = (agent.state ?? {}) as Record<string, unknown>;
         // Inventory snapshots omit provider/model. Replace would wipe a
         // picker selection and leave the composer stuck on "no provider".
@@ -276,9 +289,21 @@ function createChatAgent(): ChatAgentModule {
           // side-effect gate. Surface it for the Allow/Deny strip; cleared
           // when the resumed run starts or the run settles.
           const value = (
-            event as { value?: { sessionId?: string; runId?: string; requestId?: string; toolName?: string } }
+            event as {
+              value?: {
+                sessionId?: string;
+                runId?: string;
+                requestId?: string;
+                toolName?: string;
+              };
+            }
           ).value;
-          if (value?.sessionId && value.runId && value.requestId && value.toolName) {
+          if (
+            value?.sessionId &&
+            value.runId &&
+            value.requestId &&
+            value.toolName
+          ) {
             pendingApproval = {
               sessionId: value.sessionId,
               runId: value.runId,
@@ -293,8 +318,13 @@ function createChatAgent(): ChatAgentModule {
           // Plan 117 token meter: the meter numerator rides a custom event
           // per provider turn (bounded counter, never content); the ceiling
           // resolves client-side from the models inventory.
-          const tokens = (event as { value?: { tokens?: unknown } }).value?.tokens;
-          if (typeof tokens === "number" && Number.isFinite(tokens) && tokens >= 0) {
+          const tokens = (event as { value?: { tokens?: unknown } }).value
+            ?.tokens;
+          if (
+            typeof tokens === "number" &&
+            Number.isFinite(tokens) &&
+            tokens >= 0
+          ) {
             const current = (agent.state ?? {}) as Record<string, unknown>;
             agent.setState({ ...current, contextTokens: tokens });
             notify();
@@ -306,7 +336,8 @@ function createChatAgent(): ChatAgentModule {
           // generic agent-RPC custom event. The fetch is session-scoped and
           // idempotent (no correlation needed): the payload IS the latest
           // server-authoritative view, cached by version in agent state.
-          const rpc = (event as { value?: { code?: string; result?: unknown } }).value;
+          const rpc = (event as { value?: { code?: string; result?: unknown } })
+            .value;
           const result = parseAgentRpcResult(rpc?.result);
           if (rpc?.code === "session.context" && result) {
             const current = (agent.state ?? {}) as Record<string, unknown>;
@@ -348,16 +379,13 @@ function createChatAgent(): ChatAgentModule {
             }
           }
           // Plan 117 @-mentions: bounded workspace listing for the dropdown.
-          if (rpc?.code === "workspace.files" && result && Array.isArray(result.files)) {
+          if (
+            rpc?.code === "workspace.files" &&
+            result &&
+            Array.isArray(result.files)
+          ) {
             const current = (agent.state ?? {}) as Record<string, unknown>;
             agent.setState({ ...current, workspaceFiles: result.files });
-            notify();
-          }
-          // Plan 117 /resume: the panel's recent-sessions list — labeled,
-          // workspace-scoped, bounded server-side.
-          if (rpc?.code === "session.resumable" && result && Array.isArray(result.sessions)) {
-            const current = (agent.state ?? {}) as Record<string, unknown>;
-            agent.setState({ ...current, resumableSessions: result.sessions });
             notify();
           }
           break;
@@ -446,19 +474,19 @@ function createChatAgent(): ChatAgentModule {
         notify();
       }
     },
-    /** Test seam: clear the shared instance in place. The `chatAgent` export
-   *  binding is a const, so deleting the global below never gave importers
-   *  a fresh object — every test in a file shared one agent. */
-  resetForTests(): void {
-    agent.setMessages([]);
-    agent.setState({});
-    pendingServerMessages = null;
-    pendingApproval = null;
-    status = { streaming: false, status: null };
-    rebuild();
-    notify();
-  },
-  start: () => {
+    /** Test seam: clear the shared instance in place. The `agentSession` export
+     *  binding is a const, so deleting the global below never gave importers
+     *  a fresh object — every test in a file shared one agent. */
+    resetForTests(): void {
+      agent.setMessages([]);
+      agent.setState({});
+      pendingServerMessages = null;
+      pendingApproval = null;
+      status = { streaming: false, status: null };
+      rebuild();
+      notify();
+    },
+    start: () => {
       const release = agentStream.retain();
       const subscription = pipeRelay({
         next: (event) => applyOutOfRun(event),
@@ -496,15 +524,15 @@ function scheduled(notify: () => void): () => void {
 }
 
 const globalScope = globalThis as typeof globalThis & {
-  __clayChatAgent?: ChatAgentModule;
+  __clayAgentSession?: AgentSessionModule;
 };
 
-/** Process-wide chat agent singleton (native parity: one stream per client). */
-export const chatAgent: ChatAgentModule = (globalScope.__clayChatAgent ??=
-  createChatAgent());
+/** Process-wide agent session singleton (native parity: one stream per client). */
+export const agentSession: AgentSessionModule =
+  (globalScope.__clayAgentSession ??= createAgentSession());
 
 /** Test seam: reset the singleton in place (the const export binding keeps
  *  one instance per module — deleting the global never refreshed importers). */
-export function resetChatAgentForTests(): void {
-  chatAgent.resetForTests();
+export function resetAgentSessionForTests(): void {
+  agentSession.resetForTests();
 }

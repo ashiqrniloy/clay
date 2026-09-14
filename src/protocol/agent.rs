@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use serde_json::Value;
+
 /// Composer/prompt payload ceiling. Larger prompts fail closed before spawn I/O.
 pub const AGENT_MAX_PROMPT_BYTES: usize = 32 * 1024;
 /// Server-authoritative transcript projection cap (matches clay-agent load).
@@ -194,6 +196,12 @@ pub enum AgentWireEvent {
         /// Skill name for `load_skill` rows (plan 109 I5).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         skill_name: Option<String>,
+        /// Plan 118 task 36: the file this call touches, when the tool names
+        /// one (`read`/`write`/`edit`/`delete`). Server-built from the
+        /// daemon's arguments, so the transcript — and the Files tab
+        /// projected from it — records a path the session really handled.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<AgentTranscriptFile>,
     },
     Permission {
         session_id: String,
@@ -207,6 +215,75 @@ pub enum AgentWireEvent {
         session_id: String,
         message: String,
     },
+}
+
+/// What a tool call did to the file it named (plan 118 task 36). The verb,
+/// not the view's role label: `write` reads as `created` only once the
+/// session's own history says it had not seen the path — a judgement the
+/// view makes, since only it sees the whole session.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentTranscriptFileOp {
+    Read,
+    Write,
+    Edit,
+    Delete,
+}
+
+impl AgentTranscriptFileOp {
+    /// The file verb a coding tool maps to (`read`/`write`/`edit`/`delete`).
+    /// Every other tool names no single file (search, shell, git, move), so it
+    /// records no session file.
+    pub fn for_tool(tool: &str) -> Option<Self> {
+        match tool {
+            "read" => Some(Self::Read),
+            "write" => Some(Self::Write),
+            "edit" => Some(Self::Edit),
+            "delete" => Some(Self::Delete),
+            _ => None,
+        }
+    }
+}
+
+/// One file a session touched, as its tool call named it.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTranscriptFile {
+    pub path: String,
+    pub op: AgentTranscriptFileOp,
+}
+
+/// The file a tool call touches: its verb plus the call's `path` argument.
+/// `None` for tools that name no single file, or a call whose arguments carry
+/// no path.
+pub fn transcript_file_for_tool(tool: &str, arguments: &Value) -> Option<AgentTranscriptFile> {
+    let op = AgentTranscriptFileOp::for_tool(tool)?;
+    let path = arguments.get("path").and_then(Value::as_str)?.trim();
+    (!path.is_empty()).then(|| AgentTranscriptFile {
+        path: path.to_string(),
+        op,
+    })
 }
 
 #[derive(
@@ -255,6 +332,16 @@ pub struct AgentTranscriptEntry {
     /// `load_skill` rows carry the loaded skill's name (plan 109 I5).
     #[serde(default)]
     pub skill_name: Option<String>,
+    /// Plan 118 task 35: the agent type that produced this entry. One tab can
+    /// change its agent (the header picker), so turns carry their producer;
+    /// `None` on rows written before the field existed (or by a session with
+    /// no agent), which the view renders as unlabelled.
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Plan 118 task 36: the file this tool row touched. The Files tab is the
+    /// transcript projected to its file records — same rows, same bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<AgentTranscriptFile>,
 }
 
 impl AgentTranscriptEntry {
@@ -264,19 +351,35 @@ impl AgentTranscriptEntry {
             text: text.into(),
             tool_call_id: String::new(),
             skill_name: None,
+            agent: None,
+            file: None,
         }
+    }
+
+    /// Stamp the entry with the agent type that produced it (`None` leaves it
+    /// unlabelled). Every append path runs through here so a switch cannot
+    /// leave turns attributed to the wrong agent.
+    pub fn with_agent(mut self, agent: Option<&str>) -> Self {
+        self.agent = agent
+            .map(str::trim)
+            .filter(|agent| !agent.is_empty())
+            .map(str::to_string);
+        self
     }
 
     pub(crate) fn new_tool(
         text: impl Into<String>,
         tool_call_id: &str,
         skill_name: Option<String>,
+        file: Option<AgentTranscriptFile>,
     ) -> Self {
         Self {
             kind: AgentTranscriptKind::Tool,
             text: text.into(),
             tool_call_id: tool_call_id.to_string(),
             skill_name,
+            agent: None,
+            file,
         }
     }
 }
@@ -312,6 +415,7 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
             args_digest,
             output_digest,
             skill_name,
+            file,
             ..
         } => apply_tool_event(
             entries,
@@ -321,6 +425,7 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
             args_digest.as_deref(),
             output_digest.as_deref(),
             skill_name.clone(),
+            file.clone(),
         ),
         AgentWireEvent::Started { .. } | AgentWireEvent::Permission { .. } => {}
     }
@@ -353,6 +458,7 @@ fn push_entry(entries: &mut Vec<AgentTranscriptEntry>, kind: AgentTranscriptKind
 /// Tool rows evolve one entry per `tool_call_id` (plan 109 I5): the started
 /// phase records the args summary, terminal phases append the output excerpt
 /// in place. Progress rows are transient and carry no content.
+#[allow(clippy::too_many_arguments)]
 fn apply_tool_event(
     entries: &mut Vec<AgentTranscriptEntry>,
     phase: AgentToolPhase,
@@ -361,6 +467,7 @@ fn apply_tool_event(
     args_digest: Option<&str>,
     output_digest: Option<&str>,
     skill_name: Option<String>,
+    file: Option<AgentTranscriptFile>,
 ) {
     if tool_call_id.is_empty() || matches!(phase, AgentToolPhase::Progress) {
         return;
@@ -399,8 +506,16 @@ fn apply_tool_event(
         if skill.is_some() {
             entry.skill_name = skill;
         }
+        if file.is_some() {
+            entry.file = file;
+        }
     } else {
-        entries.push(AgentTranscriptEntry::new_tool(text, tool_call_id, skill));
+        entries.push(AgentTranscriptEntry::new_tool(
+            text,
+            tool_call_id,
+            skill,
+            file,
+        ));
         cap_snapshot(entries);
     }
 }
@@ -464,6 +579,11 @@ pub struct AgentSessionSnapshot {
     pub provider: String,
     pub model: String,
     pub leaf_id: Option<String>,
+    /// Plan 118 task 35: the agent type this session runs as (the directory
+    /// name of its per-agent config root). `None` for a session created
+    /// before agent types existed, or by a host with no agent roots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// Tokens used in the session's current context window (plan 108
     /// task 9): last finished run's bounded counter. `None` until a run
     /// reports usage; counters only, never content.
@@ -1014,6 +1134,7 @@ mod tests {
                 args_digest: None,
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         apply_transcript_event(
@@ -1051,6 +1172,87 @@ mod tests {
     }
 
     #[test]
+    fn tool_rows_record_the_file_the_call_touched() {
+        // Plan 118 task 36: the Files tab projects the transcript, so the
+        // path and verb are recorded on the row the call produced — and the
+        // phases that carry no arguments leave the record alone.
+        let mut entries = Vec::new();
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "write".into(),
+                tool_call_id: "t1".into(),
+                args_digest: Some(r#"{"path":"DESIGN.md","content":"x"}"#.into()),
+                output_digest: None,
+                skill_name: None,
+                file: Some(AgentTranscriptFile {
+                    path: "DESIGN.md".into(),
+                    op: AgentTranscriptFileOp::Write,
+                }),
+            },
+        );
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Finished,
+                name: "write".into(),
+                tool_call_id: "t1".into(),
+                args_digest: None,
+                output_digest: Some("wrote 1 byte".into()),
+                skill_name: None,
+                file: None,
+            },
+        );
+        assert_eq!(entries.len(), 1);
+        let file = entries[0].file.as_ref().expect("file record");
+        assert_eq!(file.path, "DESIGN.md");
+        assert_eq!(file.op, AgentTranscriptFileOp::Write);
+
+        // A tool call that names no file keeps the row clean.
+        apply_transcript_event(
+            &mut entries,
+            &AgentWireEvent::Tool {
+                session_id: "s".into(),
+                run_id: "r".into(),
+                phase: AgentToolPhase::Started,
+                name: "repo_search".into(),
+                tool_call_id: "t2".into(),
+                args_digest: Some(r#"{"query":"x"}"#.into()),
+                output_digest: None,
+                skill_name: None,
+                file: None,
+            },
+        );
+        assert!(entries[1].file.is_none());
+    }
+
+    #[test]
+    fn tool_file_verbs_map_and_ignore_tools_without_one_file() {
+        let args = |json: &str| serde_json::from_str::<Value>(json).expect("args");
+        for (tool, op) in [
+            ("read", AgentTranscriptFileOp::Read),
+            ("write", AgentTranscriptFileOp::Write),
+            ("edit", AgentTranscriptFileOp::Edit),
+            ("delete", AgentTranscriptFileOp::Delete),
+        ] {
+            let file = transcript_file_for_tool(tool, &args(r#"{"path":"src/main.rs"}"#))
+                .unwrap_or_else(|| panic!("{tool} names a file"));
+            assert_eq!(file.path, "src/main.rs");
+            assert_eq!(file.op, op);
+        }
+        // Tools that name no single file, and calls with no path, record none.
+        assert!(transcript_file_for_tool("repo_search", &args(r#"{"query":"x"}"#)).is_none());
+        assert!(transcript_file_for_tool("shell", &args(r#"{"command":"ls"}"#)).is_none());
+        assert!(transcript_file_for_tool("read", &args(r#"{"path":"  "}"#)).is_none());
+        assert!(transcript_file_for_tool("read", &args(r#"{"path":7}"#)).is_none());
+    }
+
+    #[test]
     fn tool_rows_evolve_one_entry_per_call_with_bounded_digests() {
         // Plan 109 I5: started -> finished evolves the row in place (args
         // kept, output excerpt appended); progress rows are transient.
@@ -1066,6 +1268,7 @@ mod tests {
                 args_digest: Some(String::from(r#"{"path":"src/main.rs"}"#)),
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         apply_transcript_event(
@@ -1079,6 +1282,7 @@ mod tests {
                 args_digest: None,
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         apply_transcript_event(
@@ -1092,6 +1296,7 @@ mod tests {
                 args_digest: None,
                 output_digest: Some("fn main()".into()),
                 skill_name: None,
+                file: None,
             },
         );
         assert_eq!(entries.len(), 1);
@@ -1114,6 +1319,7 @@ mod tests {
                 args_digest: Some(String::from(r#"{"path":"out.txt"}"#)),
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         apply_transcript_event(
@@ -1127,6 +1333,7 @@ mod tests {
                 args_digest: None,
                 output_digest: Some("permission denied".into()),
                 skill_name: None,
+                file: None,
             },
         );
         assert_eq!(entries.len(), 2);
@@ -1147,6 +1354,7 @@ mod tests {
                 args_digest: Some(String::from(r#"{"name":"rust-review"}"#)),
                 output_digest: None,
                 skill_name: Some("rust-review".into()),
+                file: None,
             },
         );
         apply_transcript_event(
@@ -1160,6 +1368,7 @@ mod tests {
                 args_digest: None,
                 output_digest: Some("Loaded skill".into()),
                 skill_name: None,
+                file: None,
             },
         );
         assert_eq!(entries.len(), 3);
@@ -1181,6 +1390,7 @@ mod tests {
                 args_digest: Some("x".repeat(AGENT_MAX_ENTRY_TEXT_BYTES + 64)),
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         assert!(entries[3].text.len() <= AGENT_MAX_ENTRY_TEXT_BYTES);
@@ -1197,6 +1407,7 @@ mod tests {
                 args_digest: Some(String::from(r#"{} "#)),
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         );
         assert_eq!(entries.len(), 4);

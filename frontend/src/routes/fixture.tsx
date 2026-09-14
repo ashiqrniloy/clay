@@ -16,11 +16,34 @@ import {
 import { lazy, Suspense } from "react";
 import { CommandCentre } from "../command-centre/CommandCentre";
 import { createDocumentSession } from "../editor/sync/session";
+import { WorkspaceView } from "./workspace";
 import { createWorkspace } from "../shell/workspace-controller";
 import { PackageWorkspace } from "../packages/PackageWorkspace";
-import { SettingsPanel } from "../settings/SettingsPanel";
+import { AgentSettingsPanel } from "../agent-settings/AgentSettingsPanel";
+import type { AgentSettingsFileInfo } from "../agent-settings/AgentSettingsPanel";
+import { themeStore } from "../state/stores";
 import { installSduiTree } from "../sdui/state";
-import type { PackageUiSnapshot } from "../sdui/types";
+import type { ThemeSnapshot } from "../theme/types";
+import type { PackageUiSnapshot, UiChoicesSnapshot } from "../sdui/types";
+
+// Plan 104 source-independence guard: package specifiers live in `const`
+// declarations only. Plan 118: `@clay/core` + the shipped design system are the
+// whole choice set (the removed Neobrutal/Glass packages are gone).
+const SHIPPED_THEME = "@clay/theme-modus-operandi";
+const SHIPPED_DESIGN_SYSTEM = "@clay/design-instrument";
+const SHIPPED_UI_CHOICES: UiChoicesSnapshot = {
+  themes: [
+    { specifier: SHIPPED_THEME },
+    { specifier: "@clay/theme-modus-vivendi" },
+    { specifier: "@clay/theme-gruvbox-material-light" },
+    { specifier: "@clay/theme-gruvbox-material-dark" },
+  ],
+  designSystems: [
+    { specifier: "@clay/core", displayName: "Core baseline" },
+    { specifier: SHIPPED_DESIGN_SYSTEM, displayName: "Quiet Instrument" },
+  ],
+  appearance: "dark",
+};
 
 const WorkspacePanes = lazy(async () => {
   const module = await import("../shell/WorkspacePanes");
@@ -32,10 +55,6 @@ const ClayEditor = lazy(async () => {
   return { default: module.ClayEditor };
 });
 
-const ChatPanel = lazy(async () => {
-  const module = await import("../chat/ChatPanel");
-  return { default: module.ChatPanel };
-});
 import type { BootstrapDto } from "../bridge/types";
 import styles from "./fixture.module.css";
 
@@ -79,20 +98,22 @@ export function FixtureRoute() {
   if (fixtureId === "path-browser") {
     return <CommandCentreFixture pathMode />;
   }
-  if (fixtureId === "chat") {
-    return <ChatFixture />;
+  if (fixtureId === "command-centre-menu") {
+    return <CommandCentreFixture menuMode />;
   }
   if (fixtureId === "coding-agent") {
     return <CodingAgentFixture />;
   }
   if (fixtureId === "settings") {
-    return (
-      <div className={styles.fixture} data-fixture="settings">
-        <SettingsPanel uiVersion={9} send={async () => undefined} />
-      </div>
-    );
+    return <SettingsFixture />;
+  }
+  if (fixtureId === "agent-settings") {
+    return <AgentSettingsFixture />;
   }
 
+  if (fixtureId === "workspace-sidebar") {
+    return <WorkspaceSidebarFixture />;
+  }
   if (fixtureId === "states") {
     return (
       <div className={styles.fixture} data-fixture="states">
@@ -146,7 +167,7 @@ export function FixtureRoute() {
         value={text}
         onChange={setText}
         validationState="error"
-        description="Value is not a valid workspace path"
+        errorMessage="Value is not a valid workspace path"
       />
       <ClayDropdown
         label="Density"
@@ -173,11 +194,126 @@ export function FixtureRoute() {
         title="Confirm"
         open={modalOpen}
         onClose={() => setModalOpen(false)}
+        footer={
+          <>
+            <ClayButton variant="muted" onPress={() => setModalOpen(false)}>
+              Cancel
+            </ClayButton>
+            <ClayButton variant="primary" onPress={() => setModalOpen(false)}>
+              Confirm
+            </ClayButton>
+          </>
+        }
       >
         <ClayText variant="body">
           Modal body with focus trap and Escape handling.
         </ClayText>
       </ClayModal>
+    </div>
+  );
+}
+
+/** The host-rendered sidebar region as the server delivers it (DEV harness):
+ * a flush stack of title + filterable list beside the editor. The real tree is
+ * built by `src/shell/file_browser.rs` and asserted there; this fixture exists
+ * so the browser path (renderer → ClayList → filter → geometry) can be
+ * measured (plan 118 task E1). */
+function WorkspaceSidebarFixture() {
+  const workspace = useMemo(() => {
+    const created = createWorkspace({ send: async () => undefined });
+    created.installBootstrap(fixtureBootstrap);
+    created.handleEnvelope({
+      kind: "runtimeSnapshot",
+      data: {
+        clientId: 1,
+        tabId: 1,
+        snapshot: {
+          runtimeGenerationId: 1,
+          behaviorManifest: fixtureBootstrap.behaviorManifest,
+          activeTheme: fixtureBootstrap.activeTheme,
+          activeTypography: fixtureBootstrap.activeTypography,
+          activeDesignSystem: (
+            fixtureBootstrap as unknown as { activeDesignSystem: never }
+          ).activeDesignSystem,
+          sduiTree: {
+            uiVersion: 9,
+            rootId: 1,
+            nodes: [
+              {
+                id: 1,
+                kind: { flex: { direction: "row", children: [2, 4] } },
+              },
+              {
+                id: 2,
+                kind: { stack: { children: [3, 5] } },
+                size: "dimension.sidebar.default",
+              },
+              {
+                id: 3,
+                kind: { label: { text: "Workspace · clay", icon: null } },
+              },
+              {
+                id: 5,
+                kind: {
+                  list: {
+                    items: [
+                      {
+                        id: "src/alpha.md",
+                        label: "alpha.md",
+                        detail: "src",
+                        action: null,
+                      },
+                      {
+                        id: "src/beta.md",
+                        label: "beta.md",
+                        detail: "src",
+                        action: null,
+                      },
+                      {
+                        id: "docs/gamma.md",
+                        label: "gamma.md",
+                        detail: "docs",
+                        action: null,
+                      },
+                    ],
+                    filter: { placeholder: "Filter files", shortcut: "/" },
+                  },
+                },
+              },
+              {
+                id: 4,
+                kind: {
+                  editorView: {
+                    binding: { documentId: 1, expectedVersion: 1 },
+                  },
+                },
+              },
+            ],
+          },
+          packageUi: {
+            version: 1,
+            emptyTab: null,
+            panels: [],
+            overlays: [],
+            components: [],
+            inputRoutes: [],
+          },
+          documents: [],
+          diagnostics: [],
+        },
+      },
+    });
+    return created;
+  }, []);
+  return (
+    <div
+      className={styles.fixture}
+      data-fixture="workspace-sidebar"
+      style={{ height: "100%" }}
+    >
+      <Suspense fallback={<ClayText variant="status">Loading panes…</ClayText>}>
+        <WorkspacePanes workspace={workspace} />
+      </Suspense>
     </div>
   );
 }
@@ -205,9 +341,11 @@ function SplitsFixture() {
 function CommandCentreFixture({
   empty = false,
   pathMode = false,
+  menuMode = false,
 }: {
   empty?: boolean;
   pathMode?: boolean;
+  menuMode?: boolean;
 }) {
   const workspace = useMemo(() => {
     const created = createWorkspace({ send: async () => undefined });
@@ -221,57 +359,76 @@ function CommandCentreFixture({
           kind: "transientMenuSnapshot",
           data: {
             sessionId: "9223372036854775809" as never,
-            prompt: pathMode ? "Browse workspace" : "Command Centre",
-            query: pathMode ? "workspace/" : "git",
+            prompt: menuMode
+              ? "Session actions"
+              : pathMode
+                ? "Browse workspace"
+                : "Command Centre",
+            query: menuMode ? "" : pathMode ? "workspace/" : "git",
             selectedIndex: 0,
             status: empty
               ? { empty: { message: "No commands match this query" } }
               : "active",
             focusPolicy: "modal",
-            origin: "centered",
-            items: empty
-              ? []
-              : pathMode
-                ? [
-                    {
-                      id: "src",
-                      label: "src/",
-                      detail: "directory",
-                      accessibilityLabel: "src directory",
-                    },
-                    {
-                      id: "readme",
-                      label: "README.md",
-                      detail: "4 KB",
-                      accessibilityLabel: "README.md file",
-                    },
-                  ]
-                : [
-                    {
-                      id: "git.refresh",
-                      label: "Refresh Git status",
-                      detail: "@clay/git - Ctrl+G",
-                      accessibilityLabel: "Refresh Git status",
-                    },
-                    {
-                      id: "runtime.reloadConfiguration",
-                      label: "Reload configuration",
-                      detail: "Clay - Ctrl+Shift+R",
-                      accessibilityLabel: "Reload configuration",
-                    },
-                    {
-                      id: "settings.open",
-                      label: "Open settings",
-                      detail: "@clay/settings",
-                      accessibilityLabel: "Open settings",
-                    },
-                  ],
+            origin: menuMode ? "contextMenu" : "centered",
+            items: menuMode
+              ? [
+                  {
+                    id: "coding-agent.fork",
+                    label: "Fork Session",
+                    detail: "coding-agent.fork",
+                    accessibilityLabel: "Fork Session",
+                  },
+                  {
+                    id: "coding-agent.tree",
+                    label: "Session Branch Tree",
+                    detail: "coding-agent.tree",
+                    accessibilityLabel: "Session Branch Tree",
+                  },
+                ]
+              : empty
+                ? []
+                : pathMode
+                  ? [
+                      {
+                        id: "src",
+                        label: "src/",
+                        detail: "directory",
+                        accessibilityLabel: "src directory",
+                      },
+                      {
+                        id: "readme",
+                        label: "README.md",
+                        detail: "4 KB",
+                        accessibilityLabel: "README.md file",
+                      },
+                    ]
+                  : [
+                      {
+                        id: "git.refresh",
+                        label: "Refresh Git status",
+                        detail: "@clay/git - Ctrl+G",
+                        accessibilityLabel: "Refresh Git status",
+                      },
+                      {
+                        id: "runtime.reloadConfiguration",
+                        label: "Reload configuration",
+                        detail: "Clay - Ctrl+Shift+R",
+                        accessibilityLabel: "Reload configuration",
+                      },
+                      {
+                        id: "settings.open",
+                        label: "Open settings",
+                        detail: "@clay/settings",
+                        accessibilityLabel: "Open settings",
+                      },
+                    ],
           },
         },
       },
     });
     return created;
-  }, [empty, pathMode]);
+  }, [empty, pathMode, menuMode]);
   return (
     <div className={styles.fixture} data-fixture="command-centre">
       <CommandCentre workspace={workspace} />
@@ -445,10 +602,102 @@ function IntelligenceFixture() {
   );
 }
 
-function PackageUiFixture() {
+const WORKSPACE_FIXTURE_DOC = `# Notes
+
+Fixture document for the workspace review surface.
+
+## 26-08-12 01:15 — outline-entry-one
+
+The rail lists this heading with its time and title.
+
+## 26-08-13 09:40 — outline-entry-two
+
+A second entry, so the rail shows a list rather than a single row.
+`;
+
+/**
+ * Settings fixture: the panel in its real host (`PackageWorkspace`'s right
+ * slot), with the selection sets the runtime enumerates stated locally — the
+ * fixture has no server, so the panel would otherwise render empty dropdowns.
+ * Specifier literals stay in `const` declarations (plan 104 guard).
+ */
+function SettingsFixture() {
+  useEffect(() => {
+    themeStore.setTheme({
+      specifier: SHIPPED_THEME,
+      tokens: {},
+      editorStyles: {},
+      densityScale: 1,
+    } as unknown as ThemeSnapshot);
+    themeStore.setUiChoices(SHIPPED_UI_CHOICES);
+    return () => themeStore.setUiChoices(null);
+  }, []);
+  return <PackageUiFixture settingsOpen />;
+}
+
+/**
+ * Agent settings fixture: the coding agent's Settings tab body as a page-level
+ * surface (approved `agent-settings.html`), with the delivered-file rows a
+ * daemon writes — the layout the client cannot read for itself without a
+ * server. `?state=empty` is the documented first-run state.
+ */
+function AgentSettingsFixture() {
+  const [params] = useSearchParams();
+  const empty = params.get("state") === "empty";
+  return (
+    <div className={styles.fixture} data-fixture="agent-settings">
+      <AgentSettingsPanel
+        files={empty ? [] : DELIVERED_AGENT_FILES}
+        loading={false}
+        onOpen={() => undefined}
+      />
+    </div>
+  );
+}
+
+/** Delivered agent config files in the daemon's fixed layout (`SYSTEM.md` plus
+ *  one `SKILL.md` per bundled skill), with built-in/edited provenance. */
+const DELIVERED_AGENT_FILES: AgentSettingsFileInfo[] = [
+  {
+    name: "SYSTEM.md",
+    displayPath: "/root/SYSTEM.md",
+    sizeBytes: 1830,
+    modifiedMs: 1,
+    edited: false,
+  },
+  {
+    name: "skills/create-plan/SKILL.md",
+    displayPath: "/root/skills/create-plan/SKILL.md",
+    sizeBytes: 7600,
+    modifiedMs: 2,
+    edited: false,
+  },
+  {
+    name: "skills/impeccable/SKILL.md",
+    displayPath: "/root/skills/impeccable/SKILL.md",
+    sizeBytes: 10800,
+    modifiedMs: 3,
+    edited: true,
+  },
+];
+
+function PackageUiFixture({
+  settingsOpen = false,
+}: {
+  settingsOpen?: boolean;
+}) {
   const session = useMemo(() => {
     const created = createDocumentSession({ send: async () => undefined });
-    created.installInitial(fixtureBootstrap);
+    created.installInitial({
+      ...fixtureBootstrap,
+      initialDocument: {
+        ...fixtureBootstrap.initialDocument,
+        head: {
+          totalBytes: WORKSPACE_FIXTURE_DOC.length,
+          firstChunk: WORKSPACE_FIXTURE_DOC,
+        },
+      },
+    } as unknown as BootstrapDto);
     created.store.update({ workspaceRootId: 1, path: "notes.md" });
     return created;
   }, []);
@@ -459,12 +708,37 @@ function PackageUiFixture() {
         rootId: 1,
         nodes: [
           { id: 1, kind: { flex: { direction: "row", children: [2, 4] } } },
-          { id: 2, kind: { panel: { title: "Workspace", children: [3] } } },
-          { id: 3, kind: { label: { text: "notes.md" } } },
+          // The server's file-browser region is a flat stack, not a panel: the
+          // host's left slot owns the region's paint (src/shell/file_browser.rs).
+          { id: 2, kind: { stack: { children: [3, 5] } } },
+          { id: 3, kind: { label: { text: "Workspace · clay" } } },
           {
             id: 4,
             kind: {
               editorView: { binding: { documentId: 1, expectedVersion: 1 } },
+            },
+          },
+          {
+            id: 5,
+            kind: {
+              list: {
+                items: [
+                  {
+                    id: "src",
+                    label: "src",
+                    detail: null,
+                    action: null,
+                    icon: "file.folder",
+                  },
+                  {
+                    id: "notes.md",
+                    label: "notes.md",
+                    detail: null,
+                    action: null,
+                    icon: "file.file",
+                  },
+                ],
+              },
             },
           },
         ],
@@ -472,19 +746,25 @@ function PackageUiFixture() {
     [],
   );
   return (
-    <div className={styles.packageFixture} data-fixture="package-ui">
-      <PackageWorkspace
-        sdui={sdui}
-        packageUi={packageFixtureSnapshot}
-        send={async () => undefined}
-        editorSlot={
-          <Suspense
-            fallback={<ClayText variant="status">Loading editor…</ClayText>}
-          >
-            <ClayEditor session={session} />
-          </Suspense>
-        }
-      />
+    <div
+      className={styles.packageFixture}
+      data-fixture={settingsOpen ? "settings" : "package-ui"}
+    >
+      <WorkspaceView session={session}>
+        <PackageWorkspace
+          sdui={sdui}
+          packageUi={packageFixtureSnapshot}
+          settingsOpen={settingsOpen}
+          send={async () => undefined}
+          editorSlot={
+            <Suspense
+              fallback={<ClayText variant="status">Loading editor…</ClayText>}
+            >
+              <ClayEditor session={session} />
+            </Suspense>
+          }
+        />
+      </WorkspaceView>
     </div>
   );
 }
@@ -719,36 +999,14 @@ const fixtureBootstrap = {
   },
 } as unknown as BootstrapDto;
 
-function ChatFixture() {
-  const [params] = useSearchParams();
-  const state = params.get("state") ?? "landing";
-  useEffect(() => {
-    let cancelled = false;
-    void import("../agent/state").then(({ chatAgent }) => {
-      if (cancelled) return;
-      seedChatFixture(chatAgent, state);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [state]);
-  return (
-    <div className={styles.packageFixture} data-fixture={`chat-${state}`}>
-      <Suspense fallback={<ClayText variant="status">Loading chat…</ClayText>}>
-        <ChatPanel surface={chatFixtureSurface} uiVersion={4} />
-      </Suspense>
-    </div>
-  );
-}
-
 function CodingAgentFixture() {
   const [params] = useSearchParams();
   const state = params.get("state") ?? "landing";
   useEffect(() => {
     let cancelled = false;
-    void import("../agent/state").then(({ chatAgent }) => {
+    void import("../agent/state").then(({ agentSession }) => {
       if (cancelled) return;
-      seedChatFixture(chatAgent, state === "landing" ? "landing" : state);
+      seedAgentFixture(agentSession, state === "landing" ? "landing" : state);
     });
     return () => {
       cancelled = true;
@@ -814,8 +1072,8 @@ const codingAgentFixtureSurface = {
   },
 } as never;
 
-function seedChatFixture(
-  chatAgent: {
+function seedAgentFixture(
+  agentSession: {
     seedForDev(input: {
       messages?: unknown;
       state?: Record<string, unknown>;
@@ -826,7 +1084,7 @@ function seedChatFixture(
   state: string,
 ) {
   if (state === "landing") {
-    chatAgent.seedForDev({
+    agentSession.seedForDev({
       messages: [],
       state: {},
       streaming: false,
@@ -835,7 +1093,7 @@ function seedChatFixture(
     return;
   }
   if (state === "conversation") {
-    chatAgent.seedForDev({
+    agentSession.seedForDev({
       messages: [
         { id: "f0", role: "user", content: "Summarize notes.md" },
         {
@@ -848,6 +1106,52 @@ function seedChatFixture(
           role: "assistant",
           content: "Three key points stand out.",
         },
+        // Plan 118 task 36: the rows carry the file records the server derives
+        // from a call's own arguments, so the Files tab (session history) has
+        // real content in a capture. Paths are real repo files; the roles are
+        // this fixture session's own state.
+        {
+          id: "f2a",
+          role: "tool",
+          content:
+            'read {"path":"plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md"}',
+          metadata: {
+            clayKind: "tool",
+            toolName: "read",
+            sessionFile: {
+              path: "plans/118-Quiet-Instrument-Migration-Component-and-Surface-Adoption.md",
+              op: "read",
+            },
+          },
+        },
+        {
+          id: "f2b",
+          role: "tool",
+          content:
+            'edit {"path":"frontend/src/coding-agent/coding-agent.module.css"}',
+          metadata: {
+            clayKind: "tool",
+            toolName: "edit",
+            sessionFile: {
+              path: "frontend/src/coding-agent/coding-agent.module.css",
+              op: "edit",
+            },
+          },
+        },
+        {
+          id: "f2c",
+          role: "tool",
+          content:
+            'write {"path":"design-artifacts/approved/quiet-instrument-migration/start.html"}',
+          metadata: {
+            clayKind: "tool",
+            toolName: "write",
+            sessionFile: {
+              path: "design-artifacts/approved/quiet-instrument-migration/start.html",
+              op: "write",
+            },
+          },
+        },
         {
           id: "f3",
           role: "assistant",
@@ -855,14 +1159,14 @@ function seedChatFixture(
           metadata: { clayKind: "usage" },
         },
       ],
-      state: { provider: "mock", model: "mock-mini", profile: "chat" },
+      state: { provider: "mock", model: "mock-mini" },
       streaming: false,
       statusText: null,
     });
     return;
   }
   if (state === "streaming") {
-    chatAgent.seedForDev({
+    agentSession.seedForDev({
       messages: [
         {
           id: "s0",
@@ -881,7 +1185,7 @@ function seedChatFixture(
     return;
   }
   if (state === "error") {
-    chatAgent.seedForDev({
+    agentSession.seedForDev({
       messages: [
         { id: "e0", role: "user", content: "List files" },
         {
@@ -897,70 +1201,3 @@ function seedChatFixture(
     });
   }
 }
-
-/** Mirrors the @clay/chat declared landing (packages/chat/package.json). */
-const chatFixtureSurface = {
-  id: "chat.entry",
-  actionTargets: [
-    "agent.clientOpenAgentPicker",
-    "agent.clientOpenProviderPicker",
-    "agent.clientOpenModelPicker",
-    "chat.submit",
-    "chat.cancel",
-    "documents.clientOpenFileDialog",
-    "workspace.clientOpenFolderDialog",
-  ],
-  provenance: {
-    packageName: "@clay/chat",
-    packageVersion: "0.1.0",
-    apiPrefix: "chat",
-    trustDomain: "trusted" as const,
-  },
-  component: {
-    kind: "panel" as const,
-    id: "chat.root",
-    title: "Chat",
-    children: [
-      {
-        kind: "label" as const,
-        id: "chat.greeting",
-        text: "What do you want to do today?",
-      },
-      {
-        kind: "label" as const,
-        id: "chat.providerHint",
-        text: "Configure a provider to start chatting.",
-      },
-      {
-        kind: "button" as const,
-        id: "chat.button.agent",
-        label: "Agent",
-        action: { commandId: "agent.clientOpenAgentPicker" },
-      },
-      {
-        kind: "button" as const,
-        id: "chat.button.provider",
-        label: "Provider",
-        action: { commandId: "agent.clientOpenProviderPicker" },
-      },
-      {
-        kind: "button" as const,
-        id: "chat.button.model",
-        label: "Model",
-        action: { commandId: "agent.clientOpenModelPicker" },
-      },
-      {
-        kind: "button" as const,
-        id: "chat.button.openFile",
-        label: "Open File",
-        action: { commandId: "documents.clientOpenFileDialog" },
-      },
-      {
-        kind: "button" as const,
-        id: "chat.button.openFolder",
-        label: "Open Folder",
-        action: { commandId: "workspace.clientOpenFolderDialog" },
-      },
-    ],
-  },
-};

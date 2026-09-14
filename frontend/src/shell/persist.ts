@@ -11,8 +11,18 @@ import {
   treeFromPersisted,
 } from "./split-tree";
 
+import type { TabAgent, TabView } from "./tab-store";
+
 export interface PersistedTab {
   workspaceRoot: string;
+  /** Tab agent identity (plan 118 task 33); absent/null when none. */
+  agent?: TabAgent | null;
+  /** Which view was up; absent means `workspace` (older v2 documents). */
+  view?: TabView;
+  /** Rail visibility for this tab; absent means visible (plan 118 task E2). */
+  railVisible?: boolean;
+  /** Agent-inspector visibility for this tab; absent means visible. */
+  inspectorVisible?: boolean;
   activePane: number;
   splitTree: PersistedSplitNode | null;
   slots: unknown[];
@@ -27,6 +37,11 @@ export interface PersistedWindow {
 
 export interface TabLayout {
   workspaceRoot: string;
+  agent: TabAgent | null;
+  view: TabView;
+  /** Per-tab layout visibility (plan 118 task E2). */
+  railVisible: boolean;
+  inspectorVisible: boolean;
   tree: SplitTree;
   /** paneId → workspace-relative path (null = empty pane). */
   documents: Map<number, string | null>;
@@ -41,6 +56,10 @@ export function windowFromTabs(
     activeTab: activeIndex,
     tabs: tabs.map((tab) => ({
       workspaceRoot: tab.workspaceRoot,
+      agent: tab.agent,
+      view: tab.view,
+      railVisible: tab.railVisible,
+      inspectorVisible: tab.inspectorVisible,
       activePane: tab.tree.activePaneId,
       splitTree: toPersisted(tab.tree.root),
       slots: [],
@@ -51,6 +70,18 @@ export function windowFromTabs(
         ]),
       ),
     })),
+  };
+}
+
+/** A persisted agent is inert display data; malformed entries are dropped
+ *  rather than half-adopted. */
+function agentFrom(raw: unknown): TabAgent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Partial<TabAgent>;
+  if (typeof value.type !== "string" || !value.type) return null;
+  return {
+    type: value.type,
+    configRoot: typeof value.configRoot === "string" ? value.configRoot : "",
   };
 }
 
@@ -69,13 +100,14 @@ export function tabsFromWindow(raw: unknown): {
   }
   const tabs: TabLayout[] = [];
   for (const entry of value.tabs) {
-    if (
-      !entry ||
-      typeof entry.workspaceRoot !== "string" ||
-      !entry.workspaceRoot
-    ) {
-      continue;
-    }
+    if (!entry || typeof entry !== "object") continue;
+    const agent = agentFrom(entry.agent);
+    const workspaceRoot =
+      typeof entry.workspaceRoot === "string" ? entry.workspaceRoot : "";
+    // A tab with neither half is not a tab (Rust applies the same rule); a
+    // document with no folder is still real, so one half is enough.
+    if (!workspaceRoot && !agent) continue;
+    const view: TabView = entry.view === "agent" ? "agent" : "workspace";
     const tree = treeFromPersisted(
       entry.splitTree ?? null,
       entry.activePane ?? DEFAULT_PANE_ID,
@@ -88,7 +120,17 @@ export function tabsFromWindow(raw: unknown): {
         documents.set(paneId, typeof path === "string" && path ? path : null);
       }
     }
-    tabs.push({ workspaceRoot: entry.workspaceRoot, tree, documents });
+    tabs.push({
+      workspaceRoot,
+      agent,
+      view,
+      // Absent means visible: the tab's own default, and what a v2 document
+      // written before the fields existed means.
+      railVisible: entry.railVisible !== false,
+      inspectorVisible: entry.inspectorVisible !== false,
+      tree,
+      documents,
+    });
   }
   if (tabs.length === 0) return null;
   const activeIndex =
@@ -103,6 +145,10 @@ export function tabsFromWindow(raw: unknown): {
 export function emptyLayout(workspaceRoot: string): TabLayout {
   return {
     workspaceRoot,
+    agent: null,
+    view: "workspace",
+    railVisible: true,
+    inspectorVisible: true,
     tree: singlePane(),
     documents: new Map([[DEFAULT_PANE_ID, null]]),
   };

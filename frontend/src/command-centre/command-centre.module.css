@@ -1,87 +1,181 @@
+/* Command centre: the one global palette and the transient menus the shell
+ * opens through the same session (`origin`). The palette is a single elevated
+ * sheet — `commandCentre.default.root.rest`: opaque overlay fill, 1px hairline,
+ * r16, overlay shadow, 240ms spring entrance — with a head (search), the
+ * scrolling results, and a foot of key hints; the menu origins take the
+ * narrower `popover.default.root.rest` surface instead (the approved
+ * command-centre and overlays compositions).
+ *
+ * Layout is host-owned; every appearance value is a `--clay-ds-*` recipe or a
+ * `--clay-*` theme role. Retired patterns are absent by construction: no
+ * leading accent bar on a selected row (selection is the fill), no shadow on
+ * anything static. The empty state consumes the family's key exactly as the
+ * approved artifact does — bare, centred text inside the sheet, not a bordered
+ * box inside a bordered box. */
+
 .surface {
-  display: grid;
-  gap: var(
-    --clay-ds-command-centre-default-root-rest-gap,
-    var(--clay-spacing-sm, 12px)
-  );
-  padding: var(
-    --clay-ds-command-centre-default-root-rest-padding,
-    0
-  );
-  border: var(
-      --clay-ds-command-centre-default-root-rest-border-width,
-      0
-    )
-    var(--clay-ds-command-centre-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-command-centre-default-root-rest-border-color,
-      transparent
-    );
-  border-radius: var(
-    --clay-ds-command-centre-default-root-rest-border-radius,
-    0
-  );
-  background: var(
-    --clay-ds-command-centre-default-root-rest-background-color,
-    transparent
-  );
-  box-shadow: var(
-    --clay-ds-command-centre-default-root-rest-shadow,
-    none
-  );
-  width: min(
-    calc(
-      var(--clay-dimension-overlay-centered-width, 640px) - 2 *
-        var(--clay-spacing-md, 16px) -
-        var(--clay-dimension-border-hairline, 1px) -
-        var(--clay-dimension-border-hairline, 1px)
-    ),
-    calc(
-      90vw - 2 * var(--clay-spacing-md, 16px) -
-        var(--clay-dimension-border-hairline, 1px) -
-        var(--clay-dimension-border-hairline, 1px)
-    )
-  );
+  display: flex;
+  flex-direction: column;
+  width: min(var(--clay-dimension-overlay-centered-width, 640px), 90vw);
+  /* Bounded: the list scrolls, the sheet never grows past the window. */
+  max-height: min(68vh, var(--clay-dimension-overlay-centered-width, 640px));
+  overflow: hidden;
+
+  border-width: var(--clay-ds-command-centre-default-root-rest-border-width);
+  border-style: var(--clay-ds-command-centre-default-root-rest-border-style);
+  border-color: var(--clay-ds-command-centre-default-root-rest-border-color);
+  border-radius: var(--clay-ds-command-centre-default-root-rest-border-radius);
+  background: var(--clay-ds-command-centre-default-root-rest-background-color);
+  color: var(--clay-ds-command-centre-default-root-rest-text-color);
+  box-shadow: var(--clay-ds-command-centre-default-root-rest-shadow, none);
+  transition:
+    opacity var(--clay-ds-command-centre-default-root-rest-transition-duration)
+      var(--clay-ds-command-centre-default-root-rest-transition-timing),
+    transform
+      var(--clay-ds-command-centre-default-root-rest-transition-duration)
+      var(--clay-ds-command-centre-default-root-rest-transition-timing);
 }
 
-.surface [role="listbox"] {
-  max-height: min(50vh, 420px);
+/* A menu session is the same component on the popover surface: r12, pop
+ * shadow, content-sized (the approved context-menu cell). */
+.menu {
+  width: fit-content;
+  min-width: 220px;
+  max-width: min(90vw, var(--clay-dimension-overlay-centered-width, 640px));
+  border-width: var(--clay-ds-popover-default-root-rest-border-width);
+  border-style: var(--clay-ds-popover-default-root-rest-border-style);
+  border-color: var(--clay-ds-popover-default-root-rest-border-color);
+  border-radius: var(--clay-ds-popover-default-root-rest-border-radius);
+  background: var(--clay-ds-popover-default-root-rest-background-color);
+  color: var(--clay-ds-popover-default-root-rest-text-color);
+  box-shadow: var(--clay-ds-popover-default-root-rest-shadow);
+  transition:
+    opacity var(--clay-ds-popover-default-root-rest-transition-duration)
+      var(--clay-ds-popover-default-root-rest-transition-timing),
+    transform var(--clay-ds-popover-default-root-rest-transition-duration)
+      var(--clay-ds-popover-default-root-rest-transition-timing);
+}
+
+/* One ring per surface (§14.4): the sheet is the shell, so the sheet shows the
+ * focus state and the input inside it draws none — boundary turns accent and
+ * takes the accent halo, exactly like the shipped composer well and the
+ * approved screens' `.input-shell:focus-within`. */
+.surface:focus-within {
+  border-color: var(--clay-accent-primary);
+  box-shadow:
+    var(--clay-ds-command-centre-default-root-rest-shadow, none),
+    0 0 0 3px color-mix(in srgb, var(--clay-accent-primary) 15%, transparent);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-command-centre-default-root-rest-gap);
+  /* Trailing space for the sheet's close affordance, which floats here. */
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
+  padding-inline-end: calc(
+    var(--clay-dimension-target-min, 32px) +
+      var(--clay-ds-command-centre-default-root-rest-padding)
+  );
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.searchIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--clay-text-muted);
+}
+
+/* A session whose prompt is the question (an API key, a file query) shows it
+ * as a micro-label; the palette's own prompt is the sheet's name. */
+.prompt {
+  flex: none;
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--clay-text-primary);
+  font-family: inherit;
+  font-size: var(--clay-text-body-size);
+  line-height: var(--clay-text-body-line-height);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--clay-text-muted);
+}
+
+.results {
+  min-height: 0;
   overflow: auto;
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
 }
 
+/* The empty state is the family's key on the approved artifact's bare shape
+ * (the recipe declares a hairline the artifact does not paint). */
 .empty {
-  min-height: calc(var(--clay-spacing-xxl, 48px) * 2);
   display: grid;
   place-items: center;
-  border-top: var(
-      --clay-ds-command-centre-default-empty-rest-border-width,
-      var(
-        --clay-ds-command-centre-default-root-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-    )
-    var(
-      --clay-ds-command-centre-default-empty-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-command-centre-default-empty-rest-border-color,
-      var(
-        --clay-ds-command-centre-default-root-rest-border-color,
-        var(--clay-border-subtle)
-      )
-    );
+  gap: var(--clay-ds-empty-default-root-rest-gap);
+  padding: var(--clay-ds-command-centre-default-empty-rest-padding);
+  background: var(--clay-ds-command-centre-default-empty-rest-background-color);
+  color: var(--clay-ds-command-centre-default-empty-rest-text-color);
+  text-align: center;
 }
 
-.status {
-  color: var(
-    --clay-ds-command-centre-default-status-rest-text-color,
-    var(
-      --clay-ds-command-centre-default-root-rest-text-color,
-      var(--clay-text-muted)
-    )
-  );
+.emptyHint,
+.hintKeys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-ds-key-hint-default-keys-rest-gap);
+}
+
+.emptyHint {
+  font-size: var(--clay-text-caption-size);
+  color: var(--clay-text-muted);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--clay-ds-key-hint-default-row-rest-gap);
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
+  border-top: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-status-size);
+  background: var(
+    --clay-ds-command-centre-default-status-rest-background-color
+  );
+  color: var(--clay-ds-command-centre-default-status-rest-text-color);
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-ds-key-hint-default-keys-rest-gap);
+  padding: var(--clay-ds-key-hint-default-row-rest-padding);
+  color: var(--clay-ds-key-hint-default-row-rest-text-color);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.count {
+  font-family: var(--clay-font-mono);
   font-variant-numeric: tabular-nums;
+  color: var(--clay-ds-command-centre-default-status-rest-text-color);
 }

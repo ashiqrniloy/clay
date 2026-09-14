@@ -9,9 +9,7 @@ use clay::editor::theme::{
     status_chrome_contrast_ratio, status_chrome_meets_contrast, validate_active_theme_contrast,
 };
 use clay::packages::record::{PackageRecord, assemble_package_record};
-use clay::protocol::{
-    ActiveTheme, TextThemeOverride, TokenType, UiDesignTokenOverride, WireDesignTokenValue,
-};
+use clay::protocol::{ActiveTheme, TokenType, UiDesignTokenOverride, WireDesignTokenValue};
 
 const EXPECTED_BASE_UI_KEYS: &[&str] = &[
     "shellBg",
@@ -435,48 +433,21 @@ fn gruvbox_themes_status_chrome_meets_aa_contrast() {
     }
 }
 
-/// Plan 088 task 3: every bundled theme package's full editor/base palette
-/// meets WCAG AA on every required foreground/background pair. Legacy
-/// `textStyles` are included in the snapshot so the compatibility projection
-/// used by the client is validated, not only the core fallback palette.
+/// Plan 088 task 3, extended by plan 118 task 13: every bundled theme package's
+/// full editor/base palette meets WCAG AA on every required foreground/background
+/// pair. The snapshot carries the theme's own `designTokens` as well as its
+/// legacy `textStyles`, so the compatibility projection *and* the typed overrides
+/// the client paints with are validated — not a core-fallback stub.
 #[test]
 fn bundled_themes_sdui_pairs_meet_aa_contrast() {
-    let bundled = [
-        (
-            "@clay/theme-gruvbox-material-dark",
-            "theme-gruvbox-material-dark",
-        ),
-        (
-            "@clay/theme-gruvbox-material-light",
-            "theme-gruvbox-material-light",
-        ),
-        ("@clay/theme-modus-operandi", "theme-modus-operandi"),
-        ("@clay/theme-modus-vivendi", "theme-modus-vivendi"),
-    ];
-    for (specifier, dir) in bundled {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
         let value = read_theme_package(specifier, dir);
         let record = assemble_package_record(&value).expect("theme validates");
-        let overrides = record
-            .contributions
-            .text_styles
-            .iter()
-            .map(|entry| TextThemeOverride {
-                token: entry.token.clone(),
-                color: entry.color,
-                background: entry.background,
-                bold: entry.bold,
-                italic: entry.italic,
-                underline: entry.underline,
-                strike: entry.strike,
-                scale: entry.scale,
-                provenance: entry.provenance.clone(),
-            })
-            .collect();
-        let snapshot = ActiveTheme {
-            specifier: specifier.to_string(),
-            overrides,
-            design_tokens: Vec::new(),
-        };
+        let snapshot = super::package_ui_conformance::theme_active_theme(specifier, &record);
+        assert!(
+            !snapshot.design_tokens.is_empty(),
+            "{specifier} must ship the language's typed UI roles"
+        );
         validate_active_theme_contrast(&snapshot).unwrap_or_else(|failure| {
             panic!(
                 "{specifier} SDUI pair {}/{} ratio {:.2} below {:.1}",
@@ -516,339 +487,464 @@ fn theme_package_below_aa_contrast_is_rejected() {
     );
 }
 
-#[test]
-fn design_neobrutal_bundled_package_validates_as_inert_data() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{manifest_dir}/packages/design-neobrutal/package.json");
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("read @clay/design-neobrutal package.json ({path}): {err}"));
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .unwrap_or_else(|err| panic!("parse @clay/design-neobrutal as JSON: {err}"));
-
-    let record = assemble_package_record(&value).unwrap_or_else(|err| {
+/// The frozen approved theme board (plan 118 task 5/7), copied into
+/// `design-artifacts/approved/` on approval. It is the specification for the
+/// four shipped themes' typed UI roles and depth pair.
+fn approved_theme_board() -> serde_json::Value {
+    let path = format!(
+        "{}/design-artifacts/approved/quiet-instrument-migration/theme-values.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|err| {
         panic!(
-            "@clay/design-neobrutal must validate as inert design-system data: rule={:?} msg={}",
-            err.rule, err.message
+            "read theme board ({path}): {err} — the approved board is a required contract \
+             input for the shipped themes (`design-artifacts/README.md`)"
         )
     });
-
-    assert_eq!(record.manifest.name, "@clay/design-neobrutal");
-    assert_eq!(record.manifest.version, "0.1.0");
-    assert!(record.manifest.clay.permissions.is_empty());
-    assert!(record.manifest.clay.modes.is_empty());
-    assert!(record.manifest.clay.entry.is_none());
-    assert!(record.manifest.clay.load_entry.is_none());
-
-    let ds = record
-        .contributions
-        .ui_design_system
-        .as_ref()
-        .expect("@clay/design-neobrutal must contribute uiDesignSystem");
-
-    assert_eq!(ds.id, "@clay/design-neobrutal");
-    assert_eq!(ds.schema_version, 1);
-    assert_eq!(ds.display_name, "Neobrutal (Default)");
-    assert!(
-        ds.recipe_count >= 25,
-        "must contain at least 25 component recipes, got {}",
-        ds.recipe_count
-    );
-
-    // Verify raw JSON contains zero literal color strings (#..., rgb, hsl)
-    let decl_str = &ds.declaration_json;
-    assert!(
-        !decl_str.contains("\"#"),
-        "design system must not contain literal hex colors"
-    );
-    assert!(
-        !decl_str.contains("rgb("),
-        "design system must not contain rgb() colors"
-    );
-    assert!(
-        !decl_str.contains("hsl("),
-        "design system must not contain hsl() colors"
-    );
-
-    // Parse declaration and verify Neobrutal geometry, borders, shadows, and legibility invariants
-    let decl: clay::shell::design_system::UiDesignSystemDeclaration =
-        serde_json::from_str(decl_str).expect("declaration_json must deserialize cleanly");
-    assert_eq!(decl.schema_version, 1);
-
-    // Plan 110 Task 7 Conformance:
-    // 1. Neobrutal 90-degree corner geometry: border_radius must be 0.0 everywhere.
-    // 2. Zero backdrop blur anywhere.
-    for (key, recipe) in &decl.recipes {
-        if let Some(radius) = recipe.border_radius {
-            assert_eq!(
-                radius, 0.0,
-                "Neobrutal recipe {key} must have border_radius 0.0, got {radius}"
-            );
-        }
-        assert_eq!(
-            recipe.backdrop_blur.unwrap_or(0.0),
-            0.0,
-            "Neobrutal recipe {key} must not apply backdrop blur"
-        );
-    }
-
-    // 3. 2px structural borders at rest on interactive kinds using the ink role (text.primary)
-    let interactive_rest_keys = [
-        "button.default.root.rest",
-        "button.primary.root.rest",
-        "button.muted.root.rest",
-        "button.danger.root.rest",
-        "textInput.default.input.rest",
-        "dropdown.default.root.rest",
-        "dropdown.default.trigger.rest",
-        "card.default.root.rest",
-        "tab.default.item.rest",
-        "kbd.default.root.rest",
-        "badge.default.root.rest",
-        "popover.default.root.rest",
-        "menu.default.root.rest",
-        "modal.default.dialog.rest",
-    ];
-    for key_str in interactive_rest_keys {
-        let key = clay::shell::design_system::RecipeKey::parse(key_str)
-            .unwrap_or_else(|e| panic!("failed to parse key {key_str}: {e}"));
-        let recipe = decl
-            .recipes
-            .get(&key)
-            .unwrap_or_else(|| panic!("missing interactive recipe {key_str}"));
-        let width = recipe
-            .border_width
-            .unwrap_or_else(|| panic!("interactive recipe {key_str} must declare border_width"));
-        assert!(
-            width >= 2.0,
-            "interactive recipe {key_str} must have rest border_width >= 2.0, got {width}"
-        );
-        let border_color = recipe
-            .border_color
-            .as_ref()
-            .unwrap_or_else(|| panic!("interactive recipe {key_str} must declare border_color"));
-        assert_eq!(
-            border_color.as_str(),
-            "text.primary",
-            "interactive recipe {key_str} must use ink role text.primary for high-contrast border"
-        );
-    }
-
-    // 4. Hard offset shadows at rest: ink color (text.primary), blur == 0, rest offset >= 3
-    let shadowed_rest_keys = [
-        "button.default.root.rest",
-        "button.primary.root.rest",
-        "button.muted.root.rest",
-        "button.danger.root.rest",
-        "textInput.default.input.rest",
-        "dropdown.default.root.rest",
-        "dropdown.default.trigger.rest",
-        "card.default.root.rest",
-        "kbd.default.root.rest",
-        "tooltip.default.root.rest",
-        "popover.default.root.rest",
-        "menu.default.root.rest",
-        "modal.default.dialog.rest",
-        "commandCentre.default.root.rest",
-    ];
-    for key_str in shadowed_rest_keys {
-        let key = clay::shell::design_system::RecipeKey::parse(key_str)
-            .unwrap_or_else(|e| panic!("failed to parse key {key_str}: {e}"));
-        let recipe = decl
-            .recipes
-            .get(&key)
-            .unwrap_or_else(|| panic!("missing shadowed recipe {key_str}"));
-        let shadows = recipe
-            .shadow
-            .as_ref()
-            .unwrap_or_else(|| panic!("recipe {key_str} must declare shadow"));
-        assert!(
-            !shadows.is_empty(),
-            "recipe {key_str} shadow list must not be empty"
-        );
-        for (idx, shadow) in shadows.iter().enumerate() {
-            assert_eq!(
-                shadow.blur, 0.0,
-                "recipe {key_str} shadow[{idx}] blur must be 0.0"
-            );
-            assert_eq!(
-                shadow.color_role.as_str(),
-                "text.primary",
-                "recipe {key_str} shadow[{idx}] color_role must be text.primary (ink)"
-            );
-            assert!(
-                shadow.x >= 3.0 && shadow.y >= 3.0,
-                "recipe {key_str} shadow[{idx}] offsets must be >= 3.0, got ({}, {})",
-                shadow.x,
-                shadow.y
-            );
-        }
-    }
-
-    // 5. List row styling: solid surface.control fill at rest (never transparent), 2px ink border
-    let list_row_rest_key = clay::shell::design_system::RecipeKey::parse("list.default.row.rest")
-        .expect("list.default.row.rest parses");
-    let list_row_rest = decl
-        .recipes
-        .get(&list_row_rest_key)
-        .expect("list.default.row.rest must exist");
-    assert_ne!(
-        list_row_rest.background_color.as_ref().map(|c| c.as_str()),
-        Some("transparent"),
-        "list.default.row.rest background must not be transparent"
-    );
-    assert_eq!(
-        list_row_rest.background_color.as_ref().map(|c| c.as_str()),
-        Some("surface.control"),
-        "list.default.row.rest background must be solid surface.control"
-    );
-    assert_eq!(
-        list_row_rest.border_width,
-        Some(2.0),
-        "list.default.row.rest border_width must be 2.0"
-    );
-
-    // 6. Selected list row: solid surface.selected fill, 2px ink border
-    let list_row_selected_key =
-        clay::shell::design_system::RecipeKey::parse("list.default.row.selected")
-            .expect("list.default.row.selected parses");
-    let list_row_selected = decl
-        .recipes
-        .get(&list_row_selected_key)
-        .expect("list.default.row.selected must exist");
-    assert_eq!(
-        list_row_selected
-            .background_color
-            .as_ref()
-            .map(|c| c.as_str()),
-        Some("surface.selected"),
-        "list.default.row.selected background must be solid surface.selected"
-    );
-    assert_eq!(
-        list_row_selected.border_width,
-        Some(2.0),
-        "list.default.row.selected border_width must be 2.0"
-    );
-    assert_eq!(
-        list_row_selected.border_color.as_ref().map(|c| c.as_str()),
-        Some("text.primary"),
-        "list.default.row.selected border_color must be text.primary"
-    );
-
-    // 7. Interactive button tactile feedback: hover lift + active press shift
-    let btn_hover_key = clay::shell::design_system::RecipeKey::parse("button.default.root.hover")
-        .expect("button.default.root.hover parses");
-    let btn_hover = decl
-        .recipes
-        .get(&btn_hover_key)
-        .expect("button.default.root.hover must exist");
-    assert_eq!(
-        btn_hover.transform_preset,
-        Some(clay::shell::design_system::TransformPreset::HoverLift)
-    );
-    let hover_shadow = &btn_hover.shadow.as_ref().expect("hover shadow")[0];
-    assert_eq!((hover_shadow.x, hover_shadow.y), (4.0, 4.0));
-
-    let btn_active_key = clay::shell::design_system::RecipeKey::parse("button.default.root.active")
-        .expect("button.default.root.active parses");
-    let btn_active = decl
-        .recipes
-        .get(&btn_active_key)
-        .expect("button.default.root.active must exist");
-    assert_eq!(
-        btn_active.transform_preset,
-        Some(clay::shell::design_system::TransformPreset::PressShiftDown)
-    );
-    let active_shadow = &btn_active.shadow.as_ref().expect("active shadow")[0];
-    assert_eq!((active_shadow.x, active_shadow.y), (1.0, 1.0));
+    serde_json::from_str(&text).unwrap_or_else(|err| panic!("parse theme board ({path}): {err}"))
 }
 
-#[test]
-fn design_glass_bundled_package_validates_as_inert_data() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let path = format!("{manifest_dir}/packages/design-glass/package.json");
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|err| panic!("read @clay/design-glass package.json ({path}): {err}"));
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .unwrap_or_else(|err| panic!("parse @clay/design-glass as JSON: {err}"));
+/// `#rgb`/`#rrggbb`/`#rrggbbaa` → RGBA bytes, the same shape the typed
+/// `designTokens` descriptor stores, so a board value and a declared value are
+/// comparable byte for byte.
+fn parse_board_hex(hex: &str) -> [u8; 4] {
+    let digits = hex.strip_prefix('#').expect("board hex starts with `#`");
+    let byte = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).expect("board hex is hex");
+    match digits.len() {
+        6 => [byte(0), byte(2), byte(4), 0xff],
+        8 => [byte(0), byte(2), byte(4), byte(6)],
+        other => panic!("board hex `{hex}` has {other} digits"),
+    }
+}
 
-    let record = assemble_package_record(&value).unwrap_or_else(|err| {
-        panic!(
-            "@clay/design-glass must validate as inert design-system data: rule={:?} msg={}",
-            err.rule, err.message
-        )
-    });
-
-    assert_eq!(record.manifest.name, "@clay/design-glass");
-    assert_eq!(record.manifest.version, "0.1.0");
-    assert!(record.manifest.clay.permissions.is_empty());
-    assert!(record.manifest.clay.modes.is_empty());
-    assert!(record.manifest.clay.entry.is_none());
-    assert!(record.manifest.clay.load_entry.is_none());
-
-    let ds = record
+/// Theme-side roles keyed by token name, as declared by a theme package.
+fn declared_roles(specifier: &str, dir: &str) -> std::collections::BTreeMap<String, [u8; 4]> {
+    let record =
+        assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+    record
         .contributions
-        .ui_design_system
-        .as_ref()
-        .expect("@clay/design-glass must contribute uiDesignSystem");
+        .design_tokens
+        .iter()
+        .map(|descriptor| {
+            let clay::packages::record::DesignTokenValueDescriptor::Color(rgba) = descriptor.value
+            else {
+                panic!(
+                    "{specifier} role `{}` must be a color (the language's theme-side roles are colors)",
+                    descriptor.token
+                );
+            };
+            (descriptor.token.clone(), rgba)
+        })
+        .collect()
+}
 
-    assert_eq!(ds.id, "@clay/design-glass");
-    assert_eq!(ds.schema_version, 1);
-    assert_eq!(ds.display_name, "Glass (Reference)");
-    assert!(
-        ds.recipe_count >= 25,
-        "must contain at least 25 component recipes, got {}",
-        ds.recipe_count
+/// Plan 118 task 13: the shipped themes implement the approved board exactly.
+/// Each theme's typed `designTokens` are the board's 13 role values, and its
+/// `textStyles` depth pair is the board's canvas/panel pair — which is the
+/// Gruvbox Material Dark `shellBg`/`panelBg` swap, the one correction the board
+/// names outside the token list. A silent value change fails here rather than
+/// drifting from the user-approved artifact.
+#[test]
+fn shipped_theme_roles_match_the_approved_board() {
+    let board = approved_theme_board();
+    let themes = board["themes"]
+        .as_object()
+        .expect("board carries a `themes` object");
+    let board_specifiers: std::collections::BTreeSet<&str> =
+        themes.keys().map(String::as_str).collect();
+    let bundled: std::collections::BTreeSet<&str> = super::package_ui_conformance::BUNDLED_THEMES
+        .iter()
+        .map(|(specifier, _)| *specifier)
+        .collect();
+    assert_eq!(
+        board_specifiers, bundled,
+        "the approved board and the bundled theme set must name the same packages"
     );
 
-    // Verify raw JSON contains zero literal color strings (#..., rgb, hsl)
-    let decl_str = &ds.declaration_json;
-    assert!(
-        !decl_str.contains("\"#"),
-        "design system must not contain literal hex colors"
-    );
-    assert!(
-        !decl_str.contains("rgb("),
-        "design system must not contain rgb() colors"
-    );
-    assert!(
-        !decl_str.contains("hsl("),
-        "design system must not contain hsl() colors"
-    );
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let approved = &themes[*specifier];
 
-    // Parse declaration and verify Glass geometry, blur boundaries, and highlights
-    let decl: clay::shell::design_system::UiDesignSystemDeclaration =
-        serde_json::from_str(decl_str).expect("declaration_json must deserialize cleanly");
-    assert_eq!(decl.schema_version, 1);
+        let board_roles: std::collections::BTreeMap<String, [u8; 4]> = approved["tokens"]
+            .as_object()
+            .expect("theme entry carries `tokens`")
+            .iter()
+            .map(|(token, value)| {
+                (
+                    token.clone(),
+                    parse_board_hex(value.as_str().expect("token value is a string")),
+                )
+            })
+            .collect();
+        assert_eq!(
+            declared_roles(specifier, dir),
+            board_roles,
+            "{specifier} must declare the approved board's role values verbatim"
+        );
 
-    // Performance Invariant: Editor text and scroll container must NOT apply backdrop blur
-    for (key, recipe) in &decl.recipes {
-        let key_str = key.to_string();
-        if key_str.starts_with("editor.") || key_str.starts_with("scroll.") {
+        // Depth direction (DESIGN.md §10.2): the canvas is the editor `shellBg`
+        // and the chrome the `panelBg`, on every theme. Gruvbox Material Dark
+        // shipped the inverted pair before this task.
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let style = |key: &str| {
+            record
+                .contributions
+                .text_styles
+                .iter()
+                .find(|entry| entry.token == key)
+                .and_then(|entry| entry.color)
+                .unwrap_or_else(|| panic!("{specifier} must declare `{key}`"))
+        };
+        assert_eq!(
+            style("shellBg"),
+            parse_board_hex(approved["canvas"].as_str().expect("canvas is a string")),
+            "{specifier} `shellBg` must be the approved canvas"
+        );
+        assert_eq!(
+            style("panelBg"),
+            parse_board_hex(approved["panel"].as_str().expect("panel is a string")),
+            "{specifier} `panelBg` must be the approved chrome"
+        );
+
+        // Paint path: the resolved snapshot the client projects into `--clay-*`
+        // custom properties carries the theme's own values for these roles, not a
+        // core-fallback substitute, and it resolves under the contrast gate.
+        let resolved = clay::shell::theme::resolve_theme_token_snapshot(
+            &super::package_ui_conformance::theme_active_theme(specifier, &record),
+        )
+        .unwrap_or_else(|failure| {
+            panic!(
+                "{specifier} resolved palette fails {}/{} ({:.2} < {:.1})",
+                failure.foreground, failure.background, failure.ratio, failure.threshold
+            )
+        });
+        for (token, value) in approved["tokens"].as_object().expect("theme tokens") {
+            let expected = value.as_str().expect("token value is a string");
+            match resolved.get(token) {
+                Some(clay::shell::theme::ThemeTokenValueDto::Color(css)) => assert!(
+                    css.eq_ignore_ascii_case(expected),
+                    "{specifier} resolves `{token}` to {css}, board says {expected}"
+                ),
+                other => panic!("{specifier} `{token}` must resolve to a colour, got {other:?}"),
+            }
+        }
+    }
+}
+
+/// Plan 118 task 13: the four themes' role *language*, independent of the exact
+/// values — the border ladder is one grey at two strengths, one accent drives
+/// every accent-driven role, the state fills are opaque, and the scrim never
+/// lightens the canvas. These are the invariants that make the values a system
+/// rather than 52 independent colours.
+#[test]
+fn shipped_theme_roles_obey_the_language() {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let roles = declared_roles(specifier, dir);
+        let role = |token: &str| -> [u8; 4] {
+            *roles
+                .get(token)
+                .unwrap_or_else(|| panic!("{specifier} must declare `{token}`"))
+        };
+
+        // Ladder: one grey, quiet step at 34 % and structural step at full
+        // strength; `border.strong` is the theme's ink (DESIGN.md §10.1).
+        let hairline = role("border.hairline");
+        let subtle = role("border.subtle");
+        assert_eq!(
+            &hairline[..3],
+            &subtle[..3],
+            "{specifier} `border.hairline` must be the structural grey, not a second colour"
+        );
+        assert_eq!(
+            hairline[3], 0x57,
+            "{specifier} hairline must sit at 34 % alpha"
+        );
+        assert_eq!(
+            subtle[3], 0xff,
+            "{specifier} `border.subtle` must be opaque"
+        );
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let ink = record
+            .contributions
+            .text_styles
+            .iter()
+            .find(|entry| entry.token == "text")
+            .and_then(|entry| entry.color)
+            .unwrap_or_else(|| panic!("{specifier} must declare `text`"));
+        assert_eq!(
+            role("border.strong"),
+            ink,
+            "{specifier} `border.strong` must be the theme's ink"
+        );
+
+        // One accent drives every accent-driven role; the muted step is the same
+        // hue one alpha step down, so an accent change cannot leave a stale ring.
+        let accent = role("accent.primary");
+        assert_eq!(
+            role("focus.ring"),
+            accent,
+            "{specifier} focus ring is the accent"
+        );
+        assert_eq!(
+            role("border.focus"),
+            accent,
+            "{specifier} focus border is the accent"
+        );
+        let muted = role("accent.muted");
+        assert_eq!(
+            &muted[..3],
+            &accent[..3],
+            "{specifier} muted accent is the same hue"
+        );
+        assert_eq!(
+            muted[3], 0xbf,
+            "{specifier} muted accent must sit at 75 % alpha"
+        );
+        assert_eq!(
+            accent[3], 0xff,
+            "{specifier} `accent.primary` must be opaque"
+        );
+
+        // State fills are opaque and mutually distinct (DESIGN.md §10.3): a
+        // translucent fill lets the surface behind it decide the contrast, and
+        // one shared value makes hover, press and selection indistinguishable.
+        let fills = [
+            role("surface.hover"),
+            role("surface.active"),
+            role("surface.selected"),
+        ];
+        for (index, fill) in fills.iter().enumerate() {
             assert_eq!(
-                recipe.backdrop_blur.unwrap_or(0.0),
-                0.0,
-                "Recipe {key_str} in scrolling/editor path must have backdrop_blur 0.0 for 60fps performance"
+                fill[3], 0xff,
+                "{specifier} state fill {index} must be opaque"
+            );
+        }
+        assert!(
+            fills[0] != fills[1] && fills[1] != fills[2] && fills[0] != fills[2],
+            "{specifier} hover/active/selected must be distinct fills"
+        );
+
+        // Two text steps, and a scrim that dims rather than lightens the canvas
+        // (the dimming colour is the theme's own call — pure black on the light
+        // themes, the chrome on Gruvbox Material Dark).
+        assert_ne!(
+            role("text.muted"),
+            role("text.disabled"),
+            "{specifier} muted and disabled text must be different steps"
+        );
+        let canvas = *record
+            .contributions
+            .text_styles
+            .iter()
+            .find(|entry| entry.token == "shellBg")
+            .and_then(|entry| entry.color)
+            .unwrap_or_else(|| panic!("{specifier} must declare `shellBg`"))
+            .first_chunk::<4>()
+            .expect("RGBA");
+        let scrim = role("surface.scrim");
+        assert!(
+            clay::editor::theme::relative_luminance(clay::color::Color::from_rgba8(
+                scrim[0], scrim[1], scrim[2], scrim[3]
+            )) <= clay::editor::theme::relative_luminance(clay::color::Color::from_rgba8(
+                canvas[0], canvas[1], canvas[2], canvas[3]
+            )),
+            "{specifier} `surface.scrim` must not be lighter than the canvas"
+        );
+    }
+}
+
+/// Plan 118 task 13: the shipped values are not merely decorative — the AA gate
+/// rejects a theme whose own role values fall below the floor. Mutating one
+/// shipped `accent.primary` to one shipped `surface.main` collapses the pair to
+/// 1:1 and must be rejected by name before it can be installed.
+#[test]
+fn shipped_theme_accent_below_the_floor_is_rejected() {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let canvas = record
+            .contributions
+            .text_styles
+            .iter()
+            .find(|entry| entry.token == "shellBg")
+            .and_then(|entry| entry.color)
+            .unwrap_or_else(|| panic!("{specifier} must declare `shellBg`"));
+        let mut snapshot = super::package_ui_conformance::theme_active_theme(specifier, &record);
+        let accent = snapshot
+            .design_tokens
+            .iter_mut()
+            .find(|override_entry| override_entry.token == "accent.primary")
+            .expect("theme declares accent.primary");
+        accent.value = WireDesignTokenValue::Color(canvas);
+
+        let failure = validate_active_theme_contrast(&snapshot).expect_err(&format!(
+            "{specifier}: accent.primary painted onto the canvas must be rejected"
+        ));
+        assert_eq!(failure.foreground, "accent.primary", "{specifier}");
+        assert_eq!(failure.background, "surface.main", "{specifier}");
+        assert_eq!(failure.threshold, 3.0, "{specifier}");
+        assert!(
+            failure.ratio < 3.0,
+            "{specifier} mutated ratio {:.2} must be below the UI floor",
+            failure.ratio
+        );
+    }
+}
+
+/// Plan 118 task 14: the border ladder is monotonic on every surface a boundary
+/// is drawn against. A hairline that is louder than the structural boundary, or
+/// a `border.strong` that is quieter than `border.subtle`, is a language
+/// violation even when each value clears its own floor — the levels stop
+/// meaning anything.
+#[test]
+fn shipped_theme_border_ladder_is_monotonic() {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let resolved = clay::shell::theme::resolve_theme_token_snapshot(
+            &super::package_ui_conformance::theme_active_theme(specifier, &record),
+        )
+        .unwrap_or_else(|failure| {
+            panic!(
+                "{specifier} resolved palette fails {}/{} ({:.2} < {:.1})",
+                failure.foreground, failure.background, failure.ratio, failure.threshold
+            )
+        });
+        let color = |role: &str| {
+            let value = resolved
+                .get(role)
+                .unwrap_or_else(|| panic!("{specifier} must resolve `{role}`"));
+            let clay::shell::theme::ThemeTokenValueDto::Color(css) = value else {
+                panic!("{specifier} `{role}` must resolve to a colour, got {value:?}");
+            };
+            let [r, g, b, a] = parse_board_hex(css);
+            clay::color::Color::from_rgba8(r, g, b, a)
+        };
+        let ratio = |role: &str, surface: &str| {
+            clay::editor::theme::composited_contrast_ratio(color(role), color(surface))
+        };
+
+        for surface in ["surface.main", "surface.panel"] {
+            let hairline = ratio("border.hairline", surface);
+            let subtle = ratio("border.subtle", surface);
+            let strong = ratio("border.strong", surface);
+            assert!(
+                hairline < subtle && subtle < strong,
+                "{specifier} on {surface}: hairline {hairline:.2} < subtle {subtle:.2} < strong {strong:.2}"
             );
         }
     }
+}
 
-    // Modal dialog must have frosted glass properties (blur > 0, inner highlight)
-    let modal_key = clay::shell::design_system::RecipeKey::new(
-        "modal",
-        "default",
-        "dialog",
-        clay::shell::design_system::RecipeState::Rest,
-    );
-    let modal_dialog = decl
-        .recipes
-        .get(&modal_key)
-        .expect("modal dialog recipe must exist");
-    assert!(
-        modal_dialog.backdrop_blur.unwrap_or(0.0) >= 16.0,
-        "modal dialog must have blur >= 16.0"
-    );
-    assert!(
-        modal_dialog.inner_highlight.is_some(),
-        "modal dialog must have inner highlight for optical refraction"
-    );
+/// Plan 118 task 14: a structural boundary that cannot be seen is rejected by
+/// name, with the measured ratio. Mutating a shipped `border.subtle` to the
+/// theme's own canvas collapses it to exactly 1:1 — the pre-migration failure
+/// the board measured at 1.84–2.74:1.
+#[test]
+fn shipped_theme_invisible_boundary_is_rejected() {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let canvas = record
+            .contributions
+            .text_styles
+            .iter()
+            .find(|entry| entry.token == "shellBg")
+            .and_then(|entry| entry.color)
+            .unwrap_or_else(|| panic!("{specifier} must declare `shellBg`"));
+
+        // Both structural roles, on both surfaces. The gate reports the first
+        // failing pair it walks into, so the surface named is whichever comes
+        // first in the policy table — the ratio is the claim that matters.
+        for role in ["border.subtle", "border.strong"] {
+            let mut snapshot =
+                super::package_ui_conformance::theme_active_theme(specifier, &record);
+            let boundary = snapshot
+                .design_tokens
+                .iter_mut()
+                .find(|override_entry| override_entry.token == role)
+                .unwrap_or_else(|| panic!("{specifier} declares {role}"));
+            boundary.value = WireDesignTokenValue::Color(canvas);
+
+            let failure = validate_active_theme_contrast(&snapshot).expect_err(&format!(
+                "{specifier}: {role} painted onto the canvas must be rejected"
+            ));
+            assert_eq!(failure.foreground, role, "{specifier}");
+            assert!(
+                ["surface.main", "surface.panel"].contains(&failure.background),
+                "{specifier} {role} failed against {}, not a boundary surface",
+                failure.background
+            );
+            assert_eq!(failure.threshold, 3.0, "{specifier}");
+            assert!(
+                failure.ratio < 1.2,
+                "{specifier} mutated {role}/{} ratio {:.2} must collapse",
+                failure.background,
+                failure.ratio
+            );
+        }
+    }
+}
+
+/// Plan 118 task 14: the hairline is exempt from the 3:1 boundary floor but not
+/// from being visible. Its shipped value clears the 1.2:1 visibility floor on
+/// both surfaces; an opaque hairline painted in the canvas colour does not, and
+/// is rejected by name.
+#[test]
+fn shipped_theme_invisible_hairline_is_rejected() {
+    for (specifier, dir) in super::package_ui_conformance::BUNDLED_THEMES {
+        let record =
+            assemble_package_record(&read_theme_package(specifier, dir)).expect("theme validates");
+        let canvas = record
+            .contributions
+            .text_styles
+            .iter()
+            .find(|entry| entry.token == "shellBg")
+            .and_then(|entry| entry.color)
+            .unwrap_or_else(|| panic!("{specifier} must declare `shellBg`"));
+        let resolved = clay::shell::theme::resolve_theme_token_snapshot(
+            &super::package_ui_conformance::theme_active_theme(specifier, &record),
+        )
+        .expect("shipped palette resolves");
+        let hairline = resolved
+            .get("border.hairline")
+            .expect("border.hairline resolves");
+        let clay::shell::theme::ThemeTokenValueDto::Color(css) = hairline else {
+            panic!("{specifier} `border.hairline` must be a colour, got {hairline:?}");
+        };
+        let [r, g, b, a] = parse_board_hex(css);
+        assert!(
+            a < 0xff,
+            "{specifier} shipped hairline must keep its 34 % alpha, got {css}"
+        );
+        let shipped = clay::editor::theme::composited_contrast_ratio(
+            clay::color::Color::from_rgba8(r, g, b, a),
+            clay::color::Color::from_rgba8(canvas[0], canvas[1], canvas[2], canvas[3]),
+        );
+        assert!(
+            shipped >= 1.2,
+            "{specifier} shipped hairline is {shipped:.2}:1 on the canvas, below the 1.2 visibility floor"
+        );
+
+        // Opaque canvas colour: invisible by construction.
+        let mut snapshot = super::package_ui_conformance::theme_active_theme(specifier, &record);
+        let invisible = snapshot
+            .design_tokens
+            .iter_mut()
+            .find(|override_entry| override_entry.token == "border.hairline")
+            .expect("theme declares border.hairline");
+        invisible.value = WireDesignTokenValue::Color(canvas);
+
+        let failure = validate_active_theme_contrast(&snapshot).expect_err(&format!(
+            "{specifier}: an invisible hairline must be rejected"
+        ));
+        assert_eq!(failure.foreground, "border.hairline", "{specifier}");
+        assert_eq!(failure.threshold, 1.2, "{specifier}");
+        assert!(
+            failure.ratio < 1.2,
+            "{specifier} invisible hairline measured {:.2}",
+            failure.ratio
+        );
+    }
 }

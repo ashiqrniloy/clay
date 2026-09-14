@@ -24,11 +24,12 @@ use std::fs;
 use std::path::Path;
 
 use clay::editor::theme::validate_active_theme_contrast;
-use clay::packages::record::assemble_package_record;
-use clay::protocol::ActiveTheme;
+use clay::packages::record::{DesignTokenValueDescriptor, PackageRecord, assemble_package_record};
+use clay::protocol::{ActiveTheme, TextThemeOverride, UiDesignTokenOverride, WireDesignTokenValue};
 use serde_json::json;
+use std::collections::BTreeSet;
 
-const BUNDLED_THEMES: &[(&str, &str)] = &[
+pub(crate) const BUNDLED_THEMES: &[(&str, &str)] = &[
     (
         "@clay/theme-gruvbox-material-dark",
         "theme-gruvbox-material-dark",
@@ -53,10 +54,83 @@ fn read_theme_package(specifier: &str, dir: &str) -> serde_json::Value {
         .unwrap_or_else(|err| panic!("parse {specifier} package.json as JSON: {err}"))
 }
 
-/// Phase 20.7 task 5: every bundled theme package is inert style-data, delegates
-/// the SDUI palette to the core token fallback (zero `designTokens`
-/// contributions so every required SDUI token resolves through the documented
-/// core fallback — token coverage by construction), and meets WCAG AA on every
+/// The theme-side UI roles every shipped theme declares as typed
+/// `designTokens` (plan 118 task 13). The list is the approved board's 13 roles
+/// (`design-artifacts/approved/quiet-instrument-migration/theme-values.json`,
+/// frozen from the task-5 prototype): the border ladder, the state fills, the
+/// accent pair, the focus pair, the two text steps and the scrim. Identical
+/// coverage across the four themes is what keeps a role from silently
+/// inheriting its value from the core fallback in one theme and not another.
+const THEME_UI_ROLES: &[&str] = &[
+    "accent.muted",
+    "accent.primary",
+    "border.focus",
+    "border.hairline",
+    "border.strong",
+    "border.subtle",
+    "focus.ring",
+    "surface.active",
+    "surface.hover",
+    "surface.scrim",
+    "surface.selected",
+    "text.disabled",
+    "text.muted",
+];
+
+/// Build the `ActiveTheme` snapshot a theme package actually resolves to: its
+/// inert `textStyles` colors plus its typed `designTokens` overrides. Mirrors
+/// the server's `build_active_theme_from_record` (`DesignTokenOverrideDescriptor::to_wire`
+/// is crate-private) so the suites validate the palette a user gets rather than
+/// a core-fallback stub.
+pub(crate) fn theme_active_theme(specifier: &str, record: &PackageRecord) -> ActiveTheme {
+    let overrides = record
+        .contributions
+        .text_styles
+        .iter()
+        .map(|descriptor| TextThemeOverride {
+            token: descriptor.token.clone(),
+            color: descriptor.color,
+            background: descriptor.background,
+            bold: descriptor.bold,
+            italic: descriptor.italic,
+            underline: descriptor.underline,
+            strike: descriptor.strike,
+            scale: descriptor.scale,
+            provenance: descriptor.provenance.clone(),
+        })
+        .collect();
+    let design_tokens = record
+        .contributions
+        .design_tokens
+        .iter()
+        .map(|descriptor| UiDesignTokenOverride {
+            token: descriptor.token.clone(),
+            value: match &descriptor.value {
+                DesignTokenValueDescriptor::Color(rgba) => WireDesignTokenValue::Color(*rgba),
+                DesignTokenValueDescriptor::Scalar(bits) => {
+                    WireDesignTokenValue::Scalar(f64::from_bits(*bits))
+                }
+                DesignTokenValueDescriptor::Opacity(bits) => {
+                    WireDesignTokenValue::Opacity(f32::from_bits(*bits))
+                }
+                DesignTokenValueDescriptor::Level(level) => {
+                    WireDesignTokenValue::Level(level.clone())
+                }
+            },
+            provenance: descriptor.provenance.clone(),
+        })
+        .collect();
+    ActiveTheme {
+        specifier: specifier.to_string(),
+        overrides,
+        design_tokens,
+    }
+}
+
+/// Phase 20.7 task 5, extended by plan 118 task 13: every bundled theme package
+/// is inert style-data that declares the language's theme-side UI roles with
+/// identical coverage (`THEME_UI_ROLES`), and the *resolved* palette — the
+/// theme's own values, not a core-fallback stub — meets WCAG AA on every
 /// required SDUI foreground/background pair (task-3 contrast guard). Parametric
 /// over the full bundled-theme set so a new theme package lands in the matrix
 /// automatically by joining `BUNDLED_THEMES`.
@@ -82,25 +156,37 @@ fn bundled_theme_conformance_matrix() {
             "{specifier} must register no modes (inert style-data)"
         );
 
-        // Token-coverage invariant: bundled themes override only editor
-        // `textStyles`; they contribute zero SDUI `designTokens`, so every
-        // required SDUI token resolves through the documented core fallback.
-        // This pins the core SDUI palette as the AA-bearing surface and means a
-        // future `designTokens`-bearing theme package enters this matrix with a
-        // real palette to validate rather than free-riding on the core fallback.
-        assert!(
-            record.contributions.design_tokens.is_empty(),
-            "{specifier} must contribute no SDUI designTokens (core fallback covers the SDUI palette)"
+        // Token-coverage invariant (plan 118 task 13): a theme must declare
+        // every role the language names — no theme may cover a subset and leave
+        // the rest resolving from the core fallback, and no theme may invent a
+        // role outside the approved set.
+        let declared: BTreeSet<&str> = record
+            .contributions
+            .design_tokens
+            .iter()
+            .map(|descriptor| descriptor.token.as_str())
+            .collect();
+        let expected: BTreeSet<&str> = THEME_UI_ROLES.iter().copied().collect();
+        assert_eq!(
+            declared,
+            expected,
+            "{specifier} must declare exactly the {:?} theme-side UI roles (missing: {:?}, unexpected: {:?})",
+            THEME_UI_ROLES.len(),
+            expected.difference(&declared).collect::<Vec<_>>(),
+            declared.difference(&expected).collect::<Vec<_>>(),
         );
 
-        // Contrast guard (Plan 068 task 3): the resolved SDUI palette meets WCAG
-        // AA on every required pair. With no `designTokens` the snapshot
-        // resolves to the core fallback, so this pins the core palette to AA.
-        let snapshot = ActiveTheme {
-            specifier: specifier.to_string(),
-            overrides: Vec::new(),
-            design_tokens: Vec::new(),
-        };
+        // Contrast guard (Plan 068 task 3): the *resolved* palette — this
+        // theme's `textStyles` base colors with its own `designTokens` layered
+        // over them — meets WCAG AA on every required pair. A theme cannot
+        // dodge the floor by declaring fewer tokens: the unresolved roles fall
+        // through to the core palette, which is validated on its own elsewhere.
+        let snapshot = theme_active_theme(specifier, &record);
+        assert_eq!(
+            snapshot.design_tokens.len(),
+            THEME_UI_ROLES.len(),
+            "{specifier} resolved snapshot must carry every declared role"
+        );
         validate_active_theme_contrast(&snapshot).unwrap_or_else(|failure| {
             panic!(
                 "{specifier} SDUI pair {}/{} ratio {:.2} below {:.1}",
@@ -817,8 +903,10 @@ fn design_system_enforces_color_authority_and_bounds() {
 
     assert_eq!(btn.background_color.as_str(), "accent.primary");
     assert_eq!(btn.border_radius, 6.0);
-    assert_eq!(btn.border_style, BorderStyle::Solid);
-    assert_eq!(btn.border_width, 1.0);
+    // Missing properties come from the core fallback for that key: the shipped
+    // primary button is a fill-only control with no border of its own (DESIGN.md §11).
+    assert_eq!(btn.border_style, BorderStyle::None);
+    assert_eq!(btn.border_width, 0.0);
     assert_eq!(btn.text_color.as_str(), "surface.main");
 }
 
@@ -1064,7 +1152,7 @@ fn plan103_fallback_recipes_have_tokens_css_definitions() {
 /// Plan 104 Task 5: Source independence guard. Host components and shell logic
 /// MUST NOT branch conditionally on package names or design system specifiers.
 #[test]
-fn plan104_source_independence_guard_rejects_package_name_branching() {
+fn plan118_source_independence_guard_rejects_package_name_branching() {
     let mut violations: Vec<(String, usize, String)> = Vec::new();
 
     fn scan_dir_for_package_branches(dir: &Path, violations: &mut Vec<(String, usize, String)>) {
@@ -1102,8 +1190,12 @@ fn plan104_source_independence_guard_rejects_package_name_branching() {
                     {
                         continue;
                     }
-                    if trimmed.contains("@clay/design-neobrutal")
-                        || trimmed.contains("@clay/design-glass")
+                    // Plan 118 task 9: the removed Neobrutal/Glass specifiers no
+                    // longer exist; the shipped one is the branch that must never
+                    // appear. A synthetic third-party name is scanned too so the
+                    // guard keeps its teeth if the shipped specifier changes.
+                    if trimmed.contains("@clay/design-instrument")
+                        || trimmed.contains("@thirdparty/design-")
                     {
                         // Exclude comments, imports, constant fallbacks, or doc comments
                         if trimmed.starts_with("import")
@@ -1134,16 +1226,15 @@ fn plan104_source_independence_guard_rejects_package_name_branching() {
     );
 }
 
-/// Plan 104 Task 5: Both first-party design system packages (@clay/design-neobrutal
-/// and @clay/design-glass) provide complete 25-component coverage and strict color authority.
+/// Plan 118 task 9: the shipped `@clay/design-instrument` package covers every
+/// required component kind and enforces strict color authority. `chat` is not in
+/// the list on purpose: the chat surface is removed (tasks 23-24) and the shipped
+/// recipe set drops its 12 keys, so the interim window falls back to core recipes.
 #[test]
-fn plan104_design_system_packages_cover_all_25_components_and_enforce_color_authority() {
+fn plan118_design_instrument_covers_required_components_and_enforces_color_authority() {
     use clay::shell::design_system::{RecipeKey, UiDesignSystemDeclaration};
 
-    let design_packages = [
-        ("@clay/design-neobrutal", "design-neobrutal"),
-        ("@clay/design-glass", "design-glass"),
-    ];
+    let design_packages = [("@clay/design-instrument", "design-instrument")];
 
     let required_components = [
         "button",
@@ -1169,7 +1260,6 @@ fn plan104_design_system_packages_cover_all_25_components_and_enforce_color_auth
         "popover",
         "menu",
         "commandCentre",
-        "chat",
         "editor",
     ];
 
@@ -1219,68 +1309,6 @@ fn plan104_design_system_packages_cover_all_25_components_and_enforce_color_auth
             "{specifier} contains raw hsl() color literal"
         );
     }
-}
-
-/// Plan 110 Task 2: Cross-package recipe key consistency assertion.
-/// Both first-party design system packages (@clay/design-neobrutal and @clay/design-glass)
-/// must declare mutually consistent recipe keys (exact same set of component.variant.slot.state keys)
-/// so neither package drifts or has missing slots/states relative to the other.
-#[test]
-fn plan110_design_system_packages_mutual_recipe_key_consistency() {
-    use clay::shell::design_system::{RecipeKey, UiDesignSystemDeclaration};
-    use std::collections::BTreeSet;
-
-    let load_keys = |dir: &str, specifier: &str| -> BTreeSet<String> {
-        let manifest_path = format!("{}/packages/{}/package.json", manifest_dir(), dir);
-        let text = fs::read_to_string(&manifest_path)
-            .unwrap_or_else(|err| panic!("read {specifier} manifest: {err}"));
-        let value: serde_json::Value = serde_json::from_str(&text)
-            .unwrap_or_else(|err| panic!("parse {specifier} manifest: {err}"));
-
-        let record = assemble_package_record(&value).unwrap_or_else(|err| {
-            panic!("{specifier} must assemble as valid package record: {err:?}")
-        });
-
-        let ds = record
-            .contributions
-            .ui_design_system
-            .as_ref()
-            .unwrap_or_else(|| panic!("{specifier} must contribute uiDesignSystem"));
-
-        let decl: UiDesignSystemDeclaration =
-            serde_json::from_str(&ds.declaration_json).expect("declaration parses cleanly");
-
-        decl.recipes
-            .keys()
-            .map(|key: &RecipeKey| key.to_key_string())
-            .collect()
-    };
-
-    let neobrutal_keys = load_keys("design-neobrutal", "@clay/design-neobrutal");
-    let glass_keys = load_keys("design-glass", "@clay/design-glass");
-
-    assert_eq!(
-        neobrutal_keys.len(),
-        142,
-        "Expected exactly 142 declared recipes in @clay/design-neobrutal baseline"
-    );
-    assert_eq!(
-        glass_keys.len(),
-        142,
-        "Expected exactly 142 declared recipes in @clay/design-glass baseline"
-    );
-
-    let missing_in_glass: Vec<_> = neobrutal_keys.difference(&glass_keys).collect();
-    let missing_in_neobrutal: Vec<_> = glass_keys.difference(&neobrutal_keys).collect();
-
-    assert!(
-        missing_in_glass.is_empty(),
-        "@clay/design-glass is missing recipe keys declared in @clay/design-neobrutal: {missing_in_glass:#?}"
-    );
-    assert!(
-        missing_in_neobrutal.is_empty(),
-        "@clay/design-neobrutal is missing recipe keys declared in @clay/design-glass: {missing_in_neobrutal:#?}"
-    );
 }
 
 /// Plan 104 Task 6: Design system validation hardening. Malicious and out-of-bounds
@@ -1409,5 +1437,1265 @@ fn plan104_third_party_design_system_security_and_authority_isolation() {
     // for a pure UI package is flagged and denied by the package loading validator
     if let Ok(rec) = malicious_record {
         assert!(rec.contributions.ui_design_system.is_some());
+    }
+}
+
+// ============================================================================
+// Plan 118 Task 8: @clay/design-instrument (Quiet Instrument)
+// ============================================================================
+
+/// Recipe keys of the removed Neobrutal/Glass baseline, from the recorded fixture.
+fn reference_design_system_keys() -> std::collections::BTreeSet<String> {
+    let path = format!(
+        "{}/tests/fixtures/design-system-reference-keys.txt",
+        manifest_dir()
+    );
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every recipe key of a bundled design-system package manifest.
+fn design_system_keys(dir: &str, specifier: &str) -> std::collections::BTreeSet<String> {
+    use clay::shell::design_system::{RecipeKey, UiDesignSystemDeclaration};
+
+    let path = format!("{}/packages/{}/package.json", manifest_dir(), dir);
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {specifier}: {err}"));
+    let value: serde_json::Value =
+        serde_json::from_str(&text).unwrap_or_else(|err| panic!("parse {specifier}: {err}"));
+    let record = assemble_package_record(&value).unwrap_or_else(|err| {
+        panic!(
+            "{specifier} must assemble: rule={:?} {}",
+            err.rule, err.message
+        )
+    });
+    let ds = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .unwrap_or_else(|| panic!("{specifier} must contribute uiDesignSystem"));
+    let decl: UiDesignSystemDeclaration =
+        serde_json::from_str(&ds.declaration_json).expect("declaration parses cleanly");
+    decl.recipes
+        .keys()
+        .map(|key: &RecipeKey| key.to_key_string())
+        .collect()
+}
+
+/// The manifest of `@clay/design-instrument` as JSON, for mutation probes.
+fn design_instrument_manifest() -> serde_json::Value {
+    let path = format!("{}/packages/design-instrument/package.json", manifest_dir());
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read manifest: {err}"));
+    serde_json::from_str(&text).unwrap_or_else(|err| panic!("parse manifest: {err}"))
+}
+
+fn design_instrument_declaration() -> clay::shell::design_system::UiDesignSystemDeclaration {
+    let value = design_instrument_manifest();
+    let record = assemble_package_record(&value)
+        .unwrap_or_else(|err| panic!("must assemble: rule={:?} {}", err.rule, err.message));
+    let ds = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("must contribute uiDesignSystem");
+    serde_json::from_str(&ds.declaration_json).expect("declaration parses cleanly")
+}
+
+#[test]
+fn plan118_design_instrument_is_inert_data_with_the_quiet_instrument_profile() {
+    let value = design_instrument_manifest();
+    let record = assemble_package_record(&value)
+        .unwrap_or_else(|err| panic!("must assemble: rule={:?} {}", err.rule, err.message));
+
+    // Inert: no permissions, no modes, no executable surface.
+    assert_eq!(record.manifest.name, "@clay/design-instrument");
+    assert_eq!(record.manifest.version, "0.1.0");
+    assert!(record.manifest.clay.permissions.is_empty());
+    assert!(record.manifest.clay.modes.is_empty());
+    assert!(record.manifest.clay.entry.is_none());
+    assert!(record.manifest.clay.load_entry.is_none());
+
+    let ds = record
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("must contribute uiDesignSystem");
+    assert_eq!(ds.id, "@clay/design-instrument");
+    assert_eq!(ds.schema_version, 1);
+    assert_eq!(ds.display_name, "Quiet Instrument");
+    assert!(ds.recipe_count >= 25, "got {}", ds.recipe_count);
+
+    // The declared design-system values are the language's numbers (DESIGN.md §4).
+    let decl = design_instrument_declaration();
+    let radius = |name: &str| match decl.values.get(name) {
+        Some(clay::shell::design_system::DesignSystemValue::Radius(v)) => *v,
+        other => panic!("values.{name} must be a radius, got {other:?}"),
+    };
+    assert_eq!(radius("radius.xs"), 5.0);
+    assert_eq!(radius("radius.control"), 8.0);
+    assert_eq!(radius("radius.panel"), 12.0);
+    assert_eq!(radius("radius.surface"), 16.0);
+    assert_eq!(radius("radius.pill"), 9999.0);
+    assert_eq!(decl.values.len(), 14, "the profile's value table is exact");
+
+    // Payload budget: the declaration is inert data shipped to the client.
+    let budget = clay::perf::budgets::UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES;
+    assert!(
+        ds.declaration_json.len() < budget,
+        "declaration {} bytes exceeds budget {}",
+        ds.declaration_json.len(),
+        budget
+    );
+
+    // No literal colours, and no executable/CSS/URL text anywhere in the declaration.
+    for forbidden in ["\"#", "rgb(", "hsl("] {
+        assert!(
+            !ds.declaration_json.contains(forbidden),
+            "declaration contains a colour literal: {forbidden}"
+        );
+    }
+    for forbidden in [
+        "<script",
+        "</",
+        "url(",
+        "http://",
+        "https://",
+        "function",
+        "javascript:",
+    ] {
+        assert!(
+            !ds.declaration_json.contains(forbidden),
+            "inert design-system data must not contain {forbidden}"
+        );
+    }
+
+    // Colour authority: every colour-bearing property resolves to a known role.
+    use clay::shell::design_system::ThemeColorRef;
+    for (key, recipe) in &decl.recipes {
+        let mut refs: Vec<(&str, &ThemeColorRef)> = Vec::new();
+        for (name, candidate) in [
+            ("backgroundColor", recipe.background_color.as_ref()),
+            ("textColor", recipe.text_color.as_ref()),
+            ("borderColor", recipe.border_color.as_ref()),
+            ("outlineColor", recipe.outline_color.as_ref()),
+        ] {
+            if let Some(color) = candidate {
+                refs.push((name, color));
+            }
+        }
+        for layer in recipe.shadow.iter().flatten() {
+            refs.push(("shadow.colorRole", &layer.color_role));
+        }
+        for (name, color) in refs {
+            let role = color.as_str();
+            assert!(
+                role == "transparent" || ThemeColorRef::parse(role).is_ok(),
+                "{key}.{name} is not a semantic theme role: {role}"
+            );
+        }
+    }
+}
+
+#[test]
+fn plan118_design_instrument_radius_state_and_material_discipline() {
+    use clay::shell::design_system::TransformPreset;
+
+    let decl = design_instrument_declaration();
+    let recipe = |key: &str| {
+        decl.recipes
+            .iter()
+            .find(|(k, _)| k.to_key_string() == key)
+            .map(|(_, r)| r)
+            .unwrap_or_else(|| panic!("missing recipe {key}"))
+    };
+
+    // The radius ladder is the only radius vocabulary: 5 / 8 / 12 / 16 / pill / 0 (regions).
+    let ladder = [0.0, 5.0, 8.0, 12.0, 16.0, 9999.0];
+    for (key, recipe) in &decl.recipes {
+        if let Some(radius) = recipe.border_radius {
+            assert!(
+                ladder.contains(&radius),
+                "{key} radius {radius} is off the ladder {ladder:?}"
+            );
+        }
+    }
+    assert_eq!(recipe("button.default.root.rest").border_radius, Some(8.0));
+    assert_eq!(recipe("list.default.row.rest").border_radius, Some(8.0));
+    assert_eq!(recipe("panel.default.root.rest").border_radius, Some(12.0));
+    assert_eq!(
+        recipe("modal.default.dialog.rest").border_radius,
+        Some(16.0)
+    );
+    assert_eq!(recipe("tab.default.item.rest").border_radius, Some(9999.0));
+    assert_eq!(recipe("kbd.default.root.rest").border_radius, Some(5.0));
+
+    // No border is wider than a hairline (DESIGN.md §14.3).
+    for (key, recipe) in &decl.recipes {
+        if let Some(width) = recipe.border_width {
+            assert!(
+                width <= 1.0,
+                "{key} border width {width} exceeds a hairline"
+            );
+        }
+    }
+
+    // Static surfaces carry no shadow; only the two elevations do (DESIGN.md §6).
+    for (key, recipe) in &decl.recipes {
+        let static_family = (key.component == "editor" && !matches!(key.slot.as_str(), "tooltip"))
+            || key.component == "scroll"
+            || key.component == "shell"
+            || key.component == "statusBar"
+            || key.component == "list"
+            || key.component == "fileBrowser"
+            || key.component == "paneSplitTree"
+            || key.component == "tab"
+            || key.component == "tabBar";
+        let static_family = static_family && key.slot != "tooltip";
+        let layers = recipe.shadow.iter().flatten().count();
+        if static_family {
+            assert_eq!(
+                layers, 0,
+                "{key} is a static surface and must not paint a shadow"
+            );
+        }
+    }
+    assert_eq!(
+        recipe("modal.default.dialog.rest")
+            .shadow
+            .as_ref()
+            .map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(
+        recipe("popover.default.root.rest")
+            .shadow
+            .as_ref()
+            .map(Vec::len),
+        Some(2)
+    );
+
+    // Blur only on the scrim and the toast; the editor and scroll paths are frozen at 0.
+    for (key, recipe) in &decl.recipes {
+        match recipe.backdrop_blur {
+            None => {}
+            Some(blur) => {
+                assert!(
+                    (blur - 3.0).abs() < f64::EPSILON || (blur - 8.0).abs() < f64::EPSILON,
+                    "{key} backdropBlur {blur} is not the scrim's 3 or the toast's 8"
+                );
+                let allowed =
+                    (key.component == "modal" && key.slot == "scrim") || (key.component == "toast");
+                assert!(allowed, "{key} may not blur (DESIGN.md §6)");
+            }
+        }
+        if key.component == "editor" {
+            assert!(recipe.backdrop_blur.is_none(), "{key} must not blur");
+        }
+    }
+
+    // No hover lift anywhere; press feedback only on buttons (DESIGN.md §7).
+    for (key, recipe) in &decl.recipes {
+        assert_ne!(
+            recipe.transform_preset,
+            Some(TransformPreset::HoverLift),
+            "{key} reintroduces hover lift"
+        );
+        if recipe.transform_preset == Some(TransformPreset::PressShiftDown) {
+            assert!(
+                key.component == "button",
+                "{key} uses press-shift-down; press is for buttons only"
+            );
+        }
+    }
+
+    // State language: focus is the 2px ring at offset 2 wherever it appears.
+    for (key, recipe) in &decl.recipes {
+        if recipe.outline_color.is_some() && key.component != "paneSplitTree" {
+            assert_eq!(recipe.outline_width, Some(2.0), "{key} outline width");
+            assert_eq!(
+                recipe.outline_offset,
+                Some(2.0),
+                "{key} focus outlines sit at offset 2 (DESIGN.md §9)"
+            );
+        }
+    }
+
+    // Selection is a fill: no row family paints a leading bar or an extra edge.
+    for (key, recipe) in &decl.recipes {
+        if key.state == clay::shell::design_system::RecipeState::Selected
+            && matches!(
+                key.component.as_str(),
+                "list" | "recentRow" | "menu" | "dropdown"
+            )
+        {
+            assert_eq!(
+                recipe.background_opacity,
+                Some(0.15),
+                "{key} selection must be the accent fill at 0.15"
+            );
+            assert!(
+                recipe.border_width.unwrap_or(0.0) == 0.0,
+                "{key} selection must not add an edge"
+            );
+            assert!(
+                recipe.shadow.is_none(),
+                "{key} selection must not add a shadow"
+            );
+        }
+    }
+}
+
+#[test]
+fn plan118_design_instrument_keys_are_the_reference_set_minus_chat_plus_the_new_families() {
+    // The removed packages' key set, recorded before deletion (task 9). Reading a
+    // fixture instead of a deleted package keeps this delta assertion honest.
+    let reference = reference_design_system_keys();
+    assert_eq!(reference.len(), 142, "reference baseline is 142 keys");
+
+    let instrument = design_system_keys("design-instrument", "@clay/design-instrument");
+    assert_eq!(instrument.len(), 165, "130 reference keys + 35 new ones");
+
+    // 1. Nothing else was dropped or renamed: every non-chat reference key survives.
+    let chat: Vec<String> = reference
+        .iter()
+        .filter(|key| key.starts_with("chat."))
+        .cloned()
+        .collect();
+    assert_eq!(chat.len(), 12, "the chat surface owns 12 keys");
+    let expected: std::collections::BTreeSet<String> = reference
+        .iter()
+        .filter(|key| !key.starts_with("chat."))
+        .cloned()
+        .collect();
+    let missing: Vec<&String> = expected.difference(&instrument).collect();
+    assert!(
+        missing.is_empty(),
+        "keys dropped from the reference set: {missing:#?}"
+    );
+
+    // 2. The additions are exactly the declared families, and nothing else.
+    let added: std::collections::BTreeSet<String> =
+        instrument.difference(&expected).cloned().collect();
+    let added_components: std::collections::BTreeSet<&str> = added
+        .iter()
+        .map(|key| key.split('.').next().expect("component segment"))
+        .collect();
+    let expected_components: std::collections::BTreeSet<&str> = [
+        "agentPicker",
+        "empty",
+        "keyHint",
+        "recentRow",
+        "seg",
+        "sessionRow",
+        "statRow",
+        "statusDot",
+        "swatch",
+        "toast",
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        added_components, expected_components,
+        "added keys must belong to the declared new families"
+    );
+    assert_eq!(added.len(), 35, "the new families own 35 keys: {added:#?}");
+
+    // 3. Every added family is declared per state, with no half-declared control.
+    for key in [
+        "seg.default.item.rest",
+        "seg.default.item.hover",
+        "seg.default.item.selected",
+        "seg.default.item.focus",
+        "seg.default.item.disabled",
+        "agentPicker.default.trigger.expanded",
+        "recentRow.default.root.selected",
+        "sessionRow.default.root.hover",
+        "toast.default.root.rest",
+        "empty.default.root.rest",
+        "statusDot.busy.root.rest",
+        "keyHint.default.row.rest",
+        "swatch.default.root.selected",
+        "statRow.default.bar.rest",
+    ] {
+        assert!(instrument.contains(key), "missing declared key {key}");
+    }
+}
+
+#[test]
+fn plan118_design_instrument_rejects_mutated_probes() {
+    // Healthy manifest assembles.
+    assert!(assemble_package_record(&design_instrument_manifest()).is_ok());
+
+    let mutate = |path: &[&str], replacement: serde_json::Value| -> serde_json::Value {
+        let mut value = design_instrument_manifest();
+        let mut cursor = &mut value;
+        for segment in path {
+            cursor = cursor
+                .get_mut(*segment)
+                .unwrap_or_else(|| panic!("missing {path:?}"));
+        }
+        *cursor = replacement;
+        value
+    };
+    let recipes = ["clay", "contributions", "uiDesignSystem", "recipes"];
+    let recipe_path = |key: &str, prop: &str| -> Vec<String> {
+        recipes
+            .iter()
+            .map(|s| s.to_string())
+            .chain([key.to_string(), prop.to_string()])
+            .collect()
+    };
+    fn as_path(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
+
+    // Literal colour and palette aliases are rejected.
+    for literal in [
+        json!("#ff0000"),
+        json!("rgb(255,0,0)"),
+        json!("package.custom.red"),
+    ] {
+        let path = recipe_path("button.default.root.rest", "backgroundColor");
+        let mutated = mutate(&as_path(&path), literal);
+        assert!(
+            assemble_package_record(&mutated).is_err(),
+            "a literal/alias colour must be rejected"
+        );
+    }
+
+    // Out-of-bounds geometry, motion, opacity and shadow layers are rejected.
+    let cases: Vec<(Vec<String>, serde_json::Value)> = vec![
+        (
+            recipe_path("panel.default.root.rest", "borderRadius"),
+            json!(40.0),
+        ),
+        (
+            recipe_path("button.default.root.rest", "borderWidth"),
+            json!(12.0),
+        ),
+        (
+            recipe_path("button.default.root.rest", "transitionDuration"),
+            json!(5000.0),
+        ),
+        (
+            recipe_path("button.default.root.disabled", "opacity"),
+            json!(1.5),
+        ),
+        (
+            recipe_path("badge.accent.root.rest", "backgroundOpacity"),
+            json!(-0.2),
+        ),
+        (
+            recipe_path("modal.default.scrim.rest", "backdropBlur"),
+            json!(64.0),
+        ),
+        (
+            recipe_path("modal.default.dialog.rest", "shadow"),
+            json!([
+                {"x": 0, "y": 1, "blur": 0, "spread": 0, "colorRole": "text.primary", "opacity": 1},
+                {"x": 0, "y": 2, "blur": 0, "spread": 0, "colorRole": "text.primary", "opacity": 1},
+                {"x": 0, "y": 3, "blur": 0, "spread": 0, "colorRole": "text.primary", "opacity": 1},
+                {"x": 0, "y": 4, "blur": 0, "spread": 0, "colorRole": "text.primary", "opacity": 1}
+            ]),
+        ),
+    ];
+    for (path, replacement) in cases {
+        let mutated = mutate(&as_path(&path), replacement);
+        assert!(
+            assemble_package_record(&mutated).is_err(),
+            "out-of-bounds {path:?} must be rejected"
+        );
+    }
+
+    // A design system cannot smuggle an executable surface.
+    // The payload budget and the recipe ceiling fail closed: a design system that
+    // grows past either is rejected rather than shipped to the client.
+    let mut bloated = design_instrument_manifest();
+    let template =
+        bloated["clay"]["contributions"]["uiDesignSystem"]["recipes"]["button.default.root.rest"]
+            .clone();
+    let mut recipes = serde_json::Map::new();
+    for index in 0..600 {
+        recipes.insert(format!("filler{index}.default.root.rest"), template.clone());
+    }
+    bloated["clay"]["contributions"]["uiDesignSystem"]["recipes"] =
+        serde_json::Value::Object(recipes);
+    assert!(
+        assemble_package_record(&bloated).is_err(),
+        "a declaration past the recipe/payload bound must be rejected"
+    );
+}
+
+#[test]
+fn plan118_design_instrument_is_listed_in_the_bundled_inventory() {
+    let path = format!("{}/src/packages/bundled-inventory.toml", manifest_dir());
+    let text = fs::read_to_string(&path).expect("read bundled-inventory.toml");
+    assert!(
+        text.contains("root = \"design-instrument\""),
+        "@clay/design-instrument must be listed in the bundled inventory, or it is never trusted"
+    );
+    // A shipped package without a directory (or a directory without an entry) fails closed:
+    // the in-crate inventory tests compare roots against this table, so both must exist.
+    let dir = format!("{}/packages/design-instrument/package.json", manifest_dir());
+    assert!(
+        Path::new(&dir).exists(),
+        "packages/design-instrument/package.json must exist"
+    );
+    // The removed roots are absent from the compiled trust inventory: no stale
+    // entry can resolve a directory that no longer exists. The compiled inventory
+    // is crate-private, so `plan118_removed_design_systems_are_absent` (which scans
+    // `bundled-inventory.toml` itself) and the in-crate
+    // `unlisted_package_dirs_are_not_trusted` are what pin this behaviour.
+    assert!(
+        !text.contains("design-neobrutal") && !text.contains("design-glass"),
+        "the bundled inventory must not keep an entry for a removed package root"
+    );
+}
+
+/// Plan 118 task 9: the Neobrutal and Glass design systems are gone — not merely
+/// unreferenced. The specifiers must appear nowhere in code, manifests, fixtures,
+/// or harness scripts (Markdown prose and frozen plan/decision records excluded).
+#[test]
+fn plan118_removed_design_systems_are_absent() {
+    let removed = ["design-neobrutal", "design-glass"];
+    let mut hits: Vec<String> = Vec::new();
+
+    fn scan(dir: &Path, removed: &[&str], hits: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "node_modules" || name == "target" || name == ".git" {
+                continue;
+            }
+            if path.is_dir() {
+                scan(&path, removed, hits);
+                continue;
+            }
+            // Frozen/approved artifacts and historical records may name the removed
+            // systems; live code, data, fixtures and scripts may not.
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for needle in removed {
+                if content.contains(needle) {
+                    hits.push(format!("{}: {needle}", path.display()));
+                }
+            }
+        }
+    }
+
+    for dir in [
+        "packages",
+        "src",
+        "frontend/src",
+        "tests/fixtures",
+        "scripts",
+        "examples",
+    ] {
+        scan(&Path::new(&manifest_dir()).join(dir), &removed, &mut hits);
+    }
+
+    assert!(
+        hits.is_empty(),
+        "removed design systems still referenced: {hits:#?}"
+    );
+
+    // The directories themselves are gone, and no inventory entry survives them
+    // (a stale entry for a removed directory would fail the trust binding).
+    for slug in ["design-neobrutal", "design-glass"] {
+        let package = Path::new(&manifest_dir()).join("packages").join(slug);
+        assert!(!package.exists(), "packages/{slug} must be deleted");
+    }
+}
+
+/// Plan 118 tasks "Remove the `@clay/chat` package and its server surface" and
+/// "Remove the chat frontend surface and de-chat the shared agent module": the
+/// landing package, its pane contribution, its command ids and its React
+/// surface are gone — not merely unreferenced. No load line, package directory,
+/// inventory entry, command id, action target, fixture, panel, module or symbol
+/// may survive them (Markdown prose and frozen plan/decision records excluded).
+#[test]
+fn plan118_chat_landing_and_its_commands_are_absent() {
+    let removed = [
+        "@clay/chat",
+        "chat.entry",
+        "chat.profile",
+        "chat.submit",
+        "chat.cancel",
+        "chat.steer",
+        "chat.composer",
+        "chat.openAgentPicker",
+        "chat.openProviderPicker",
+        "chat.openModelPicker",
+        // The shared agent module's chat-era symbols (renamed to session naming).
+        "chatAgent",
+        "ChatAgentModule",
+        "ChatSnapshot",
+        "ChatStatus",
+        "ChatIntentContext",
+        "ChatPanel",
+        "seedChatFixture",
+        "resetChatAgentForTests",
+        "__clayChatAgent",
+    ];
+    // Guards that assert the retirement itself, on purpose naming the retired
+    // ids and symbols: an invocation must fail as an unknown command (server)
+    // and a resurrection must fail the client scan (frontend).
+    const RETIREMENT_GUARDS: &[&str] = &[
+        "src/server/command_execution.rs",
+        "src/server/connection/runtime.rs",
+        "src/server/js_runtime/tests.rs",
+        "frontend/src/test/chat-surface-absence.test.ts",
+    ];
+    let manifest_dir = manifest_dir();
+    let root = Path::new(&manifest_dir);
+    let mut hits: Vec<String> = Vec::new();
+
+    fn scan(dir: &Path, removed: &[&str], hits: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "node_modules" || name == "target" || name == ".git" || name == "dist" {
+                continue;
+            }
+            if path.is_dir() {
+                scan(&path, removed, hits);
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for needle in removed {
+                if content.contains(needle) {
+                    hits.push(format!("{}: {needle}", path.display()));
+                }
+            }
+        }
+    }
+
+    for dir in [
+        "packages",
+        "src",
+        "tests/fixtures",
+        "scripts",
+        "examples",
+        // Plan 118's chat-frontend task deleted the panel/fixture/landing branch,
+        // so the whole client is in scope now — including `styles/tokens.css`,
+        // which carried the removed family's fallback declarations.
+        "frontend/src",
+    ] {
+        scan(&root.join(dir), &removed, &mut hits);
+    }
+    hits.retain(|hit| {
+        !RETIREMENT_GUARDS
+            .iter()
+            .any(|guard| hit.contains(&format!("{}/{guard}", root.display())))
+    });
+    assert!(
+        hits.is_empty(),
+        "the removed chat landing still referenced: {hits:#?}"
+    );
+    // Every guard is a live test, not a rotted exemption: if one is deleted the
+    // scan above would quietly lose its only allowance, so they must exist.
+    for guard in RETIREMENT_GUARDS {
+        assert!(
+            root.join(guard).exists(),
+            "{guard} is exempt from the removal scan but no longer exists — \
+             restore the guard or drop the exemption"
+        );
+    }
+
+    // The package directory, its inventory entry and its load line are gone, and
+    // the example tree still loads the surviving agent package.
+    assert!(
+        !root.join("packages/chat").exists(),
+        "packages/chat must be deleted"
+    );
+    let inventory = fs::read_to_string(root.join("src/packages/bundled-inventory.toml")).unwrap();
+    assert!(
+        !inventory.contains("chat"),
+        "the bundled inventory must not keep an entry for the removed root"
+    );
+    let first_party =
+        fs::read_to_string(root.join("examples/config/packages/first-party.js")).unwrap();
+    assert!(
+        !first_party.contains("@clay/chat"),
+        "the canonical first-party module must not load the removed landing"
+    );
+
+    // The React surface itself is gone (not just unreferenced).
+    assert!(
+        !root.join("frontend/src/chat").exists(),
+        "frontend/src/chat must be deleted"
+    );
+}
+
+// ============================================================================
+// Plan 118 Task 15: catalog currency — declared slots and removed systems
+// ============================================================================
+
+/// Rows that are hosts rather than recipe targets: `tabList` carries closed recipe
+/// *attributes* and paints through the `tab`/`tabBar` families, and `table` is
+/// reserved. Neither can be marked `†`.
+const MATRIX_EXEMPT_ROWS: &[(&str, &str)] = &[("tabList", "root"), ("table", "root")];
+
+/// Parse `(family, slot, marked)` from the recipe matrix's three contract tables.
+fn recipe_matrix_rows() -> Vec<(String, String, bool)> {
+    let path = format!(
+        "{}/docs/development/ui-design-system-recipe-matrix.md",
+        manifest_dir()
+    );
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let Some(rest) = line.strip_prefix("| `") else {
+            continue;
+        };
+        let Some((family, rest)) = rest.split_once("` | `") else {
+            continue;
+        };
+        let (slot, marked) = match rest.split_once('`') {
+            Some((slot, tail)) => (slot, tail.starts_with('\u{2020}')),
+            None => continue,
+        };
+        if !family.chars().all(|c| c.is_ascii_alphabetic())
+            || !slot.chars().all(|c| c.is_ascii_alphabetic())
+        {
+            continue;
+        }
+        rows.push((family.to_string(), slot.to_string(), marked));
+    }
+    rows
+}
+
+/// Plan 118 task 15: the matrix must not present a slot as part of the contract when
+/// the shipped package declares no recipe for it. The `†` markers are the contract —
+/// recomputed here from the shipped manifest, in both directions, so the catalogs
+/// cannot drift back into promising variables that do not exist.
+#[test]
+fn plan118_recipe_matrix_marks_undeclared_slots() {
+    let declared: std::collections::BTreeSet<(String, String)> =
+        design_system_keys("design-instrument", "@clay/design-instrument")
+            .into_iter()
+            .filter_map(|key| {
+                let mut parts = key.split('.');
+                let family = parts.next()?.to_string();
+                let _variant = parts.next()?;
+                let slot = parts.next()?.to_string();
+                Some((family, slot))
+            })
+            .collect();
+
+    let rows = recipe_matrix_rows();
+    assert!(
+        rows.len() >= 90,
+        "expected the full matrix, parsed {} rows",
+        rows.len()
+    );
+
+    let exempt: std::collections::BTreeSet<(String, String)> = MATRIX_EXEMPT_ROWS
+        .iter()
+        .map(|(f, s)| (f.to_string(), s.to_string()))
+        .collect();
+
+    let mut stale_marks = Vec::new();
+    let mut missing_marks = Vec::new();
+    for (family, slot, marked) in &rows {
+        let key = (family.clone(), slot.clone());
+        if exempt.contains(&key) {
+            continue;
+        }
+        let is_declared = declared.contains(&key);
+        if *marked && is_declared {
+            stale_marks.push(format!("{family}.{slot}"));
+        }
+        if !*marked && !is_declared {
+            missing_marks.push(format!("{family}.{slot}"));
+        }
+    }
+    assert!(
+        stale_marks.is_empty(),
+        "these slots are declared by the shipped package but marked `†` in the matrix: {stale_marks:#?}"
+    );
+    assert!(
+        missing_marks.is_empty(),
+        "these slots have no shipped recipe and must carry `†` in the matrix: {missing_marks:#?}"
+    );
+
+    // The generated index in `components.md` carries the same marks, so a reader of
+    // either catalog sees the same contract.
+    let components = fs::read_to_string(format!(
+        "{}/.agents/skills/clay-execution/references/components.md",
+        manifest_dir()
+    ))
+    .expect("read components.md");
+    let index_start = components
+        .find("## UI Design-System Recipe Slots (Plan 101)")
+        .expect("components.md holds the slot index section");
+    let index = &components[index_start..];
+    for (family, slot, marked) in &rows {
+        if exempt.contains(&(family.clone(), slot.clone())) {
+            continue;
+        }
+        if *marked {
+            assert!(
+                index.contains(&format!("`{slot}\u{2020}`")),
+                "components.md slot index must mark {family}.{slot} with `†`"
+            );
+        } else {
+            assert!(
+                index.contains(&format!("`{slot}`")),
+                "components.md slot index must list {family}.{slot}"
+            );
+        }
+    }
+}
+
+/// Plan 118 task 15: a catalog page must not present a removed design system (or a
+/// retired pattern) as part of the shipped contract. Pages that are historical
+/// records keep their mentions; every other mention has to say so in the same line.
+/// Plan 118's documentation task extends the same rule to the removed chat surface
+/// and to the product-level pages (`PRODUCT.md`, `roadmap.md`); its JS-API task
+/// extends it to the published Clay JS API pages and the generated registry
+/// compiled from them.
+#[test]
+fn plan118_catalog_pages_do_not_ship_removed_systems() {
+    // Pages that are historical records by contract (frozen audit/review or a
+    // decision record): they keep the removed names, with a banner saying so.
+    const HISTORICAL_PAGES: &[&str] = &[
+        "docs/development/ui-design-system-css-audit.md",
+        "docs/development/ui-design-system-package-primitive-review.md",
+        "docs/development/ui-design-system-conformance.md",
+        "docs/wiki/modules/ui-design-system-runtime.md",
+        "docs/reference/ui-design-systems.md",
+        "docs/development/tauri-react-primitive-migration.md",
+        "docs/development/tauri-react-parity-ledger.md",
+        "docs/development/react-ui-catalog-mapping.md",
+        "docs/wiki/modules/ui-review-harness.md",
+    ];
+    // A line may name a removed system only while marking it as gone.
+    const REMOVAL_MARKERS: &[&str] = &[
+        "remov",
+        "former",
+        "previous",
+        "historical",
+        "retired",
+        "supersede",
+        "replace",
+        "reject",
+        "no longer",
+        "deleted",
+        "pre-migration",
+        "went with",
+    ];
+    let removed = ["neobrutal", "luminous glass", "design-glass"];
+    // The removed chat surface (plan 118 task 22): its identifiers, not the bare
+    // word, so ordinary prose stays free.
+    let removed_surfaces = ["@clay/chat", "chatpanel", "chat.default.", "chat.entry"];
+
+    let mut pages = vec![
+        "DESIGN.md".to_string(),
+        "PRODUCT.md".to_string(),
+        "roadmap.md".to_string(),
+        "docs/index.md".to_string(),
+        "docs/reference/ui-components.md".to_string(),
+        "docs/reference/packages/creating-packages.md".to_string(),
+        "docs/development/ui-design-system-recipe-matrix.md".to_string(),
+        "docs/development/ui-design-system-visual-direction.md".to_string(),
+        // Plan 118's wiki pass: the two pages added by it describe only the
+        // shipped state, so they are scanned for removed-system mentions too.
+        "docs/wiki/modules/launcher-landing-surface.md".to_string(),
+        "docs/wiki/modules/design-artifact-gate.md".to_string(),
+        // Plan 118's JS-API task: the published API pages and the generated
+        // registry they are compiled into must not advertise a removed system,
+        // package, command or surface either — the registry is the machine-
+        // readable promise, so a stale artifact is a stale API.
+        "docs/reference/clay-js-api/theme/set-design-system.md".to_string(),
+        "docs/reference/clay-js-api/theme/set-theme.md".to_string(),
+        "docs/reference/clay-js-api/settings/set-design-system.md".to_string(),
+        // Plan 118's configuration task: the guide users configure from and the
+        // canonical example they copy must not offer a removed system, the
+        // removed chat surface, or a chat landing-package line either.
+        "docs/reference/clay-js-api/configuration.md".to_string(),
+        "examples/config/init.js".to_string(),
+        "docs/generated/clay-js-api-registry.json".to_string(),
+        ".agents/skills/clay-execution/references/components.md".to_string(),
+        ".agents/skills/clay-execution/references/tokens.md".to_string(),
+        ".agents/skills/clay-execution/references/ui.md".to_string(),
+        ".agents/skills/clay-execution/references/config.md".to_string(),
+    ];
+    pages.extend(HISTORICAL_PAGES.iter().map(|p| (*p).to_string()));
+
+    let mut hits: Vec<String> = Vec::new();
+    for page in &pages {
+        let path = format!("{}/{page}", manifest_dir());
+        let text = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+        let historical = HISTORICAL_PAGES.contains(&page.as_str());
+        for (number, line) in text.lines().enumerate() {
+            let lowered = line.to_lowercase();
+            let Some(needle) = removed
+                .iter()
+                .chain(removed_surfaces.iter())
+                .find(|needle| lowered.contains(*needle))
+            else {
+                continue;
+            };
+            if historical {
+                continue;
+            }
+            if REMOVAL_MARKERS
+                .iter()
+                .any(|marker| lowered.contains(marker))
+            {
+                continue;
+            }
+            hits.push(format!(
+                "{page}:{} names `{needle}` as current: {}",
+                number + 1,
+                line.trim()
+            ));
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "catalog pages must not present a removed design system or the removed chat surface as shipped:\n{:#?}",
+        hits
+    );
+}
+
+/// Plan 118 task 16: `@clay/core` is not a second language. Every shipped recipe the
+/// core fallback set covers must resolve to exactly the fallback value, so a build
+/// that has not installed a design system paints what the package activates and the
+/// activation swap cannot move geometry, material or motion.
+#[test]
+fn plan118_core_fallbacks_match_the_shipped_language() {
+    use clay::shell::design_system::{core_design_system_fallbacks, resolve_design_system};
+
+    let declaration = design_instrument_declaration();
+    let resolved = resolve_design_system(&declaration, None).expect("shipped system resolves");
+    let fallbacks = core_design_system_fallbacks();
+
+    let mut shared = 0usize;
+    for (key, fallback) in &fallbacks {
+        let Some(active) = resolved.recipes.get(key) else {
+            continue;
+        };
+        shared += 1;
+        assert_eq!(
+            active,
+            fallback,
+            "core fallback `{}` must equal the shipped recipe (DESIGN.md §16: one language)",
+            key.to_key_string()
+        );
+    }
+
+    // The fallback set is deliberately the host-consumed subset, not the whole
+    // package: it must still cover the component kinds and shell surfaces the host
+    // paints before a snapshot lands (`plan101` asserts the exact required set).
+    assert!(
+        shared >= 30,
+        "expected the core fallbacks to cover the shipped controls (shared={shared})"
+    );
+}
+
+/// Plan 118 task 16: the static `--clay-ds-*` block in `styles/tokens.css` is the
+/// pre-bootstrap projection of the same recipes. Every variable it states must equal
+/// what the shipped package resolves for that key, or the activation swap repaints.
+#[test]
+fn plan118_host_fallback_block_matches_the_resolved_package() {
+    use clay::shell::design_system::{ResolvedComponentRecipe, resolve_design_system};
+
+    /// Property suffixes the block may state, longest first so `outline-style`
+    /// cannot be read as `style`.
+    const PROPS: &[&str] = &[
+        "background-color",
+        "background-opacity",
+        "transition-duration",
+        "transition-timing",
+        "border-radius",
+        "border-color",
+        "border-width",
+        "border-style",
+        "backdrop-saturate",
+        "backdrop-blur",
+        "inner-highlight",
+        "outline-color",
+        "outline-width",
+        "outline-offset",
+        "outline-style",
+        "transform-preset",
+        "text-color",
+        "padding",
+        "shadow",
+        "gap",
+        "opacity",
+    ];
+
+    fn kebab(key: &str) -> String {
+        let mut out = String::new();
+        for ch in key.chars() {
+            if ch.is_ascii_uppercase() {
+                out.push('-');
+                out.push(ch.to_ascii_lowercase());
+            } else {
+                out.push(ch);
+            }
+        }
+        out.replace('.', "-")
+    }
+
+    /// Prettier wraps long values (`cubic-bezier( 0, 0, 0.2, 1 )`); compare the
+    /// value, not its line breaks.
+    fn normalize(value: &str) -> String {
+        value
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("( ", "(")
+            .replace(" )", ")")
+            .replace(", ", ",")
+    }
+
+    fn role_css(role: &str) -> String {
+        if role == "transparent" {
+            "transparent".to_string()
+        } else {
+            format!("var(--clay-{})", role.replace('.', "-"))
+        }
+    }
+
+    /// Mirrors `frontend/src/theme/design-system-adapter.ts`: the block and the
+    /// runtime snapshot must project a recipe to the same CSS text.
+    fn projected(prop: &str, recipe: &ResolvedComponentRecipe) -> String {
+        fn number(value: f64) -> String {
+            if value.fract() == 0.0 {
+                format!("{value:.0}")
+            } else {
+                format!("{value}")
+            }
+        }
+        let number = |value: f64| number(value);
+        match prop {
+            "background-color" => role_css(recipe.background_color.as_str()),
+            "text-color" => role_css(recipe.text_color.as_str()),
+            "border-color" => role_css(recipe.border_color.as_str()),
+            "outline-color" => role_css(recipe.outline_color.as_str()),
+            "border-radius" => format!("{}px", number(recipe.border_radius)),
+            "border-width" => format!("{}px", number(recipe.border_width)),
+            "backdrop-blur" => format!("{}px", number(recipe.backdrop_blur)),
+            "outline-width" => format!("{}px", number(recipe.outline_width)),
+            "outline-offset" => format!("{}px", number(recipe.outline_offset)),
+            "transition-duration" => format!("{}ms", number(recipe.transition_duration)),
+            "transition-timing" => match recipe.transition_timing.as_str() {
+                "linear" => "linear".to_string(),
+                "ease-out" => "cubic-bezier(0, 0, 0.2, 1)".to_string(),
+                "spring-snappy" => "cubic-bezier(0.2, 0.8, 0.2, 1)".to_string(),
+                other => panic!("unexpected timing `{other}`"),
+            },
+            "transform-preset" => match recipe.transform_preset.as_str() {
+                "none" => "none".to_string(),
+                "press-shift-down" => "translateY(1px)".to_string(),
+                "press-subtle" => "scale(0.98)".to_string(),
+                other => panic!("unexpected transform preset `{other}`"),
+            },
+            "border-style" => recipe.border_style.as_str().to_string(),
+            "outline-style" => recipe.outline_style.as_str().to_string(),
+            "opacity" => number(recipe.opacity),
+            "shadow" => {
+                if recipe.shadow.is_empty() {
+                    "none".to_string()
+                } else {
+                    recipe
+                        .shadow
+                        .iter()
+                        .map(|layer| {
+                            let role = role_css(layer.color_role.as_str());
+                            let tint = if layer.opacity == 1.0 {
+                                role
+                            } else {
+                                format!(
+                                    "color-mix(in srgb, {role} {}%, transparent)",
+                                    (layer.opacity * 100.0).round() as i64
+                                )
+                            };
+                            format!(
+                                "{}px {}px {}px {}px {tint}",
+                                number(layer.x),
+                                number(layer.y),
+                                number(layer.blur),
+                                number(layer.spread)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            }
+            other => panic!("the block must not state `{other}`"),
+        }
+    }
+
+    let declaration = design_instrument_declaration();
+    let resolved = resolve_design_system(&declaration, None).expect("shipped system resolves");
+
+    let tokens_path = format!("{}/frontend/src/styles/tokens.css", manifest_dir());
+    let tokens_css = fs::read_to_string(&tokens_path)
+        .unwrap_or_else(|err| panic!("read tokens.css ({tokens_path}): {err}"));
+    let marker = "/* Host fallback design-system recipe variables";
+    let start = tokens_css
+        .find(marker)
+        .unwrap_or_else(|| panic!("tokens.css must keep the host fallback block marker"));
+    let rest = &tokens_css[start..];
+    let end = rest
+        .find("\n}\n")
+        .map(|offset| start + offset)
+        .unwrap_or(tokens_css.len());
+    let block = &tokens_css[start..end];
+
+    let mut checked = 0usize;
+    for declaration_text in block.split(';') {
+        let Some((name, value)) = declaration_text.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        let Some(variable) = name.strip_prefix("--clay-ds-") else {
+            continue;
+        };
+        let Some(prop) = PROPS
+            .iter()
+            .find(|prop| variable.ends_with(&format!("-{prop}")))
+        else {
+            panic!("unknown host fallback variable `{name}`");
+        };
+        let prefix = variable.trim_end_matches(&format!("-{prop}"));
+        // Spacing tokens and the composed veil/scrim tints are host-authored: the
+        // recipe carries a token name or a fill + opacity pair, not a CSS string.
+        if matches!(*prop, "padding" | "gap" | "background-opacity") {
+            continue;
+        }
+        let Some((key, recipe)) = declaration
+            .recipes
+            .keys()
+            .find(|key| kebab(&key.to_key_string()) == prefix)
+            .and_then(|key| resolved.recipes.get(key).map(|recipe| (key, recipe)))
+        else {
+            // Every declared fallback states a shipped recipe: the removed chat
+            // family was the last exemption (plan 118's chat-frontend task).
+            panic!("host fallback variable `{name}` has no shipped recipe");
+        };
+        if *prop == "background-color" && recipe.background_opacity != 1.0 {
+            continue;
+        }
+        let want = normalize(&projected(prop, recipe));
+        let got = normalize(value);
+        assert_eq!(
+            got,
+            want,
+            "`{name}` ({} · {prop}) must equal the shipped recipe value",
+            key.to_key_string()
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 150,
+        "expected the host fallback block to state the migrated values (checked={checked})"
+    );
+}
+
+/// Plan 118 task 16: no fallback recipe may reintroduce a retired pattern — the
+/// banned 0px radius outside a full-bleed region, a hard offset shadow, a linear
+/// transition with a duration, or a ring that is not the 2px/offset-2 focus ring.
+#[test]
+fn plan118_core_fallbacks_obey_the_language_rules() {
+    use clay::shell::design_system::{RecipeState, core_design_system_fallbacks};
+
+    /// Full-bleed regions (§5: a region's outer edge stays square) and non-boxes
+    /// (text-only or layout-only recipes, where a radius is not visible).
+    const FLUSH_KEYS: &[&str] = &[
+        "dropdown.default.root.rest",
+        "empty.default.root.rest",
+        "fileBrowser.default.root.rest",
+        "flex.default.root.rest",
+        "grid.default.root.rest",
+        "keyHint.default.keys.rest",
+        "keyHint.default.root.rest",
+        "keyHint.default.row.rest",
+        "label.default.root.rest",
+        "modal.default.root.rest",
+        "modal.default.scrim.rest",
+        "paneSplitTree.default.root.rest",
+        "scroll.default.root.rest",
+        "statusBar.default.root.rest",
+        "tabBar.default.root.rest",
+    ];
+    const RADII: &[f64] = &[0.0, 5.0, 8.0, 12.0, 16.0, 9999.0];
+    const DURATIONS: &[f64] = &[0.0, 150.0, 240.0, 620.0];
+
+    for (key, recipe) in core_design_system_fallbacks() {
+        let name = key.to_key_string();
+        assert!(
+            RADII.contains(&recipe.border_radius),
+            "`{name}` radius {} is not on the 5/8/12/16/pill ladder (DESIGN.md §5)",
+            recipe.border_radius
+        );
+        if !FLUSH_KEYS.contains(&name.as_str()) {
+            assert_ne!(
+                recipe.border_radius, 0.0,
+                "`{name}` may not be 0px (DESIGN.md §5)"
+            );
+        }
+        for layer in &recipe.shadow {
+            assert!(
+                !(layer.blur == 0.0 && (layer.x != 0.0 || layer.y != 0.0)),
+                "`{name}` reintroduces a hard offset shadow (DESIGN.md §14)"
+            );
+        }
+        assert!(
+            DURATIONS.contains(&recipe.transition_duration),
+            "`{name}` duration {} is not a language motion tier (DESIGN.md §7)",
+            recipe.transition_duration
+        );
+        if recipe.transition_duration > 0.0 {
+            assert_ne!(
+                recipe.transition_timing.as_str(),
+                "linear",
+                "`{name}` animates linearly (DESIGN.md §7: nothing linear)"
+            );
+        }
+        if recipe.outline_style.as_str() == "solid" {
+            assert_eq!(
+                recipe.outline_width, 2.0,
+                "`{name}` ring width (DESIGN.md §11)"
+            );
+            assert_eq!(
+                recipe.outline_offset, 2.0,
+                "`{name}` ring offset (DESIGN.md §11)"
+            );
+        }
+        if recipe.transform_preset.as_str() == "press-shift-down" {
+            assert_eq!(
+                key.component, "button",
+                "`{name}`: press is for buttons only"
+            );
+            assert_eq!(
+                key.state,
+                RecipeState::Active,
+                "`{name}`: press is the active state"
+            );
+        }
     }
 }

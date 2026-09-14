@@ -2833,7 +2833,7 @@ documentation_path = "docs/reference/clay-js-api/theme/set-design-system.md"
 key_bindings = []
 custom_properties = ["specifier:string=required"]
 permissions = []
-security_notes = "Activates inert recipe data that may select among active-theme color roles and set bounded non-color values but never contains concrete colors, so color authority stays with the active theme and no raw CSS is possible. @clay/core is built in; other specifiers must already be enabled package records or are adopted through the package service's existing enable/trust path with no automatic trust promotion. On failure or package revocation the previous valid design system is preserved and a sanitized diagnostic surfaces; missing recipes resolve through @clay/core fallbacks. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority."
+security_notes = "Activates inert recipe data that may select among active-theme color roles and set bounded non-color values but never contains concrete colors, so color authority stays with the active theme and no raw CSS is possible. @clay/core is built in and always selectable; a bundled @clay/ specifier (the shipped @clay/design-instrument) resolves through the first-party bundled record path with its manifest read and nothing installed, and a third-party specifier must be an installed package that still passes the package service's existing enable/trust validation - selection itself never installs, adopts, or enables a capability, and there is no automatic trust promotion. On failure or package revocation the previous valid design system is preserved and a sanitized diagnostic surfaces; missing recipes resolve through @clay/core fallbacks. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority."
 current_rust_owner = "src/server/ops/theme.rs::op_clay_theme_set_design_system"
 registry_public = true
 
@@ -3492,7 +3492,7 @@ backing_rust = "src/client_commands.rs::EditorClientCommand"
 deno_op = "op_clay_keybindings_bind_key"
 deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
 documentation_path = "docs/reference/clay-js-api/shell/client-tab-activate.md"
-key_bindings = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"]
+key_bindings = ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "Ctrl+Alt+4", "Ctrl+Alt+5", "Ctrl+Alt+6", "Ctrl+Alt+7", "Ctrl+Alt+8", "Ctrl+Alt+9"]
 custom_properties = []
 permissions = []
 security_notes = "Bindable client UI command ID only; The numbered family is documented in the page body. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority."

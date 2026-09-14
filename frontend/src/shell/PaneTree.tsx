@@ -3,6 +3,7 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { ClayButton, ClayText } from "../components";
 import type { PackageSurface, PackageUiSnapshot } from "../sdui/types";
+import type { TabAgent } from "./tab-store";
 import { ClayEditor } from "../editor/ClayEditor";
 import type { SplitNode } from "./split-tree";
 import type { PaneRecord, TabRuntime } from "./workspace-controller";
@@ -16,27 +17,24 @@ const PackageSurfaceView = lazy(async () => {
   return { default: module.PackageSurfaceView };
 });
 
-const ChatPanel = lazy(async () => {
-  const module = await import("../chat/ChatPanel");
-  return { default: module.ChatPanel };
+const LauncherPanel = lazy(async () => {
+  const module = await import("../launcher/LauncherPanel");
+  return { default: module.LauncherPanel };
 });
 
-const CodingAgentPanel = lazy(async () => {
-  const module = await import("../coding-agent/CodingAgentPanel");
-  return { default: module.CodingAgentPanel };
-});
+/** First-party pane surfaces the host renders itself: exact package
+ *  provenance *and* trusted-domain status, never a name match alone. Any
+ *  other package's contribution (pane or empty-tab) renders through the
+ *  generic SDUI view. */
+const HOST_RENDERED_SURFACES: Record<string, string> = {
+  "@clay/coding-agent": "coding-agent",
+  "@clay/launcher": "launcher",
+};
 
-/** Trusted `@clay/coding-agent` pane surface, if the package contributed one. */
-function codingAgentSurface(
-  packageUi: PackageUiSnapshot | null,
-): PackageSurface | null {
-  return (
-    packageUi?.surfaces?.find(
-      (surface) =>
-        surface.provenance.packageName === "@clay/coding-agent" &&
-        surface.provenance.trustDomain === "trusted",
-    ) ?? null
-  );
+/** Which host panel renders a package's surface, if any. */
+export function hostRenderedSurface(surface: PackageSurface): string | null {
+  if (surface.provenance.trustDomain !== "trusted") return null;
+  return HOST_RENDERED_SURFACES[surface.provenance.packageName] ?? null;
 }
 
 export interface PaneTreeProps {
@@ -48,7 +46,12 @@ export interface PaneTreeProps {
   onOpenPath: (path: string) => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
-  onLaunchAgent: () => void;
+  /** Attach a server-listed agent to this tab (the launcher's agent pane). */
+  onPickAgent: (agent: TabAgent) => void;
+  /** Launcher: pick a server-listed workspace root for this tab. */
+  onOpenWorkspace: (root: string) => Promise<void> | void;
+  /** Render the launcher for an empty pane (uncommitted tab only). */
+  showLauncher: boolean;
   packageUi: PackageUiSnapshot | null;
   uiVersion: number;
 }
@@ -56,19 +59,21 @@ export interface PaneTreeProps {
 /** Plan 109 I4: the coding-agent surface's effort-cycle chord, read from
  *  the pane session's behavior manifest so `bindKey` overrides apply.
  *  Default `Shift+Tab` when unbound. */
-function effortChordOf(pane: {
+export function effortChordOf(pane: {
   session: { behaviorManifest(): { keymaps?: unknown } };
 }): EffortChord | null {
   const keymaps =
     (pane.session.behaviorManifest().keymaps as
-      | Array<{ commandId: string; sequence?: ServerKeyStroke[] }>
-      | undefined) ?? [];
+      Array<{ commandId: string; sequence?: ServerKeyStroke[] }> | undefined) ??
+    [];
   const binding = keymaps.find(
     (entry) => entry.commandId === "coding-agent.clientCycleEffort",
   );
   const stroke = binding?.sequence?.at(-1);
-  if (!stroke) return { shift: true, ctrl: false, alt: false, meta: false, key: "Tab" };
-  const raw = typeof stroke.key === "string" ? stroke.key : stroke.key.character;
+  if (!stroke)
+    return { shift: true, ctrl: false, alt: false, meta: false, key: "Tab" };
+  const raw =
+    typeof stroke.key === "string" ? stroke.key : stroke.key.character;
   if (raw.length === 0) return null;
   return {
     shift: stroke.modifiers.shift,
@@ -86,8 +91,9 @@ function PaneContent({
   onOpenPath,
   onOpenFile,
   onOpenFolder,
-  onLaunchAgent,
-  runtime,
+  onPickAgent,
+  onOpenWorkspace,
+  showLauncher,
 }: {
   pane: PaneRecord;
   packageUi: PackageUiSnapshot | null;
@@ -95,7 +101,9 @@ function PaneContent({
   onOpenPath: (path: string) => void;
   onOpenFile: () => void;
   onOpenFolder: () => void;
-  onLaunchAgent: () => void;
+  onPickAgent: (agent: TabAgent) => void;
+  onOpenWorkspace: (root: string) => Promise<void> | void;
+  showLauncher: boolean;
   runtime: TabRuntime;
   /** Plan 109 I4: effective effort-cycle chord from the manifest. */
   effortChord: EffortChord | null;
@@ -105,56 +113,17 @@ function PaneContent({
     pane.session.store.get,
   );
   const empty = !meta?.path && pane.session.snapshotDoc().length === 0;
-  // Coding Agent split surface (plan 108 task 8): launched per pane via the
-  // `coding-agent.profile` command; provenance-exact host rendering like the
-  // chat landing, generic SDUI renderer for every other package.
-  if (
-    runtime.agentSurfaceOpen &&
-    runtime.agentSurfacePaneId === pane.paneId &&
-    packageUi
-  ) {
-    const surface = codingAgentSurface(packageUi);
-    if (surface) {
-      const isBundledAgent =
-        surface.provenance.packageName === "@clay/coding-agent" &&
-        surface.provenance.trustDomain === "trusted";
-      return (
-        <Suspense
-          fallback={
-            <div className={styles.empty} role="status">
-              <ClayText variant="body" muted>
-                Loading package surface…
-              </ClayText>
-            </div>
-          }
-        >
-          {isBundledAgent ? (
-            <CodingAgentPanel
-              surface={surface}
-              uiVersion={uiVersion}
-              workspaceRoot={runtime.workspaceRoot}
-              session={pane.session}
-              send={pane.session.request}
-              effortChord={effortChordOf(pane)}
-            />
-          ) : (
-            <PackageSurfaceView
-              surface={surface}
-              uiVersion={uiVersion}
-              send={pane.session.request}
-            />
-          )}
-        </Suspense>
-      );
-    }
-  }
-  if (empty && packageUi?.emptyTab) {
-    // Provenance-exact host rendering for the bundled chat landing
-    // (Phase 10). Every other package keeps the inert SDUI renderer.
+  // The launcher is the landing of an *uncommitted* tab (plan 118 task 33): a
+  // tab that has picked neither a folder nor an agent. With either half picked
+  // the pane is an ordinary empty editor — the tab now has a context, and the
+  // launcher's rows would be a second, stale picker.
+  if (empty && showLauncher && packageUi?.emptyTab) {
+    // Plan 118 Part D: the window's landing is a package contribution. The
+    // bundled launcher renders as the host panel for its trusted provenance;
+    // any other empty-tab contribution renders through the generic SDUI view.
+    // With no contribution installed, the core fallback below stays Open
+    // File / Open Folder only — no product name lives in core.
     const emptyTab = packageUi.emptyTab;
-    const isBundledChat =
-      emptyTab.provenance.packageName === "@clay/chat" &&
-      emptyTab.provenance.trustDomain === "trusted";
     return (
       <Suspense
         fallback={
@@ -165,8 +134,13 @@ function PaneContent({
           </div>
         }
       >
-        {isBundledChat ? (
-          <ChatPanel surface={emptyTab} uiVersion={uiVersion} />
+        {hostRenderedSurface(emptyTab) === "launcher" ? (
+          <LauncherPanel
+            session={pane.session}
+            onOpenWorkspace={onOpenWorkspace}
+            onOpenFolder={onOpenFolder}
+            onPickAgent={onPickAgent}
+          />
         ) : (
           <PackageSurfaceView
             surface={emptyTab}
@@ -184,7 +158,6 @@ function PaneContent({
         <div className={styles.emptyActions}>
           <ClayButton onPress={onOpenFile}>Open file</ClayButton>
           <ClayButton onPress={onOpenFolder}>Open folder</ClayButton>
-          <ClayButton onPress={onLaunchAgent}>Coding Agent</ClayButton>
         </div>
         {meta?.diagnostic ? (
           <div role="alert">
@@ -208,7 +181,9 @@ export function PaneTree({
   onOpenPath,
   onOpenFile,
   onOpenFolder,
-  onLaunchAgent,
+  onPickAgent,
+  onOpenWorkspace,
+  showLauncher,
   packageUi,
   uiVersion,
 }: PaneTreeProps) {
@@ -231,7 +206,9 @@ export function PaneTree({
             onOpenPath={onOpenPath}
             onOpenFile={onOpenFile}
             onOpenFolder={onOpenFolder}
-            onLaunchAgent={onLaunchAgent}
+            onPickAgent={onPickAgent}
+            onOpenWorkspace={onOpenWorkspace}
+            showLauncher={showLauncher}
             runtime={runtime}
             effortChord={pane ? effortChordOf(pane) : null}
           />
@@ -249,7 +226,14 @@ export function PaneTree({
   const orientation =
     node.orientation === "horizontal" ? "horizontal" : "vertical";
   return (
-    <Group orientation={orientation} className={styles.group} data-clay-ds="paneSplitTree.group">
+    <Group
+      orientation={orientation}
+      className={styles.group}
+      data-clay-ds="paneSplitTree.group"
+      // The visible handle is one hairline; the pointer target is wider so a
+      // split stays grabbable without drawing a thick divider (DESIGN.md §13.3).
+      resizeTargetMinimumSize={{ coarse: 24, fine: 8 }}
+    >
       <Panel
         id={`split-${path.join("") || "root"}-a`}
         defaultSize={`${Math.round(node.ratio * 100)}%`}
@@ -266,7 +250,9 @@ export function PaneTree({
           onOpenPath={onOpenPath}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
-          onLaunchAgent={onLaunchAgent}
+          onPickAgent={onPickAgent}
+          onOpenWorkspace={onOpenWorkspace}
+          showLauncher={showLauncher}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />
@@ -274,17 +260,6 @@ export function PaneTree({
       <Separator
         className={styles.separator}
         data-clay-ds="paneSplitTree.handle"
-        style={
-          orientation === "horizontal"
-            ? {
-                width:
-                  "var(--clay-ds-pane-split-tree-default-handle-rest-border-width, var(--clay-dimension-border-thin, 2px))",
-              }
-            : {
-                height:
-                  "var(--clay-ds-pane-split-tree-default-handle-rest-border-width, var(--clay-dimension-border-thin, 2px))",
-              }
-        }
       />
       <Panel
         id={`split-${path.join("") || "root"}-b`}
@@ -300,7 +275,9 @@ export function PaneTree({
           onOpenPath={onOpenPath}
           onOpenFile={onOpenFile}
           onOpenFolder={onOpenFolder}
-          onLaunchAgent={onLaunchAgent}
+          onPickAgent={onPickAgent}
+          onOpenWorkspace={onOpenWorkspace}
+          showLauncher={showLauncher}
           packageUi={packageUi}
           uiVersion={uiVersion}
         />

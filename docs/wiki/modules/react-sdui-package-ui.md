@@ -67,8 +67,13 @@ removal (Phase 12).
    mandatory `main`, contains overlays, and appends package status items.
    Narrow layout stacks fixed panels while retaining a usable main region.
 9. `PaneTree.tsx` renders the one winning `empty-tab` package surface when the
-   pane has no path/text. No contribution renders the core Open File/Open
-   Folder fallback.
+   pane has no path/text. Plan 118 Part D: the bundled `@clay/launcher`
+   contribution renders as the host's compiled launcher panel (the
+   `hostRenderedSurface` trusted-provenance lookup, alongside the Coding Agent
+   panel; see [Launcher Landing Surface](launcher-landing-surface.md)); any other
+   `empty-tab` contribution renders through the generic SDUI view, and no
+   contribution renders the core Open File/Open Folder fallback (which keeps no
+   product-named landing).
 10. Plan 108 task 8 adds named pane surfaces (`activation: "pane"`): the wire
     snapshot carries them in `PackageUiSnapshot.surfaces` (same shape as the
     empty-tab landing); the empty-tab election ignores them. Launch/close is a
@@ -83,12 +88,12 @@ removal (Phase 12).
     + `agentSurfacePaneId`) and auto-closes when the contribution disappears.
     The bundled `@clay/coding-agent` surface is provenance-exact host
     rendering (`frontend/src/coding-agent/CodingAgentPanel.tsx`, the
-    ChatPanel/SettingsPanel precedent) — a 50/50 vertical split (left
+    SettingsPanel precedent) — a 50/50 vertical split (left
     transcript + composer + status row + extension strip, right
     Files/Memory/Context tabs with selected-box full-content detail); every
     dynamic value rides the one AG-UI stream, third-party `pane` surfaces
     render through the unchanged generic SDUI renderer. Its host-owned
-    `chat.submit`/`chat.cancel`/`chat.steer` controls bypass static-tree
+    `agent.submit`/`agent.cancel`/`agent.steer` controls bypass static-tree
     source validation and are authorized by the bound tab session; they are
     not arbitrary package actions. Two catalog gaps
     closed generically: `tabList` kind (React Aria Tabs, widget-local

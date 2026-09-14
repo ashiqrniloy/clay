@@ -19,7 +19,7 @@ custom_properties:
   - name: specifier
     type: string
     default: required
-    description: "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Also accepts `item_id` from dropdown action payloads."
+    description: "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-instrument` — Quiet Instrument). Also accepts `item_id` from dropdown action payloads."
 security: Validates the specifier server-side and persists an inert preference only: activation applies through the same inert-recipe path as theme.setDesignSystem (recipes reference theme color roles by name and never contain concrete colors, so no raw CSS or color authority exists) and the reload re-validates the stored value through apply_design_system, preserving the previous valid design system on failure. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package manager, WASM, client-side JavaScript, raw Deno ops, raw CSS, or renderer callback authority, and never promotes package trust by naming a specifier.
 agent_guidance: Use `settings.setDesignSystem` (or the Settings panel "Design system" dropdown) when the user changes the design system interactively; the persisted choice reapplies on every reload. Use `theme.setDesignSystem` from init.js for declarative startup configuration. Never suggest raw CSS or untrusted design-system packages.
 lookup_tags: [settings, design-system, preferences, theme, recipes, panel, core, fallback]
@@ -39,12 +39,12 @@ Settings-panel command that activates a UI design system and persists the choice
 
 `settings.setDesignSystem` is the command-surface settings API behind the Settings panel's "Design system" dropdown. It accepts one string argument (`specifier`, or `item_id` from dropdown action payloads) and executes server-first:
 
-1. The command executor (`src/server/command_execution.rs::execute_settings`) validates the specifier: `@clay/core` (built-in baseline) or a bundled first-party package whose manifest contributes a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Anything else fails closed with an `InvalidArguments` diagnostic before any state changes.
+1. The command executor (`src/server/command_execution.rs::execute_settings`) validates the specifier: `@clay/core` (built-in baseline) or a bundled first-party package whose manifest contributes a `uiDesignSystem` (`@clay/design-instrument` — Quiet Instrument). Anything else fails closed with an `InvalidArguments` diagnostic before any state changes.
 2. The connection runtime (`src/server/connection/runtime.rs::persist_settings_change`) persists the validated specifier as the `designSystem` preference in `~/.clay/preferences.json` (atomic write) and triggers a runtime generation reload.
-3. The reload applies persisted preferences (`src/server/evaluation.rs::apply_persisted_preferences`) through the same activation path as [`theme.setDesignSystem`](../theme/set-design-system.md) (`apply_design_system`), which resolves the declaration against the active theme, fills missing component recipes from the `@clay/core` fallback set, and fails closed on invalid or revoked packages.
+3. The reload applies persisted preferences (`src/server/js_runtime/evaluation.rs::apply_persisted_preferences`) through the same activation path as [`theme.setDesignSystem`](../theme/set-design-system.md) (`apply_design_system`), which resolves the declaration against the active theme, fills missing component recipes from the `@clay/core` fallback set, and fails closed on invalid or revoked packages.
 4. Every client receives the new `RuntimeStateSnapshot` — including `ui_choices` (the server-enumerated theme/design-system/appearance lists) and `active_design_system` — and the React adapter projects the recipes into CSS custom properties before paint. No restart and no component remount is required.
 
-The command itself exposes no JavaScript module facade; settings intents are command-surface APIs. Programmatic (init.js) activation remains [`theme.setDesignSystem`](../theme/set-design-system.md).
+The command is the authority; the `clay:settings` module facade is a thin wrapper over it (`packages/settings/dist/load.js::setDesignSystem` sends the same command intent). Clay JS callers that cannot reach the package module use `commands.serverExecuteCommand` with the same id and arguments. Programmatic (init.js) activation remains [`theme.setDesignSystem`](../theme/set-design-system.md).
 
 ## When to use
 
@@ -55,23 +55,23 @@ Invoke from UI action payloads (Settings panel dropdowns, command centre) or thr
 ```ts
 import { setDesignSystem } from "clay:settings";
 
-setDesignSystem("@clay/design-neobrutal");
+setDesignSystem("@clay/design-instrument");
 // or
 setDesignSystem("@clay/core");
 ```
 
-`setDesignSystem` sends the `settings.setDesignSystem` command intent through the commands facade and returns the server acceptance status. The Settings panel ships the same command with a Design system dropdown whose items enumerate the server-provided `ui_choices.design_systems` list (`@clay/core` "Core baseline", plus each bundled design-system package).
+`setDesignSystem` sends the `settings.setDesignSystem` command intent through the commands facade and returns the server acceptance status. The Settings panel ships the same command with a Design system dropdown whose items enumerate the server-provided `ui_choices.design_systems` list (`@clay/core` "Core baseline", plus each bundled design-system package and any enabled contributor) — the same set the command accepts, so nothing selectable is missing from the list and nothing listed is rejected.
 
 ## Example
 
 ```json
 { "commandId": "settings.setDesignSystem", "arguments": { "item_id": "@clay/core" } }
-{ "commandId": "settings.setDesignSystem", "arguments": { "specifier": "@clay/design-glass" } }
+{ "commandId": "settings.setDesignSystem", "arguments": { "specifier": "@clay/design-instrument" } }
 ```
 
 ## Options
 
-Pass a single `specifier` (or `item_id`) string. `@clay/core` selects the built-in baseline; other accepted values are the bundled design-system packages (`@clay/design-neobrutal`, `@clay/design-glass`). Third-party or unknown specifiers are rejected before persistence; deeper resolution (enabled record + declaration validation) stays enforced fail-closed at apply time.
+Pass a single `specifier` (or `item_id`) string. `@clay/core` selects the built-in baseline; other accepted values are the bundled design-system packages (`@clay/design-instrument` — Quiet Instrument). Third-party or unknown specifiers are rejected before persistence; deeper resolution (enabled record + declaration validation) stays enforced fail-closed at apply time.
 
 ## Return and async behavior
 
@@ -79,7 +79,7 @@ Asynchronous: resolves with the server's `accepted` command status once the spec
 
 ## Errors
 
-Fails closed with an `InvalidArguments` command diagnostic (`settings.setDesignSystem requires an item_id/specifier argument`, or `settings.setDesignSystem requires an enabled uiDesignSystem contribution, got \`…\``) without persisting or reloading when the specifier is missing, empty, or does not name `@clay/core` or a bundled design-system package. If the stored preference later names a revoked or invalid package, activation fails closed on the next reload: the previous valid design system is preserved and a sanitized diagnostic is recorded.
+Fails closed with an `InvalidArguments` command diagnostic (`settings.setDesignSystem requires an item_id/specifier argument`, or `settings.setDesignSystem requires an enabled uiDesignSystem contribution, got \`…\``) without persisting or reloading when the specifier is missing, empty, or does not name `@clay/core` or a bundled design-system package. If the stored preference later names a removed, revoked, or invalid package, activation fails closed on the next reload: nothing is installed partially, the core baseline (the shipped language's host-consumed subset) stays active, startup keeps loading, and one bounded diagnostic names both the rejected specifier and the system that stays active.
 
 ## Permissions and security
 
@@ -111,8 +111,8 @@ No default key bindings. The command is invoked from Settings panel dropdown act
 
 ## Custom properties
 
-- `specifier` (string, required): `@clay/core` for the built-in baseline, or one bundled package contributing a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Dropdown payloads may supply the same value as `item_id`.
+- `specifier` (string, required): `@clay/core` for the built-in baseline, or one bundled package contributing a `uiDesignSystem` (`@clay/design-instrument` — Quiet Instrument). Dropdown payloads may supply the same value as `item_id`.
 
 ## Snapshot fields
 
-The runtime state snapshot gained `ui_choices` (`UiChoicesSnapshot`): `themes` (enabled `@clay/theme-*` specifiers), `design_systems` (`@clay/core` first, then enabled `uiDesignSystem` contributors, with server-provided display names), and `appearance` (the persisted `light`/`dark`/`system` preference). The Settings panel renders its dropdowns from this list instead of hardcoded options.
+The runtime state snapshot gained `ui_choices` (`UiChoicesSnapshot`): `themes` (enabled `@clay/theme-*` specifiers), `design_systems` (`@clay/core` first, then every bundled package that contributes a `uiDesignSystem` — selectable without a prior `loadPackage` — and any other enabled contributor, with server-provided display names), and `appearance` (the persisted `light`/`dark`/`system` preference). The Settings panel renders its dropdowns from this list instead of hardcoded options.

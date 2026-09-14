@@ -1,6 +1,6 @@
 // Bundle-size budget check (Plan 097 Phase 4/5). Run after `npm run build`.
 // Startup shell excludes code-split editor, package, desktop-workflow, and
-// chat (AG-UI) chunks. Total gzip includes every lazy renderer.
+// agent (AG-UI) chunks. Total gzip includes every lazy renderer.
 
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -30,8 +30,8 @@ for (const file of readdirSync(dist)) {
     file,
   );
   const workflow = /CommandCentre|WorkspacePanes|controls/i.test(file);
-  const chat = /ChatPanel|ag-ui|TauriClay|agent/i.test(file);
-  if (!editor && !packageRenderer && !workflow && !chat) shellGzip += gz;
+  const agent = /ag-ui|TauriClay|agent/i.test(file);
+  if (!editor && !packageRenderer && !workflow && !agent) shellGzip += gz;
   rows.push([
     file,
     `${(gz / 1024).toFixed(1)} kB`,
@@ -41,8 +41,8 @@ for (const file of readdirSync(dist)) {
         ? "package"
         : workflow
           ? "workflow"
-          : chat
-            ? "chat"
+          : agent
+            ? "agent"
             : "shell",
   ]);
 }

@@ -16,7 +16,7 @@ import {
 
 setTheme("@clay/theme-gruvbox-material-dark");
 setAppearance("dark");
-setDesignSystem("@clay/core");
+setDesignSystem("@clay/design-instrument");
 
 await publishTree(defineFlex({
   id: "review-design-system-root",
@@ -29,7 +29,7 @@ await publishTree(defineFlex({
         defineStack({
           id: "review-design-system-stack",
           children: [
-            defineLabel({ id: "review-design-system-label", text: "Explicit @clay/core activation" }),
+            defineLabel({ id: "review-design-system-label", text: "Shipped @clay/design-instrument activation" }),
             defineButton({
               id: "review-design-system-action",
               label: "Primary action",

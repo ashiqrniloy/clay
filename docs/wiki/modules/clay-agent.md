@@ -52,8 +52,7 @@ spawn or speak to it.
   and `playwright-core@1.61.0` for CDP composition. The unused 0.3
   `prism-model-router` dependency was dropped with the consolidation; retired
   0.3 package names are denied by `agent_protocol::phase25_dependencies_deny_acp_agui_mcp`.
-- Host-registered `AgentDefinition`s. Chat is a tool-free chat session
-  (Phase 2 ships the `@clay/coding-agent` UI); coding profiles get the Phase 1
+- Host-registered `AgentDefinition`s. `Chat` is the built-in tool-free profile the server falls back to when a tab's book has no profile (its UI surface was removed with plan 118; the name survives as the daemon-level default); coding profiles get the Phase 1
   tool surface described below.
 - Coding-run options (`run.setOptions`, Clay JS `agent.setRunOptions`): Prism
   0.5.5 policy caps, all defaulting to `null` (unbounded) — tokens, turns,
@@ -181,7 +180,7 @@ spawn or speak to it.
   `/wiki-init` as a prompt prefix, enables the binding internally, then
   dispatches the extension command (with the Rust environment cache
   invalidated for that prefix); `/wiki-init` with wiki gated off stays
-  a chat-safe prompt.
+  a plain prompt (no tool runs).
 
 ## Coding tools and document reverse-RPC (Phase 1)
 
@@ -219,22 +218,26 @@ error to deny, so the tool never executes).
 
 How It Works items 6–15 cover the remaining Phase 1 families (compaction/OM,
 skills/commands/drivers, durable runs, search/tree/checkpoints, MCP
-allow-list, Obscura). Phase boundaries: Phase 2 adds the Chat UI for these
+allow-list, Obscura). Phase boundaries: Phase 2 adds the agent UI for these
 facades, Phase 4 package contribution feeding of skills/commands, Phase 5
 workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 
-## Coding Agent panel surfaces (plan 117)
+## Coding Agent panel surfaces (plans 117 and 118)
 
 `frontend/src/coding-agent/CodingAgentPanel.tsx` renders the plan 117
 user-visible surfaces, all state-driven from snapshot state / AG-UI custom
-events (never invented client-side):
+events (never invented client-side). Plan 118 composed them into the approved
+agent view of a tab (`DESIGN.md` §12, §16): the column is header /
+72ch transcript / state strip / composer / environment foot, the inspector is
+the view's right column (340px, 312px ≤ 1240px, a drawer below 1000px), and
+reference data lives in the inspector rather than in the transcript.
 
-- **Skills card** — pinned at the top of the transcript from session start
-  (persists once messages arrive); lists the catalog skills
-  (name+description) that the daemon discovered from the three roots.
-- **MCP card + composer section** — per-server connection outcomes
-  (`{serverId, connected, tools, error}`) from snapshot state; failed
-  servers show their error, hidden when empty. Display-only (no
+- **Skills and MCP servers** — the inspector's Context tab lists the catalog
+  skills (name + description) from the three roots and the per-server
+  connection outcomes (`{serverId, connected, tools, error}`) from snapshot
+  state; failed servers show their error and the section is absent when no
+  server is configured. The foot carries one summary segment
+  (`MCP files · 3 tools · ghost · hidden`). Display-only (no
   restart/connect actions).
 - **@ mentions** — trailing `@token` opens a sectioned dropdown (Skills +
   Files, type-to-filter, ArrowUp/Down/Tab/Escape); `@skill:<name>` embeds
@@ -242,7 +245,8 @@ events (never invented client-side):
   `@file:<path>` attaches file content (images as image blocks).
   Workspace file list comes from the `workspace.files` daemon RPC
   (bounded 200 paths, depth 8).
-- **Token meter** — status-row occupancy `used/ceiling` from the LAST
+- **Token meter** — header occupancy `used/ceiling` drawn as the stat-row bar,
+  from the LAST
   provider turn's prompt tokens (never the run-total `agent_finished`
   usage, which double-counts) vs the model's context window (resolved
   client-side from the models inventory); warning above 60%, error above
@@ -252,7 +256,13 @@ events (never invented client-side):
 - **Effort dropdown + branch from session start** — effort levels resolve
   client-side from the models inventory's `thinkingLevels` (no longer
   gated on the first prompt); the git branch is recorded at session
-  creation, not just on rebind.
+  creation, not just on rebind, and the environment foot reports it with the
+  workspace root, the extensions and the MCP summary.
+- **Transcript turns, not cards** — one turn per row (role label, right-aligned
+  mono note, body) separated by a hairline, at the 72ch measure; machine output
+  (`tool`, `skill`, `usage`) is a single inset well clamped to three lines, so a
+  turn's height never depends on how much it printed. Selecting a turn opens its
+  full content in Session Info.
 - **Labeled /resume** — Files-tab recent rows render human labels (first
   user-message words) from the workspace-scoped `session.resumable` list;
   selection resumes the full transcript without an entry-less snapshot
@@ -326,7 +336,7 @@ events (never invented client-side):
    Phase 2 adds the pi-parity slash surface: `session.prompt` intercepts text
    whose first token matches a registered command name (exact match; `{json}`
    args parse as the args object, free text carries as `{ input }`;
-   unknown `/x` stays a prompt — chat-safe). The dispatch result rides the
+   unknown `/x` stays a prompt — no tool runs). The dispatch result rides the
    transcript lane as a synthetic `agent_started`/`message_delta`/
    `agent_finished` triple (runId `cmd-<name>`): the result renders as an
    assistant message and the client's AG-UI run closes — the bare dispatch
@@ -343,7 +353,7 @@ events (never invented client-side):
     returns `status: "suspended"` + `runId` + `version` + redacted
     `pendingDecisions`. `run.resume` validates decision shape first, then
     CAS-resumes via `resumeAgentRun` (stale version / fingerprint mismatch
-    fails closed; dispatched tools never replay). Chat stays non-durable.
+    fails closed; dispatched tools never replay). The built-in `Chat` profile stays non-durable.
     `sessionPrompt` drains via `session.stream()` (not `subscribe()+run()`:
     durable subscriptions stay open past settlement and would hang the RPC
     reply) and rebuilds the suspended payload from the `agent_suspended`
@@ -424,7 +434,10 @@ events (never invented client-side):
 14. MCP is allow-list-only (decision 1758, config surface added plan 117):
     the server builds `mcpAllowList` from the per-agent `mcp.json` + the
     repo-root `.mcp.json` (see Responsibilities) and sends it in
-    `initialize` (`AgentMcpAllowListEntry` on `AgentHostConfig`); the
+    `initialize` (`AgentMcpAllowListEntry` on `AgentHostConfig`) — and,
+    since plan 118 task 35, again per session (`session.new` /
+    `session.setAgent` carry that agent's own list, so a switch swaps its
+    servers rather than inheriting the previous agent's); the
     daemon validates every entry fail-closed (absolute executable,
     literal argv, explicit env names) before any spawn, then connects
     per-server with fault isolation via `@arnilo/prism-mcp`. Empty list
@@ -461,8 +474,26 @@ data subdir holds runtime state. A legacy `<config-root>/agent/` data
 dir is renamed into `agents/coding-agent/data` at server start (rename
 failure keeps the legacy dir serving — credentials never orphan).
 The SERVER passes `--agent-config-root
-<configuration-root>/agents/coding-agent` explicitly (plan 117); without
-it the daemon derives the root from the home directory — the launch test
+<configuration-root>/agents/coding-agent` explicitly (plan 117); that root
+is the daemon's **default agent**, and plan 118 task 35 makes the other
+configured types resolvable beside it: a session may name an agent
+(`session.new { agent }` / `session.setAgent { sessionId, agent }`), the
+daemon accepts only a bare bounded name whose directory resolves as a direct
+child of the default root's parent (separators, traversal, and unknown names
+fail closed — never a silent fallback to the default agent), and loads that
+agent's config once per root (SYSTEM.md seeding, `tool-caps.json`,
+`skills.json`, delivered + user-added `skills/`, MCP bridges). A switch
+rebuilds the live agent over the same session branch (the mid-session
+model-switch mechanism), so the session id, its transcript, and its leaf
+survive while the config the next run reads changes; each appended session
+entry is stamped with the agent that produced it (`metadata.agentType`) and
+the session record carries it, so resume keeps both. The
+switch does **not** move runtime state between roots: `data/` (sessions
+DB, vault, book) stays the default agent's — one daemon is one data dir,
+and per-agent data dirs would need a per-agent daemon (recorded ceiling).
+Without
+`--agent-config-root` the daemon derives the default root from the home
+directory — the launch test
 showed that path leaking the real home under the daemon's env-clear
 spawn, which is why the server always passes it. The spawn environment is
 cleared except `HOME`/`USERPROFILE`/`PATH` (`for_server`), so MCP bare
@@ -478,7 +509,9 @@ book survives restarts). First request:
 ```
 
 The daemon also registers a built-in minimal `Chat` agent profile at boot —
-the server's `ensure_tab_session` default profile must always resolve —
+the server's `ensure_tab_session` default profile must always resolve, so the
+name stays even though plan 118 removed the chat *surface* (this profile is a
+daemon default, not a UI) —
 and `session.prompt` passes unlisted model ids through (the discovery
 catalog is convenience, not authority; the provider rejects bad ids).
 

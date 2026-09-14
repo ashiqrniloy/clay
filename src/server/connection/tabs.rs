@@ -18,8 +18,10 @@ use crate::{
     },
 };
 
+use crate::protocol::AgentServerMessage;
 use crate::server::IpcServer;
 use crate::server::TabServerState;
+use crate::server::launcher;
 
 use super::{
     file_operation_failed, new_tab_binding_conflict_error, tab_binding_conflict_error,
@@ -124,6 +126,14 @@ pub(super) async fn open_workspace_for_bound_tab(
             Err(error) => return vec![file_operation_failed(error, None, None)],
         }
     };
+    // Launcher (plan 118 Part D): opening a folder in a tab is an explicit
+    // open, so it leads the recents list. Best-effort, never fatal here.
+    if let Some(server) = reload_server {
+        crate::server::launcher::record_recent_workspace(
+            server.configuration_root().as_deref(),
+            &root,
+        );
+    }
     let snapshot = {
         let mut registry = tab_registry.lock().await;
         registry.open_workspace(
@@ -397,6 +407,94 @@ where
                 registry.snapshot()
             };
             let _ = tab_registry_tx.send(snapshot);
+        }
+        // Plan 118 task 35: the tab-chrome agent switch. Tab chrome is the
+        // only way a tab's agent changes, which keeps the agent type out of
+        // the agent command path: the registry stores a name the server
+        // itself resolved, and every later read (config root, session, MCP
+        // allow-list) starts from that stored value — never from webview
+        // input, and never a path.
+        TabCommand::SetAgent { tab_id, agent } => {
+            let Some(server) = reload_server else {
+                codec
+                    .write_server_message(
+                        stream,
+                        &ServerMessage::Error {
+                            code: ProtocolErrorCode::InvalidMessage,
+                            message: "agent switch requires a live server".to_string(),
+                        },
+                    )
+                    .await?;
+                return Ok(TabDispatch::Continue);
+            };
+            // Validate before the registry moves: the named agent must be a
+            // configured one (its directory resolves under the data root's
+            // `agents/`), so an unconfigured or hostile name can never become
+            // a tab's identity.
+            let next = match agent.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+                None => None,
+                Some(name) => {
+                    match launcher::resolve_agent_type(server.configuration_root().as_deref(), name)
+                    {
+                        Some(_) => Some(name.to_string()),
+                        None => {
+                            codec
+                            .write_server_message(
+                                stream,
+                                &ServerMessage::Error {
+                                    code: ProtocolErrorCode::InvalidMessage,
+                                    message: format!(
+                                        "agent type `{name}` is not configured under the Clay data root"
+                                    ),
+                                },
+                            )
+                            .await?;
+                            return Ok(TabDispatch::Continue);
+                        }
+                    }
+                }
+            };
+            let previous = tab_registry.lock().await.agent_type(tab_id);
+            let accepted = {
+                let mut registry = tab_registry.lock().await;
+                registry.set_agent_type(tab_id, client_id, next.as_deref())
+            };
+            if !accepted {
+                codec
+                    .write_server_message(stream, &tab_binding_conflict_error())
+                    .await?;
+                return Ok(TabDispatch::Continue);
+            }
+            match server.agent.rebind_tab_agent(tab_id).await {
+                Ok(snapshot) => {
+                    if let Some(snapshot) = snapshot {
+                        server
+                            .agent
+                            .broadcast(AgentServerMessage::Snapshot(snapshot));
+                    }
+                    let snapshot = tab_registry.lock().await.snapshot();
+                    let _ = tab_registry_tx.send(snapshot);
+                }
+                Err(error) => {
+                    // The daemon refused the switch (it validates the agent
+                    // again): revert the registry so the tab does not claim
+                    // an agent its live session is not running.
+                    let mut registry = tab_registry.lock().await;
+                    registry.set_agent_type(tab_id, client_id, previous.as_deref());
+                    let snapshot = registry.snapshot();
+                    drop(registry);
+                    let _ = tab_registry_tx.send(snapshot);
+                    codec
+                        .write_server_message(
+                            stream,
+                            &ServerMessage::Error {
+                                code: ProtocolErrorCode::InvalidMessage,
+                                message: format!("agent switch failed: {error}"),
+                            },
+                        )
+                        .await?;
+                }
+            }
         }
     }
     Ok(TabDispatch::Continue)

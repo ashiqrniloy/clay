@@ -1,0 +1,11 @@
+fixture=ui-review-launcher
+config_source=examples/config (canonical tree, cp -r parity)
+window_requested_size=1500x950
+theme=fixture-default
+appearance=fixture-default
+drive_steps=[{"find":{"role":"button","name":"Palette"},"do":"click"},{"wait":700},{"find":{"role":"entry","name":"Control Center"},"do":"type","text":"chat"}]
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 1500x950, compositor kept 1500x1151

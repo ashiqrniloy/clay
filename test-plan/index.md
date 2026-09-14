@@ -33,9 +33,10 @@ Current desktop launch is Tauri v2 + React: `clay` and `clay client` launch
 
 The review retains 20 app-only CDP screenshots and paired AX snapshots at
 1440×900 and 780×900 for editor, intelligence, package UI, settings,
-Command Centre (active/empty), Path Browser, Chat, splits, and combined
-loading/empty/error states. Real Tauri AT-SPI dumps cover welcome, opened
-editor, tabs/splits, and Chat. Static visual and rest-state accessibility checks
+Command Centre (active/empty), Path Browser, the chat surface (since removed
+by plan 118 — historical), splits, and combined loading/empty/error states.
+Real Tauri AT-SPI dumps cover the then-welcome landing, the opened editor,
+tabs/splits, and the then-chat surface. Static visual and rest-state accessibility checks
 pass. Keyboard-only completion, command/path activation, native dialog,
 settings, and tab/pane interaction remain explicitly `UNRESOLVED`: this host
 has denied `/dev/uinput`, no `xdotool`/`ydotool`, and no Wayland portal path that
@@ -79,8 +80,8 @@ freshly rebuilt desktop build:
 |---|---|---|
 | UI-DS-21…26 automated legs | PASS | Settings-panel snapshot-driven choices + no-remount switch, validator allowlist/rejection, persistence + appearance-across-restart e2e, theme enumeration from enabled records (see module 15 record) |
 | Real-app captures (`ui-review-default`, `ui-review-design-system`, `ui-review-design-system-light`, `ui-review-error`) | PASS | `test-plan/artifacts/110-ui-design-systems/`; window-cropped portal screenshots |
-| Real-app package activation (`ui-review-design-neobrutal`, `ui-review-design-glass`) | UNRESOLVED | Blocked by the plan-110 task-18 pre-existing reload deadlock (`setDesignSystem("@clay/design-*")` inside `init.js` evaluation hangs the JS runtime; `@clay/core` applies instantly). Fixture-layer DS × theme visual evidence: `.impeccable/reviews/110-final/` |
-| Capture tooling | IMPROVED | `scripts/capture-ui-review.sh`: waits for fixture SDUI trees, crops portal screenshots to the Clay window (never retains full-desktop captures with host windows), new `ui-review-design-neobrutal-light` / `ui-review-design-glass-light` fixtures for the full matrix once task 18 lands |
+| Real-app package activation (removed Neobrutal/Glass harness states) | SUPERSEDED | Those two design-system packages were **removed** (plan 118 task 9) and their fixture states deleted; `ui-review-design-system` / `…-light` now capture the shipped `@clay/design-instrument`. The plan-110 reload deadlock was fixed in plan 110 task 18, so the replacement states are capturable. Fixture-layer DS × theme visual evidence from that era remains in `.impeccable/reviews/110-final/` |
+| Capture tooling | IMPROVED | `scripts/capture-ui-review.sh`: waits for fixture SDUI trees, crops portal screenshots to the Clay window (never retains full-desktop captures with host windows); the removed fixture names are rejected by the argument check (`plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`) |
 | Build hygiene | NEW CEILING | Mixed stale/fresh binaries fail client-side rkyv deserialization (`ArchivedSduiTree` subtree pointer overran) and surface as `Session lost` — rebuild both `clay` and `clay-desktop` before captures |
 
 ## Plan 109 manual-test-plan execution record (2026-09-06)
@@ -141,11 +142,53 @@ the context inspector (SYSTEM.md + AGENTS.md + base instructions).
 No existing manual step was deleted or weakened; the module 17 ceiling notes
 were updated to name the plan 117 seams they supersede.
 
+## Plan 118 manual-test-plan execution record (2026-09-13, task 26)
+
+Executed against a freshly rebuilt Linux desktop build (`cargo build --bins`
+**and** `cargo build --bins -p clay-desktop`; see finding 4) with the isolated
+review harness; evidence in
+`test-plan/artifacts/118-quiet-instrument-migration/` (one capture per state,
+each with `accessibility.txt`, window-cropped `screenshot.png`, `metadata.txt`,
+`runtime-tree.txt` where the fixture publishes one, and `review.status`).
+
+Module changes: [01](01-launch-and-connection.md) gained the landing state pair
+(L12 core fallback / L12a launcher landing) plus L14a/L14b handoffs and three
+negative checks; [03](03-files-and-workspace.md) F32/F32a/F33–F37/F39 were
+rewritten for the landing, and F37a/F37b add the recents-hygiene negatives;
+[13](13-window-splits.md) S35 returns to the landing; [14](14-tabs.md) states
+which tab model ships and which is approved-but-not-built;
+[15](15-ui-design-systems.md) rewrote UI-DS-02/16/17/19/26 for the shipped
+system and added UI-DS-38 (launcher landing), UI-DS-39 (hairlines), UI-DS-40
+(boundary/state contrast) and UI-DS-41 (removed-specifier fallback);
+[17](17-coding-agent-parity.md) added C38–C40 with C-N12/C-N13 (chat absence,
+landing ownership); [16](16-agent-host.md), [09](09-packages-and-modes.md) and
+[11](11-performance.md) replaced chat-surface wording, and no step anywhere
+loads, selects or installs a removed package or the removed design systems.
+
+| State (fixture) | Result | Evidence |
+|---|---|---|
+| Launcher landing (`ui-review-launcher`, new fixture) | PASS | `launcher-landing/`: `Start` heading + paragraph, `Recent workspaces` landmark with a real recents row, `Agents` pane with its first-run note, `Open folder…`, the action footer with the disabled primary `Open`; screenshot inspected against `design-artifacts/approved/quiet-instrument-migration/start.html` |
+| Core fallback (`ui-review-default`) | PASS | `core-fallback/`: `Empty tab` + `Start with a file or folder` + `Open file`/`Open folder` only — no product name, no agent button |
+| Shipped design system, dark + light (`ui-review-design-system`, `…-light`) | PASS | `design-system-dark/`, `design-system-light/`: `Design system review` panel with enabled/disabled rows; `active_design_system=@clay/design-instrument` in `runtime-tree.txt` |
+| Error / recovery / loading | PASS | `error/` (sanitized `JavaScript runtime evaluation failed.` in the status bar, client stays connected), `recovery/` (`Reconnect session`, `Disconnected`), `loading/` (`Loading review` panel delivered through the snapshot) |
+| Large typography | PASS | `large-typography/`: landing-free fallback state at ui 24 / mono 20 / proportional 21 in bounds |
+| Coding Agent view (`ui-review-coding-agent`) | UNRESOLVED live | `coding-agent/` captured the empty tab, not the agent view: the pane is activated by a package-contributed command that the same `init.js` generation cannot dispatch, and this host has no input synthesis. Fixture fixed to load the package; view evidence remains the DEV-harness set under UI-DS-35 |
+| Interactive legs (landing handoffs, close-return, theme switch, palette, dialogs, splits/tabs) | UNRESOLVED — host ceiling | `computer-use-linux doctor`: no `/dev/uinput`, xdotool/ydotool or portal input path; AT-SPI *action* invocation works but the harness tears the app down before a probe can act. Automated legs pin every one of these (per-module records) |
+| Automated regression on the same tree | PASS | `--lib` 1336, presentation 61, protocol 214, runtime 75, security 153; frontend 357; `tsc`; Vite build + budgets (shell 173.3/180, total 392.9/400 kB gzip); fmt/clippy; component conformance 18/18 with 0 mismatches and 5/5 state probes |
+
+Findings recorded by this execution (details in module
+[15](15-ui-design-systems.md#findings-from-this-execution-recorded-not-fixed-here)):
+the harness `mkdir`/`chmod` break that made every capture impossible (fixed);
+the coding-agent fixture's package-load gap (fixed); the landing's side chrome
+still mounting a zero-document outline rail (design finding carried to the
+visual review with a required disposition); and the `src-tauri` build-hygiene
+ceiling (rebuild `clay-desktop`). No step was weakened to pass.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
 |---|-------------|--------|-------------------|
-| 01 | [Launch and connection](01-launch-and-connection.md) | server/client lifecycle, lease, read-only observer, restart, status line | `docs/development/launch-and-gui-smoke.md` |
+| 01 | [Launch and connection](01-launch-and-connection.md) | server/client lifecycle, lease, read-only observer, restart, status line, and the empty-tab landing (plan 118: the bundled `@clay/launcher` panel when its package is loaded — `Start`, Workspaces/Agents panes, recents, handoffs — versus the Clay-owned `Start with a file or folder` fallback when no empty-tab contribution is installed; L12/L12a/L14a/L14b + negative checks) | `docs/development/launch-and-gui-smoke.md` |
 | 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, watcher auto-reload, default reload chord, planned-API denial, install-appended load line (C30–C34) | `docs/reference/clay-js-api/configuration.md`, `examples/` tree, `tests/fixtures/configuration/plan080-manual/` |
 | 03 | [Files and workspace](03-files-and-workspace.md) | open/save/reload, dirty state, conflicts, sanitized file-browser/workspace labels, hidden-pane toggle, `Ctrl+O` while hidden, multi-document (incl. pane-scoped switcher, duplicate-open focus routing), Path Browser (24.3): seed fallback, fuzzy filter, descend/ascend/direct jump, invalid-path recovery, file open + duplicate-open focus + active-pane targeting, `Alt+Enter` current-tab workspace load, cancellation, tab-switch/reload dismissal, native-dialog fallback, navigation-no-grant/symlink/cross-tab security checks, centered modal surface/accessibility/containment (24.4) | `docs/development/file-open-save-reload-workflow.md`, `docs/reference/clay-js-api/configuration.md` (Phase 24.3 review) |
 | 04 | [Core editing](04-core-editing.md) | typing, undo/redo, clipboard, newline/indent rules, IME preedit, completion projection/ranking, Phase 28 comment/list/heading transforms and inlay toggle, bounded AT-SPI/AccessKit editable-text semantics | `docs/reference/clay-js-api/editor/` command docs, `docs/development/accessibility.md` |
@@ -159,9 +202,9 @@ were updated to name the plan 117 seams they supersede.
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
-| 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, default `@clay/design-neobrutal` selection, `@clay/design-glass` reference system with solid fallbacks, watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/revoked selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, restart persistence through `init.js`, 25-component recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, and cross-theme recoloring consistency (Plans 102, 103 & 104) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `.impeccable/review/plan-104/` |
-| 16 | [Agent host (clay-agent)](16-agent-host.md) | `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing, Chat UI chrome unchanged; coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
-| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort); plan 117 C24–C37 + C-N5–C-N11: skills card from three discovery roots + skills.json gating, MCP card + composer connections (user/repo config, per-server isolation), agent settings page with provenance, @ mentions, token meter with threshold tones + heuristic fallback, /wiki-init flow, graft default-on, labeled /resume with rich restore, branch at creation, effort from session start, and composed system-prompt layers (SYSTEM.md/AGENTS.md/base) in the context inspector | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108, plans/117 |
+| 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, `@clay/core` baseline versus the shipped `@clay/design-instrument` default (the former Neobrutal/Glass packages were removed by plan 118 task 9), watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/removed selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, the composited content-theme contrast gate (UI-DS-31), catalog currency (UI-DS-32), component-level conformance against the approved specimen (UI-DS-33), shell/Workspace composition adoption (UI-DS-34), Coding Agent composition adoption (UI-DS-35), Settings panel and Agent Settings composition adoption (UI-DS-36), command centre and overlay-family composition adoption (UI-DS-37), the launcher landing composition (UI-DS-38), hairline zoning (UI-DS-39), composited boundary/state contrast (UI-DS-40), the removed-specifier fallback and choice set (UI-DS-41), the tab's two views (UI-DS-42), agent types and the per-tab picker (UI-DS-43), the agent Files tab as the session's file history (UI-DS-44), the workspace sidebar's filter head (UI-DS-45), the 2026-09-13 visual and accessibility review of the migrated app (42 captured states, deviation dispositions, defect log, live AT-SPI walk and hairline contrast probe), restart persistence through `init.js`, full recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, cross-theme recoloring consistency, and Quiet Instrument conformance (hairline zoning, radius ladder, transient-only elevation, mono-for-data, measure, state/keyboard/typography checks) (Plans 102, 103, 104 & 118; `DESIGN.md`) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `DESIGN.md`, `.impeccable/review/plan-104/` |
+| 16 | [Agent host (clay-agent)](16-agent-host.md) | (agent surface, no chat) `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing; the removed Chat surface is named nowhere as shipped (plan 118); coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
+| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort); plan 117 C24–C37 + C-N5–C-N11 (plus plan 118 C38–C40 + C-N12/C-N13: the landing→agent-view launch route, the Settings tab as the Agent Settings surface, the Files tab session history, chat-surface absence, landing ownership): skills card from three discovery roots + skills.json gating, MCP card + composer connections (user/repo config, per-server isolation), agent settings page with provenance, @ mentions, token meter with threshold tones + heuristic fallback, /wiki-init flow, graft default-on, labeled /resume with rich restore, branch at creation, effort from session start, and composed system-prompt layers (SYSTEM.md/AGENTS.md/base) in the context inspector | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108, plans/117 |
 | 18 | [Icon packs (Plan 112)](18-icon-packs.md) | zero-config bundled Regular fallback, `setIconPack` Regular/Duotone selection (load ≠ select), watcher swap/fail-closed break + restore recovery, unloaded/unknown selection bounded diagnostics, third-party own-prefix + hostile-fixture rejection (live adoption blocked: no pnpm), file-browser/git/markdown semantic icons, icon-only control contract (names, tooltips, hit targets, retained text labels), AT-SPI a11y pass, no-network inlined-geometry rendering, responsive/large-typography scaling and pack-swap feel | `docs/reference/clay-js-api/theme/set-icon-pack.md`, `docs/reference/icon-packs.md`, `test-plan/artifacts/112-icons/` |
 
 ## Coverage matrix (what to run when)
@@ -185,6 +228,7 @@ were updated to name the plan 117 seams they supersede.
 | Pane/tab/transient-menu accessibility (roles, names, announcements) / cross-tab isolation | 10, 13, 14, 03 |
 | Pane document views / concurrent modes / duplicate-open routing | 13, 03, 09 |
 | Anything user-visible | 01 always (launch gate) |
+| Plan 118 Quiet Instrument migration & launcher landing (design-system/theme values, component recipes, shell/workspace/agent/settings/palette/overlay compositions, empty-tab landing) | 01 (L12/L12a/L14a/L14b), 15 (UI-DS-31…45), 03 (F32/F32a/F37a/F37b), 13 (S35), 14 (tab-model note), 17 (C38–C40, C-N12/C-N13), 02 (C16–C18 watcher reload), 11 (switch feel) |
 | Welcome entry state / completion projection / centered Command Centre / review harness (Plan 087) | 01 (L12–L14), 03 (F32–F37), 04 (E16–E21), 10 (K69–K72), 11 (Q11–Q14), 13 (S33–S35) |
 | Plan 088 shell/theme/package modernization and responsive layout | 01 (L15–L19), 02 (C20–C24), 03 (F38–F41), 04 (E22–E24), 07 (T14–T17), 09 (P16–P21), 10 (K73–K77), 11 (Q15–Q19), 13 (S36–S40), 14 (T71–T76) |
 | Plan 089 validation, performance, timeout diagnostics, and multi-window/scale/Wayland platform checks | 01 (L18–L22), 04 (E22–E24), 07 (T15/T18–T19), 09 (P16–P21), 10 (K73–K77), 11 (Q15–Q19), 13 (S36–S42), 14 (T71–T76) |
@@ -195,7 +239,7 @@ were updated to name the plan 117 seams they supersede.
 | Plan 097 Phase 5 CodeMirror editing + optimistic document sync | 04 (E-series), 03 (open/save/reload), 11 (type latency) |
 | Plan 097 Phase 6 panes/splits/tabs/per-tab workspaces/persistence | 13, 14, 03 (workspace roots), 01 (reconnect) |
 | Plan 097 Phase 7 editor interaction/rendering/completions/language intelligence | 04, 05, 06, 07, 08, 11 |
-| Plan 097 Phase 10 AG-UI chat over Tauri channels | 09 (@clay/chat surface), 10 (chat intents), 11 (stream feel) |
+| Plan 097 Phase 10 AG-UI chat over Tauri channels (historical: the `@clay/chat` surface was removed by plan 118; the same transport lane carries the Coding Agent) | 09 (package lane), 11 (agent-transcript stream feel), 17 (agent view) |
 | Plan 097 Phase 11 release hardening/packaging/updates/security | 01 (launch identity), 11 (budgets), 12 (platform policy) |
 | Plan 097 Phase 12 parity certification/cutover/native removal | 01, 13, 14 + full regression pass of modules above |
 | Plan 102 UI design systems (selection, switching, fallback/revocation recovery) | 15, 02 (C16–C18 watcher reload), 09 (adoption/revocation), 11 (switch latency) |
@@ -424,7 +468,8 @@ compiled native dialog backends), internal refactors (tasks 5, 6, 7, 8, 12),
 build config (task 9, index code-split), drift guards/docs (tasks 4, 10, 11,
 13). The one deliberate shipping change is the chunk split's startup-loading
 behavior, recorded as new step Q38 in [module 11](11-performance.md) instead
-of chat-only.
+of the one-time chunk-split work rather than as a chat-surface step (the
+`@clay/chat` surface was removed by plan 118).
 
 | Modules/steps | Result | Evidence |
 |---|---|---|
@@ -445,14 +490,15 @@ configuration surfaces are the `clay:agent` facades and `examples/init.js`
 section 12. New module [16](16-agent-host.md) (steps A1–A19) covers the
 user-visible configuration; coding-tool dirty-buffer/approval/search-isolation
 behavior is pinned by the automated suites cited in that module, not manual
-steps. Chat UI chrome is recorded as unchanged (A1).
+steps. No chat surface is claimed (the package was removed by plan 118; the
+module names the agent surface instead).
 
 | Modules/steps | Result | Evidence |
 |---|---|---|
 | 16 A1–A4 (config/docs cross-check) | PASS | `node --check examples/init.js` clean; canonical-example doc-registry tests green; inventory coverage gate pins `default:boolean=false` (2157) and `compactAfterTokens:number=80000` (2158); no credential/hidden-key surfaces added |
 | 16 A5–A15 (autonomy/compaction/search/tree/checkpoints) | PASS automated | clay-agent suites 49/49 incl. approval default-off, OM settings-provider override, workspace-scoped search with no context injection, checkpoint restore fail-closed |
 | 16 A16–A19 (MCP/Obscura fail-closed) | PASS automated | Empty/non-canonical allow-list rejection, missing-binary-hidden, no-vendor-imports tests; Rust `phase25_dependencies_deny_acp_agui_mcp` green |
-| Live GUI steps | NOT RUN (host ceiling, per index records) | Same no-input-backend ceiling documented for Plans 097/099/105; no Phase 1 manual step requires driving Chat (Phase 2 UI) |
+| Live GUI steps | NOT RUN (host ceiling, per index records) | Same no-input-backend ceiling documented for Plans 097/099/105; no Phase 1 manual step requires driving the agent surface (Phase 2 UI) |
 
 ## Plan 112 icon-pack execution record (2026-09-07)
 

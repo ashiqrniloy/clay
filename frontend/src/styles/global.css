@@ -34,10 +34,55 @@ body {
   color: var(--clay-text-primary);
 }
 
+/* Scroll chrome is the design system's `scroll` family: the thumb is the
+   `surface.scrollbar` role at the recipe's rest opacity, and it firms up on
+   hover and drag. Standard `scrollbar-color` covers the rest state; the WebKit
+   pseudo-elements carry the state pair (DESIGN.md §11). */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--clay-surface-scrollbar)
-    var(--clay-surface-scrollbar-track);
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--clay-ds-scroll-default-scrollbar-thumb-rest-background-color)
+        calc(
+          var(--clay-ds-scroll-default-scrollbar-thumb-rest-opacity, 1) * 100%
+        ),
+      transparent
+    )
+    var(--clay-ds-scroll-default-scrollbar-track-rest-background-color);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-scroll-default-scrollbar-thumb-rest-background-color)
+      calc(var(--clay-ds-scroll-default-scrollbar-thumb-rest-opacity, 1) * 100%),
+    transparent
+  );
+  border-radius: var(
+    --clay-ds-scroll-default-scrollbar-thumb-rest-border-radius
+  );
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-scroll-default-scrollbar-thumb-hover-background-color)
+      calc(
+        var(--clay-ds-scroll-default-scrollbar-thumb-hover-opacity, 1) * 100%
+      ),
+    transparent
+  );
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-scroll-default-scrollbar-thumb-active-background-color)
+      calc(
+        var(--clay-ds-scroll-default-scrollbar-thumb-active-opacity, 1) * 100%
+      ),
+    transparent
+  );
 }
 
 /* =========================================================================
@@ -57,11 +102,22 @@ body {
   }
 }
 
-/* 2. Reduced Transparency: Disable backdrop filters and fall back to solid theme surfaces */
+/* 2. Reduced Transparency (DESIGN.md §13.7): every veil resolves to an opaque
+   theme surface and no blur keeps running. The veils are addressed by the
+   component/slot attributes the components emit — the retired `glass` material
+   marker is gone with the design system that painted it. A scrim resolves to
+   the canvas (an opaque dimming layer), and a veil-bearing surface to the
+   overlay plane, which is already opaque. */
 @media (prefers-reduced-transparency: reduce) {
-  [data-clay-material="glass"],
-  [data-clay-component="modal"][data-clay-slot="scrim"],
-  [data-clay-component="dropdown"][data-clay-slot="popover"] {
+  [data-clay-component="modal"][data-clay-slot="scrim"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--clay-surface-main) !important;
+  }
+
+  [data-clay-component="dropdown"][data-clay-slot="popover"],
+  [data-clay-component="panel"],
+  [data-clay-slot="dialog"] {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background: var(--clay-surface-overlay) !important;
@@ -70,9 +126,15 @@ body {
 
 /* 3. Unsupported Backdrop Filter Fallback */
 @supports not (backdrop-filter: blur(1px)) {
-  [data-clay-material="glass"],
-  [data-clay-component="modal"][data-clay-slot="scrim"],
-  [data-clay-component="dropdown"][data-clay-slot="popover"] {
+  [data-clay-component="modal"][data-clay-slot="scrim"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--clay-surface-main);
+  }
+
+  [data-clay-component="dropdown"][data-clay-slot="popover"],
+  [data-clay-component="panel"],
+  [data-clay-slot="dialog"] {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background: var(--clay-surface-overlay);

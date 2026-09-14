@@ -24,7 +24,9 @@ import {
   getStatusPayload,
   openPayload,
   listAgentSettingsPayload,
+  listLauncherEntriesPayload,
   openAgentSettingsPayload,
+  removeLauncherRecentPayload,
   reloadPayload,
   requestResyncPayload,
   savePayload,
@@ -38,6 +40,7 @@ export type SendFn = (payload: string) => Promise<void>;
 const FEATURE_EVENT_KINDS = new Set([
   "behaviorManifestInstalled",
   "agentSettingsFiles",
+  "launcherEntries",
   "decorationSet",
   "decorationBatch",
   "viewportRenderPatch",
@@ -67,6 +70,12 @@ export interface DocumentSession {
   /** Agent settings page (plan 117): open one listed file by name into the
    *  normal document pipeline (this session's pane becomes its editor). */
   openAgentSettings(name: string): void;
+  /** Launcher (plan 118 Part D): request the start surface's server-resolved
+   *  rows; the reply arrives as a `launcherEntries` feature event. */
+  listLauncherEntries(): void;
+  /** Launcher: drop one recent workspace by server-side index; the reply is a
+   *  fresh `launcherEntries` listing. */
+  removeLauncherRecent(index: number): void;
   featureSnapshot(): readonly BridgeEnvelope[];
   subscribeFeatures(listener: (envelope: BridgeEnvelope) => void): () => void;
   attachView(view: EditorView): void;
@@ -89,6 +98,16 @@ export interface DocumentSession {
   /** Path of an open request awaiting its server reply, if any. */
   inFlightOpenPath(): string | null;
   requestResync(): void;
+  /** Move the caret to a document line and scroll it into view (the workspace
+   *  rail's outline navigation). No-op when the pane has no attached view. */
+  revealLine(line: number): void;
+  /** 0-based document line at the top of the editor viewport, with the outline's
+   *  reading inset applied (the workspace rail's scroll-spy signal, plan 118
+   *  task E2). 0 when no view is attached. */
+  topVisibleLine(): number;
+  /** Subscribe to viewport scrolls; the listener coalesces per frame in the
+   *  rail, not here. Returns an unsubscribe. */
+  onViewportChange(listener: () => void): () => void;
 }
 
 interface Options {
@@ -96,9 +115,22 @@ interface Options {
   store?: DocumentStore;
 }
 
+/** How far into the viewport an outline entry counts as reached (px). The
+ *  approved prototype uses the same reading inset for its scroll-spy. */
+const OUTLINE_READING_INSET = 48;
+
+/**
+ * Create the per-pane document session (document state, sync, editor view).
+ */
 export function createDocumentSession(options: Options): DocumentSession {
   const store = options.store ?? createDocumentStore();
   let view: EditorView | null = null;
+  /** Scroll-spy subscribers (plan 118 task E2) and the element they listen on. */
+  const viewportListeners = new Set<() => void>();
+  let viewportTarget: HTMLElement | null = null;
+  const notifyViewport = () => {
+    for (const listener of [...viewportListeners]) listener();
+  };
   let clientCommandHandler: ((commandId: string) => boolean) | null = null;
   let nextTransactionId = 1;
   const inflight = new Set<number>();
@@ -351,11 +383,17 @@ export function createDocumentSession(options: Options): DocumentSession {
     },
     attachView(next) {
       view = next;
+      viewportTarget = next.scrollDOM;
+      viewportTarget.addEventListener("scroll", notifyViewport, {
+        passive: true,
+      });
       installAuthoritative(detachedDoc);
     },
     detachView(current) {
       if (view === current) {
         // Latest user text (acked or not) becomes the detached snapshot.
+        viewportTarget?.removeEventListener("scroll", notifyViewport);
+        viewportTarget = null;
         detachedDoc = current.state.doc;
         view = null;
       }
@@ -510,6 +548,12 @@ export function createDocumentSession(options: Options): DocumentSession {
     openAgentSettings(name: string) {
       send(openAgentSettingsPayload(name));
     },
+    listLauncherEntries() {
+      send(listLauncherEntriesPayload());
+    },
+    removeLauncherRecent(index: number) {
+      send(removeLauncherRecentPayload(index));
+    },
     inFlightOpenPath() {
       return inFlightOpenPath;
     },
@@ -519,6 +563,30 @@ export function createDocumentSession(options: Options): DocumentSession {
       // A resync replaces the assembled prefix; stop consuming old chunks.
       if (load && !load.done) load.done = true;
       send(requestResyncPayload(meta.documentId, meta.version));
+    },
+    revealLine(line) {
+      if (!view) return;
+      const lineCount = view.state.doc.lines;
+      if (lineCount === 0) return;
+      const target = Math.min(Math.max(Math.trunc(line), 0), lineCount - 1);
+      view.dispatch({
+        selection: { anchor: view.state.doc.line(target + 1).from },
+        scrollIntoView: true,
+      });
+    },
+    topVisibleLine() {
+      if (!view) return 0;
+      // The outline reads "the entry the reader has reached", so an entry
+      // counts once it is the inset's worth into the viewport — the approved
+      // prototype's `scrollTop + 48` (plan 118 task E2).
+      const block = view.lineBlockAtHeight(
+        view.scrollDOM.scrollTop + OUTLINE_READING_INSET,
+      );
+      return view.state.doc.lineAt(block.from).number - 1;
+    },
+    onViewportChange(listener) {
+      viewportListeners.add(listener);
+      return () => viewportListeners.delete(listener);
     },
   };
 

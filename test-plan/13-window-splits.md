@@ -208,7 +208,7 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 |---|--------|----------|
 | S33 | Open a document in pane 1, split vertically (`Ctrl+\`), trigger completion in pane 1 | Completion popup anchors to pane 1's caret and stays inside pane 1's rect; the split divider/pane 2 are unaffected |
 | S34 | Move focus to pane 2 (click / `Ctrl+Alt+Arrow`), trigger completion there | Popup re-anchors to pane 2's caret; only the active pane's caret is used (`completion_anchor` comes from the active pane) |
-| S35 | Close the last pane's document, then close the pane | The pane returns to the welcome entry state; splitting again from welcome yields a normal editable pane |
+| S35 | Close the last pane's document, then close the pane | The pane returns to the empty-tab landing — the bundled launcher when its package is loaded, else the Clay-owned `Start with a file or folder` card (plan 118 Part D, module [01](01-launch-and-connection.md) L12/L12a); splitting again from the landing yields a normal editable pane |
 
 ## Plan 088 responsive split/pane steps
 
@@ -383,3 +383,18 @@ UNRESOLVED: same no-input-backend host ceiling (`doctor`
 artifacts and the 2026-08-24 parity AT-SPI split records remain the live
 evidence. Launch-gate capture: `code-reviews/screenshots/2026-09-01-plan105-manual/default/`
 (module 01 record).
+
+## Plan 118 execution record (2026-09-13)
+
+Plan 118 Part D changed only what the empty pane *renders* (a package
+contribution instead of the Clay-owned card); splits, ratios, focus and
+per-pane documents are untouched. Artifacts:
+`test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| S35 (landing return) | PASS structural / UNRESOLVED interactive | `close_pane` still resets the pane to the empty tab, and `frontend/src/shell/WorkspacePanes.test.tsx` pins both landing resolutions (launcher contribution vs core fallback); the live close chord stays input-blocked on this host |
+| S36–S42 regression class | PASS live (static) | `core-fallback/` and `launcher-landing/` captures show panes, sidebar and outline rail in bounds at the harness window with the shipped shell geometry (40px titlebar / 28px status bar); interactive resize/split legs remain UNRESOLVED as recorded above |
+
+No existing step was deleted or weakened; S35's expected result was rewritten
+for the shipped landing.

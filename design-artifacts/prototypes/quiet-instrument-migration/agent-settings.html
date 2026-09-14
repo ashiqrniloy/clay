@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi" data-scene="rest">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Agent files (migration prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+/* agent files: the coding agent's Settings tab, as its own surface */
+.agent-files { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; }
+.agent-files-col { width: 100%; max-width: 760px; padding: 22px 20px 60px; }
+.files-list { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+</style>
+</head>
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Quiet Instrument — Agent files</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">migration prototype</span>
+  </span>
+  <nav class="proto-nav" data-nav aria-label="Prototype pages"><a class="proto-link" href="start.html">Start</a><a class="proto-link" href="shell.html">Shell</a><a class="proto-link" href="workspace.html">Workspace</a><a class="proto-link" href="agent-landing.html">Agent</a><a class="proto-link" href="settings.html">Settings</a><a class="proto-link" href="agent-settings.html">Agent files</a><a class="proto-link" href="command-centre.html">Command centre</a><a class="proto-link" href="package-workspace.html">Packages</a><a class="proto-link" href="overlays.html">Overlays</a><a class="proto-link" href="themes.html">Theme values</a></nav>
+  <span class="proto-note">The agent's Settings tab: the config files the daemon seeds, with their real sizes and built-in/edited provenance.</span>
+  <div class="proto-actions">
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Surface state"><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="rest">Delivered files</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="empty">Nothing delivered</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="error">Unreadable</button></span>
+    <span class="seg" role="radiogroup" aria-label="Row density">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="comfortable">comfortable</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="compact">compact</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+<div class="proto-stage">
+  <div class="proto-frame">
+
+<div class="win" role="application" aria-label="Coding agent settings" data-clay-ds="shell.default.root.rest">
+  <header class="titlebar" data-clay-ds="shell.default.header.rest">
+    <span class="tb-brand" data-clay-ds="shell.default.brand.rest">Clay</span>
+    <span class="tb-spacer"></span>
+    <nav class="tb-actions" aria-label="Agent controls">
+      <button class="tb-btn" type="button" title="Toggle inspector" aria-expanded="true" data-clay-ds="button.muted.root.rest"><span>Inspector</span></button>
+    </nav>
+  </header>
+
+  <div class="app" data-app data-inspector="expanded" style="grid-template-columns: minmax(0,1fr)" data-clay-ds="shell.default.workingArea.rest">
+    <div class="agent-files" data-focus-zone=".agent-files">
+      <div class="agent-files-col">
+        <div class="tabs" role="tablist" aria-label="Inspector" data-clay-ds="tabBar.default.root.rest">
+          <button class="tab" type="button" role="tab" aria-selected="false" data-clay-ds="tab.default.item.rest">Files</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-clay-ds="tab.default.item.rest">Memory</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-clay-ds="tab.default.item.rest">Context</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-clay-ds="tab.default.item.rest">Session Info</button>
+          <button class="tab" type="button" role="tab" aria-selected="true" data-active="true" data-clay-ds="tab.default.item.rest">Settings</button>
+        </div>
+
+        <div role="tabpanel" aria-label="Settings">
+          <div style="padding-top:16px">
+            <span class="t-caption" data-clay-ds="label.caption.root.rest">Delivered agent files. Edits to skills apply on the next daemon start. Skill sizes are read from <span class="mono">.agents/skills/*/SKILL.md</span>; <span class="mono">SYSTEM.md</span> is written by the daemon at runtime.</span>
+          </div>
+
+          <ul class="files-list" aria-label="Agent files" data-scene="rest">
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">SYSTEM.md</span>
+                <span class="file-meta"><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span><span class="badge badge--muted" data-clay-ds="badge.muted.root.rest">written at runtime</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/clay-execution/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">4.6 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/create-decision-log/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">4.9 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/create-plan/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">7.6 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/design-taste-frontend/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">85.2 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/find-docs/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">6.2 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/full-output-enforcement/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">2.5 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/high-end-visual-design/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">10.3 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/impeccable/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">10.8 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/karpathy-guidelines/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">2.5 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/rust-async-patterns/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">12.1 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/rust-best-practices/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">4.2 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/skill-creator/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">18.2 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+            <li>
+              <button class="file-row" type="button">
+                <span class="file-name">skills/typescript-advanced-types/SKILL.md</span>
+                <span class="file-meta"><span class="file-size">7.8 kB</span><span class="badge badge--builtin" data-clay-ds="badge.default.root.rest">built-in</span></span>
+              </button>
+            </li>
+          </ul>
+
+          <div class="empty" data-scene="empty" hidden>
+            <p class="empty-title">No agent files yet.</p>
+            <p class="empty-text">The daemon seeds <span class="mono">SYSTEM.md</span> and the bundled skills the first time this agent starts. Until then there is nothing to list — and without a system prompt the agent will not open a session at all.</p>
+          </div>
+
+          <div class="empty" data-scene="error" hidden>
+            <p class="empty-title">The skills directory could not be read.</p>
+            <p class="empty-text">Sessions still start: <span class="mono">SYSTEM.md</span> loads on its own and the missing skills are simply not offered. Nothing here is a hard failure, so it reads as a warning, not a stop.</p>
+          </div>
+
+          <div style="border-top:1px solid var(--hairline);margin:20px 0 0;padding-top:16px">
+            <span class="t-micro" data-clay-ds="label.default.root.rest">Loading</span>
+            <p class="t-body" style="margin:6px 0 0" data-clay-ds="label.body.root.rest">Loading…</p>
+          </div>
+
+          <div style="border-top:1px solid var(--hairline);margin:20px 0 0;padding-top:16px">
+            <span class="t-micro" data-clay-ds="label.default.root.rest">Empty</span>
+            <p class="t-body" style="margin:6px 0 0" data-clay-ds="label.body.root.rest">No agent files delivered yet.</p>
+            <p class="t-detail" style="margin:4px 0 0" data-clay-ds="label.detail.root.rest">The daemon seeds <code>SYSTEM.md</code> and one file per skill at start.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer class="statusbar" data-clay-ds="statusBar.default.root.rest">
+    <span class="status-seg" data-clay-ds="statusItem.default.root.rest"><span class="dot dot--ok"></span>/workspace</span>
+    <span class="status-seg status-seg--muted" data-clay-ds="statusItem.default.root.rest">6 delivered files · one edited</span>
+    <span class="status-hints">
+      <button class="status-key" type="button"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+5" data-clay-ds="kbd.default.root.rest"></kbd> settings</button>
+      <button class="status-key" type="button"><kbd class="kbd kbd--sm kbd--flat" data-kbd="esc" data-clay-ds="kbd.default.root.rest"></kbd> close tab</button>
+    </span>
+  </footer>
+</div>
+
+  </div>
+</div>
+
+<script src="ds.js"></script>
+
+</body>
+</html>

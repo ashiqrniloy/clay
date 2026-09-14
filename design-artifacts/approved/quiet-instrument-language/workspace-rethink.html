@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#eff1f5">
+<title>Clay — Workspace · design proposal B (quiet instrument)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<style>
+/* ---------------------------------------------------------------------------
+   Screen 1 · Workspace — reimagined.
+
+   Information architecture: the shell stops framing things. The tree is a
+   quiet list, the document bar is one line of identity + state + actions, the
+   editor becomes a real measure-limited column with a number gutter, and the
+   right rail turns the file into something navigable: an outline of every
+   timestamped entry plus the document facts that used to sit in badges.
+
+   The relative-path open control is retained but on demand: ⌘O (or the Open
+   action) reveals it as a thin strip, and the palette can do the same job with
+   a path prompt. Nothing in the shipped screen was dropped.
+   --------------------------------------------------------------------------- */
+
+.app { --rail-w: 236px; grid-template-columns: var(--side-w) minmax(0, 1fr) var(--rail-w); }
+.app[data-inspector='collapsed'] { grid-template-columns: var(--side-w) minmax(0, 1fr) 0; }
+.app[data-inspector='collapsed'] .rail { display: none; }
+
+/* ---------- document bar ------------------------------------------------ */
+
+.docbar { display: flex; align-items: center; gap: 12px; padding: 12px 18px 10px; min-width: 0; flex-wrap: wrap; }
+.crumb { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.crumb-name { font: 500 14px/1 var(--font-mono); letter-spacing: -0.01em; }
+.crumb-path { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+.badges { display: flex; align-items: center; gap: 6px; }
+.docbar-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+
+/* ---------- on-demand open strip --------------------------------------- */
+
+.openbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--veil);
+  animation: strip-in var(--t) both;
+}
+
+@keyframes strip-in { from { opacity: 0; transform: translateY(-6px); } }
+
+.openbar .field { max-width: 420px; }
+.openbar-note { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+.openbar-note[data-tone='err'] { color: var(--c-err); }
+.openbar-note[data-tone='ok'] { color: var(--c-ok); }
+
+/* ---------- editor: gutter + measure ----------------------------------- */
+
+.editor-wrap { flex: 1; min-height: 0; display: flex; justify-content: center; overflow: hidden; padding: 0 8px; }
+.editor { display: grid; grid-template-columns: 46px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: 100%; max-width: calc(var(--measure) + 4rem); min-height: 0; overflow: hidden; }
+
+.gutter { padding: 20px 0 40vh; text-align: right; user-select: none; }
+.gln { display: block; padding-right: 14px; font: 400 var(--fs-xs) / 1.7 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.gln[data-current='true'] { color: var(--c-accent); font-weight: 500; }
+
+.doc {
+  margin: 0;
+  padding: 20px 24px 40vh 0;
+  overflow: auto;
+  font: 400 13px/1.7 var(--font-mono);
+  color: var(--c-text);
+  outline: none;
+  caret-color: var(--c-caret);
+  tab-size: 2;
+  min-width: 0;
+}
+
+.doc .ln { display: block; white-space: pre-wrap; min-height: calc(1em * 1.7); border-left: 2px solid transparent; margin-left: -12px; padding-left: 10px; border-radius: 0 var(--r-xs) var(--r-xs) 0; }
+.doc .ln:hover { background: color-mix(in oklab, var(--c-text) 4%, transparent); }
+.doc .ln[data-current='true'] { background: var(--c-accent-soft); border-left-color: var(--c-accent); }
+
+.md-blank { color: transparent; }
+.md-mark { color: var(--c-text-3); }
+.md-ts { color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+
+.md-h1 { color: var(--c-doc-h1); font-weight: 600; font-size: 1.35em; letter-spacing: -0.01em; }
+.md-h2 { color: var(--c-doc-h2); font-weight: 600; }
+.md-h3 { color: var(--c-doc-h3); font-weight: 600; }
+.md-h4 { color: var(--c-doc-h4); font-weight: 600; }
+.md-h5, .md-h6 { color: var(--c-text); font-weight: 600; }
+
+.md-code { background: var(--c-code-bg); color: var(--c-code-span); border-radius: var(--r-xs); padding: 0 3px; }
+.md-strong { font-weight: 600; }
+.md-li, .md-quote { color: var(--c-list); }
+.md-quote { background: var(--c-quote-bg); border-radius: var(--r-xs); }
+.md-link { color: var(--c-link); }
+.md-url { color: var(--c-text-3); }
+.md-blank + .md-h2 { margin-top: 6px; }
+
+/* ---------- right rail ------------------------------------------------- */
+
+.rail { border-left: 1px solid var(--hairline); display: flex; flex-direction: column; min-height: 0; background: color-mix(in oklab, var(--c-bg) 70%, transparent); }
+.rail-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px; }
+.rail-section { padding: 0 14px 12px; }
+.rail-facts { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; padding: 0 14px 14px; align-items: baseline; }
+.rail-facts dt { font: 500 10px/1.6 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+.rail-facts dd { margin: 0; font: 400 var(--fs-xs) / 1.6 var(--font-mono); color: var(--c-text-2); text-align: right; }
+.rail-list { flex: 1; min-height: 0; overflow: auto; padding: 0 8px 12px; display: flex; flex-direction: column; gap: 1px; }
+
+.entry {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--c-text-2);
+  text-align: left;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+.entry:hover { background: var(--c-hover); color: var(--c-text); }
+.entry[data-active='true'] { background: var(--c-accent-soft); color: var(--c-accent); }
+.entry-time { font: 400 10px/1.5 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.entry-title { font: 400 var(--fs-xs) / 1.5 var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry[data-active='true'] .entry-time { color: var(--c-accent); }
+
+.rail-foot { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--hairline); font: 400 10px/1 var(--font-mono); color: var(--c-text-3); flex-wrap: wrap; }
+
+/* ---------- theme + settings rows ------------------------------------- */
+
+.theme-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.theme-item .kbd { margin-left: 0; }
+.theme-item .theme-mode { font: 400 10px/1 var(--font-mono); color: var(--c-text-3); text-transform: uppercase; letter-spacing: 0.08em; }
+/* ---------- narrow ---------- */
+
+@media (max-width: 1000px) {
+  .app,
+  .app[data-inspector='expanded'],
+  .app[data-inspector='collapsed'] { grid-template-columns: minmax(0, 1fr); }
+  .app[data-inspector='expanded'] .rail {
+    position: fixed;
+    z-index: 50;
+    inset: var(--titlebar-h) 0 var(--status-h) auto;
+    width: min(340px, 92vw);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-overlay);
+    display: flex;
+  }
+  .docbar, .openbar { padding-left: 12px; padding-right: 12px; }
+  .doc { padding-right: 12px; }
+}
+
+</style>
+</head>
+<body>
+
+<div class="desk">
+  <div class="win" role="application" aria-label="Clay workspace">
+
+    <header class="titlebar">
+      <span class="tb-brand">Clay</span>
+      <div class="tb-tabs" role="tablist" aria-label="Workspace tabs">
+        <button class="tb-tab" role="tab" aria-selected="true" data-active="true">Workspace</button>
+      </div>
+      <span class="tb-spacer"></span>
+      <nav class="tb-actions" aria-label="Application controls">
+        <span class="popwrap">
+          <button class="tb-btn" type="button" data-popover-toggle="theme" data-theme-trigger="true"
+                  data-shortcut="alt+t" aria-haspopup="menu" aria-expanded="false" title="Content theme">
+            <span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span data-theme-label>Modus Operandi</span>
+          </button>
+          <div class="popover popover--wide" data-popover="theme" role="menu" aria-label="Content theme">
+            <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">six palettes, one geometry</span></div>
+            <div id="theme-list"></div>
+            <p class="pop-note">Keys <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">1</kbd>–<kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">6</kbd> · cycle <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">`</kbd></p>
+          </div>
+        </span>
+
+        <button class="tb-btn" type="button" data-open="palette" title="Command palette">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+          <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">K</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-open="shortcuts" data-shortcut="shift+?" title="Keyboard map">
+          <kbd class="kbd kbd--sm">?</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-toggle="inspector" aria-expanded="true" data-shortcut="mod+i" title="Toggle outline rail">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+          <span data-inspector-toggle-label>Hide outline</span>
+        </button>
+
+        <button class="tb-btn" type="button" data-toggle="sidebar" aria-expanded="true" data-shortcut="mod+b" title="Toggle files">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+          <span data-sidebar-toggle-label>Hide files</span>
+        </button>
+
+        <div class="win-btns">
+          <button class="win-btn" type="button" title="Minimise window" aria-label="Minimise window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="win-btn" type="button" title="Maximise window" aria-label="Maximise window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg>
+          </button>
+          <button class="win-btn win-btn--close" type="button" title="Close window" aria-label="Close window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <div class="app" data-app data-sidebar="expanded" data-inspector="expanded">
+
+      <!-- ---------- files ---------- -->
+      <aside class="side" data-focus-zone=".side" aria-label="Workspace files">
+        <div class="side-head">
+          <h2 class="side-title">
+            Workspace
+            <button class="btn btn--ghost btn--icon" type="button" data-toggle="sidebar" title="Hide files" aria-label="Hide files">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 6 9 12l5 6"/></svg>
+            </button>
+          </h2>
+          <p class="side-kicker">Workspace · clay</p>
+        </div>
+        <div class="side-tools">
+          <label class="field">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+            <input type="search" data-filter-for="files" placeholder="Filter files" aria-label="Filter files" autocomplete="off" spellcheck="false">
+            <kbd class="kbd kbd--sm kbd--flat">/</kbd>
+          </label>
+        </div>
+        <div class="side-body">
+          <nav class="tree" data-tree="files" role="tree" aria-label="Workspace file tree" id="file-tree"></nav>
+        </div>
+        <div class="side-foot">
+          <span data-filter-count></span>
+          <span class="spacer"></span>
+          <span><kbd class="kbd kbd--sm kbd--flat">↑↓</kbd> move</span>
+          <span><kbd class="kbd kbd--sm kbd--flat">↵</kbd> open</span>
+        </div>
+      </aside>
+
+      <!-- ---------- document ---------- -->
+      <main class="pane" data-focus-zone=".main">
+        <div class="main" style="display:flex; flex-direction:column; min-height:0; flex:1;">
+
+          <div class="docbar">
+            <div class="crumb">
+              <span class="crumb-name" data-doc-name>VENT.md</span>
+              <span class="crumb-path" data-doc-path>clay/VENT.md</span>
+            </div>
+            <div class="badges" aria-label="Document state">
+              <span class="badge" data-doc-version>v1</span>
+              <span class="badge badge--clean" data-doc-state><span class="dot dot--ok"></span><span data-doc-state-text>clean</span></span>
+              <span class="badge" data-doc-mode>editable</span>
+            </div>
+            <div class="docbar-actions">
+              <button class="btn btn--ghost" type="button" data-action="open-toggle" data-shortcut="mod+o" title="Open a workspace-relative path">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 7h5l2 2h9v10H4z"/></svg>
+                Open
+                <kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">O</kbd>
+              </button>
+              <button class="btn btn--ghost btn--icon" type="button" data-action="undo" data-shortcut="mod+z" title="Undo" aria-label="Undo">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 9h11a5 5 0 0 1 0 10h-6"/><path d="M8 5 4 9l4 4"/></svg>
+              </button>
+              <button class="btn btn--ghost btn--icon" type="button" data-action="redo" data-shortcut="mod+shift+z" title="Redo" aria-label="Redo" disabled>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M20 9H9a5 5 0 0 0 0 10h6"/><path d="m16 5 4 4-4 4"/></svg>
+              </button>
+              <button class="btn btn--primary" type="button" data-action="save" data-shortcut="mod+s" title="Save">
+                Save
+                <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">S</kbd>
+              </button>
+              <button class="btn btn--ghost btn--icon btn--danger" type="button" data-action="close" data-shortcut="mod+w" title="Close file" aria-label="Close file">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="openbar" data-openbar hidden>
+            <span class="label">Open path</span>
+            <label class="field field--quiet">
+              <span class="mono faint" aria-hidden="true">./</span>
+              <input type="text" id="open-path" placeholder="relative/path" aria-label="Open relative path" autocomplete="off" spellcheck="false">
+            </label>
+            <button class="btn" type="button" data-action="open-path" disabled>Open</button>
+            <span class="openbar-note" role="status" data-open-note>relative to /workspace · Tab completes</span>
+            <span class="spacer"></span>
+            <button class="btn btn--ghost btn--icon" type="button" data-action="open-hide" title="Hide" aria-label="Hide open path">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
+
+          <div class="editor-wrap">
+            <div class="editor" data-editor>
+              <div class="gutter" data-gutter aria-hidden="true"></div>
+              <article class="doc" data-canvas aria-label="VENT.md source"></article>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- ---------- outline rail ---------- -->
+      <aside class="rail inspector" data-focus-zone=".rail" aria-label="Document outline">
+        <div class="rail-head">
+          <span class="label">Outline</span>
+          <span class="chip chip--accent" data-entry-count>0</span>
+          <span class="spacer"></span>
+          <button class="btn btn--ghost btn--icon" type="button" data-toggle="inspector" title="Hide outline" aria-label="Hide outline">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m10 6 5 6-5 6"/></svg>
+          </button>
+        </div>
+
+        <dl class="rail-facts">
+          <dt>File</dt><dd data-fact-file>VENT.md</dd>
+          <dt>Revision</dt><dd data-fact-version>v1</dd>
+          <dt>State</dt><dd data-fact-state>clean</dd>
+          <dt>Entries</dt><dd data-fact-entries>0</dd>
+          <dt>Words</dt><dd data-fact-words>0</dd>
+          <dt>Language</dt><dd>markdown</dd>
+          <dt>Encoding</dt><dd>utf-8</dd>
+        </dl>
+
+        <hr class="hr">
+
+        <div class="rail-list" data-entries role="listbox" aria-label="Document entries"></div>
+
+        <div class="rail-foot">
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm kbd--flat">↑↓</kbd> entry</span>
+          <span class="spacer"></span>
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">I</kbd> hide</span>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span class="status-seg"><span class="dot dot--ok"></span>/workspace</span>
+      <span class="status-seg status-seg--muted">Connected</span>
+      <span class="status-seg status-seg--muted" data-doc-stat></span>
+      <span class="status-hints">
+        <button class="status-key" type="button" data-open="palette"><kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">K</kbd> palette</button>
+        <button class="status-key" type="button" data-action="filter-focus"><kbd class="kbd kbd--sm kbd--flat">/</kbd> filter</button>
+        <button class="status-key" type="button" data-cycle-theme><kbd class="kbd kbd--sm kbd--flat" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm kbd--flat">`</kbd> theme</button>
+        <button class="status-key" type="button" data-open="shortcuts"><kbd class="kbd kbd--sm kbd--flat">?</kbd> keys</button>
+      </span>
+    </footer>
+  </div>
+</div>
+
+<!-- ================= overlays ================= -->
+
+<section class="overlay" data-overlay="palette" role="dialog" aria-label="Command palette">
+  <div class="sheet palette">
+    <header class="sheet-head">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+      <input class="pal-input" data-pal-input placeholder="Files, entries, actions, themes…" aria-label="Search commands" autofocus style="flex:1; border:0; background:transparent; font:400 14px/1.5 var(--font-ui);">
+      <div class="seg" role="group" aria-label="Scope">
+        <button class="seg-item" type="button" data-pal-scope-btn="all" data-active="true">All</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Files">Files</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Entries">Entries</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Document">Document</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="View">View</button>
+      </div>
+    </header>
+    <div class="pal-list" data-pal-list role="listbox" aria-label="Commands"></div>
+    <p class="pal-empty" data-pal-empty hidden>No match. <kbd class="kbd kbd--sm">Esc</kbd> dismisses.</p>
+    <footer class="pal-foot">
+      <span>scope: <strong data-pal-scope>All commands</strong></span>
+      <span class="spacer"></span>
+      <span data-pal-count>0 results</span>
+      <span class="hint"><kbd class="kbd kbd--sm kbd--flat">↑↓</kbd> navigate</span>
+      <span class="hint"><kbd class="kbd kbd--sm kbd--flat">↵</kbd> run</span>
+    </footer>
+  </div>
+</section>
+
+<section class="overlay overlay--center" data-overlay="shortcuts" role="dialog" aria-label="Keyboard map">
+  <div class="sheet sheet--wide">
+    <header class="sheet-head">
+      <span class="label">Keyboard map</span>
+      <span class="spacer"></span>
+      <span class="panel-sub">this platform: <strong data-kbd-platform>⌘</strong></span>
+      <button class="btn btn--ghost btn--icon" type="button" data-close="shortcuts" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body">
+      <div class="keys">
+        <div class="key-group">
+          <h3>Global</h3>
+          <div class="key-row"><span class="key-desc">Command palette</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Keyboard map</span><span class="key-combo"><kbd class="kbd">?</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Files / outline rail</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">B</kbd><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">I</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Theme 1–6 · cycle</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">1..6</kbd><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">`</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Document</h3>
+          <div class="key-row"><span class="key-desc">Save</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">S</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Undo / redo</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">Z</kbd><kbd class="kbd" data-kbd-shift>⇧</kbd><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">Z</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Open path strip</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">O</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Close file</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">W</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Indent</span><span class="key-combo"><kbd class="kbd">Tab</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Files</h3>
+          <div class="key-row"><span class="key-desc">Move</span><span class="key-combo"><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Expand / collapse</span><span class="key-combo"><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Open file</span><span class="key-combo"><kbd class="kbd">↵</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Filter</span><span class="key-combo"><kbd class="kbd">/</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Outline</h3>
+          <div class="key-row"><span class="key-desc">Previous / next entry</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">↑</kbd><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">↓</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Jump to entry</span><span class="key-combo"><kbd class="kbd">↵</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Palette entry search</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd><kbd class="kbd">›</kbd></span></div>
+        </div>
+      </div>
+    </div>
+    <footer class="sheet-foot">
+      <span class="panel-sub">Keys follow the platform modifier; the artifact reports <strong data-kbd-platform>⌘</strong>.</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-close="shortcuts">Close</button>
+    </footer>
+  </div>
+</section>
+
+<script src="workspace-data.js"></script>
+<script src="ds.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var WORKSPACE = window.CLAY_WORKSPACE;
+  var sources = WORKSPACE.sources;
+
+  ClayDS.renderTree(document.getElementById('file-tree'), WORKSPACE.tree, {
+    selected: 'VENT.md',
+    sources: sources
+  });
+
+  function knownPaths() { return WORKSPACE.files; }
+
+  /* ---------------- editor --------------------------------------------- */
+
+  var editor = ClayDS.createEditor({
+    canvas: document.querySelector('[data-canvas]'),
+    gutter: document.querySelector('[data-gutter]'),
+    value: sources['VENT.md'] || '# VENT\n',
+    label: 'VENT.md source'
+  });
+
+  var docName = document.querySelector('[data-doc-name]');
+  var docPath = document.querySelector('[data-doc-path]');
+  var docState = document.querySelector('[data-doc-state]');
+  var docStateText = document.querySelector('[data-doc-state-text]');
+  var docStat = document.querySelector('[data-doc-stat]');
+  var currentFile = 'VENT.md';
+  var versions = { 'VENT.md': 1 };
+
+  /* ---------------- outline rail ---------------------------------------- */
+
+  var entryHost = document.querySelector('[data-entries]');
+  var entryCount = document.querySelector('[data-entry-count]');
+  var entries = [];
+  var activeEntry = -1;
+  // An explicit jump scrolls the editor; the spy must not fight it back.
+  var spyLockUntil = 0;
+
+  function buildOutline() {
+    entries = editor.outline().filter(function (item) { return item.level === 2; });
+    entryCount.textContent = String(entries.length);
+    if (!entries.length) {
+      entryHost.innerHTML = '<p class="panel-sub" style="padding:12px 8px">No <code>##</code> entries in this file. The rail fills in as sections appear.</p>';
+      activeEntry = -1;
+      document.querySelector('[data-fact-entries]').textContent = '0';
+      return;
+    }
+    entryHost.innerHTML = entries.map(function (item, index) {
+      var title = item.title.replace(/^\d{2}-\d{2}-\d{2} \d{2}:\d{2}\s*—\s*/, '');
+      return '<button class="entry" type="button" role="option" data-index="' + index + '" data-line="' + item.line + '"'
+        + (index === 0 ? ' data-active="true"' : '') + ' title="' + item.title.replace(/"/g, '&quot;') + '">'
+        + '<span class="entry-time">' + (item.stamp ? item.stamp.split(' ')[1] : '--:--') + '</span>'
+        + '<span class="entry-title">' + title + '</span>'
+        + '</button>';
+    }).join('');
+    activeEntry = entries.length ? 0 : -1;
+    document.querySelector('[data-fact-entries]').textContent = String(entries.length);
+  }
+
+  function paintFacts() {
+    var text = editor.value;
+    var words = text.split(/\s+/).filter(Boolean).length;
+    document.querySelector('[data-fact-words]').textContent = words.toLocaleString();
+    document.querySelector('[data-fact-file]').textContent = currentFile.split('/').pop();
+    document.querySelector('[data-fact-version]').textContent = 'v' + versions[currentFile];
+    document.querySelector('[data-fact-state]').textContent = editor.dirty ? 'modified' : 'clean';
+    docStat.textContent = words + ' words · ' + entries.length + ' entries · markdown';
+  }
+
+  function paintState() {
+    var dirty = editor.dirty;
+    docStateText.textContent = dirty ? 'modified' : 'clean';
+    docState.className = 'badge ' + (dirty ? 'badge--dirty' : 'badge--clean');
+    var dot = docState.querySelector('.dot');
+    dot.className = 'dot ' + (dirty ? 'dot--warn' : 'dot--ok');
+    paintFacts();
+  }
+
+  function setActiveEntry(index) {
+    if (!entries.length) return;
+    activeEntry = Math.max(0, Math.min(index, entries.length - 1));
+    Array.prototype.forEach.call(entryHost.querySelectorAll('.entry'), function (node) {
+      var on = Number(node.dataset.index) === activeEntry;
+      node.dataset.active = on ? 'true' : 'false';
+      if (on) node.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function gotoEntry(index, focus) {
+    if (!entries.length) return;
+    spyLockUntil = Date.now() + 800;
+    setActiveEntry(index);
+    var item = entries[activeEntry];
+    editor.gotoLine(item.line);
+    if (focus) {
+      var node = entryHost.querySelector('.entry[data-index="' + activeEntry + '"]');
+      if (node) node.focus();
+    }
+    ClayDS.announce(item.title);
+  }
+
+  entryHost.addEventListener('click', function (event) {
+    var node = event.target.closest('.entry');
+    if (node) gotoEntry(Number(node.dataset.index), false);
+  });
+
+  entryHost.addEventListener('keydown', function (event) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      var next = activeEntry + (event.key === 'ArrowDown' ? 1 : -1);
+      setActiveEntry(next);
+      var node = entryHost.querySelector('.entry[data-index="' + activeEntry + '"]');
+      if (node) node.focus();
+      ClayDS.flash(node);
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      gotoEntry(activeEntry, true);
+    }
+  });
+
+  // scroll spy: the outline follows the editor, cheapest useful signal
+  var scrollHost = document.querySelector('.doc');
+  var spyFrame = null;
+  scrollHost.addEventListener('scroll', function () {
+    if (spyFrame) return;
+    spyFrame = requestAnimationFrame(function () {
+      spyFrame = null;
+      if (Date.now() < spyLockUntil) return;
+      var top = scrollHost.scrollTop + 48;
+      var line = -1;
+      editor.outline().forEach(function (item) {
+        if (item.level !== 2) return;
+        var node = scrollHost.querySelector('.ln[data-line="' + item.line + '"]');
+        if (node && node.offsetTop <= top) line = item.line;
+      });
+      if (line < 0) return;
+      var index = entries.findIndex(function (item) { return item.line === line; });
+      if (index >= 0 && index !== activeEntry) setActiveEntry(index);
+    });
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (!event.altKey || event.metaKey || event.ctrlKey) return;
+    if (event.key === 'ArrowDown') { event.preventDefault(); gotoEntry(activeEntry + 1, false); }
+    if (event.key === 'ArrowUp') { event.preventDefault(); gotoEntry(activeEntry - 1, false); }
+  });
+
+  /* ---------------- open path strip ------------------------------------ */
+
+  var openStrip = document.querySelector('[data-openbar]');
+  var pathInput = document.getElementById('open-path');
+  var pathButton = document.querySelector('[data-action="open-path"]');
+  var pathNote = document.querySelector('[data-open-note]');
+
+  function showOpen(show) {
+    openStrip.hidden = !show;
+    if (show) {
+      pathInput.focus();
+      pathInput.select();
+      ClayDS.flash(openStrip);
+    } else {
+      var trigger = document.querySelector('[data-action="open-toggle"]');
+      if (trigger) trigger.focus();
+    }
+  }
+
+  function normalize(value) {
+    return value.trim().replace(/^\.\//, '').replace(/^\/workspace\//, '');
+  }
+
+  pathInput.addEventListener('input', function () {
+    pathButton.disabled = !pathInput.value.trim();
+    pathNote.dataset.tone = '';
+    pathNote.textContent = 'relative to /workspace · Tab completes';
+  });
+
+  pathInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      var prefix = normalize(pathInput.value).toLowerCase();
+      var match = knownPaths().filter(function (path) { return path.toLowerCase().indexOf(prefix) === 0; })[0];
+      if (match) {
+        pathInput.value = match;
+        pathInput.dispatchEvent(new Event('input'));
+      }
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      runOpen();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      showOpen(false);
+    }
+  });
+
+  function runOpen() {
+    var wanted = normalize(pathInput.value);
+    if (!wanted) return;
+    var hit = knownPaths().filter(function (path) { return path.toLowerCase() === wanted.toLowerCase(); })[0];
+    if (!hit) {
+      pathNote.dataset.tone = 'err';
+      pathNote.textContent = 'not in workspace: ' + wanted;
+      return;
+    }
+    if (openFile(hit)) {
+      pathNote.dataset.tone = 'ok';
+      pathNote.textContent = 'opened ' + hit;
+    }
+  }
+
+  pathButton.addEventListener('click', runOpen);
+  document.querySelector('[data-action="open-toggle"]').addEventListener('click', function () {
+    showOpen(openStrip.hidden);
+  });
+  document.querySelector('[data-action="open-hide"]').addEventListener('click', function () { showOpen(false); });
+
+  /* ---------------- document actions ----------------------------------- */
+
+  function openFile(id, opts) {
+    opts = opts || {};
+    var name = id.split('/').filter(Boolean).pop();
+    var text = sources[id];
+    if (id !== currentFile) {
+      if (editor.dirty && !opts.force) {
+        ClayDS.toast('Save ' + currentFile + ' before switching', { kbd: ClayDS.key('mod+s'), tone: 'warn' });
+        return false;
+      }
+      currentFile = id;
+      editor.setValue(text || '# ' + name + '\n\nContent for ' + id + ' is not bundled in this design artifact.\n\n', { saved: true });
+      versions[id] = versions[id] || 1;
+      docName.textContent = name;
+      docPath.textContent = 'clay/' + id;
+      buildOutline();
+    }
+    document.querySelectorAll('[data-tree-item]').forEach(function (row) {
+      var on = row.dataset.id === id;
+      row.setAttribute('aria-selected', on ? 'true' : 'false');
+      row.dataset.active = on ? 'true' : 'false';
+      if (on) {
+        document.querySelectorAll('[data-tree-item]').forEach(function (r) { r.tabIndex = -1; });
+        row.tabIndex = 0;
+      }
+    });
+    document.querySelector('[data-doc-version]').textContent = 'v' + versions[id];
+    paintState();
+    ClayDS.announce('Opened ' + id);
+    return true;
+  }
+
+  document.addEventListener('clay:file', function (event) { openFile(event.detail.id); });
+
+  document.addEventListener('clay:editor', function (event) {
+    paintState();
+    document.querySelector('[data-action="undo"]').disabled = !event.detail.canUndo;
+    document.querySelector('[data-action="redo"]').disabled = !event.detail.canRedo;
+  });
+
+  document.querySelector('[data-action="save"]').addEventListener('click', function () {
+    editor.save();
+    paintState();
+    ClayDS.toast('Saved ' + currentFile, { kbd: ClayDS.key('mod+s') });
+  });
+
+  document.querySelector('[data-action="undo"]').addEventListener('click', function () {
+    if (editor.undo()) ClayDS.toast('Undo', { tone: 'quiet', ms: 1000 });
+  });
+
+  document.querySelector('[data-action="redo"]').addEventListener('click', function () {
+    if (editor.redo()) ClayDS.toast('Redo', { tone: 'quiet', ms: 1000 });
+  });
+
+  document.querySelector('[data-action="close"]').addEventListener('click', function () {
+    if (editor.dirty) {
+      ClayDS.toast('Unsaved changes in ' + currentFile, { kbd: ClayDS.key('mod+s'), tone: 'warn' });
+      return;
+    }
+    document.querySelectorAll('[data-tree-item]').forEach(function (row) {
+      row.setAttribute('aria-selected', 'false');
+      row.dataset.active = 'false';
+    });
+    editor.setValue('# No file open\n\nPress ' + ClayDS.key('mod+k') + ' for files, or ' + ClayDS.key('mod+o') + ' to type a workspace-relative path.\n', { saved: true });
+    currentFile = 'untitled';
+    docName.textContent = 'No file open';
+    docPath.textContent = 'clay';
+    document.querySelector('[data-doc-version]').textContent = '—';
+    buildOutline();
+    paintState();
+    ClayDS.toast('File closed', { kbd: ClayDS.key('mod+w') });
+  });
+
+  document.querySelector('[data-action="filter-focus"]').addEventListener('click', function () {
+    var input = document.querySelector('[data-filter-for="files"]');
+    input.focus();
+    input.select();
+    ClayDS.flash(input.closest('.field'));
+  });
+
+  /* ---------------- theme menu ----------------------------------------- */
+
+  function themeItems(host) {
+    ClayDS.themes.forEach(function (theme, index) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pop-item theme-item';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.dataset.setTheme = theme.id;
+      btn.setAttribute('aria-checked', 'false');
+      btn.innerHTML = '<span class="swatch" aria-hidden="true" data-theme="' + theme.id + '"><i></i><i></i><i></i></span>'
+        + '<span>' + theme.label + '</span>'
+        + '<span class="theme-mode">' + theme.mode + '</span>';
+      var kbd = document.createElement('kbd');
+      kbd.className = 'kbd kbd--sm';
+      kbd.textContent = ClayDS.key('alt+' + (index + 1));
+      btn.appendChild(kbd);
+      host.appendChild(btn);
+    });
+  }
+
+  themeItems(document.getElementById('theme-list'));
+
+  document.querySelectorAll('[data-cycle-theme]').forEach(function (node) {
+    node.addEventListener('click', function () { ClayDS.cycleTheme(1); });
+  });
+
+  /* ---------------- palette -------------------------------------------- */
+
+  function fileCommands() {
+    return knownPaths().map(function (path) {
+      return {
+        id: 'file:' + path,
+        title: path,
+        group: 'Files',
+        keywords: path.replace(/\//g, ' '),
+        meta: sources[path] ? '' : 'not bundled',
+        hint: sources[path] ? '↵' : '',
+        run: function () { openFile(path); }
+      };
+    });
+  }
+
+  function entryCommands() {
+    return editor.outline().filter(function (item) { return item.level === 2; }).map(function (item) {
+      return {
+        id: 'entry:' + item.line,
+        title: item.title,
+        group: 'Entries',
+        meta: 'line ' + (item.line + 1),
+        keywords: item.title,
+        run: function () {
+          var index = entries.findIndex(function (e) { return e.line === item.line; });
+          gotoEntry(index < 0 ? 0 : index, false);
+        }
+      };
+    });
+  }
+
+  function documentCommands() {
+    return [
+      { id: 'doc:save', title: 'Save file', group: 'Document', hint: ClayDS.key('mod+s'), run: function () { document.querySelector('[data-action="save"]').click(); } },
+      { id: 'doc:undo', title: 'Undo edit', group: 'Document', hint: ClayDS.key('mod+z'), run: function () { document.querySelector('[data-action="undo"]').click(); } },
+      { id: 'doc:redo', title: 'Redo edit', group: 'Document', hint: ClayDS.key('mod+shift+z'), run: function () { document.querySelector('[data-action="redo"]').click(); } },
+      { id: 'doc:open', title: 'Open path…', group: 'Document', hint: ClayDS.key('mod+o'), keywords: 'open file path', run: function () { showOpen(true); } },
+      { id: 'doc:close', title: 'Close file', group: 'Document', hint: ClayDS.key('mod+w'), run: function () { document.querySelector('[data-action="close"]').click(); } }
+    ];
+  }
+
+  function viewCommands() {
+    return [
+      { id: 'view:filter', title: 'Filter file tree', group: 'View', hint: '/', run: function () { document.querySelector('[data-action="filter-focus"]').click(); } },
+      { id: 'view:files', title: 'Toggle file list', group: 'View', hint: ClayDS.key('mod+b'), run: function () { ClayDS.toggleSidebar(); } },
+      { id: 'view:outline', title: 'Toggle outline rail', group: 'View', hint: ClayDS.key('mod+i'), run: function () { ClayDS.toggleInspector(); } },
+      { id: 'view:density', title: 'Toggle row density', group: 'View', keywords: 'compact comfortable', run: function () {
+          ClayDS.setDensity(document.documentElement.dataset.density === 'compact' ? 'comfortable' : 'compact');
+        } },
+      { id: 'view:keys', title: 'Keyboard map', group: 'View', hint: '?', run: function () { ClayDS.openOverlay('shortcuts'); } }
+    ].concat(ClayDS.themes.map(function (theme) {
+      return {
+        id: 'theme:' + theme.id,
+        title: 'Theme: ' + theme.label,
+        group: 'View',
+        meta: theme.mode,
+        run: function () { ClayDS.setTheme(theme.id); }
+      };
+    }));
+  }
+
+  ClayDS.setCommands(fileCommands().concat(entryCommands(), documentCommands(), viewCommands()));
+
+  /* ---------------- boot ------------------------------------------------ */
+
+  document.querySelector('[data-kbd-platform]').textContent = ClayDS.mod;
+  document.addEventListener('click', function (event) {
+    if (event.target.closest('[data-open="palette"]')) {
+      ClayDS.setCommands(fileCommands().concat(entryCommands(), documentCommands(), viewCommands()));
+    }
+  });
+
+  buildOutline();
+  paintState();
+})();
+</script>
+</body>
+</html>

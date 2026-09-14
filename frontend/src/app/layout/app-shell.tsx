@@ -1,11 +1,14 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router";
 
-import { ClayText } from "../../components";
+import { ClayButton, ClayKbd } from "../../components";
 import { workspace } from "../../shell/workspace-singleton";
+import { tabTitle } from "../../shell/tab-store";
+import { workspaceRail } from "../../shell/layout-state";
 import { useSessionConnection } from "../use-clay-session";
 import styles from "./shell.module.css";
 import { TabBar, type ShellTab } from "./tab-bar";
+import { ViewSwitcher } from "./view-switcher";
 import { WorkingArea } from "./working-area";
 
 export interface AppShellProps {
@@ -21,6 +24,13 @@ function statusFromPhase(phase: string): string {
   if (phase === "ready") return "Connected";
   if (phase === "disconnected") return "Disconnected";
   return "Connecting…";
+}
+
+/** Workspace label for the status bar: the folder's basename, never a path. */
+function workspaceLabel(root: string | undefined): string {
+  if (!root) return "";
+  const parts = root.split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) ?? "";
 }
 
 /**
@@ -41,8 +51,14 @@ export function AppShell({
     workspace.subscribe,
     workspace.getSnapshot,
   );
+  const railVisible = useSyncExternalStore(
+    workspaceRail.subscribe,
+    workspaceRail.isVisible,
+  );
   const activeRuntime = workspace.active();
   const activeDiagnostic = activeRuntime?.diagnostic;
+  const activePane = activeRuntime?.panes.get(activeRuntime.tree.activePaneId);
+  const activeMeta = activePane?.session.store.get() ?? null;
   // Progressive chunk load in flight: a transient, server-backed phase.
   const documentLoading = [...(activeRuntime?.panes.values() ?? [])].some(
     (pane) => pane.session.store.get()?.loading,
@@ -55,11 +71,17 @@ export function AppShell({
       ? "Loading document…"
       : (status ?? statusFromPhase(live.phase)));
 
+  const activeTab =
+    snapshot.tabs.find((tab) => tab.clientId === snapshot.activeClientId) ??
+    null;
   const liveTabs: ShellTab[] = snapshot.tabs.map((tab) => ({
     id: String(tab.clientId),
     label: tab.label,
+    title: tabTitle(tab.workspaceRoot, tab.agent),
     dirty: tab.dirty,
     closable: snapshot.tabs.length > 1,
+    // Approved marker: the mono word inside the tab, not a second badge.
+    agent: tab.agent ? { busy: tab.agentBusy } : null,
   }));
   const tabs =
     injectedTabs ??
@@ -70,10 +92,41 @@ export function AppShell({
       ? String(snapshot.activeClientId)
       : (tabs[0]?.id ?? null));
 
+  const hints = [
+    {
+      id: "palette",
+      label: "palette",
+      keys: "Ctrl X P",
+      run: () => workspace.dispatchServerCommand("controlCenter.open"),
+    },
+    {
+      id: "files",
+      label: "files",
+      keys: "Ctrl B",
+      run: () => workspace.dispatchServerCommand("workspace.toggleFileBrowser"),
+    },
+    {
+      id: "outline",
+      label: railVisible ? "hide outline" : "outline",
+      keys: "Ctrl I",
+      run: () => workspaceRail.toggle(),
+    },
+    {
+      id: "filter",
+      label: "filter",
+      keys: "/",
+      run: () => {
+        document
+          .querySelector<HTMLInputElement>("[data-clay-list-filter] input")
+          ?.focus();
+      },
+    },
+  ];
+
   return (
     <div className={styles.shell}>
-      <header className={styles.header}>
-        <span className={styles.brand}>CLAY</span>
+      <header className={styles.header} data-clay-ds="shell.header">
+        <span className={styles.brand}>Clay</span>
         <TabBar
           tabs={tabs}
           activeId={activeTabId}
@@ -89,10 +142,45 @@ export function AppShell({
             const clientId = Number(id);
             if (Number.isFinite(clientId)) workspace.requestClose(clientId);
           }}
-          onNew={
-            injectedTabs ? undefined : () => void workspace.openTabDialog()
-          }
+          onNew={injectedTabs ? undefined : () => void workspace.newTab()}
         />
+        {injectedTabs ? null : (
+          <ViewSwitcher
+            view={activeTab?.view ?? "workspace"}
+            hasWorkspace={Boolean(activeTab?.workspaceRoot)}
+            hasAgent={Boolean(activeTab?.agent)}
+            onSelect={(view) => workspace.setView(view)}
+          />
+        )}
+        <span className={styles.titlebarSpacer} />
+        <nav className={styles.actions} aria-label="Application controls">
+          <ClayButton
+            variant="muted"
+            aria-keyshortcuts="Control+X Control+P"
+            onPress={() =>
+              workspace.dispatchServerCommand("controlCenter.open")
+            }
+          >
+            Palette
+          </ClayButton>
+          <ClayButton
+            variant="muted"
+            aria-keyshortcuts="Control+B"
+            onPress={() =>
+              workspace.dispatchServerCommand("workspace.toggleFileBrowser")
+            }
+          >
+            Files
+          </ClayButton>
+          <ClayButton
+            variant="muted"
+            aria-keyshortcuts="Control+I"
+            aria-pressed={railVisible}
+            onPress={() => workspaceRail.toggle()}
+          >
+            {railVisible ? "Hide outline" : "Outline"}
+          </ClayButton>
+        </nav>
       </header>
       <main className={styles.workingArea} aria-label="Clay workspace">
         <WorkingArea left={left}>
@@ -100,14 +188,41 @@ export function AppShell({
         </WorkingArea>
       </main>
       <footer className={styles.footer} data-clay-ds="statusBar.root">
-        <ClayText variant="status" muted>
-          {location.pathname}
-        </ClayText>
-        <span role="status" aria-live="polite">
-          <ClayText variant="status" muted data-testid="shell-status">
-            {resolvedStatus}
-          </ClayText>
+        <span className={styles.statusGroup} data-testid="shell-location">
+          {workspaceLabel(
+            activeTab?.workspaceRoot || activeRuntime?.sessionRoot,
+          ) || location.pathname}
         </span>
+        {activeMeta?.path ? (
+          <span className={styles.statusGroup}>
+            <span className={styles.statusValue}>{activeMeta.path}</span>
+            <span>{`v${activeMeta.version}`}</span>
+            <span>{activeMeta.dirty ? "dirty" : "clean"}</span>
+          </span>
+        ) : null}
+        <span role="status" aria-live="polite" className={styles.statusMessage}>
+          <span data-testid="shell-status" className={styles.statusValue}>
+            {resolvedStatus}
+          </span>
+        </span>
+        <span className={styles.statusSpacer} />
+        {hints.length > 0 ? (
+          <span className={styles.statusHints}>
+            {hints.map((hint) => (
+              <button
+                key={hint.id}
+                type="button"
+                className={styles.statusHint}
+                onClick={hint.run}
+              >
+                <span>{hint.label}</span>
+                {hint.keys.split(" ").map((key) => (
+                  <ClayKbd key={`${hint.id}-${key}`}>{key}</ClayKbd>
+                ))}
+              </button>
+            ))}
+          </span>
+        ) : null}
       </footer>
     </div>
   );

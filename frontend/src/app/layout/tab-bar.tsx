@@ -1,10 +1,19 @@
-import { ClayTabStrip, type TabItem, type ClayTabStripProps } from "../../components";
+import {
+  ClayTabStrip,
+  type TabItem,
+  type ClayTabStripProps,
+} from "../../components";
 
 export interface ShellTab {
   id: string;
   label: string;
+  /** Full tooltip: the folder path and the attached agent. */
+  title?: string;
   dirty?: boolean;
   closable?: boolean;
+  /** Agent half attached (plan 118 task 33): the strip draws its marker and
+   *  pulses it while the agent is working. */
+  agent?: { busy: boolean } | null;
 }
 
 export interface TabBarProps {
@@ -35,6 +44,7 @@ export function TabBar({
       onNew={onNew}
       ariaLabel="Window tabs"
       emptyLabel="No tabs"
+      variant="inline"
     />
   );
 }

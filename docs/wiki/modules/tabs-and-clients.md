@@ -57,6 +57,74 @@ server. The authority boundary from earlier phases is untouched — each
 connection still holds its own capability tokens, document leases, and
 workspace grants; the registry only binds already-authorized connections.
 
+**Product information architecture (plan 118).** The mechanism above is
+unchanged by what a tab *means*. The approved target IA is: a tab is one
+**workspace** (a folder) plus one **agent**, rendering exactly one of two views
+at a time — Workspace or Agent — with a switcher in tab chrome
+([`DESIGN.md`](../../../DESIGN.md) §12; approved set in
+`design-artifacts/approved/quiet-instrument-migration/`).
+
+Shipped: a fresh window and every *uncommitted* tab (nothing picked yet) open
+the **launcher** ([Launcher Landing Surface](launcher-landing-surface.md)), not
+`@clay/chat`, which plan 118 removed. Since the two-view task (plan 118 task 33)
+the tab *is* the two-view unit:
+
+- the tab record (owner: `frontend/src/shell/tab-store.ts`) carries the
+  **picked folder** (empty while uncommitted — the server session always has a
+  real root, so only an explicit pick commits the tab), the **agent identity**
+  (`{ type, configRoot }`, inert display data), the **view**
+  (`workspace | agent`), and the running flag behind the strip's pulsing marker;
+- `layout.json` v2 round-trips all three per tab (`src/shell/layout_persist.rs`:
+  `PersistedTabState { workspace_root, agent, view, … }`, `agent` optional, a
+  tab with **neither** half skipped rather than half-restored, an absent `view`
+  read as the workspace view);
+- the **workspace view** is the pane tree (editor + SDUI tree/sidebar) and the
+  **agent view** is the trusted `@clay/coding-agent` panel
+  (`frontend/src/coding-agent/AgentView.tsx`); `WorkspacePanes` keeps both
+  mounted and hides the inactive one, so a switch re-fetches nothing and loses
+  no state;
+- the switcher is tab chrome (`frontend/src/app/layout/view-switcher.tsx`, the
+  design system's `seg` family, `Ctrl+1`/`Ctrl+2`); it is inert with a reason
+  on an uncommitted tab, and the view that is up carries the only selection
+  signal;
+- an uncommitted tab's launcher row pick **rebinds that tab's workspace in
+  place** through the existing `TabCommand::OpenWorkspace` path (the server
+  rebinds the registry entry and rebroadcasts it, so the label, the tooltip and
+  `layout.json` follow, and the agent host rebinds to the new root); a tab that
+  already holds a workspace opens the picked folder as its own tab;
+- `⌘T` / the strip's `+` opens an uncommitted tab on the launcher, and the
+  launcher's agent pane attaches the agent half without touching the workspace.
+
+Shipped since the agent-type task (plan 118 task 35): the **agent types are a
+registry the server owns** and the agent view's title is the picker.
+
+- `TabCommand::SetAgent { tab_id, agent }` is the only way a tab's agent
+  changes, and it is tab chrome (the titlebar's picker sends it; the server
+  resolves the client's bound tab). The handler validates the name against the
+  Clay data root's `agents/` — `launcher::resolve_agent_type`, which rejects
+  separators/traversal/unknown names and requires the directory to exist — then
+  the registry's `RegistryEntry.agent_type` holds it. `TabEntry` still keeps its
+  four protocol-visible identity fields: the agent half stays server-local
+  (the client showed it optimistically and reconciles from the snapshot), and
+  no path ever crosses the wire.
+- Every later read starts from that stored name: the agent settings page
+  (`agent_settings::agent_config_root_for`, contained to
+  `<data root>/agents/<type>`), the tab's session (`AgentHost::ensure_tab_session`
+  passes `agent` + that agent's MCP allow-list to the daemon), and the switch
+  itself (`AgentHost::rebind_tab_agent` → the daemon's `session.setAgent`, which
+  re-reads only that agent's config over the same session branch). A refused
+  switch reverts the registry entry, so a tab never claims an agent its live
+  session is not running.
+- The picker reuses the launcher's enumeration (one `launcherEntries` fetch),
+  consumes the design system's `agentPicker.default.trigger.*` family, marks the
+  current type, and names where more come from (`~/.clay/agents/`).
+- Transcript rows carry the agent that produced them (`metadata.agent` on the
+  AG-UI message, `AgentTranscriptEntry.agent` in the snapshot), so a transcript
+  that spans a switch labels each turn and derives the boundary note client side
+  — it survives a reload because the stamps are server data.
+
+Shipped (Part D, plan 118 tasks 33–36): the launcher landing, the tab's two views with their switcher, the agent-type picker, and the agent view's Files tab as the session's file history (one row per path the session touched, newest first, opening in the workspace view).
+
 ## Server side: TabRegistry and protocol
 
 - `TabRegistry` (`src/server/tab_registry.rs`) is `Arc<Mutex<...>>` on

@@ -2,6 +2,22 @@
 
 Navigation and contract entry for Clay's reusable UI surface. This page links the authoritative catalogs and the rules for using them so any agent or developer can discover every reusable UI primitive/component and the conformance rules without reading paint code. It is maintained by Phase 20.8 and updated whenever the component catalog, token catalog, or conformance rules change.
 
+## Design Language (Quiet Instrument)
+
+[`DESIGN.md`](../../DESIGN.md) is the normative design system: the five laws
+(one surface with hairline zones, two elevations, accent is state, type does
+the structure, motion carries meaning), the value profile (radius ladder
+5/8/12/16/pill, 1px hairlines, veil/accent opacities, the two shadow recipes,
+150/240/620ms motion), geometry and reading measures, the per-surface recipe
+binding for every component kind, shell composition rules, accessibility
+invariants, the retired patterns, and the conformance checklist.
+
+This page and the catalogs remain the entry points for *what exists*; `DESIGN.md`
+owns *how it looks*. A change to appearance is a `DESIGN.md` edit plus
+design-system package data — never a host CSS module, a component rewrite, or a
+new token. A change to a component, primitive, style variable, or token updates
+this navigation page, the catalogs, and the drift tests together.
+
 ## Single Source of Truth
 
 The `clay-execution` catalog references are the authoritative catalog. This page links them; it does not duplicate them. When a UI phase adds, removes, or changes a component, primitive, style variable, token, or layout rule, the phase updates the catalog in the same change and this page stays a navigation entry.
@@ -21,7 +37,12 @@ are cataloged here so package authors do not mistake them for extension points:
 - **Welcome entry surface:** `WelcomeWidget` is Clay-owned empty/local-fallback
   presentation when no `empty-tab` pane-content is loaded. It exposes existing
   file/folder command routes only; packages cannot replace this fallback or
-  gain dialog authority. The loaded landing is package pane-content (`@clay/chat`).
+  gain dialog authority. The empty-tab landing is package pane-content and no
+  longer ships a product-named core branch: plan 118 deleted the `@clay/chat`
+  landing, and the approved target information architecture makes the
+  **launcher** the landing surface with the agent as a first-class view of the
+  same tab (plan 118 Part D,
+  `design-artifacts/approved/quiet-instrument-migration/start.html`).
 - **Completion:** `TransientMenuOrigin::Completion` is a Clay-owned modeless
   caret/IME projection with an 8 visible-row and 480 logical-pixel cap,
   retained scrolling, stale/empty/error dismissal, and sanitized status/a11y
@@ -52,7 +73,7 @@ points:
 - Clay owns the working area, pane/split tree, fixed slots, tab bar, status
   chrome, core welcome fallback, file browser, completion projection, and
   centered Command Centre. The loaded empty-tab landing is package pane-content
-  (`@clay/chat` by default). Packages contribute inert component trees, action
+  (whatever package contributes the empty-tab landing). Packages contribute inert component trees, action
   intents, input/state metadata, and typed semantic tokens only.
 - Retained package/SDUI hosts clip children to their owning bounds and expose
   clipped-child accessibility semantics. A nested `scroll` component receives
@@ -107,9 +128,10 @@ and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 
 ## Reference Documents
 
-- [UI Design Systems](ui-design-systems.md) — Plan 101/102/103 public specification for typed UI design-system recipe contributions, property domains, state mapping, deterministic fallbacks, accessibility layers, and programmatic activation.
-- [UI Design-System Recipe Matrix](../development/ui-design-system-recipe-matrix.md) — Plan 101 comprehensive matrix of all package component kinds, internal surfaces, chrome primitives, semantic recipe slots, applicable interaction states, allowed property families, layout-neutrality classifications, active-theme color role sources, accessibility invariants, and deterministic fallback resolution.
-- [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer (`src/shell/primitives.rs`): divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, and the Phase 24.4 token-driven scrim; token mapping, interaction states, accessibility roles, and the conformance contract.
+- [Clay Design System — Quiet Instrument](../../DESIGN.md) — normative design language: laws, values, geometry, materials, motion, typography, state language, per-surface component recipes, shell composition, accessibility invariants, retired patterns, review checklist, and the design-system implementation profile.
+- [UI Design Systems](ui-design-systems.md) — public specification for typed UI design-system recipe contributions, property domains, state mapping, deterministic fallbacks, accessibility layers, the shipped system (`@clay/design-instrument`) plus the `@clay/core` baseline, the composited content-theme contrast gate, and programmatic activation (Plans 101–103, 118).
+- [UI Design-System Recipe Matrix](../development/ui-design-system-recipe-matrix.md) — comprehensive matrix of all package component kinds, internal surfaces, chrome primitives, semantic recipe slots, applicable interaction states, allowed property families, layout-neutrality classifications, active-theme color role sources, accessibility invariants, and deterministic fallback resolution. `†` marks a host slot the shipped package declares no recipe for; the markers are drift-tested.
+- [UI Chrome Primitives](primitives/ui-chrome-primitives.md) — the chrome primitive catalog (divider, focus ring, panel chrome, scroll chrome, badge, kbd hint, icon slot, tooltip shell, token-driven scrim). The Phase 20.2 native `src/shell/primitives.rs` paint helpers are gone with the native client; the same contract is realized as token-driven React components/CSS classes in `frontend/src/components/chrome.tsx`.
 - [Clay Shell and Package UI/Layout Strategy](primitives/shell-layout-strategy.md) — shell vocabulary, working area, pane/split tree, fixed/transient slots, package UI/state/style contract, and the Tauri/React client implementation boundary.
 - [Creating Clay Packages](packages/creating-packages.md) — package authoring guide. The Components section and the UI and Layout Model section define the package-facing authoring contract; the Styling and Themes section and the Phase 20.1/20.4/20.7 authoring contracts define token/theme usage. Implemented-vs-planned markers in the guide match the component catalog exactly.
 
@@ -117,7 +139,7 @@ and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 
 Clay is the host authority for UI conformance. Validation runs inside Clay's Rust host validator at parse/install/theme-apply time; no package-facing op or facade exposes it. Third-party packages physically cannot inject raw styling, undocumented components/tokens, oversized UI payloads, or sub-contrast themes.
 
-- **Contrast / legibility:** active-theme status-chrome token pairs must meet `TEXT_CONTRAST_MIN` (4.5) for text and `UI_CONTRAST_MIN` (3.0) for accent/border/focus UI pairs (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`). A below-AA theme is not activated.
+- **Contrast / legibility:** active-theme role pairs must meet `TEXT_CONTRAST_MIN` (4.5) for text, `UI_CONTRAST_MIN` (3.0) for structural boundaries/accent/focus/state fills, and `HAIRLINE_VISIBILITY_MIN` (1.2) for the decorative `border.hairline` — each pair measured **composited** (alpha over its backdrop), with the border ladder monotonic on the same surface (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`). A below-floor theme is not activated and the previous theme stays installed.
 - **State-completeness:** `applicable_states(kind)` (`src/shell/components.rs`) is the per-`ComponentKind` interaction-state contract; the SDUI paint path renders every applicable state from tokens (`component_state_palette`).
 - **Payload budgets:** SDUI snapshot ≤ 4096 B, update ≤ 1024 B; runtime `publishTree` tree ≤ 16 KiB / ≤ 128 nodes / ≤ 16 depth / ≤ 4096-char text node (`src/packages/record/mod.rs`, `src/server/ui.rs`, `src/server/ops/sdui.rs`).
 - **Code-vs-catalog drift:** the `ComponentKind` enum, typed style variables, and `core_theme_value` arms stay in sync with the catalog tables in `components.md` / `tokens.md` (enforced by `tests/package_ui_conformance.rs`).
@@ -136,5 +158,5 @@ Agents and plan documents that touch app UI must follow the create-plan UI requi
 
 1. Reuse cataloged components, primitives, style variables, and tokens first; a custom component outside the catalog requires explicit justification.
 2. New components, primitives, tokens, and style variables are additive-only and token-driven (no raw colors, CSS, concrete font families, or point sizes).
-3. Every new component ships state-complete (all applicable `InteractionState` variants styled from tokens) and accessible.
-4. Update the component catalog, the token catalog when token entries change, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Plan 087 also records Clay-owned welcome/completion/centered surfaces and keeps them out of package-facing anchor enums. Documentation drift fails `cargo test`.
+3. Every new component ships state-complete (all applicable `InteractionState` variants styled from tokens), accessible, and conformant with the Quiet Instrument binding in `DESIGN.md` §11 and the retired patterns in §14.
+4. Update `DESIGN.md` when design-language values or per-surface rules change; update the component catalog, the token catalog when token entries change, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Plan 087 also records Clay-owned welcome/completion/centered surfaces and keeps them out of package-facing anchor enums. Documentation drift fails `cargo test`.

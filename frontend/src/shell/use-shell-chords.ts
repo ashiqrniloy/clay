@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { workspaceRail } from "./layout-state";
 import type { WorkspaceController } from "./workspace-controller";
 import type { ServerKeyStroke } from "./workspace-controller";
 
@@ -148,6 +149,45 @@ export function useShellChords(
       if (key === "-" || key === "_") {
         event.preventDefault();
         workspace.split("vertical");
+        return;
+      }
+      // The tab's two views (plan 118 task 33): the switcher is tab chrome, so
+      // the chord fires wherever focus sits. A pick that would be a no-op (an
+      // uncommitted tab) leaves the view alone.
+      if (!event.altKey && (key === "1" || key === "2")) {
+        const snapshot = workspace.getSnapshot();
+        const tab = snapshot.tabs.find(
+          (entry) => entry.clientId === snapshot.activeClientId,
+        );
+        if (!tab || (!tab.workspaceRoot && !tab.agent)) return;
+        event.preventDefault();
+        workspace.setView(key === "1" ? "workspace" : "agent");
+        return;
+      }
+      if (key === "t" || key === "T") {
+        event.preventDefault();
+        void workspace.newTab();
+        return;
+      }
+      // The filter chord is the approved sidebar behaviour: `/` puts the caret
+      // in the visible list filter (the workspace file listing). Generic: it
+      // focuses whichever filter the host is showing, never a named pane.
+      if (key === "/" && !event.shiftKey) {
+        const field = document.querySelector<HTMLInputElement>(
+          "[data-clay-list-filter] input",
+        );
+        if (!field) return;
+        event.preventDefault();
+        field.focus();
+        field.select();
+        return;
+      }
+      // The workspace rail is view chrome, not editor text: the chord fires
+      // wherever focus sits, and the titlebar and rail buttons run the same
+      // toggle (DESIGN.md §12).
+      if (key === "i" || key === "I") {
+        event.preventDefault();
+        workspaceRail.toggle();
         return;
       }
       if (key === "Tab") {

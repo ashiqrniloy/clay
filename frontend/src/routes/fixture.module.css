@@ -1,6 +1,9 @@
 /* Fixture route: deterministic visual states for development/test builds
- * only. Not a production second shell.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+ * only. Not a production second shell — but it is the DEV review surface for
+ * the catalog, so it renders in the shipped language: panels, empty states,
+ * rows and dividers take the same recipes the product uses, and every
+ * appearance value is a `--clay-ds-*` recipe or a `--clay-*` theme role (no
+ * raw colour, border width, radius or shadow). */
 
 .fixture {
   height: 100%;
@@ -9,6 +12,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--clay-spacing-md, 16px);
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  color: var(--clay-text-primary);
 }
 
 .packageFixture {
@@ -21,10 +26,7 @@
   grid-template-rows: auto 1fr;
   height: 100%;
   min-height: 0;
-  background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
 }
 
 .documentSurface {
@@ -35,66 +37,54 @@
 .reviewStatus {
   display: flex;
   align-items: center;
-  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px);
-  border-bottom: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    solid
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-hairline)
-    );
-  background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-panel)
-  );
-  color: var(--clay-text-primary);
+  padding: var(--clay-ds-status-bar-default-root-rest-padding);
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+  background: var(--clay-ds-status-bar-default-root-rest-background-color);
+  color: var(--clay-ds-status-bar-default-root-rest-text-color);
 }
 
 .row {
   display: flex;
-  gap: var(--clay-spacing-sm, 12px);
+  gap: var(--clay-ds-key-hint-default-row-rest-gap);
   align-items: center;
   flex-wrap: wrap;
 }
 
+/* A panel is the veil plane: recipe fill (composed from its own opacity),
+ * hairline and radius, never a shadow. */
 .panel {
-  background: var(
-    --clay-ds-panel-default-root-rest-background-color,
-    var(--clay-surface-panel)
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-ds-panel-default-root-rest-gap);
+  padding: var(--clay-ds-panel-default-root-rest-padding);
+  border-width: var(--clay-ds-panel-default-root-rest-border-width);
+  border-style: var(--clay-ds-panel-default-root-rest-border-style);
+  border-color: var(--clay-ds-panel-default-root-rest-border-color);
+  border-radius: var(--clay-ds-panel-default-root-rest-border-radius);
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-panel-default-root-rest-background-color)
+      calc(var(--clay-ds-panel-default-root-rest-background-opacity, 1) * 100%),
+    transparent
   );
-  border: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    solid
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-hairline)
-    );
-  padding: var(--clay-spacing-md, 16px);
+  color: var(--clay-ds-panel-default-root-rest-text-color);
 }
 
 .emptyState {
   display: grid;
   place-items: center;
+  gap: var(--clay-ds-empty-default-root-rest-gap);
   min-height: 96px;
-  background: var(--clay-surface-list);
-  border: var(
-      --clay-ds-panel-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    solid
-    var(
-      --clay-ds-panel-default-root-rest-border-color,
-      var(--clay-border-hairline)
-    );
+  padding: var(--clay-ds-empty-default-root-rest-padding);
+  background: var(--clay-ds-empty-default-root-rest-background-color);
+  color: var(--clay-ds-empty-default-root-rest-text-color);
 }
 
 .stack {
   display: flex;
   flex-direction: column;
-  gap: var(--clay-spacing-sm, 12px);
+  gap: var(--clay-ds-stack-default-root-rest-gap);
   align-items: center;
 }

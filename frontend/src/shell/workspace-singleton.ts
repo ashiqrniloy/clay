@@ -31,8 +31,4 @@ export const workspace = createWorkspace({
     const { openFolderDialog } = await import("../bridge/client");
     return openFolderDialog(tabId);
   },
-  openTabDialog: async () => {
-    const { openTabDialog } = await import("../bridge/client");
-    return openTabDialog();
-  },
 });

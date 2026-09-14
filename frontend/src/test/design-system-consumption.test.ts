@@ -21,7 +21,9 @@ export interface ComponentCssConsumption {
 }
 
 /**
- * Recursively discovers all `*.module.css` files within a directory.
+ * Recursively discovers every host stylesheet within a directory — CSS modules
+ * and plain host CSS alike, minus `styles/tokens.css`, which *states* the
+ * fallback values rather than consuming them.
  */
 export function scanCssModuleFiles(dir: string): string[] {
   const results: string[] = [];
@@ -31,7 +33,11 @@ export function scanCssModuleFiles(dir: string): string[] {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       results.push(...scanCssModuleFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith(".module.css")) {
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith(".css") &&
+      entry.name !== "tokens.css"
+    ) {
       results.push(fullPath);
     }
   }
@@ -155,34 +161,93 @@ export function checkVariableProvenance(
 
 /**
  * Known owning component CSS module relative paths.
+ *
+ * The inventory of record is
+ * `design-artifacts/prototypes/quiet-instrument-migration/README.md` (§2/§3/§4):
+ * every package family names the module that must paint it. Families whose
+ * surface does not exist yet (`recentRow` — the launcher is Part D) still name
+ * their owner so the gate reports the missing consumer instead of silently
+ * accepting a family with no home.
  */
 export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
+  badge: ["components/chrome.module.css"],
+  kbd: ["components/chrome.module.css"],
+  divider: ["components/chrome.module.css"],
+  tooltip: ["components/tooltip.module.css"],
   button: ["components/button.module.css"],
   textInput: ["components/text-field.module.css"],
+  label: ["components/text.module.css"],
   dropdown: ["components/controls.module.css"],
+  list: [
+    "components/controls.module.css",
+    "routes/workspace.module.css",
+    // The agent inspector's Settings tab lists delivered config files as
+    // `list.default.row`s (no second row language for a file listing).
+    "agent-settings/agent-settings.module.css",
+  ],
   collapse: ["components/controls.module.css"],
+  seg: ["components/controls.module.css", "app/layout/shell.module.css"],
+  menu: [
+    // The command palette; the agent composer's completion menus paint the
+    // same family from the coding-agent surface (Plan 118 task 22 will move
+    // the palette onto it too).
+    "command-centre/command-centre.module.css",
+    "coding-agent/coding-agent.module.css",
+  ],
+  popover: [
+    "components/controls.module.css",
+    "command-centre/command-centre.module.css",
+  ],
   modal: ["components/modal.module.css"],
+  toast: ["components/toast.module.css"],
+  empty: ["coding-agent/coding-agent.module.css"],
   tab: ["components/tab-strip.module.css"],
   tabBar: ["components/tab-strip.module.css"],
-  chat: ["chat/chat.module.css"],
-  chatPanel: ["chat/chat.module.css"],
   editor: ["editor/editor.module.css"],
   editorChrome: ["editor/editor.module.css"],
+  scroll: [
+    "editor/editor.module.css",
+    "sdui/registry.module.css",
+    "styles/global.css",
+  ],
   commandCentre: ["command-centre/command-centre.module.css"],
   statusItem: ["app/layout/shell.module.css"],
+  statusDot: ["coding-agent/coding-agent.module.css"],
   statusBar: [
     "app/layout/shell.module.css",
     "packages/package-workspace.module.css",
   ],
   shell: ["app/layout/shell.module.css"],
+  card: ["sdui/registry.module.css"],
+  panel: [
+    "sdui/registry.module.css",
+    "sdui/renderer.module.css",
+    "packages/package-workspace.module.css",
+    "settings/settings-panel.module.css",
+    "routes/workspace.module.css",
+  ],
+  overlay: ["sdui/registry.module.css", "sdui/renderer.module.css"],
+  portal: ["sdui/registry.module.css", "sdui/renderer.module.css"],
+  flex: ["sdui/registry.module.css", "sdui/renderer.module.css"],
+  stack: ["sdui/registry.module.css", "sdui/renderer.module.css"],
   paneSplitTree: [
     "shell/pane-tree.module.css",
     "coding-agent/coding-agent.module.css",
   ],
   fileBrowser: ["packages/package-workspace.module.css"],
   settingsPanel: ["settings/settings-panel.module.css"],
-  divider: ["components/chrome.module.css"],
-  tooltip: ["components/tooltip.module.css"],
+  agentPicker: [
+    "coding-agent/coding-agent.module.css",
+    "components/controls.module.css",
+  ],
+  sessionRow: ["coding-agent/coding-agent.module.css"],
+  statRow: ["coding-agent/coding-agent.module.css"],
+  keyHint: [
+    "coding-agent/coding-agent.module.css",
+    "command-centre/command-centre.module.css",
+  ],
+  swatch: ["settings/settings-panel.module.css"],
+  recentRow: ["routes/start.module.css"],
 };
 
 export interface UnconsumedPropertyViolation {
@@ -241,6 +306,34 @@ export function checkOwningComponentPropertyCoverage(
   return violations;
 }
 
+/**
+ * (e) Asserts that a recipe key consumed by CSS is consumed by one of its
+ * recorded owner modules (not only somewhere on the tree, which would let a
+ * surface borrow another surface's recipe). Returns the misrouted keys.
+ */
+export function checkOwnerRouting(
+  recipeKeys: readonly string[],
+  consumedByFile: ReadonlyMap<string, Set<string>>,
+  ownership: Record<string, string[]>,
+): string[] {
+  const misrouted: string[] = [];
+  for (const key of recipeKeys) {
+    const owners = ownership[key.split(".")[0] ?? ""];
+    if (!owners) continue;
+    const prefix = recipeVariableToCssName(key);
+    const matches = (vars: Iterable<string>) =>
+      [...vars].some((v) => v === prefix || v.startsWith(`${prefix}-`));
+    const consumedSomewhere = [...consumedByFile.values()].some(matches);
+    if (!consumedSomewhere) continue;
+    const consumedByOwner = owners.some((file) =>
+      matches(consumedByFile.get(file) ?? []),
+    );
+    if (!consumedByOwner)
+      misrouted.push(`${key} (owners: ${owners.join(", ")})`);
+  }
+  return misrouted.sort();
+}
+
 // ============================================================================
 // Repository Data Loader
 // ============================================================================
@@ -249,11 +342,12 @@ function loadRepoData() {
   const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
   const srcDir = path.join(repoRoot, "frontend/src");
   const tokensPath = path.join(srcDir, "styles/tokens.css");
-  const neobrutalPath = path.join(
+  // Plan 118 task 9: the shipped system is @clay/design-instrument. The removed
+  // Neobrutal/Glass packages are gone, so the gate reads exactly one package.
+  const shippedPath = path.join(
     repoRoot,
-    "packages/design-neobrutal/package.json",
+    "packages/design-instrument/package.json",
   );
-  const glassPath = path.join(repoRoot, "packages/design-glass/package.json");
 
   const cssFiles = scanCssModuleFiles(srcDir);
   const allConsumedVars = new Set<string>();
@@ -270,19 +364,13 @@ function loadRepoData() {
   const tokensContent = fs.readFileSync(tokensPath, "utf8");
   const fallbackVars = extractFallbackVariables(tokensContent);
 
-  const neobrutalPkg = extractPackageRecipes(
-    fs.readFileSync(neobrutalPath, "utf8"),
+  const shippedPkg = extractPackageRecipes(
+    fs.readFileSync(shippedPath, "utf8"),
   );
-  const glassPkg = extractPackageRecipes(fs.readFileSync(glassPath, "utf8"));
 
-  const packageRecipeKeys = Array.from(
-    new Set([...neobrutalPkg.recipeKeys, ...glassPkg.recipeKeys]),
-  ).sort();
+  const packageRecipeKeys = Array.from(new Set(shippedPkg.recipeKeys)).sort();
 
-  const allPackageEmittedVars = new Set<string>([
-    ...neobrutalPkg.emittedVars,
-    ...glassPkg.emittedVars,
-  ]);
+  const allPackageEmittedVars = new Set<string>(shippedPkg.emittedVars);
 
   return {
     srcDir,
@@ -290,8 +378,7 @@ function loadRepoData() {
     allConsumedVars,
     consumedByFile,
     fallbackVars,
-    neobrutalPkg,
-    glassPkg,
+    shippedPkg,
     packageRecipeKeys,
     allPackageEmittedVars,
   };
@@ -301,10 +388,27 @@ function loadRepoData() {
 // Test Suite
 // ============================================================================
 
-describe("Phase 20.7 / Plan 110 Task 2: Recipe-consumption drift & coverage", () => {
-  // Gate toggle: `it.fails` indicates expected failures for unmerged tasks 3, 7, 8
-  // Setting STRICT_DS_GATE=1 forces immediate raw failures.
-  const redFirst = process.env.STRICT_DS_GATE === "1" ? it : it.fails;
+/**
+ * Plan 118 task 21: the adoption backlog, recorded when the drift gate stopped
+ * tolerating drift. Both lists are asserted by exact equality, so anything new
+ * fails immediately and anything adopted must leave the recording — the two
+ * host-CSS adoption tasks shrink them to empty and then delete the file.
+ */
+interface AdoptionBacklog {
+  note: string;
+  unconsumedRecipeKeys: string[];
+  unbackedConsumedVariables: string[];
+}
+
+function loadAdoptionBacklog(): AdoptionBacklog {
+  const path = fileURLToPath(
+    new URL("./fixtures/design-system-adoption-backlog.json", import.meta.url),
+  );
+  return JSON.parse(fs.readFileSync(path, "utf8")) as AdoptionBacklog;
+}
+
+describe("Phase 20.7 / Plan 110 Task 2 / Plan 118 Task 21: recipe-consumption drift & coverage", () => {
+  const backlog = loadAdoptionBacklog();
 
   // --------------------------------------------------------------------------
   // 1. Synthetic Drift Regression Tests
@@ -410,10 +514,35 @@ describe("Phase 20.7 / Plan 110 Task 2: Recipe-consumption drift & coverage", ()
         "--clay-ds-text-input-default-input-focus-outline-color",
       );
     });
+    it("fails when a synthetic recipe key is consumed outside its owner module", () => {
+      const consumedByFile = new Map<string, Set<string>>([
+        [
+          "editor/editor.module.css",
+          new Set(["--clay-ds-button-default-root-rest-border-color"]),
+        ],
+      ]);
+      expect(
+        checkOwnerRouting(["button.default.root.rest"], consumedByFile, {
+          button: ["components/button.module.css"],
+        }),
+      ).toEqual([
+        "button.default.root.rest (owners: components/button.module.css)",
+      ]);
+      // Consumed by its owner → no violation.
+      expect(
+        checkOwnerRouting(
+          ["button.default.root.rest"],
+          new Map([
+            [
+              "components/button.module.css",
+              new Set(["--clay-ds-button-default-root-rest-border-color"]),
+            ],
+          ]),
+          { button: ["components/button.module.css"] },
+        ),
+      ).toEqual([]);
+    });
   });
-
-  // --------------------------------------------------------------------------
-  // 2. Real-World Drift Detection Verification
   // --------------------------------------------------------------------------
   describe("Real-world drift detection (verifies that known repository drift is actively detected)", () => {
     it("confirms canonical tab.default.item.* recipes are declared in packages and consumed by CSS", () => {
@@ -449,7 +578,7 @@ describe("Phase 20.7 / Plan 110 Task 2: Recipe-consumption drift & coverage", ()
     it("confirms textInput.default.input.focus outline properties are actively consumed by text-field.module.css", () => {
       const repo = loadRepoData();
       const violations = checkOwningComponentPropertyCoverage(
-        repo.neobrutalPkg.recipes,
+        repo.shippedPkg.recipes,
         repo.consumedByFile,
         repo.allConsumedVars,
       );
@@ -477,72 +606,108 @@ describe("Phase 20.7 / Plan 110 Task 2: Recipe-consumption drift & coverage", ()
   // --------------------------------------------------------------------------
   // 3. Real-Data Zero-Drift Gates (Red-First; turns green as Tasks 3, 7, 8 land)
   // --------------------------------------------------------------------------
-  describe("Real-data zero-drift gate (strict enforcement after tasks 3, 7, 8)", () => {
-    redFirst(
-      "asserts all package recipe keys are consumed by CSS (turns green when tasks 3 and 8 land)",
-      () => {
-        const repo = loadRepoData();
-        const unconsumed = checkRecipeKeyCoverage(
-          repo.packageRecipeKeys,
-          repo.allConsumedVars,
-        );
-        expect(
-          unconsumed,
-          `Found ${unconsumed.length} unconsumed package recipe keys in CSS: ${unconsumed.join(", ")}`,
-        ).toEqual([]);
-      },
-    );
+  describe("Real-data zero-drift gate (hard since Plan 118 task 21)", () => {
+    it("asserts every package recipe key is consumed by CSS or recorded in the adoption backlog", () => {
+      const repo = loadRepoData();
+      const unconsumed = checkRecipeKeyCoverage(
+        repo.packageRecipeKeys,
+        repo.allConsumedVars,
+      );
+      expect(
+        unconsumed,
+        `Found ${unconsumed.length} unconsumed package recipe keys in CSS: ${unconsumed.join(", ")}`,
+      ).toEqual(backlog.unconsumedRecipeKeys);
 
-    it(
-      "asserts all tokens.css fallback variables are consumed by CSS (turns green when task 3 lands)",
-      () => {
-        const repo = loadRepoData();
-        const unconsumed = checkFallbackVariableCoverage(
-          repo.fallbackVars,
-          repo.allConsumedVars,
-        );
-        expect(
-          unconsumed,
-          `Found ${unconsumed.length} dead fallback variables in tokens.css: ${unconsumed.join(", ")}`,
-        ).toEqual([]);
-      },
-    );
+      // The recording cannot contain keys the package does not declare: a
+      // renamed or dropped recipe would otherwise stay "recorded" forever.
+      const declared = new Set(repo.packageRecipeKeys);
+      const phantom = backlog.unconsumedRecipeKeys.filter(
+        (key) => !declared.has(key),
+      );
+      expect(phantom, "recorded keys that no package declares").toEqual([]);
+      expect(backlog.unconsumedRecipeKeys).toEqual(
+        [...backlog.unconsumedRecipeKeys].sort(),
+      );
+    });
 
-    redFirst(
-      "asserts all consumed CSS variables have host fallbacks or package recipes (turns green when task 3 lands)",
-      () => {
-        const repo = loadRepoData();
-        const unbacked = checkVariableProvenance(
-          repo.allConsumedVars,
-          repo.fallbackVars,
-          repo.allPackageEmittedVars,
-        );
-        expect(
-          unbacked,
-          `Found ${unbacked.length} consumed CSS variables without fallback or package recipe: ${unbacked.join(", ")}`,
-        ).toEqual([]);
-      },
-    );
+    it("asserts all tokens.css fallback variables are consumed by CSS (turns green when task 3 lands)", () => {
+      const repo = loadRepoData();
+      const unconsumed = checkFallbackVariableCoverage(
+        repo.fallbackVars,
+        repo.allConsumedVars,
+      );
+      expect(
+        unconsumed,
+        `Found ${unconsumed.length} dead fallback variables in tokens.css: ${unconsumed.join(", ")}`,
+      ).toEqual([]);
+    });
 
-    it(
-      "asserts textInput focus outline properties are consumed by owning component CSS",
-      () => {
-        const repo = loadRepoData();
-        const violations = checkOwningComponentPropertyCoverage(
-          repo.neobrutalPkg.recipes,
-          repo.consumedByFile,
-          repo.allConsumedVars,
-        );
-        const textInputViolations = violations.filter(
-          (v) =>
-            v.recipeKey === "textInput.default.input.focus" &&
-            v.property.startsWith("outline"),
-        );
-        expect(
-          textInputViolations,
-          `textInput focus outline properties must be consumed by text-field.module.css`,
-        ).toEqual([]);
-      },
-    );
+    it("asserts every consumed CSS variable has a host fallback or package recipe, or is recorded in the adoption backlog", () => {
+      const repo = loadRepoData();
+      const unbacked = checkVariableProvenance(
+        repo.allConsumedVars,
+        repo.fallbackVars,
+        repo.allPackageEmittedVars,
+      );
+      expect(
+        unbacked,
+        `Found ${unbacked.length} consumed CSS variables without fallback or package recipe: ${unbacked.join(", ")}`,
+      ).toEqual(backlog.unbackedConsumedVariables);
+
+      // The recording cannot name variables no module consumes: an unbacked
+      // reference that was migrated away must leave the list.
+      const live = backlog.unbackedConsumedVariables.filter((v) =>
+        repo.allConsumedVars.has(v),
+      );
+      expect(live).toEqual(backlog.unbackedConsumedVariables);
+      expect(backlog.unbackedConsumedVariables).toEqual(
+        [...backlog.unbackedConsumedVariables].sort(),
+      );
+    });
+
+    it("asserts textInput focus outline properties are consumed by owning component CSS", () => {
+      const repo = loadRepoData();
+      const violations = checkOwningComponentPropertyCoverage(
+        repo.shippedPkg.recipes,
+        repo.consumedByFile,
+        repo.allConsumedVars,
+      );
+      const textInputViolations = violations.filter(
+        (v) =>
+          v.recipeKey === "textInput.default.input.focus" &&
+          v.property.startsWith("outline"),
+      );
+      expect(
+        textInputViolations,
+        `textInput focus outline properties must be consumed by text-field.module.css`,
+      ).toEqual([]);
+    });
+
+    it("routes every consumed recipe key through its owning component CSS module", () => {
+      const repo = loadRepoData();
+      const misrouted = checkOwnerRouting(
+        repo.packageRecipeKeys,
+        repo.consumedByFile,
+        COMPONENT_CSS_OWNERSHIP,
+      );
+      expect(
+        misrouted,
+        `consumed outside its recorded owner module: ${misrouted.join("; ")}`,
+      ).toEqual([]);
+    });
+
+    it("names an owner module for every declared recipe family", () => {
+      const repo = loadRepoData();
+      const families = [
+        ...new Set(
+          repo.packageRecipeKeys.map((key) => key.split(".")[0] ?? ""),
+        ),
+      ].sort();
+      const unmapped = families.filter((f) => !COMPONENT_CSS_OWNERSHIP[f]);
+      expect(
+        unmapped,
+        `families with no recorded CSS owner: ${unmapped.join(", ")}`,
+      ).toEqual([]);
+    });
   });
 });

@@ -2128,14 +2128,30 @@ fn canonical_example_covers_theme_typography_and_modular_configuration() {
         1,
         "canonical example must keep one active atomic typography call"
     );
-    // Plan 102: design-system selection is documented once as a commented
-    // non-default option; the built-in @clay/core fallback needs no call,
-    // and comments must state install/adopt-before-select plus no new
-    // package authority from selection.
+    // Plan 118: the shipped Quiet Instrument system is the explicit active
+    // selection (it resolves from the compiled bundled inventory with no
+    // loadPackage), and the built-in @clay/core baseline is kept as the
+    // commented alternative; the comments must state install/adopt-before-select
+    // plus no new package authority from selection. Exactly these two calls —
+    // a third setDesignSystem( would document a third path nobody ships.
+    assert_eq!(
+        example
+            .matches("\nsetDesignSystem(\"@clay/design-instrument\");")
+            .count(),
+        1,
+        "canonical example must keep one active design-system selection"
+    );
+    assert_eq!(
+        example
+            .matches("// setDesignSystem(\"@clay/core\");")
+            .count(),
+        1,
+        "canonical example must keep the @clay/core baseline as the commented alternative"
+    );
     assert_eq!(
         example.matches("setDesignSystem(").count(),
-        1,
-        "canonical example must document setDesignSystem selection exactly once"
+        2,
+        "canonical example must document the shipped selection and its baseline alternative only"
     );
     // Plan 112: icon-pack selection is documented once with an active bundled
     // Regular selection (offline-safe), a commented Duotone alternative and

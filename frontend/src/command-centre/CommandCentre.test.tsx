@@ -68,6 +68,47 @@ function bootstrap(): BootstrapDto {
   };
 }
 
+function mountMenu(snapshot: {
+  prompt: string;
+  query?: string;
+  items?: { id: string; label: string; detail: string | null }[];
+  status?: "active" | { empty: { message: string } };
+  origin?: "centered" | "commandPalette" | "contextMenu" | "menuBar";
+}) {
+  const sent: string[] = [];
+  const workspace = createWorkspace({
+    send: async (payload) => {
+      sent.push(payload);
+    },
+  });
+  workspace.installBootstrap(bootstrap());
+  workspace.handleEnvelope({
+    kind: "routed",
+    data: {
+      clientId: 1,
+      tabId: 10,
+      event: {
+        kind: "transientMenuSnapshot",
+        data: {
+          sessionId: "9223372036854775809" as never,
+          query: snapshot.query ?? "",
+          selectedIndex: 0,
+          status: snapshot.status ?? "active",
+          focusPolicy: "modal",
+          origin: snapshot.origin ?? "centered",
+          prompt: snapshot.prompt,
+          items: (snapshot.items ?? []).map((item) => ({
+            ...item,
+            accessibilityLabel: item.label,
+          })),
+        },
+      },
+    },
+  });
+  render(<CommandCentre workspace={workspace} />);
+  return { workspace, sent };
+}
+
 describe("CommandCentre", () => {
   it("renders one modal list and forwards query, movement, activation, and cancel", async () => {
     const sent: string[] = [];
@@ -112,7 +153,7 @@ describe("CommandCentre", () => {
     expect(
       screen.getByRole("listbox", { name: "Command Centre results" }),
     ).toBeVisible();
-    const search = screen.getByRole("textbox", { name: "Search" });
+    const search = screen.getByRole("textbox", { name: "Command Centre" });
     await user.type(search, "r");
     await user.keyboard("{ArrowDown}{Enter}");
     await user.keyboard("{Escape}");
@@ -162,65 +203,140 @@ describe("CommandCentre", () => {
     expect(families).toContain("menuCancel");
   });
 
-  it("keeps a typed API key when the snapshot query is masked and flushes it on Enter",
-    async () => {
-      const sent: string[] = [];
-      const workspace = createWorkspace({
-        send: async (payload) => {
-          sent.push(payload);
+  it("keeps a typed API key when the snapshot query is masked and flushes it on Enter", async () => {
+    const sent: string[] = [];
+    const workspace = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    workspace.installBootstrap(bootstrap());
+    const snapshot = {
+      sessionId: "9223372036854775809" as never,
+      prompt: "API key (hidden)",
+      query: "",
+      items: [
+        {
+          id: "store_secret",
+          label: "Store API key",
+          detail: "Value is hidden. Enter stores it.",
+          accessibilityLabel: "Store API key",
         },
-      });
-      workspace.installBootstrap(bootstrap());
-      const snapshot = {
-        sessionId: "9223372036854775809" as never,
-        prompt: "API key (hidden)",
-        query: "",
-        items: [
-          {
-            id: "store_secret",
-            label: "Store API key",
-            detail: "Value is hidden. Enter stores it.",
-            accessibilityLabel: "Store API key",
+      ],
+      selectedIndex: 0,
+      status: "active" as const,
+      focusPolicy: "modal" as const,
+      origin: "centered" as const,
+    };
+    workspace.handleEnvelope({
+      kind: "routed",
+      data: {
+        clientId: 1,
+        tabId: 10,
+        event: { kind: "transientMenuSnapshot", data: snapshot },
+      },
+    });
+    const user = userEvent.setup();
+    render(<CommandCentre workspace={workspace} />);
+    const field = screen.getByRole("textbox", { name: "API key (hidden)" });
+    await user.type(field, "sk-test-key");
+    workspace.handleEnvelope({
+      kind: "routed",
+      data: {
+        clientId: 1,
+        tabId: 10,
+        event: {
+          kind: "transientMenuSnapshot",
+          data: { ...snapshot, query: "•".repeat(11) },
+        },
+      },
+    });
+    expect(field).toHaveValue("sk-test-key");
+    await user.keyboard("{Enter}");
+    const queries = sent
+      .map(
+        (payload) =>
+          JSON.parse(payload) as {
+            family: string;
+            payload: { query?: string };
           },
-        ],
-        selectedIndex: 0,
-        status: "active" as const,
-        focusPolicy: "modal" as const,
-        origin: "centered" as const,
-      };
-      workspace.handleEnvelope({
-        kind: "routed",
-        data: {
-          clientId: 1,
-          tabId: 10,
-          event: { kind: "transientMenuSnapshot", data: snapshot },
+      )
+      .filter((payload) => payload.family === "menuQueryUpdate")
+      .map((payload) => payload.payload.query);
+    expect(queries.at(-1)).toBe("sk-test-key");
+    expect(sent.map((payload) => JSON.parse(payload).family)).toContain(
+      "menuActivate",
+    );
+  });
+
+  it("composes the palette sheet: head, results, foot hints, live count", () => {
+    mountMenu({
+      prompt: "Command Centre",
+      items: [
+        { id: "git.refresh", label: "Refresh Git status", detail: "@clay/git" },
+        {
+          id: "settings.open",
+          label: "Open settings",
+          detail: "@clay/settings",
         },
-      });
-      const user = userEvent.setup();
-      render(<CommandCentre workspace={workspace} />);
-      const field = screen.getByRole("textbox", { name: "API key (hidden)" });
-      await user.type(field, "sk-test-key");
-      workspace.handleEnvelope({
-        kind: "routed",
-        data: {
-          clientId: 1,
-          tabId: 10,
-          event: {
-            kind: "transientMenuSnapshot",
-            data: { ...snapshot, query: "•".repeat(11) },
-          },
-        },
-      });
-      expect(field).toHaveValue("sk-test-key");
-      await user.keyboard("{Enter}");
-      const queries = sent
-        .map((payload) => JSON.parse(payload) as { family: string; payload: { query?: string } })
-        .filter((payload) => payload.family === "menuQueryUpdate")
-        .map((payload) => payload.payload.query);
-      expect(queries.at(-1)).toBe("sk-test-key");
-      expect(sent.map((payload) => JSON.parse(payload).family)).toContain(
-        "menuActivate",
-      );
-    },
-  );
+      ],
+    });
+    const sheet = screen.getByTestId("command-centre");
+    // One sheet: the palette surface, never a second frame inside it.
+    expect(sheet.className).toContain("surface");
+    expect(sheet.className).not.toContain("menu");
+    // The prompt is the head's one visible label and the field's name (the
+    // sheet paints no second title row).
+    expect(screen.getByText("Command Centre")).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Command Centre" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "Command Centre" }),
+    ).toBeVisible();
+    // Rows carry the server's detail (which is where a chord is stated).
+    expect(screen.getByText("@clay/git")).toBeVisible();
+    // The foot states the keys and the live count.
+    expect(screen.getByText("navigate")).toBeVisible();
+    expect(screen.getByText("run")).toBeVisible();
+    expect(screen.getByText("close")).toBeVisible();
+    expect(screen.getByText("2 results")).toBeVisible();
+  });
+
+  it("renders an empty result set inside the sheet, not as a nested card", () => {
+    mountMenu({
+      prompt: "Command Centre",
+      status: { empty: { message: "No commands match this query" } },
+    });
+    const empty = screen.getAllByRole("status")[0]!;
+    expect(empty).toHaveTextContent("No commands match this query");
+    expect(empty).toHaveTextContent("Esc");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("uses the popover surface and the prompt label for menu sessions", () => {
+    mountMenu({
+      prompt: "Session actions",
+      origin: "contextMenu",
+      items: [{ id: "fork", label: "Fork Session", detail: null }],
+    });
+    const sheet = screen.getByTestId("command-centre");
+    expect(sheet.className).toContain("menu");
+    // The prompt is a visible micro-label here and the field's name.
+    expect(screen.getByText("Session actions")).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Session actions" }),
+    ).toBeVisible();
+  });
+
+  it("fabricates no scope controls the server does not send", () => {
+    mountMenu({
+      prompt: "Command Centre",
+      items: [{ id: "git.refresh", label: "Refresh Git status", detail: null }],
+    });
+    // The prototype's all/Session/Skills/MCP scopes have no server data, so the
+    // shipped palette renders none of them.
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
+  });
 });

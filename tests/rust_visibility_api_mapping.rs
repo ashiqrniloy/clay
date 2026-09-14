@@ -336,3 +336,98 @@ fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
         );
     }
 }
+
+/// Plan 118 task "Create or verify Clay JS APIs for the changed public
+/// programmatic surfaces": the migration's new Rust machinery is
+/// implementation, not API. The launcher's recent-workspace store and entry
+/// builder, the bundled-design-system lookup and the composited contrast floors
+/// stay `pub(crate)`; the only new library-public items are the protocol DTOs
+/// (`src/protocol/mod.rs`, the wire contract the desktop crate mirrors) and the
+/// composited contrast *measurement* helpers in `src/editor/theme.rs` — the pub
+/// helper family that already holds `contrast_ratio`/`relative_luminance` — and
+/// neither is reachable from a JS facade or a Deno op.
+#[test]
+fn plan118_new_runtime_machinery_stays_crate_private() {
+    let root = repository_root();
+    let crate_private_declarations: &[(&str, &str)] = &[
+        // Launcher: recents persistence and entry assembly (plan 118 Part D).
+        ("src/server/launcher.rs", "pub fn record_recent_workspace"),
+        ("src/server/launcher.rs", "pub fn remove_recent_workspace"),
+        ("src/server/launcher.rs", "pub fn launcher_entries"),
+        ("src/server/launcher.rs", "pub const MAX_RECENTS"),
+        ("src/server/mod.rs", "pub mod launcher"),
+        // Design-system selection helpers (plan 118 task 20).
+        (
+            "src/packages/bundled.rs",
+            "pub fn bundled_design_system_display_name",
+        ),
+        // Contrast floors (plan 118 task 14). `REQUIRED_CONTRAST_PAIRS` is not
+        // listed: it was already `pub(crate)` before the plan.
+        ("src/shell/theme.rs", "pub const HAIRLINE_VISIBILITY_MIN"),
+        ("src/shell/theme.rs", "pub const REQUIRED_FILL_PAIRS"),
+    ];
+    for (path, declaration) in crate_private_declarations {
+        let source = read_src(path);
+        let crate_private = format!("pub(crate){}", &declaration["pub".len()..]);
+        assert!(
+            source.contains(&crate_private),
+            "{declaration} in {path} must exist as `{crate_private}`"
+        );
+        assert!(
+            !source.contains(declaration),
+            "{declaration} in {path} must stay pub(crate): it is plan-118 \
+             implementation, not a public programmatic surface"
+        );
+    }
+
+    // The composited contrast maths is measurement, not API: no op wrapper and
+    // no JS facade may reach for it. Only Rust callers (the contrast policy in
+    // `src/shell/theme.rs` and the shipped-theme gate in `tests/theme_packages.rs`)
+    // measure with it.
+    let helper_names = ["composited_contrast_ratio", "composite_over"];
+    let mut programmatic_sources: Vec<(String, String)> = Vec::new();
+    for dir in ["src/server/ops", "runtime/js"] {
+        let dir_path = root.join(dir);
+        let entries = fs::read_dir(&dir_path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", dir_path.display()));
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                continue;
+            }
+            let Ok(source) = fs::read_to_string(&path) else {
+                continue;
+            };
+            programmatic_sources.push((path.display().to_string(), source));
+        }
+    }
+    // Package facades ship inside package directories; scan their sources too.
+    for package_dir in ["packages/settings", "packages/coding-agent"] {
+        for entry in fs::read_dir(root.join(package_dir))
+            .unwrap_or_else(|error| panic!("read {package_dir}: {error}"))
+            .filter_map(Result::ok)
+        {
+            let path = entry.path();
+            if path.is_dir()
+                && let Ok(source) = fs::read_to_string(path.join("dist/load.js"))
+            {
+                programmatic_sources
+                    .push((path.join("dist/load.js").display().to_string(), source));
+            }
+        }
+    }
+    assert!(
+        programmatic_sources.len() >= 10,
+        "expected to scan op wrappers and JS facades, found {}",
+        programmatic_sources.len()
+    );
+    for (path, source) in &programmatic_sources {
+        for name in helper_names {
+            assert!(
+                !source.contains(name),
+                "{path} must not expose the contrast measurement helper {name}; \
+                 contrast is policy in Rust, never a programmatic surface"
+            );
+        }
+    }
+}

@@ -1,292 +1,167 @@
-/* Clay button — five interaction states from tokens, zero radius
- * (mechanical geometry), variants default/muted/primary/danger.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Clay button — the shipped `button` recipes (default / muted / primary /
+ * danger × rest/hover/active/focus/disabled).
+ *
+ * Layout (padding, gap, fixed sizes) is host-owned. Every visual property is a
+ * `--clay-ds-*` recipe value or a `--clay-*` theme role: no literal radius,
+ * border, shadow, colour or duration. The recipe variables are stated in the
+ * host fallback block (styles/tokens.css), so the shell paints the shipped
+ * language before the first design-system snapshot lands. */
 
 .button {
   display: inline-flex;
   align-items: center;
-  gap: var(
-    --clay-ds-button-default-root-rest-gap,
-    var(--clay-spacing-inline, 6px)
-  );
-  border: var(
-      --clay-ds-button-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-button-default-root-rest-border-style, solid)
-    var(--clay-ds-button-default-root-rest-border-color, transparent);
-  border-radius: var(--clay-ds-button-default-root-rest-border-radius, 0);
-  padding: var(
-    --clay-ds-button-default-root-rest-padding,
-    var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px)
-  );
+  gap: var(--clay-ds-button-default-root-rest-gap);
+  padding: var(--clay-ds-button-default-root-rest-padding);
   font-family: var(--clay-font-ui);
   font-size: var(--clay-text-body-size);
   cursor: pointer;
-  box-shadow: var(--clay-ds-button-default-root-rest-shadow, none);
-  transform: var(--clay-ds-button-default-root-rest-transform-preset, none);
+
+  border-width: var(--clay-ds-button-default-root-rest-border-width);
+  border-style: var(--clay-ds-button-default-root-rest-border-style);
+  border-color: var(--clay-ds-button-default-root-rest-border-color);
+  border-radius: var(--clay-ds-button-default-root-rest-border-radius);
+  --fill: var(--clay-ds-button-default-root-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-button-default-root-rest-text-color);
+  transform: var(--clay-ds-button-default-root-rest-transform-preset);
   transition:
-    background-color
-      var(
-        --clay-ds-button-default-root-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-button-default-root-rest-transition-timing, linear),
-    border-color
-      var(
-        --clay-ds-button-default-root-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-button-default-root-rest-transition-timing, linear),
-    box-shadow
-      var(
-        --clay-ds-button-default-root-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-button-default-root-rest-transition-timing, linear),
-    transform
-      var(
-        --clay-ds-button-default-root-rest-transition-duration,
-        var(--clay-motion-fast, 100ms)
-      )
-      var(--clay-ds-button-default-root-rest-transition-timing, linear);
+    background-color var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing),
+    color var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing),
+    border-color var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing),
+    transform var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing);
 }
 
-/* Rest */
+/* Rest — the default variant repeats the base rule's own key so a variant
+ * class is never a silent no-op (the recipe is the same one). */
 .default {
-  background: var(
-    --clay-ds-button-default-root-rest-background-color,
-    var(--clay-surface-control)
-  );
-  color: var(
-    --clay-ds-button-default-root-rest-text-color,
-    var(--clay-text-primary)
-  );
-  border-color: var(
-    --clay-ds-button-default-root-rest-border-color,
-    transparent
-  );
-  border-radius: var(--clay-ds-button-default-root-rest-border-radius, 0);
-  box-shadow: var(--clay-ds-button-default-root-rest-shadow, none);
+  border-color: var(--clay-ds-button-default-root-rest-border-color);
+  --fill: var(--clay-ds-button-default-root-rest-background-color);
+  color: var(--clay-ds-button-default-root-rest-text-color);
 }
 .muted {
-  background: var(
-    --clay-ds-button-muted-root-rest-background-color,
-    transparent
-  );
-  color: var(
-    --clay-ds-button-muted-root-rest-text-color,
-    var(--clay-text-muted)
-  );
-  border-color: var(
-    --clay-ds-button-muted-root-rest-border-color,
-    var(--clay-border-subtle)
-  );
-  border-radius: var(
-    --clay-ds-button-muted-root-rest-border-radius,
-    var(--clay-ds-button-default-root-rest-border-radius, 0)
-  );
-  box-shadow: var(--clay-ds-button-muted-root-rest-shadow, none);
+  border-color: var(--clay-ds-button-muted-root-rest-border-color);
+  --fill: var(--clay-ds-button-muted-root-rest-background-color);
+  color: var(--clay-ds-button-muted-root-rest-text-color);
 }
 .primary {
-  background: var(
-    --clay-ds-button-primary-root-rest-background-color,
-    var(--clay-accent-primary)
-  );
-  color: var(
-    --clay-ds-button-primary-root-rest-text-color,
-    var(--clay-surface-main)
-  );
-  border-color: var(
-    --clay-ds-button-primary-root-rest-border-color,
-    transparent
-  );
-  border-radius: var(
-    --clay-ds-button-primary-root-rest-border-radius,
-    var(--clay-ds-button-default-root-rest-border-radius, 0)
-  );
-  box-shadow: var(--clay-ds-button-primary-root-rest-shadow, none);
+  border-color: var(--clay-ds-button-primary-root-rest-border-color);
+  --fill: var(--clay-ds-button-primary-root-rest-background-color);
+  color: var(--clay-ds-button-primary-root-rest-text-color);
 }
 .danger {
-  background: var(
-    --clay-ds-button-danger-root-rest-background-color,
-    var(--clay-surface-control)
-  );
-  color: var(
-    --clay-ds-button-danger-root-rest-text-color,
-    var(--clay-diagnostic-error)
-  );
-  border-color: var(
-    --clay-ds-button-danger-root-rest-border-color,
-    transparent
-  );
-  border-radius: var(
-    --clay-ds-button-danger-root-rest-border-radius,
-    var(--clay-ds-button-default-root-rest-border-radius, 0)
-  );
-  box-shadow: var(--clay-ds-button-danger-root-rest-shadow, none);
+  border-color: var(--clay-ds-button-danger-root-rest-border-color);
+  --fill: var(--clay-ds-button-danger-root-rest-background-color);
+  color: var(--clay-ds-button-danger-root-rest-text-color);
 }
 
 /* Hover */
 .default[data-hovered],
 .default:not([data-disabled]):not([data-pressed]):hover {
-  background: var(
-    --clay-ds-button-default-root-hover-background-color,
-    var(--clay-surface-hover)
-  );
-  color: var(
-    --clay-ds-button-default-root-hover-text-color,
-    var(--clay-text-primary)
-  );
-  border-color: var(
-    --clay-ds-button-default-root-hover-border-color,
-    var(--clay-ds-button-default-root-rest-border-color, transparent)
-  );
-  box-shadow: var(--clay-ds-button-default-root-hover-shadow, none);
-  transform: var(--clay-ds-button-default-root-hover-transform-preset, none);
+  border-color: var(--clay-ds-button-default-root-hover-border-color);
+  --fill: var(--clay-ds-button-default-root-hover-background-color);
+  color: var(--clay-ds-button-default-root-hover-text-color);
+  transform: var(--clay-ds-button-default-root-hover-transform-preset);
 }
 .muted[data-hovered] {
-  background: var(
-    --clay-ds-button-muted-root-hover-background-color,
-    transparent
-  );
-  color: var(
-    --clay-ds-button-muted-root-hover-text-color,
-    var(--clay-text-primary)
-  );
-  border-color: var(
-    --clay-ds-button-muted-root-hover-border-color,
-    var(--clay-ds-button-muted-root-rest-border-color, transparent)
-  );
-  box-shadow: var(--clay-ds-button-muted-root-hover-shadow, none);
-  transform: var(--clay-ds-button-muted-root-hover-transform-preset, none);
+  --fill: var(--clay-ds-button-muted-root-hover-background-color);
+  color: var(--clay-ds-button-muted-root-hover-text-color);
+  transform: var(--clay-ds-button-muted-root-hover-transform-preset);
 }
 .primary[data-hovered] {
-  background: var(
-    --clay-ds-button-primary-root-hover-background-color,
-    var(--clay-surface-hover)
+  --fill: var(--clay-ds-button-primary-root-hover-background-color);
+  --fill-opacity: var(
+    --clay-ds-button-primary-root-hover-background-opacity,
+    1
   );
-  color: var(
-    --clay-ds-button-primary-root-hover-text-color,
-    var(--clay-surface-main)
-  );
-  border-color: var(
-    --clay-ds-button-primary-root-hover-border-color,
-    var(--clay-ds-button-primary-root-rest-border-color, transparent)
-  );
-  box-shadow: var(--clay-ds-button-primary-root-hover-shadow, none);
-  transform: var(--clay-ds-button-primary-root-hover-transform-preset, none);
+  color: var(--clay-ds-button-primary-root-hover-text-color);
+  transform: var(--clay-ds-button-primary-root-hover-transform-preset);
 }
 .danger[data-hovered] {
-  background: var(
-    --clay-ds-button-danger-root-hover-background-color,
-    var(--clay-surface-hover)
-  );
-  color: var(
-    --clay-ds-button-danger-root-hover-text-color,
-    var(--clay-diagnostic-error)
-  );
-  border-color: var(
-    --clay-ds-button-danger-root-hover-border-color,
-    var(--clay-ds-button-danger-root-rest-border-color, transparent)
-  );
-  box-shadow: var(--clay-ds-button-danger-root-hover-shadow, none);
-  transform: var(--clay-ds-button-danger-root-hover-transform-preset, none);
+  --fill: var(--clay-ds-button-danger-root-hover-background-color);
+  --fill-opacity: var(--clay-ds-button-danger-root-hover-background-opacity);
+  color: var(--clay-ds-button-danger-root-hover-text-color);
+  transform: var(--clay-ds-button-danger-root-hover-transform-preset);
 }
 
 /* Active (pressed) */
 .default[data-pressed] {
-  background: var(
-    --clay-ds-button-default-root-active-background-color,
-    var(--clay-surface-active)
-  );
-  box-shadow: var(--clay-ds-button-default-root-active-shadow, none);
-  transform: var(
-    --clay-ds-button-default-root-active-transform-preset,
-    translateY(1px)
-  );
+  --fill: var(--clay-ds-button-default-root-active-background-color);
+  transform: var(--clay-ds-button-default-root-active-transform-preset);
 }
 .muted[data-pressed] {
-  background: var(
-    --clay-ds-button-muted-root-active-background-color,
-    var(--clay-surface-active)
-  );
-  box-shadow: var(--clay-ds-button-muted-root-active-shadow, none);
-  transform: var(
-    --clay-ds-button-muted-root-active-transform-preset,
-    translateY(1px)
-  );
+  --fill: var(--clay-ds-button-muted-root-active-background-color);
+  color: var(--clay-ds-button-muted-root-active-text-color);
+  transform: var(--clay-ds-button-muted-root-active-transform-preset);
 }
 .primary[data-pressed] {
-  background: var(
-    --clay-ds-button-primary-root-active-background-color,
-    var(--clay-surface-active)
-  );
-  color: var(
-    --clay-ds-button-primary-root-active-text-color,
-    var(--clay-surface-main)
-  );
-  box-shadow: var(--clay-ds-button-primary-root-active-shadow, none);
-  transform: var(
-    --clay-ds-button-primary-root-active-transform-preset,
-    translateY(1px)
-  );
+  --fill: var(--clay-ds-button-primary-root-active-background-color);
+  color: var(--clay-ds-button-primary-root-active-text-color);
+  transform: var(--clay-ds-button-primary-root-active-transform-preset);
 }
 .danger[data-pressed] {
-  background: var(
-    --clay-ds-button-danger-root-active-background-color,
-    var(--clay-surface-active)
+  --fill: var(--clay-ds-button-danger-root-active-background-color);
+  --fill-opacity: var(
+    --clay-ds-button-danger-root-active-background-opacity,
+    1
   );
-  color: var(
-    --clay-ds-button-danger-root-active-text-color,
-    var(--clay-diagnostic-error)
-  );
-  box-shadow: var(--clay-ds-button-danger-root-active-shadow, none);
-  transform: var(
-    --clay-ds-button-danger-root-active-transform-preset,
-    translateY(1px)
-  );
+  color: var(--clay-ds-button-danger-root-active-text-color);
+  transform: var(--clay-ds-button-danger-root-active-transform-preset);
 }
 
-/* Focus */
+/* Focus — one ring per surface (DESIGN.md §14.4): the button draws it. */
 .button[data-focused],
 .button:focus-visible {
-  outline: var(--clay-ds-button-default-root-focus-outline-width, 2px)
-    var(--clay-ds-button-default-root-focus-outline-style, solid)
-    var(
-      --clay-ds-button-default-root-focus-outline-color,
-      var(--clay-focus-ring)
-    );
-  outline-offset: var(--clay-ds-button-default-root-focus-outline-offset, 1px);
+  outline: var(--clay-ds-button-default-root-focus-outline-width)
+    var(--clay-ds-button-default-root-focus-outline-style)
+    var(--clay-ds-button-default-root-focus-outline-color);
+  outline-offset: var(--clay-ds-button-default-root-focus-outline-offset);
 }
 
 /* Disabled */
 .button[data-disabled] {
-  background: var(
-    --clay-ds-button-default-root-disabled-background-color,
-    var(--clay-surface-disabled)
-  );
-  color: var(
-    --clay-ds-button-default-root-disabled-text-color,
-    var(--clay-text-disabled)
-  );
-  opacity: var(
-    --clay-ds-button-default-root-disabled-opacity,
-    var(--clay-opacity-disabled)
-  );
-  border-color: var(
-    --clay-ds-button-default-root-disabled-border-color,
-    transparent
-  );
+  --fill: var(--clay-ds-button-default-root-disabled-background-color);
+  color: var(--clay-ds-button-default-root-disabled-text-color);
+  border-color: var(--clay-ds-button-default-root-disabled-border-color);
+  opacity: var(--clay-ds-button-default-root-disabled-opacity);
+  cursor: default;
+}
+.muted[data-disabled] {
+  --fill: var(--clay-ds-button-muted-root-disabled-background-color);
+  color: var(--clay-ds-button-muted-root-disabled-text-color);
+  opacity: var(--clay-ds-button-muted-root-disabled-opacity);
+  cursor: default;
+}
+.primary[data-disabled] {
+  --fill: var(--clay-ds-button-primary-root-disabled-background-color);
+  color: var(--clay-ds-button-primary-root-disabled-text-color);
+  opacity: var(--clay-ds-button-primary-root-disabled-opacity);
+  cursor: default;
+}
+.danger[data-disabled] {
+  --fill: var(--clay-ds-button-danger-root-disabled-background-color);
+  color: var(--clay-ds-button-danger-root-disabled-text-color);
+  opacity: var(--clay-ds-button-danger-root-disabled-opacity);
   cursor: default;
 }
 
 /* Icon-only composition (Plan 112 Task 7): the 16px glyph sits inside a
- * ≥24px CSS hit target (WCAG 2.2 minimum target size) using spacing tokens;
- * width/height stay equal so focus rings and hover fills stay square. */
+ * ≥24px CSS hit target (WCAG 2.2 minimum target size); width/height stay equal
+ * so focus rings and hover fills stay square. */
 .iconButton {
-  min-inline-size: calc(var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2);
-  min-block-size: calc(var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2);
+  min-inline-size: calc(
+    var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2
+  );
+  min-block-size: calc(
+    var(--clay-dimension-icon-size, 16px) + var(--clay-spacing-xs, 8px) * 2
+  );
   padding: var(--clay-spacing-xxs, 4px);
   justify-content: center;
 }

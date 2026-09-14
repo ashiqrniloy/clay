@@ -16,7 +16,7 @@ Rust.
 | Prompt/cancel/session requests | Existing validated bridge path (`session_request`) |
 | Event pipeline (chunk expansion, verification, message/state application) | `AbstractAgent` from `@ag-ui/client` — never duplicated |
 | Custom transport | `frontend/src/agent/TauriClayAgent.ts` (`run()` over the relay) |
-| Presentation binding | `frontend/src/agent/state.ts` + `frontend/src/chat/ChatPanel.tsx` + `frontend/src/coding-agent/CodingAgentPanel.tsx` (plan 108: bounded `tools` rows + cumulative `toolStats` from `clay.toolPhase` CUSTOM events; counts only, never payloads) |
+| Presentation binding | `frontend/src/agent/state.ts` + `frontend/src/coding-agent/CodingAgentPanel.tsx` (plan 108: bounded `tools` rows + cumulative `toolStats` from `clay.toolPhase` CUSTOM events; counts only, never payloads) |
 
 ## Event mapping (Rust adapter)
 
@@ -48,22 +48,24 @@ caps, delta byte caps, inventory limits).
 3. Only the active client's pump relays agent events, so multi-tab desktops do
    not receive duplicate streams.
 4. A run is one `runAgent()` call: `TauriClayAgent.run()` sends the validated
-   `chat.submit` intent through `session_request` (server-side prompt
+   `agent.submit` intent through `session_request` (server-side prompt
    validation/bounds reused) and forwards exactly that run's events to the
    upstream pipeline, completing at `RUN_FINISHED`/`RUN_ERROR`. Empty prompts
    complete locally without touching the wire. `abortRun()` sends the
-   validated `chat.cancel` intent.
+   validated `agent.cancel` intent. (Plan 118 renamed these from `chat.*`;
+   the ids are agent-scoped, and the host-rendered composer is their single
+   authorization owner.)
 5. Out-of-run snapshots (transcript restore, inventory) are applied through
    the agent's own public `setMessages`/`setState` APIs by
    `state.ts` — there is no parallel Clay-only reducer anywhere in React.
 
 ## Presentation
 
-`ChatPanel` mounts only for the bundled `@clay/chat` empty-tab surface
-(provenance-exact selection, mirroring the SettingsPanel precedent).
-Greeting/hint copy and setup buttons are read from the package's declared
-component tree, so package authority over landing presentation is preserved
-and disabling/replacing `@clay/chat` removes the view automatically.
+`CodingAgentPanel` is the module's only consumer: it mounts for the bundled
+`@clay/coding-agent` pane surface (provenance-exact selection, mirroring the
+SettingsPanel precedent). Plan 118 removed the empty-tab landing panel and its
+`@clay/chat` package, so the shared module carries session naming
+(`agentSession`/`AgentSnapshot`/`AgentStatus`) and no product-named branch.
 
 - Transcript rows are memoized; per-token deltas rerender only the streaming
   row.
@@ -84,15 +86,20 @@ and disabling/replacing `@clay/chat` removes the view automatically.
 - Tool/permission payloads are inert data; future coding-agent work gains
   display transport without gaining execution authority.
 - Packages cannot spawn or speak to the daemon, acquire Tauri APIs, or
-  subscribe to the relay; replacement of `@clay/chat` removes the landing and
-  profile but not host security. ACP remains absent.
+  subscribe to the relay; replacing a landing or agent package removes its
+  contributions but not host security. ACP remains absent.
 
 ## Verification
 
 - Rust: adapter unit tests (mapping, JSON shape, terminal diagnostics),
   relay fan-out tests, full workspace clippy `-D warnings`.
 - Frontend: transport tests (end-to-end run through the real `@ag-ui/client`
-  pipeline, intent payloads, cancel), state-glue tests, ChatPanel component
-  tests. Production budgets keep AG-UI out of the startup shell: the review
-  harness is a DEV-only `React.lazy` route, and `ChatPanel` is a 37.1 kB gzip
-  lazy chunk (shell 160.4 / 180 kB, total 342.9 / 400 kB).
+  pipeline, intent payloads, cancel), state-glue tests, CodingAgentPanel
+  component tests. Production budgets keep the panel out of the startup shell:
+  the review harness is a DEV-only `React.lazy` route, and `CodingAgentPanel`
+  is a 9.7 kB gzip lazy chunk (shell 169.3 / 180 kB, total 388.7 / 400 kB).
+  `frontend/vite.config.ts` also gives `bridge/client.ts` its own chunk: rollup
+  hoists a manual chunk's dependencies, so without that split the eager shell
+  (which imports the bridge) pulled the whole 36.4 kB-gzip `agent-core` chunk
+  into startup as a preloaded chunk. Plan 118's chat-frontend task fixed the
+  hoist, which is what makes the agent lane genuinely lazy.

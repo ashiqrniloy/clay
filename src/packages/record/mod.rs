@@ -493,7 +493,7 @@ pub struct PackageOptionContributionDescriptor {
 /// via `clay.contributions.uiDesignSystem` (Plan 101).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiDesignSystemContributionDescriptor {
-    /// Design-system identifier (e.g. `@clay/theme-neobrutal`).
+    /// Design-system identifier (e.g. `@clay/design-instrument`).
     pub id: String,
     /// Schema version (must be `1`).
     pub schema_version: u32,

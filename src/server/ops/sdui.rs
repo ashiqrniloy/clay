@@ -161,6 +161,9 @@ impl RuntimeTreeBuilder {
             },
             "list" => SduiNodeKind::List {
                 items: self.convert_list_items(object.get("items"), id)?,
+                // Package-declared lists are plain: the filter affordance is a
+                // core listing concern (plan 118 task E1).
+                filter: None,
             },
             "editorView" => SduiNodeKind::EditorView {
                 binding: SduiEditorBinding {
@@ -481,7 +484,7 @@ mod tests {
             }]
         }"#;
         let tree = convert(tree_json).expect("core icon reference accepted");
-        let SduiNodeKind::List { items } = &tree.nodes[0].kind else {
+        let SduiNodeKind::List { items, .. } = &tree.nodes[0].kind else {
             panic!("expected list");
         };
         assert_eq!(items[0].icon.as_deref(), Some("action.close"));

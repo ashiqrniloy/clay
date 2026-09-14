@@ -122,9 +122,6 @@
             "actionTargets": [
               "coding-agent.profile",
               "coding-agent.close",
-              "chat.submit",
-              "chat.cancel",
-              "chat.steer",
               "agent.clientOpenModelPicker",
               "agent.clientOpenSessionPicker",
               "documents.clientOpenFileDialog"

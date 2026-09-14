@@ -21,7 +21,8 @@ only renders and forwards composer input.
   `agent_subscribe` / `agent_unsubscribe`).
 - `frontend/src/agent/TauriClayAgent.ts` — `AbstractAgent` subclass; the
   stream feeds AG-UI's reducer, so message state is standard.
-- `frontend/src/chat/ChatPanel.tsx` — presentation only.
+- `frontend/src/coding-agent/CodingAgentPanel.tsx` — presentation only (the
+  empty-tab landing panel was removed with `@clay/chat` in plan 118).
 
 ## Flow
 
@@ -35,8 +36,8 @@ only renders and forwards composer input.
    `TauriClayAgent`; AG-UI's runtime reduces them into a messages snapshot,
    preserving status across notification cycles.
 4. **Prompts/cancel reuse the validated request path**: composer submit and
-   cancel are sent as inert `sduiAction` intents (`chat.submit`,
-   `chat.cancel`) through `session_request` — no second write path, so
+   cancel are sent as inert `sduiAction` intents (`agent.submit`,
+   `agent.cancel`) through `session_request` — no second write path, so
    validation, provenance, and authorization are unchanged.
 
 ## Invariants
@@ -54,7 +55,7 @@ only renders and forwards composer input.
   AgentRpc `result_json` parsed to an object).
 - Relay: `cargo test -p clay-desktop agent`.
 - Frontend transport: `frontend/src/agent/transport.test.ts`; component:
-  `frontend/src/chat/ChatPanel.test.tsx`.
+  `frontend/src/coding-agent/CodingAgentPanel.test.tsx`.
 
 ## Related
 

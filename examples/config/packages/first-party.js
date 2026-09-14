@@ -78,8 +78,12 @@ await grantLanguageServer({
 //                           @clay/lsp-javascript  @clay/lsp-markdown
 //                           (authorize first, above; load grammar
 //                            packages before their LSP bridges)
-//   Chat landing:           @clay/chat   (default empty-tab surface;
-//                            omit this line → core Open File/Folder only)
+//   Start surface:          @clay/launcher
+//   Agent pane surface:     @clay/coding-agent
+//   Design system:          @clay/design-instrument (Quiet Instrument;
+//                           selected in init.js section 2 — the bundled
+//                           record resolves on demand, so there is no load
+//                           line for it and selection installs nothing)
 //   Settings UI:            @clay/settings
 //   Themes:                 @clay/theme-gruvbox-material-dark
 //                           @clay/theme-gruvbox-material-light
@@ -94,8 +98,8 @@ await loadPackage("@clay/markdown");   // prose mode + parser + prose movement
 await loadPackage("@clay/rust");       // code mode + tree-sitter grammar
 await loadPackage("@clay/typescript");
 await loadPackage("@clay/javascript");
-await loadPackage("@clay/chat");       // empty-tab Chat landing
-await loadPackage("@clay/coding-agent"); // Coding Agent split surface (coding-agent.profile)
+await loadPackage("@clay/launcher");    // start surface: the empty-tab landing
+await loadPackage("@clay/coding-agent"); // agent pane surface (coding-agent.profile)
 await loadPackage("@clay/settings");   // settings panel (theme/appearance UI)
 await loadPackage("@clay/lsp-rust");        // after the grant above
 await loadPackage("@clay/lsp-typescript");

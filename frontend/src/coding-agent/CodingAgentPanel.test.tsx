@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 // CodingAgentPanel surface tests (plan 108 task 8): provenance-exact host
 // rendering for the bundled @clay/coding-agent split surface. Mirrors the
-// ChatPanel test harness: the AG-UI relay is mocked; the stream seam and the
+// CodingAgentPanel test harness: the AG-UI relay is mocked; the stream seam and the
 // Tauri bridge are the only outs.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 type StreamEvent = Record<string, unknown> & { type: string };
 
 const harness = vi.hoisted(() => {
@@ -54,12 +62,14 @@ import { CodingAgentPanel, groupModelsByProvider } from "./CodingAgentPanel";
 /** Mirrors the panel's worker-dropdown clear value (plan 109 I8). */
 const OM_WORKER_CLEAR_VALUE = "om-worker:none";
 import { sendRequest } from "../bridge/client";
-import { resetChatAgentForTests } from "../agent/state";
+import { resetAgentSessionForTests } from "../agent/state";
 import { createDocumentSession } from "../editor/sync/session";
-import type { BootstrapDto } from "../bridge/types";
 
 beforeEach(() => {
-  resetChatAgentForTests();
+  resetAgentSessionForTests();
+  // Per-test isolation: intents are asserted per test, so a previous test's
+  // send history must not leak into another's "every intent is declared" check.
+  vi.clearAllMocks();
 });
 
 afterEach(() => {
@@ -75,9 +85,6 @@ const surface = {
   actionTargets: [
     "coding-agent.profile",
     "coding-agent.close",
-    "chat.submit",
-    "chat.cancel",
-    "chat.steer",
     "agent.clientOpenModelPicker",
     "agent.clientOpenSessionPicker",
     "documents.clientOpenFileDialog",
@@ -114,7 +121,7 @@ const surface = {
 };
 
 describe("CodingAgentPanel", () => {
-  it("renders the 50/50 split with transcript, tabs, status row, and strip", async () => {
+  it("renders the approved composition: transcript, inspector tabs, state strip, and environment foot", async () => {
     render(
       <CodingAgentPanel
         surface={surface}
@@ -129,13 +136,14 @@ describe("CodingAgentPanel", () => {
     for (const tab of ["Files", "Memory", "Context"]) {
       expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
     }
-    // Status row: workspace path + provider/model (git branch seams until the
-    // pi-parity task lands the generic fields).
-    expect(screen.getByText(/\/tmp\/ws/)).toBeInTheDocument();
-    // Extension strip carries the MCP allow-list names from STATE_SNAPSHOT.
-    expect(
-      await screen.findByText(/MCP: none/),
-    ).toBeInTheDocument();
+    // Environment foot: workspace path, branch, and the MCP summary (the
+    // per-server detail lives in the Context tab).
+    expect(screen.getByText("/tmp/ws")).toBeInTheDocument();
+    expect(screen.getByText("git —")).toBeInTheDocument();
+    expect(await screen.findByText("MCP none")).toBeInTheDocument();
+    // The composer owns the single focus boundary; the strip reports state.
+    expect(screen.getByLabelText(/Message/)).toBeInTheDocument();
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
   });
 
   it("renders transcript boxes from the AG-UI stream and colors them by type", async () => {
@@ -146,9 +154,9 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    // Seed via the shared relay seam (same flow ChatPanel tests use): the
+    // Seed via the shared relay seam (same flow the transport tests use): the
     // out-of-run snapshot path applies messages + state and notifies.
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -164,14 +172,18 @@ describe("CodingAgentPanel", () => {
         snapshot: {
           provider: "mock",
           model: "mini",
-          mcpServers: [{ serverId: "files", connected: true, tools: 2, error: "" }],
+          mcpServers: [
+            { serverId: "files", connected: true, tools: 2, error: "" },
+          ],
         },
         clientId: 1,
       } as never);
       expect(await screen.findByText("plan this phase")).toBeInTheDocument();
       expect(screen.getByText("I read the plan.")).toBeInTheDocument();
-      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(0);
-      expect(screen.getByText(/MCP: files/)).toBeInTheDocument();
+      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(
+        0,
+      );
+      expect(screen.getByText("MCP files · 2 tools")).toBeInTheDocument();
     } finally {
       release();
     }
@@ -185,7 +197,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -219,9 +231,7 @@ describe("CodingAgentPanel", () => {
         1,
       );
       // A tool card renders its kind and tool-name metadata.
-      fireEvent.click(
-        screen.getByRole("button", { name: /shell exited 0/ }),
-      );
+      fireEvent.click(screen.getByRole("button", { name: /shell exited 0/ }));
       // Kind row + tool-name row show "shell"; the content pre shows the
       // bounded output.
       expect((await screen.findAllByText("shell")).length).toBeGreaterThan(1);
@@ -241,7 +251,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -276,7 +286,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Session Info" }));
@@ -296,7 +306,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // The daemon registry rides STATE (plan-108 registry is the single
@@ -320,7 +330,9 @@ describe("CodingAgentPanel", () => {
         },
         clientId: 1,
       } as never);
-      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(0);
+      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(
+        0,
+      );
       const composer = screen.getByLabelText(/Message/);
       fireEvent.change(composer, { target: { value: "/open" } });
       expect(
@@ -333,13 +345,9 @@ describe("CodingAgentPanel", () => {
       fireEvent.change(composer, { target: { value: "/deploy" } });
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       // Plan 109 R2: the real branch replaces the `git —` placeholder.
-      expect(
-        screen.getAllByText(
-          (_, element) => element?.textContent === "/tmp/ws · git main",
-        ).length,
-      ).toBeGreaterThan(0);
-      // Plan 109 R3: the strip reflects daemon-reported extensions.
-      expect(screen.getByText("Extensions: wiki")).toBeInTheDocument();
+      expect(screen.getByText("git main")).toBeInTheDocument();
+      // Plan 109 R3: the foot reflects daemon-reported extensions.
+      expect(screen.getByText("extensions wiki")).toBeInTheDocument();
     } finally {
       release();
     }
@@ -356,10 +364,14 @@ describe("CodingAgentPanel", () => {
     );
     // Nothing emits a snapshot before the first prompt, so the panel asks for
     // the tab's STATE itself (tab-resolved server-side).
-    expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("listSessions"));
-    expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("tabState"));
+    expect(sendRequest).toHaveBeenCalledWith(
+      expect.stringContaining("listSessions"),
+    );
+    expect(sendRequest).toHaveBeenCalledWith(
+      expect.stringContaining("tabState"),
+    );
 
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -372,15 +384,15 @@ describe("CodingAgentPanel", () => {
         },
         clientId: 1,
       } as never);
-      // The status row reports the tab's branch (server-side `.git` read on
-      // the mount snapshot) and the MCP card lists the connected server.
-      await waitFor(() => {
-        const rows = Array.from(document.querySelectorAll('[role="status"]'));
-        expect(
-          rows.some((row) => (row.textContent ?? "").includes("git feature/pane-open")),
-        ).toBe(true);
-      });
-      expect(await screen.findByLabelText(/MCP servers/)).toBeInTheDocument();
+      // The foot reports the tab's branch (server-side `.git` read on the
+      // mount snapshot) and its MCP summary; per-server detail is the
+      // Context tab's.
+      expect(
+        await screen.findByText("git feature/pane-open"),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByText("MCP graft · 6 tools"),
+      ).toBeInTheDocument();
     } finally {
       release();
     }
@@ -395,7 +407,7 @@ describe("CodingAgentPanel", () => {
       />,
     );
     // The state store is a module singleton; pin the fields under test.
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -405,14 +417,11 @@ describe("CodingAgentPanel", () => {
       } as never);
       // Not a repo (or not yet read) → the `—` fallback; no extensions
       // reported → the segment is omitted, MCP stays.
-      await screen.findByText(/MCP: none/);
-      expect(
-        screen.getAllByText(
-          (_, element) => element?.textContent === "/tmp/ws · git —",
-        ).length,
-      ).toBeGreaterThan(0);
-      expect(screen.queryByText(/^Extensions:/)).not.toBeInTheDocument();
-      expect(screen.getByText(/MCP: none/)).toBeInTheDocument();
+      await screen.findByText("MCP none");
+      expect(screen.getByText("/tmp/ws")).toBeInTheDocument();
+      expect(screen.getByText("git —")).toBeInTheDocument();
+      expect(screen.queryByText(/^extensions /)).not.toBeInTheDocument();
+      expect(screen.getByText("MCP none")).toBeInTheDocument();
     } finally {
       release();
     }
@@ -444,10 +453,16 @@ describe("CodingAgentPanel", () => {
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
-        effortChord={{ shift: true, ctrl: false, alt: false, meta: false, key: "Tab" }}
+        effortChord={{
+          shift: true,
+          ctrl: false,
+          alt: false,
+          meta: false,
+          key: "Tab",
+        }}
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -486,10 +501,16 @@ describe("CodingAgentPanel", () => {
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
-        effortChord={{ shift: false, ctrl: true, alt: false, meta: false, key: "e" }}
+        effortChord={{
+          shift: false,
+          ctrl: true,
+          alt: false,
+          meta: false,
+          key: "e",
+        }}
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -567,7 +588,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -627,7 +648,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // A live session id activates the context fetch path.
@@ -691,9 +712,7 @@ describe("CodingAgentPanel", () => {
           },
         },
       } as never);
-      expect(
-        await screen.findByText("hello full content"),
-      ).toBeInTheDocument();
+      expect(await screen.findByText("hello full content")).toBeInTheDocument();
 
       // Back restores the category list.
       fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -711,7 +730,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -754,7 +773,7 @@ describe("CodingAgentPanel", () => {
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -763,7 +782,9 @@ describe("CodingAgentPanel", () => {
           sessionId: "s1",
           provider: "mock",
           model: "mini",
-          models: [{ provider: "mock", model: "mini", displayName: "Mock demo" }],
+          models: [
+            { provider: "mock", model: "mini", displayName: "Mock demo" },
+          ],
           providers: [{ id: "mock", configured: true }],
         },
         clientId: 1,
@@ -789,9 +810,21 @@ describe("CodingAgentPanel", () => {
             observation: { provider: "mock", model: "mini" },
             reflection: null,
             activity: [
-              { id: "e1#1", kind: "observation", summary: "User prefers dark mode" },
-              { id: "e2#1", kind: "reflection", summary: "User values dark mode" },
-              { id: "e3#dropped", kind: "drop", summary: "Dropped 1 observation" },
+              {
+                id: "e1#1",
+                kind: "observation",
+                summary: "User prefers dark mode",
+              },
+              {
+                id: "e2#1",
+                kind: "reflection",
+                summary: "User values dark mode",
+              },
+              {
+                id: "e3#dropped",
+                kind: "drop",
+                summary: "Dropped 1 observation",
+              },
             ],
           },
         },
@@ -825,7 +858,9 @@ describe("CodingAgentPanel", () => {
       );
       expect(hiddenSelect).toBeTruthy();
       await act(async () => {
-        fireEvent.change(hiddenSelect!, { target: { value: "model:mock/mini" } });
+        fireEvent.change(hiddenSelect!, {
+          target: { value: "model:mock/mini" },
+        });
       });
       await waitFor(() => {
         expect(
@@ -868,6 +903,56 @@ describe("CodingAgentPanel", () => {
     });
   });
 
+  it("streaming state offers Stop and keeps the composer as a steering lane (plan 118 port)", async () => {
+    // Ported from the deleted landing panel's suite: the cancel handler and the
+    // streaming state have exactly one owner — this panel drives the shared
+    // transport's `agent.cancel`; nothing surface-specific owned them.
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: { provider: "mock", model: "mini" },
+        clientId: 1,
+      });
+      await waitFor(() =>
+        expect(screen.getByLabelText(/Message/)).toBeEnabled(),
+      );
+
+      harness.emit({
+        type: "RUN_STARTED",
+        threadId: "s",
+        runId: "r",
+        clientId: 1,
+      });
+      expect(store.getSnapshot().status.streaming).toBe(true);
+      expect(await screen.findByText("Working")).toBeInTheDocument();
+      expect(
+        screen.getByText("steer or stop from the composer"),
+      ).toBeInTheDocument();
+      // The composer stays enabled (steer), and the action swaps to Stop.
+      expect(screen.getByLabelText(/Message/)).toHaveProperty(
+        "placeholder",
+        "Steer the agent, or wait",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await waitFor(() => {
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining("agent.cancel"),
+        );
+      });
+    } finally {
+      release();
+    }
+  });
+
   it("composer intents are declared action targets (plan 117 follow-up)", async () => {
     render(
       <CodingAgentPanel
@@ -878,7 +963,9 @@ describe("CodingAgentPanel", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => {
-      expect(sendRequest).toHaveBeenCalledWith(expect.stringContaining("sduiAction"));
+      expect(sendRequest).toHaveBeenCalledWith(
+        expect.stringContaining("sduiAction"),
+      );
     });
     const sent = vi.mocked(sendRequest).mock.calls.map(([payload]) => {
       const parsed = JSON.parse(String(payload)) as {
@@ -890,72 +977,6 @@ describe("CodingAgentPanel", () => {
     expect(intents.length).toBeGreaterThan(0);
     for (const intent of intents) {
       expect(surface.actionTargets).toContain(intent);
-    }
-  });
-
-  it("recent sessions compact Resume into distinct icon actions (plan 112 T8)", async () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const store = (await import("../agent/state")).chatAgent;
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          // Plan 117: the resumable list carries sessionId + label (first
-          // words of the first user message) + the daemon's local last-active
-          // stamp; a session the daemon never labelled reads "Untitled
-          // session" instead of a blank row.
-          resumableSessions: [
-            {
-              sessionId: "abcdef123456",
-              label: "Fix the login bug",
-              updatedAt: "2026-09-10T20:17:29.681Z",
-              updatedAtLabel: "2026-09-10 22:17",
-            },
-            {
-              sessionId: "ffff00001111",
-              label: "",
-              updatedAt: "2026-09-09T08:02:00.000Z",
-              updatedAtLabel: "2026-09-09 10:02",
-            },
-          ],
-        },
-        clientId: 1,
-      } as never);
-      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
-      // Distinct accessible names per row; glyphs not text labels. The stamp
-      // disambiguates rows that share a label.
-      const first = await screen.findByRole("button", {
-        name: "Resume Fix the login bug (2026-09-10 22:17)",
-      });
-      const second = await screen.findByRole("button", {
-        name: "Resume Untitled session (2026-09-09 10:02)",
-      });
-      // Both halves of the identity are visible on the row.
-      expect(screen.getByText("Fix the login bug")).toBeInTheDocument();
-      expect(screen.getByText("2026-09-10 22:17")).toBeInTheDocument();
-      expect(first.querySelector("svg")).not.toBeNull();
-      expect(second.querySelector("svg")).not.toBeNull();
-      // Empty-state discovery actions keep their visible labels.
-      expect(screen.getByRole("button", { name: "Open file" }).textContent).toContain("Open file");
-      expect(screen.getByRole("button", { name: "Resume session" }).textContent).toContain("Resume session");
-      expect(screen.getByRole("button", { name: "Search sessions…" }).textContent).toContain("Search sessions…");
-      fireEvent.click(first);
-      await waitFor(() => {
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining("abcdef123456"),
-        );
-      });
-    } finally {
-      release();
     }
   });
 
@@ -973,7 +994,7 @@ describe("CodingAgentPanel", () => {
     }
     // Permission prompt (approval strip) keeps text buttons — no icon-only
     // Allow/Deny. Approval arrives as clay.permissionRequest (plan 108).
-    const store = (await import("../agent/state")).chatAgent;
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -995,7 +1016,7 @@ describe("CodingAgentPanel", () => {
     }
   });
 
-  it("Files tab (plan 109 I6): shows the empty state and no workspace tree until a file is selected", () => {
+  it("Files tab (plan 118 task 36): shows the session-history empty state, never a file browser", () => {
     render(
       <CodingAgentPanel
         surface={surface}
@@ -1004,57 +1025,162 @@ describe("CodingAgentPanel", () => {
       />,
     );
     expect(
-      screen.getByText("Open a file to work on it alongside the agent."),
+      screen.getByText("No files in this session yet"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open file" })).toBeInTheDocument();
+    // The approved empty state says what the list *is*, and which keystrokes
+    // move the session forward instead.
+    expect(
+      screen.getByText(/Files the agent reads, writes or searches appear here/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/mention a file/)).toBeInTheDocument();
+    expect(screen.getAllByText(/workspace view/).length).toBeGreaterThan(0);
+    // The editor-in-inspector path is gone: no document surface, no tree, and
+    // no second way to open the workspace.
     expect(screen.queryByTestId("clay-editor")).not.toBeInTheDocument();
-    // The workspace browser tree is the shell file browser's sole instance
-    // (left workspace tab); the Files tab no longer embeds it.
     expect(screen.queryByText(/Workspace browser/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Open file|Resume session/ }),
+    ).toBeNull();
   });
 
-  it("Files tab (plan 109 I6): follows workspace selection into the shared editor view", () => {
-    const session = createDocumentSession({ send: async () => undefined });
-    session.installInitial(bootstrapDto);
-    // Simulate the shell selection flow: the pane session opens the file
-    // (store path is the selection state the editor view follows).
-    session.store.update({ path: "notes/plan.md" });
+  it("Files tab (plan 118 task 36): lists the files this session touched, newest first", async () => {
+    const onOpen = vi.fn();
     render(
       <CodingAgentPanel
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
-        session={session}
+        onOpenInWorkspace={onOpen}
       />,
     );
-    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
-    expect(screen.queryByText(/alongside the agent/)).not.toBeInTheDocument();
-    // Selecting another file rebinds the same session — no second pipeline.
-    session.store.update({ path: "src/lib.rs" });
-    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+      // The transcript's tool rows carry the file records the server derived
+      // from the call's own arguments (a resumed session rebuilds them from
+      // the same rows, so the list survives a resume).
+      harness.emit({
+        type: "MESSAGES_SNAPSHOT",
+        messages: [
+          {
+            id: "clay-tool-t1",
+            role: "tool",
+            content: 'read {"path":"src/main.rs"}',
+            metadata: {
+              clayKind: "tool",
+              toolName: "read",
+              sessionFile: { path: "src/main.rs", op: "read" },
+            },
+          },
+          {
+            id: "clay-tool-t2",
+            role: "tool",
+            content: 'write {"path":"plans/118.md"}',
+            metadata: {
+              clayKind: "tool",
+              toolName: "write",
+              sessionFile: { path: "plans/118.md", op: "write" },
+            },
+          },
+        ],
+        clientId: 1,
+      } as never);
+
+      // Basename first, directory muted, role word and its mark letter.
+      const newest = await screen.findByRole("button", {
+        name: "Open plans/118.md in the workspace view",
+      });
+      expect(within(newest).getByText("118.md")).toBeInTheDocument();
+      expect(within(newest).getByText("plans")).toBeInTheDocument();
+      expect(within(newest).getByText("created")).toBeInTheDocument();
+      expect(within(newest).getByText("A")).toBeInTheDocument();
+      const older = screen.getByRole("button", {
+        name: "Open src/main.rs in the workspace view",
+      });
+      expect(within(older).getByText("read")).toBeInTheDocument();
+      expect(within(older).getByText("R")).toBeInTheDocument();
+      // Newest first: the write happened after the read.
+      const list = screen.getByRole("list", {
+        name: "Files this session has touched",
+      });
+      const rows = within(list).getAllByRole("button");
+      expect(rows[0]).toBe(newest);
+      expect(rows[1]).toBe(older);
+      // Rows keep their text label (plan 112 T8: no icon takeover).
+      expect(newest.querySelector("svg")).toBeNull();
+      // The count and the filter are the other panels' affordances.
+      expect(screen.getByLabelText("Filter session files")).toBeInTheDocument();
+      expect(screen.getByText("2")).toBeInTheDocument();
+
+      // ⏎ on a row switches the tab's view at that file (the row is a button:
+      // Enter activates it, and the shell does the view switch + open).
+      fireEvent.click(newest);
+      expect(onOpen).toHaveBeenCalledWith("plans/118.md");
+    } finally {
+      release();
+    }
+  });
+
+  it("Files tab (plan 118 task 36): filters by path and keeps the editor out", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: { provider: "mock", model: "mini" },
+        clientId: 1,
+      } as never);
+      harness.emit({
+        type: "MESSAGES_SNAPSHOT",
+        messages: [
+          {
+            id: "clay-tool-t9",
+            role: "tool",
+            content: 'edit {"path":"src/shell/theme.rs"}',
+            metadata: {
+              clayKind: "tool",
+              toolName: "edit",
+              sessionFile: { path: "src/shell/theme.rs", op: "edit" },
+            },
+          },
+        ],
+        clientId: 1,
+      } as never);
+      expect(
+        await screen.findByRole("button", {
+          name: "Open src/shell/theme.rs in the workspace view",
+        }),
+      ).toBeInTheDocument();
+      const filter = screen.getByLabelText("Filter session files");
+      fireEvent.change(filter, { target: { value: "nope" } });
+      expect(
+        screen.queryByRole("button", {
+          name: "Open src/shell/theme.rs in the workspace view",
+        }),
+      ).toBeNull();
+      fireEvent.change(filter, { target: { value: "theme" } });
+      expect(
+        screen.getByRole("button", {
+          name: "Open src/shell/theme.rs in the workspace view",
+        }),
+      ).toBeInTheDocument();
+      // The Files tab never hosts a document surface.
+      expect(screen.queryByTestId("clay-editor")).not.toBeInTheDocument();
+    } finally {
+      release();
+    }
   });
 });
 
-/** Minimal bootstrap for a mounted document session (mirrors editor tests). */
-const bootstrapDto = {
-  clientId: 1,
-  protocolVersion: 28,
-  endpoint: "test",
-  generation: 1,
-  initialDocument: {
-    documentId: 1,
-    version: 1,
-    head: { totalBytes: 4, firstChunk: "seed" },
-    access: { editable: { leaseId: 1 } },
-    workspaceRoot: "/tmp/ws",
-  },
-  behaviorManifest: {
-    manifestId: "m",
-    behaviorVersion: 2,
-    commands: [],
-    keymaps: [],
-  },
-} as unknown as BootstrapDto;
 describe("Settings tab (plan 117 follow-up)", () => {
   it("lists the agent's delivered files from the pane session and opens one", async () => {
     const sent: string[] = [];
@@ -1131,9 +1257,15 @@ describe("Settings tab (plan 117 follow-up)", () => {
 });
 
 describe("MCP UI surfaces (plan 117)", () => {
-  it("pinned card lists connected servers with tool counts and marks hidden ones", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+  it("Context tab lists connected servers with tool counts and marks hidden ones", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1143,23 +1275,39 @@ describe("MCP UI surfaces (plan 117)", () => {
           model: "mini",
           mcpServers: [
             { serverId: "files", connected: true, tools: 2, error: "" },
-            { serverId: "search", connected: false, tools: 0, error: "spawn failed" },
+            {
+              serverId: "search",
+              connected: false,
+              tools: 0,
+              error: "spawn failed",
+            },
           ],
         },
         clientId: 1,
       } as never);
+      // Capabilities are reference data, so they live in the Context tab
+      // (DESIGN.md §12) rather than in the transcript.
+      fireEvent.click(screen.getByRole("tab", { name: "Context" }));
       const mcpCard = await screen.findByLabelText("MCP servers connected");
       expect(within(mcpCard).getByText("files")).toBeInTheDocument();
       expect(within(mcpCard).getByText("2 tools")).toBeInTheDocument();
-      expect(within(mcpCard).getByText("hidden: spawn failed")).toBeInTheDocument();
+      expect(
+        within(mcpCard).getByText("hidden: spawn failed"),
+      ).toBeInTheDocument();
     } finally {
       release();
     }
   });
 
-  it("card is hidden when no server is configured", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+  it("server section is absent when no server is configured", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1168,19 +1316,28 @@ describe("MCP UI surfaces (plan 117)", () => {
         clientId: 1,
       } as never);
       // Flush the coalesced state render, then assert absence: nothing
-      // will ever paint the card (no servers configured).
+      // will ever paint the section (no servers configured).
       await waitFor(() => {
-        expect(screen.getByText(/MCP: none/)).toBeInTheDocument();
+        expect(screen.getByText("MCP none")).toBeInTheDocument();
       });
-      expect(screen.queryByLabelText("MCP servers connected")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+      expect(
+        screen.queryByLabelText("MCP servers connected"),
+      ).not.toBeInTheDocument();
     } finally {
       release();
     }
   });
 
-  it("composer section shows server + tool state and persists across transcript growth", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+  it("the foot shows the MCP summary and the Context tab the detail, both across transcript growth", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1190,32 +1347,52 @@ describe("MCP UI surfaces (plan 117)", () => {
           model: "mini",
           mcpServers: [
             { serverId: "files", connected: true, tools: 3, error: "" },
-            { serverId: "ghost", connected: false, tools: 0, error: "connection closed" },
+            {
+              serverId: "ghost",
+              connected: false,
+              tools: 0,
+              error: "connection closed",
+            },
           ],
         },
         clientId: 1,
       } as never);
-      const section = await screen.findByLabelText("MCP connections");
+      expect(
+        await screen.findByText("MCP files · 3 tools · ghost · hidden"),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+      const section = await screen.findByLabelText("MCP servers connected");
       expect(within(section).getByText("3 tools")).toBeInTheDocument();
-      expect(within(section).getByText("hidden: connection closed")).toBeInTheDocument();
-      expect(await screen.findByLabelText("MCP servers connected")).toBeInTheDocument();
+      expect(
+        within(section).getByText("hidden: connection closed"),
+      ).toBeInTheDocument();
 
-      // Messages arrive; both MCP surfaces persist (pinned card + section).
+      // Messages arrive; both MCP surfaces persist (foot summary + section).
       harness.emit({
         type: "TEXT_MESSAGE_CONTENT",
         delta: "hello",
         messageId: "m1",
       } as never);
-      expect(screen.getByLabelText("MCP servers connected")).toBeInTheDocument();
-      expect(screen.getByLabelText("MCP connections")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("MCP servers connected"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("MCP files · 3 tools · ghost · hidden"),
+      ).toBeInTheDocument();
     } finally {
       release();
     }
   });
 
   it("@-mentions: dropdown merges catalog + files, filter narrows, selection embeds (plan 117)", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1231,7 +1408,10 @@ describe("MCP UI surfaces (plan 117)", () => {
       harness.emit({
         type: "CUSTOM",
         name: "clay.agentRpc",
-        value: { code: "workspace.files", result: { files: ["src/main.rs", "README.md"] } },
+        value: {
+          code: "workspace.files",
+          result: { files: ["src/main.rs", "README.md"] },
+        },
       } as never);
       const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
 
@@ -1239,30 +1419,44 @@ describe("MCP UI surfaces (plan 117)", () => {
       fireEvent.change(composer, { target: { value: "@" } });
       const dropdown = await screen.findByRole("listbox", { name: "Mentions" });
       expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
-      expect(within(dropdown).getByText("@file:src/main.rs")).toBeInTheDocument();
+      expect(
+        within(dropdown).getByText("@file:src/main.rs"),
+      ).toBeInTheDocument();
 
       // Typing narrows across both kinds.
       fireEvent.change(composer, { target: { value: "@br" } });
       expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
-      expect(within(dropdown).queryByText("@file:src/main.rs")).not.toBeInTheDocument();
+      expect(
+        within(dropdown).queryByText("@file:src/main.rs"),
+      ).not.toBeInTheDocument();
 
       // @file: narrows to files only.
       fireEvent.change(composer, { target: { value: "@file:re" } });
       expect(within(dropdown).getByText("@file:README.md")).toBeInTheDocument();
-      expect(within(dropdown).queryByText("@skill:brief")).not.toBeInTheDocument();
+      expect(
+        within(dropdown).queryByText("@skill:brief"),
+      ).not.toBeInTheDocument();
 
       // Selection embeds the mention token into the draft.
       fireEvent.click(within(dropdown).getByText("@file:README.md"));
       expect(composer.value).toBe("@file:README.md ");
-      expect(screen.queryByRole("listbox", { name: "Mentions" })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("listbox", { name: "Mentions" }),
+      ).not.toBeInTheDocument();
     } finally {
       release();
     }
   });
 
   it("@-mentions: Tab selects the highlighted match (plan 117)", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1286,10 +1480,20 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("token meter: compact occupancy vs ceiling with diagnostic threshold tones (plan 117)", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
-    const emitState = (tokens: number | null, model = "mini", window = 100_000) => {
+    const emitState = (
+      tokens: number | null,
+      model = "mini",
+      window = 100_000,
+    ) => {
       harness.emit({
         type: "STATE_SNAPSHOT",
         snapshot: {
@@ -1338,8 +1542,14 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("token meter: heuristic estimates occupancy when usage is unreported (plan 117)", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // 7200 chars ÷ 3.6 chars/token (claude family) = 2000 tokens.
@@ -1348,7 +1558,9 @@ describe("MCP UI surfaces (plan 117)", () => {
         snapshot: {
           provider: "mock",
           model: "claude-x",
-          models: [{ provider: "mock", model: "claude-x", contextWindow: 270_000 }],
+          models: [
+            { provider: "mock", model: "claude-x", contextWindow: 270_000 },
+          ],
         },
         clientId: 1,
       } as never);
@@ -1366,8 +1578,14 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("effort dropdown is active from session start (plan 117): levels resolve from the model inventory before any prompt", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // Mount-time inventory STATE: trio + models inventory, NO session and
@@ -1397,61 +1615,251 @@ describe("MCP UI surfaces (plan 117)", () => {
     }
   });
 
-  it("recent sessions: labeled rows from the resumable list + rich resume (plan 117)", async () => {
-    render(<CodingAgentPanel surface={surface} uiVersion={4} workspaceRoot="/tmp/ws" />);
-    const store = (await import("../agent/state")).chatAgent;
-    const release = store.start();
-    try {
-      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
-      // The empty-state mount fetches the workspace-scoped list.
-      await waitFor(() =>
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining("resumableSessions"),
-        ),
-      );
-      // The daemon reply rides the generic agent-RPC custom event.
-      harness.emit({
-        type: "CUSTOM",
-        name: "clay.agentRpc",
-        value: {
-          code: "session.resumable",
-          result: {
-            sessions: [
-              {
-                sessionId: "abcdef123456",
-                label: "Fix the login bug",
-                updatedAt: "2026-09-10T20:17:29.681Z",
-                updatedAtLabel: "2026-09-10 22:17",
-              },
-              {
-                sessionId: "ffff00001111",
-                label: "",
-                updatedAt: "2026-09-09T08:02:00.000Z",
-                updatedAtLabel: "2026-09-09 10:02",
-              },
-            ],
+  it("is the header title, lists only the configured agents, and marks the current one", async () => {
+    const session = createDocumentSession({ send: async () => undefined });
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        session={session}
+        agentType="coding-agent"
+        onPickAgent={() => undefined}
+      />,
+    );
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "launcherEntries",
+          // The server's ServerMessage shape: the listing rides under
+          // `entries` (the same envelope the launcher parses).
+          data: {
+            clientId: 1,
+            entries: {
+              workspaces: [],
+              pruned: 0,
+              agents: [
+                {
+                  name: "coding-agent",
+                  label: "Coding Agent",
+                  configRoot: "~/.clay/agents/coding-agent",
+                  skillCount: 3,
+                },
+                {
+                  name: "reviewer",
+                  label: "Reviewer",
+                  configRoot: "~/.clay/agents/reviewer",
+                  skillCount: 1,
+                },
+              ],
+            },
           },
         },
+      } as never);
+    });
+
+    // The title reads the current agent, and it consumes the agentPicker
+    // trigger family (not the plain dropdown).
+    const trigger = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        "[data-agent-pick] button",
+      );
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    });
+    expect(trigger).toHaveAttribute("data-clay-component", "agentPicker");
+    expect(trigger).toHaveAttribute("data-clay-slot", "trigger");
+    expect(trigger).toHaveTextContent("Coding Agent");
+
+    // Opening the menu lists exactly the server-listed types.
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    const currentRow = await screen.findByRole("option", {
+      name: /Coding Agent/,
+    });
+    void currentRow;
+    expect(currentRow).toHaveAttribute("aria-selected", "true");
+    const reviewerRow = screen.getByRole("option", { name: /Reviewer/ });
+    expect(reviewerRow).toHaveAttribute("aria-selected", "false");
+    // The menu names where more agent types come from and never fabricates
+    // one the data root does not hold.
+    expect(screen.getByText(/from ~\/\.clay\/agents\//)).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Ghost/ })).toBeNull();
+  });
+
+  it("hands the picked type to the tab and resets the pending effort", async () => {
+    const picked: Array<string | null> = [];
+    const session = createDocumentSession({ send: async () => undefined });
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        session={session}
+        agentType="coding-agent"
+        onPickAgent={(agent) => picked.push(agent)}
+      />,
+    );
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "launcherEntries",
+          // The server's ServerMessage shape: the listing rides under
+          // `entries` (the same envelope the launcher parses).
+          data: {
+            clientId: 1,
+            entries: {
+              workspaces: [],
+              pruned: 0,
+              agents: [
+                {
+                  name: "coding-agent",
+                  label: "Coding Agent",
+                  configRoot: "~/.clay/agents/coding-agent",
+                  skillCount: 3,
+                },
+                {
+                  name: "reviewer",
+                  label: "Reviewer",
+                  configRoot: "~/.clay/agents/reviewer",
+                  skillCount: 1,
+                },
+              ],
+            },
+          },
+        },
+      } as never);
+    });
+    const trigger = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        "[data-agent-pick] button",
+      );
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("option", { name: /Reviewer/ }));
+    });
+    expect(picked).toEqual(["reviewer"]);
+    // The already-current row is a no-op: no redundant tab command.
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("option", { name: /Coding Agent/ }));
+    });
+    expect(picked).toEqual(["reviewer"]);
+  });
+
+  it("keeps the picker inert when there is no shell to switch through", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        agentType="coding-agent"
+      />,
+    );
+    const trigger = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>(
+        "[data-agent-pick] button",
+      );
+      expect(button).toBeTruthy();
+      return button as HTMLButtonElement;
+    });
+    expect(trigger).toBeDisabled();
+  });
+});
+
+describe("Per-turn agent labels (plan 118 task 35)", () => {
+  it("labels turns with their producer and notes the switch when the tab changes agent", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        agentType="reviewer"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "MESSAGES_SNAPSHOT",
+        messages: [
+          {
+            id: "m0",
+            role: "user",
+            content: "first, as the coding agent",
+            metadata: { agent: "coding-agent" },
+          },
+          {
+            id: "m1",
+            role: "assistant",
+            content: "done, then switched",
+            metadata: { agent: "reviewer" },
+          },
+          {
+            id: "m2",
+            role: "assistant",
+            content: "and a second turn from the reviewer",
+            metadata: { agent: "reviewer" },
+          },
+        ],
         clientId: 1,
       } as never);
-      // Labels render with the last-active stamp; an unlabelled session says
-      // so rather than showing a bare id.
-      const first = await screen.findByRole("button", {
-        name: "Resume Fix the login bug (2026-09-10 22:17)",
-      });
-      expect(screen.getByText("Fix the login bug")).toBeInTheDocument();
-      expect(screen.getByText("Untitled session")).toBeInTheDocument();
-      expect(screen.getByText("2026-09-09 10:02")).toBeInTheDocument();
-      // Selecting a session resumes through the rich load path.
-      fireEvent.click(first);
-      await waitFor(() => {
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining("resumeSession"),
-        );
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining("abcdef123456"),
-        );
-      });
+      expect(
+        await screen.findByText(/first, as the coding agent/),
+      ).toBeInTheDocument();
+      // The previous agent's turn keeps its label...
+      expect(screen.getByText("Coding Agent")).toBeInTheDocument();
+      expect(screen.getAllByText("Reviewer").length).toBeGreaterThan(0);
+      // ...and exactly one switch note marks the boundary.
+      expect(screen.getAllByText("Switched to Reviewer")).toHaveLength(1);
+    } finally {
+      release();
+    }
+  });
+
+  it("shows no agent labels when one agent wrote the whole transcript", async () => {
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        agentType="coding-agent"
+      />,
+    );
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      harness.emit({
+        type: "MESSAGES_SNAPSHOT",
+        messages: [
+          {
+            id: "m0",
+            role: "user",
+            content: "only one agent here",
+            metadata: { agent: "coding-agent" },
+          },
+        ],
+        clientId: 1,
+      } as never);
+      expect(
+        await screen.findByText(/only one agent here/),
+      ).toBeInTheDocument();
+      const log = screen.getByRole("log", { name: "Transcript" });
+      expect(within(log).queryByText(/Switched to/)).toBeNull();
+      // One agent in the transcript: the head keeps the generic role label
+      // instead of naming the agent on every turn.
+      expect(within(log).queryByText("Coding Agent")).toBeNull();
+      expect(within(log).getByText("you")).toBeInTheDocument();
     } finally {
       release();
     }

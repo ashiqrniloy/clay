@@ -89,6 +89,15 @@ pub struct BaseUiColors {
     pub diagnostic_error: Color,
     pub diagnostic_warning: Color,
     pub diagnostic_info: Color,
+    /// Optional accent hue (`accent`). A legacy theme that sets it gives the
+    /// shell a real accent; absent, `accent.primary` keeps projecting from
+    /// `caret` (the pre-vocabulary behaviour).
+    pub accent: Option<Color>,
+    /// Optional structural border ladder (`borderHairline`/`borderSubtle`/
+    /// `borderStrong`). Absent, all three keep projecting from `scrollbar`.
+    pub border_hairline: Option<Color>,
+    pub border_subtle: Option<Color>,
+    pub border_strong: Option<Color>,
 }
 
 // Bit positions in `StyleRegistry::attr_defaults` for theme-declared
@@ -178,6 +187,10 @@ impl StyleRegistry {
                 diagnostic_error: Color::from_rgb8(0xff, 0x4d, 0x6d),
                 diagnostic_warning: Color::from_rgb8(0xff, 0xd1, 0x66),
                 diagnostic_info: Color::from_rgb8(0x61, 0xaf, 0xef),
+                accent: None,
+                border_hairline: None,
+                border_subtle: None,
+                border_strong: None,
             },
             semantic: Color::from_rgb8(0x4d, 0xc8, 0x8a),
             diagnostic: Color::from_rgba8(0xff, 0x4d, 0x6d, 0x3f),
@@ -408,6 +421,13 @@ pub enum BaseUiColorKey {
     LineHighlight,
     IndentGuide,
     BracketMatch,
+    /// `accent` — the theme's accent hue for shell affordances (plan 118 task E7).
+    Accent,
+    /// `borderHairline` / `borderSubtle` / `borderStrong` — the structural border
+    /// ladder a theme can express without typed `designTokens` (plan 118 task E7).
+    BorderHairline,
+    BorderSubtle,
+    BorderStrong,
 }
 
 /// Where a [`TextStyleOverride`] applies: either a base-UI chrome color or a
@@ -445,6 +465,10 @@ pub fn parse_override_token(token: &str) -> Option<OverrideTarget> {
         "lineHighlight" => BaseUiColorKey::LineHighlight,
         "indentGuide" => BaseUiColorKey::IndentGuide,
         "bracketMatch" => BaseUiColorKey::BracketMatch,
+        "accent" => BaseUiColorKey::Accent,
+        "borderHairline" => BaseUiColorKey::BorderHairline,
+        "borderSubtle" => BaseUiColorKey::BorderSubtle,
+        "borderStrong" => BaseUiColorKey::BorderStrong,
         _ => return TokenType::from_name(token).map(OverrideTarget::Syntax),
     };
     Some(OverrideTarget::BaseUi(base))
@@ -573,6 +597,16 @@ impl StyleRegistry {
                             }
                             BaseUiColorKey::LineHighlight => registry.line_highlight = color,
                             BaseUiColorKey::IndentGuide => registry.indent_guide = color,
+                            BaseUiColorKey::Accent => registry.base.accent = Some(color),
+                            BaseUiColorKey::BorderHairline => {
+                                registry.base.border_hairline = Some(color)
+                            }
+                            BaseUiColorKey::BorderSubtle => {
+                                registry.base.border_subtle = Some(color)
+                            }
+                            BaseUiColorKey::BorderStrong => {
+                                registry.base.border_strong = Some(color)
+                            }
                             BaseUiColorKey::BracketMatch => registry.bracket_match = color,
                         }
                     }
@@ -660,11 +694,37 @@ pub fn relative_luminance(color: Color) -> f64 {
 
 /// WCAG contrast ratio between two opaque colors. Larger is better; 4.5 is AA
 /// for normal text and is the floor Clay uses for status chrome polish.
+///
+/// Alpha is ignored — use [`composited_contrast_ratio`] for translucent roles.
 pub fn contrast_ratio(foreground: Color, background: Color) -> f64 {
     let l1 = relative_luminance(foreground);
     let l2 = relative_luminance(background);
     let (lighter, darker) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
     (lighter + 0.05) / (darker + 0.05)
+}
+
+/// Straight-alpha composite of `top` over `bottom`: what the eye actually sees
+/// when the top color is painted on the bottom one. Alpha is taken in
+/// gamma-encoded sRGB (the space the stored bytes live in), the convention the
+/// approved theme board measures with.
+pub fn composite_over(top: Color, bottom: Color) -> Color {
+    let [tr, tg, tb, ta] = top.components();
+    let [br, bg, bb, _] = bottom.components();
+    let alpha = f64::from(ta) / 255.0;
+    let mix = |t: u8, b: u8| (f64::from(t) * alpha + f64::from(b) * (1.0 - alpha)).round() as u8;
+    Color::from_rgba8(mix(tr, br), mix(tg, bg), mix(tb, bb), u8::MAX)
+}
+
+/// WCAG contrast ratio of a translucent foreground painted on `background`:
+/// the foreground is composited over the background first, then measured
+/// against the background itself.
+///
+/// This is the ratio that matters for every alpha-carrying role — a 34 %
+/// hairline reads 1.4:1 on canvas, not the 21:1 its raw RGB would score.
+/// Opaque foregrounds are unaffected, so this is behaviour-preserving wherever
+/// opacity is 1.
+pub fn composited_contrast_ratio(foreground: Color, background: Color) -> f64 {
+    contrast_ratio(composite_over(foreground, background), background)
 }
 
 /// Status-chrome contrast for a resolved registry (`statusText` on `statusBg`).
@@ -1053,6 +1113,37 @@ mod tests {
             )
             .italic
         );
+    }
+
+    #[test]
+    fn composited_contrast_measures_alpha_over_the_backdrop() {
+        let canvas = Color::from_rgb8(0x28, 0x28, 0x28);
+        // Opaque foregrounds are unaffected: compositing is a no-op at alpha 1.
+        let opaque = Color::from_rgb8(0xd4, 0xbe, 0x98);
+        assert_eq!(
+            composite_over(opaque, canvas),
+            opaque,
+            "an opaque top replaces the backdrop"
+        );
+        assert!(
+            (composited_contrast_ratio(opaque, canvas) - contrast_ratio(opaque, canvas)).abs()
+                < f64::EPSILON
+        );
+        // A 34 % hairline is the reason compositing exists: ignoring alpha scores
+        // it as if it were an opaque mid-grey (4:1 here, 21:1 on light chrome),
+        // which would clear every structural floor while the eye sees ~1.4:1.
+        let hairline = Color::from_rgba8(0x92, 0x83, 0x74, 0x57);
+        let raw = contrast_ratio(hairline, canvas);
+        let composited = composited_contrast_ratio(hairline, canvas);
+        assert!(raw > 3.0, "raw bytes score {raw:.2}");
+        assert!(
+            (composited - 1.61).abs() < 0.02,
+            "34 % hairline on #282828 reads {composited:.2}; the approved theme board \
+             records 1.61:1 for this pair (gruvbox-material-dark)"
+        );
+        // Compositing darkens toward the backdrop monotonically with alpha.
+        let more = composited_contrast_ratio(Color::from_rgba8(0x92, 0x83, 0x74, 0xff), canvas);
+        assert!(composited < more, "{composited:.2} < {more:.2}");
     }
 
     #[test]

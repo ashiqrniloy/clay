@@ -44,7 +44,8 @@ Three layers, strict separation:
 2. **`@clay/coding-agent` (first-party Clay package, "base coding agent").**
    Minimal, pi-coding-agent-parity coding agent: coding tools against Clay
    documents, approvals, sessions, branching, compaction, steering, commands,
-   plan files. Replaceable like `@clay/chat`; contains no workflow opinions.
+   plan files. Replaceable like any first-party product package
+   (`@clay/launcher`); contains no workflow opinions.
 3. **`st` (`@arnilo/st`, third-party Clay package on npm).** Author's own
    autonomous workflow, composed only from the base layer's primitives plus
    Prism packages. Installed with `clay install npm:@arnilo/st`. Not shipped
@@ -354,7 +355,7 @@ upstream feature work.
   `@arnilo/prism-providers` from the Prism graph, plus `better-sqlite3`, and
   no retired package names.
 - Startup reports Prism `0.4.0`; existing SQLite session fixtures open and
-  round-trip without a schema migration; chat/mock flows stay byte-compatible.
+  round-trip without a schema migration; session/mock flows stay byte-compatible.
 - Rollback drill restores the committed 0.3 package/import set with `npm ci`;
   no database rollback or compatibility shim is required.
 
@@ -421,7 +422,7 @@ upstream feature work.
   plumbing lands, not merely because `prism-web-tools` is installed. All
   capabilities hidden when the binary is absent. Skip `/brave`, `/exa`,
   `/firecrawl`.
-- Keep mock-mode and existing chat flows byte-compatible.
+- Keep mock-mode and the launcher/workspace flows byte-compatible.
 
 ### Exit Gate
 
@@ -441,8 +442,9 @@ upstream feature work.
   set, system prompt layer, `create-plan`-style skill, slash commands
   (`/compact`, `/new`, `/branch`+checkout map, `/model` picker hook), plan
   file conventions (`plans/`), and the agent UI surface per the binding spec
-  below, composed from existing SDUI primitives and the chat extension
-  points.
+  below — the bundled package's surface renders as the host's compiled agent
+  panel for its trusted provenance, and any other package's `pane`
+  contribution renders through the generic SDUI renderer.
 - Pi-parity behaviors: streaming, steering/cancel, session list/resume,
   branch fork/checkout, manual + auto compaction, provider/model switching.
   Full tree parity: `/tree` in-place navigation with branch summaries
@@ -483,8 +485,9 @@ upstream feature work.
   validation rules.
 - No autonomy, workflows, sub-agents, or memory cadence policy — those are
   `st` concerns.
-- Replaceable like `@clay/chat`; third-party packages extend/replace via
-  declared extension points with user approval.
+- Replaceable like any first-party product package (`@clay/launcher`);
+  third-party packages extend/replace via declared extension points with user
+  approval.
 
 ### Coding Agent UI (binding spec)
 
@@ -495,40 +498,64 @@ follows `clay-ui`: primitives-first, token-only styling, pane split tree,
 and the mandatory seven-file design-skill stack listed in the plan's
 `Approach -> Documentation Reviewed`.
 
-**Layout.** Launching the agent splits the working area down the middle
-vertically: two equal panes (50/50, user-resizable, ratio-clamped).
+**The surface is the agent view of a tab.** One tab holds one workspace and
+one agent and renders exactly one view at a time — Workspace or Agent — with
+the switcher in tab chrome (`⌘1`/`⌘2`). The agent view is not a split of the
+working area, and it is **not the window's landing**: the landing is the
+launcher (`@clay/launcher`, plan 118), which a fresh window and every empty
+tab (`⌘T`) open.
 
-- **Left pane — agent activity.** Chronological transcript exactly like
-  the pi TUI: user prompt, agent message, tool outputs (including MCP),
-  skills loaded — in arrival order.
-  - Tool output boxes show a fixed number of lines and truncate after
-    that, so all transcript boxes keep a uniform height.
-  - Box color distinguishes content type (user / agent / tool / skill /
-    MCP); colors come from typed theme tokens only.
-  - Selecting/clicking a truncated box renders its **full** content in the
-    right pane — the right split is the detail surface for anything cut
-    off in the transcript.
-- **Right pane — three tabs at the top.**
-  1. **Files** — the file view as it exists today; path browser loads
-     workspace files on demand.
-  2. **Observational Memory** — runtime OM activity (st agent): what the
-     agent is observing, reflecting on, and dropping, live. Tab ships in
-     Phase 2 chrome; live population lands with `st` memory cadence
-     (Phase 7).
-  3. **Context** — the agent's current context, categorized: system
-     prompt, user prompts, agent messages, tool outputs, skills loaded,
-     files loaded.
-- **Input + status area (left pane bottom).**
-  - Composer text box that grows vertically as the message lengthens.
-    Supports `/` commands like pi: provider selection, model selection,
-    configuration, compaction, and every registered command.
+**Layout.** One agent column plus the inspector: header / transcript / state
+strip / composer / environment foot, zoned from the inspector by a hairline.
+The inspector (340px, 312px ≤ 1240px, a drawer below 1000px) holds the
+reference data, so the transcript keeps the width.
+
+- **Header — the agent-type picker is the view's title.** It names the tab's
+  agent (one agent per tab) and opens the registry of configured agent types
+  with the resolved config root and skill count. The model control, the
+  context meter (real values only) and the effort control sit at the trailing
+  edge.
+- **Transcript (72ch measure).** Chronological turns exactly like the pi
+  TUI: user prompt, agent message, reasoning, tool output (including MCP),
+  skills loaded, usage, errors — in arrival order, role-labelled, hairline
+  separated (a turn rounds only in its fill states).
+  - Machine output (`tool`, `skill`, `usage`) is one inset well per turn
+    (`surface.control` fill, 12px radius, hairline) with a uniform
+    three-line clamp, so a turn's height never depends on how much it
+    printed.
+  - A truncated box's full content opens in the inspector's **Session Info** tab
+    (the detail destination, plan 109 I10); the other inspector tabs stay
+    reference data.
+- **Composer (agent column bottom).** One boundary: the field well draws the
+  fill, the hairline and the focus ring, and the input inside draws none
+  (`DESIGN.md` §14.4, one ring per surface). Text is left-aligned; Send /
+  Stop / Close sit inside the well's trailing edge. It grows with the message
+  (48px min, 32vh max) and supports `/` commands like pi — provider
+  selection, model selection, configuration, compaction, and every registered
+  command — plus `@` file mentions.
   - `Shift+Tab` cycles thinking/reasoning effort of the selected model
     (pi behavior; keybind configurable, this default).
-  - Status row below the composer: **left** = loaded workspace path +
-    git branch; **right** = selected provider + model + current context
-    size vs context window.
-  - Extension strip below that: active extensions (caveman, ponytail,
-    …) and active MCP servers.
+- **State strip.** Status dot + message + note (mono 11px): streaming,
+  cancelled, failed, waiting for approval, disconnected.
+- **Environment foot.** Workspace · branch · active extensions (caveman,
+  ponytail, …) · active MCP servers, as a mono strip.
+- **Inspector — tabs at the top.**
+  1. **Files** — the session's file history: the files this session has
+     read, written, created or deleted, newest first, with `⏎` switching
+     the tab to its workspace view at that file. Session history, not a
+     file browser — the tree is the workspace view's job.
+  2. **Memory** — runtime OM activity (st agent): what the agent is
+     observing, reflecting on, and dropping, live. Tab ships in Phase 2
+     chrome; live population lands with `st` memory cadence (Phase 7).
+  3. **Context** — the agent's current context, categorized: system
+     prompt, user prompts, agent messages, tool outputs, skills loaded,
+     files loaded. The capability inventories (skills, MCP servers) are
+     reference data and belong here, not in a permanent center panel.
+  4. **Session Info** — the session's identity and live values: id, client,
+     status, workspace, working directory, git branch, model, context usage,
+     effort, MCP and skill summary.
+  5. **Settings** — the agent Settings page: the delivered-file list
+     (`DESIGN.md` §12, "Settings surfaces").
 
 ### Exit Gate
 
@@ -537,13 +564,17 @@ vertically: two equal panes (50/50, user-resizable, ratio-clamped).
 - Tree/discard drill: `/tree` branch from an earlier entry restores the
   workspace to that entry's document checkpoint; the abandoned branch keeps
   its summary; `/fork` and `/clone` produce independent sessions.
-- UI spec conformance: 50/50 agent split with three right-pane tabs
-  (Files, OM chrome, Context); uniform-height truncated transcript boxes
-  with type-colored borders from tokens; box selection shows full content
-  in the right pane; growing composer with `/` commands; `Shift+Tab`
-  reasoning cycle; status row (workspace+branch | provider+model+context
-  usage); extension/MCP strip. Visual + accessibility inspection per
-  `clay-ui` Step 1.
+- UI spec conformance: agent view of a tab with the agent-type picker as the
+  view title and exactly one composer boundary (shell well + focus ring, no
+  inner ring); 72ch transcript of role-labelled, hairline-separated turns with
+  uniform-height three-line-clamped machine wells whose full content opens in
+  Session Info;
+  state strip; environment foot (workspace · branch · extensions · MCP);
+  inspector (340/312/drawer) with the Files (session history), Memory,
+  Context (categorized counts + capability inventories), Session Info and
+  Settings tabs; real values only — no fabricated meters or tool output.
+  Visual + accessibility inspection per `clay-ui` Step 1, and the tab's
+  workspace view stays one `⌘1` away.
 - Fixture `build`/`fix` knowledge checks: with wiki enabled, `/wiki-init` +
   `/wiki-refresh` produce an OKF bundle that `wiki_search` answers from;
   with graft enabled, `graft_ask`/`graft_callers` return ranked spans;
@@ -555,7 +586,8 @@ vertically: two equal panes (50/50, user-resizable, ratio-clamped).
   current workspace are returned with the correct tree location; an identical
   fixture session in another workspace never appears; selecting a result
   resumes it without implicitly attaching its transcript to the current run.
-- Deleting/disabling the package leaves the daemon and chat fully functional.
+- Deleting/disabling the package leaves the daemon, the launcher and the
+  workspace fully functional.
 
 ### Phase 2.1 Defects, UX, and Prism 0.5.0 (`plans/109`)
 
@@ -569,9 +601,11 @@ Mid-execution: I1–I3 landed (workspace bind, per-workspace model auto-load,
   this). UI dropdown + configurable `Shift+Tab`.
 - Remaining original UX: full transcript (I5), Files-as-editor-view (I6),
   Context drawer (I7), OM activity + worker models (I8), `/resume` (I9),
-  Session Info as fourth right-pane tab (I10), R1–R5. Bind UI to plan 110
-  (`ClayTabStrip`, recipe consumption). Phase 2's three-tab chrome is the
-  108 ship; 109 adds Session Info and stops duplicating the workspace tree.
+  Session Info tab (I10), R1–R5. Bind UI to plan 110 (`ClayTabStrip`, recipe
+  consumption). The inspector tab set is plan 118's approved five — Files,
+  Memory, Context, Session Info, Settings — so 109's Session Info lands as the
+  fourth tab, and the Files tab becomes the session's file history rather than
+  a second workspace tree.
 - Image support: still deferred (not in plan 109).
 
 ### Phase 2.2 Skill Discovery, Wiki/Graft Wiring, Project Prompt, MCP, Context Inspector
@@ -652,7 +686,7 @@ Locked changes:
   `.wiki/` (already guaranteed: `autoDeploySkills: false`). The
   wiki-searcher + wiki-maintainer skills activate simultaneously with a
   successful init; without it they, the wiki commands, and the wiki
-  tools never appear (chat-safe prompt, as today's disabled default).
+  tools never appear (a plain prompt with no tool, as today's disabled default).
   `knowledge.setOptions` stays as the internal mechanism and
   programmatic surface.
 - **Graft — available by default.** Remove the RPC-first activation:
@@ -668,7 +702,7 @@ Locked changes:
   wiki-maintainer, graft — get on/off switches in
   `~/.clay/agents/coding-agent/skills.json` (`agentSkills` section). Off ⇒ the
   skill never registers and its dependent slash commands never appear:
-  wiki off ⇒ `/wiki-init` stays a chat-safe prompt (the intercept
+  wiki off ⇒ `/wiki-init` stays a plain prompt (the intercept
   honors the gate); graft off ⇒ no binding, no tools. Filesystem-
   discovered skills are unaffected by this gate.
 - **Agent-delivered skills are file-backed — disk is the source of
@@ -991,8 +1025,8 @@ mid-Phase-2.2 implementation):
   histories). Children never see the implementation agent's transcript.
 - **Unbiased two-phase children.** After the implementation plan exists and
   **before** implementation:
-  1. Test child is given **only** that plan (acceptance criteria, not impl
-     chat or diffs) and writes a frozen test plan (`create-test-plan`).
+  1. Test child is given **only** that plan (acceptance criteria, not the impl
+     transcript or diffs) and writes a frozen test plan (`create-test-plan`).
   2. Validation child is given **only** that plan and writes a frozen
      validation plan (`create-validation-plan`).
   After a task is implemented, the same children write/run tests and
@@ -1045,8 +1079,8 @@ mid-Phase-2.2 implementation):
 - `@arnilo/prism-memory/compaction/observational-memory` attached to the built-in workflow orchestrator session
   and each durable child session: per-task compaction
   (fast strategy), recall tool
-  active, `om:status`/`om:view` surfaces in Clay UI, and the right-pane
-  Observational Memory tab (Phase 2 UI spec) shows live observe/reflect/drop
+  active, `om:status`/`om:view` surfaces in Clay UI, and the inspector's
+  Memory tab (Phase 2 UI spec) shows live observe/reflect/drop
   activity. Defaults: worker models configured separately from the session
   model; `compactAfterTokens` default **80,000** tokens (user-configurable);
   retention **per session**, not per workspace, to start.

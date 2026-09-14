@@ -222,7 +222,7 @@ No performance budget was changed.
 | Check | Result | Evidence |
 |---|---|---|
 | Wide/narrow rendered surfaces | PASS static | 20 CDP captures under `code-reviews/screenshots/2026-08-24-tauri-react-parity/` at 1440×900 and 780×900 show no clipping, duplicate overlay, or visible layout jank |
-| Editor/package/Chat render cost | PASS structural; stream feel unresolved | Existing CodeMirror, SDUI, AG-UI, list, and hot-path tests pass; provider setup/input prevented a live streaming-latency claim |
+| Editor/package/agent-transcript render cost | PASS structural; stream feel unresolved | Existing CodeMirror, SDUI, AG-UI, list, and hot-path tests pass; provider setup/input prevented a live streaming-latency claim |
 | Bundle budget | PASS | Frontend build: shell 160.6 kB gzip / 180 kB budget; total 343.2 kB / 400 kB budget |
 | Keyboard/filter/resize feel | UNRESOLVED live | Host cannot safely deliver keyboard or compositor resize actions; no visual pass inferred from source/tests |
 

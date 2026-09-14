@@ -52,11 +52,31 @@ pub struct SduiTree {
 pub struct SduiNode {
     pub id: SduiNodeId,
     pub kind: SduiNodeKind,
+    /// Optional host-owned size token for a region node: the host sizes it from
+    /// the typed dimension token instead of an equal flex share (plan 118 task
+    /// E1 — the workspace sidebar is 244px, 224px at ≤1240px, and the SDUI row
+    /// cannot express that with flex alone). Inert data: the token must resolve
+    /// in the core catalog, so a tree cannot invent geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
 }
 
 impl SduiNode {
     pub const fn new(id: SduiNodeId, kind: SduiNodeKind) -> Self {
-        Self { id, kind }
+        Self {
+            id,
+            kind,
+            size: None,
+        }
+    }
+
+    /// A region node sized from a host-owned dimension token (`dimension.*`).
+    pub fn sized(id: SduiNodeId, kind: SduiNodeKind, token: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind,
+            size: Some(token.into()),
+        }
     }
 }
 
@@ -90,6 +110,13 @@ pub enum SduiNodeKind {
     },
     List {
         items: Vec<SduiListItem>,
+        /// Optional filter affordance (plan 118 task E1): the host renders the
+        /// approved tools row above the rows, filters the delivered rows
+        /// locally (keystroke-local over a bounded listing — never a server
+        /// round-trip per keystroke) and shows the live match count. Absent
+        /// means a plain list, which is what every other tree delivers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<SduiListFilter>,
     },
     EditorView {
         binding: SduiEditorBinding,
@@ -103,6 +130,27 @@ pub enum SduiNodeKind {
     },
 }
 
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct SduiListFilter {
+    pub placeholder: String,
+    /// Single-key shortcut hint (`/`) that focuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+}
+
+/// One row of a list: what it says and what activating it means. Rows carry no
+/// authority — the action is the same inert intent a button carries.
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -337,6 +385,7 @@ pub(crate) fn representative_sdui_tree() -> SduiTree {
             SduiNode::new(
                 list_id,
                 SduiNodeKind::List {
+                    filter: None,
                     items: vec![SduiListItem {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),
@@ -385,6 +434,48 @@ pub(crate) fn representative_panel_update() -> SduiTreeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan 118 task E1: a node may be sized from a host dimension token and a
+    /// list may carry a filter affordance; both are optional, so a tree written
+    /// before them still parses (the fields are absent on the wire).
+    #[test]
+    fn list_filter_and_node_size_are_optional_and_round_trip() {
+        let legacy = serde_json::json!({
+            "uiVersion": 1,
+            "rootId": 1,
+            "nodes": [{ "id": 1, "kind": { "list": { "items": [] } } }],
+        });
+        let tree: SduiTree = serde_json::from_value(legacy).expect("legacy tree parses");
+        assert!(tree.nodes[0].size.is_none());
+        assert!(matches!(
+            &tree.nodes[0].kind,
+            SduiNodeKind::List { filter: None, .. }
+        ));
+
+        let sized = SduiNode::sized(
+            SduiNodeId(2),
+            SduiNodeKind::List {
+                items: Vec::new(),
+                filter: Some(SduiListFilter {
+                    placeholder: "Filter files".to_string(),
+                    shortcut: Some("/".to_string()),
+                }),
+            },
+            "dimension.sidebar.default",
+        );
+        let value = serde_json::to_value(&sized).expect("serialize");
+        assert_eq!(
+            value["size"],
+            serde_json::json!("dimension.sidebar.default")
+        );
+        assert_eq!(
+            value["kind"]["list"]["filter"]["placeholder"],
+            "Filter files"
+        );
+        assert_eq!(value["kind"]["list"]["filter"]["shortcut"], "/");
+        let back: SduiNode = serde_json::from_value(value).expect("round trip");
+        assert_eq!(back, sized);
+    }
 
     #[test]
     fn sdui_schema_represents_initial_widget_kinds() {
@@ -450,6 +541,7 @@ mod tests {
                 SduiNode::new(
                     list_id,
                     SduiNodeKind::List {
+                        filter: None,
                         items: vec![SduiListItem {
                             id: "recent-main".to_string(),
                             label: "main.rs".to_string(),
@@ -507,6 +599,7 @@ mod tests {
                         expected_version: None,
                     },
                 },
+                size: None,
             }
         );
     }

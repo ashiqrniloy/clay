@@ -150,6 +150,26 @@ fixtures live under
 | `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; open the centered Command Centre, then press Enter in the terminal to capture. |
 | `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
 
+`--example-config` boots the review against a copy of the canonical
+`examples/config/` tree instead of the fixture's own `init.js`: the whole tree
+(init.js plus `packages/`) is copied into the isolated config root, exactly as
+`cp -r examples/config/. ~/.clay/` would, and `metadata.txt` records
+`config_source=examples/config`. It is accepted only with
+`--fixture ui-review-launcher` (the landing the canonical config renders) and
+refused with exit 2 for fixtures whose checks assert their own panel content, so
+a mismatched pair is never captured as a pass. This is the leg used by the
+canonical-example launch test:
+`test-plan/artifacts/118-quiet-instrument-migration/launch-test/`.
+
+`--theme <specifier>` / `--appearance light|dark|system` seed
+`~/.clay/preferences.json` in that same isolated root, so a prefs-seeded theme
+intentionally overrides the example's own `setTheme` call (documented
+precedence) and one canonical config can be captured under all four shipped
+themes. A passing capture also writes a bounded, root-redacted
+`server.diagnostics.txt` (diagnostic/configuration/generation lines plus
+`configuration_failed_lines` and `agent_registration_lines` counters); a failed
+`--drive` step keeps its full probe transcript in `drive.failed.txt`.
+
 Each run copies its named `init.js` into a mode-700 temporary
 `HOME/.clay`, uses a mode-700 temporary XDG config/data/socket root,
 creates only bounded fixture documents, and removes the launch root and raw

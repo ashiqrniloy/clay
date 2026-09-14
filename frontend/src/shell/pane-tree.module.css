@@ -2,59 +2,65 @@
   height: 100%;
   min-height: 0;
   background: var(
-    --clay-ds-pane-split-tree-default-group-rest-background-color,
-    var(--clay-border-hairline)
+    --clay-ds-pane-split-tree-default-group-rest-background-color
   );
 }
 
 .pane {
   height: 100%;
   min-height: 0;
-  background: var(
-    --clay-ds-pane-split-tree-default-pane-rest-background-color,
-    var(--clay-surface-main)
-  );
-  outline: var(
-      --clay-ds-pane-split-tree-default-pane-rest-outline-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-pane-split-tree-default-pane-rest-outline-style, solid)
-    var(--clay-ds-pane-split-tree-default-pane-rest-outline-color, transparent);
-  border-radius: var(
-    --clay-ds-pane-split-tree-default-pane-rest-border-radius,
-    0
-  );
+  background: var(--clay-ds-pane-split-tree-default-pane-rest-background-color);
+  outline-width: var(--clay-ds-pane-split-tree-default-pane-rest-outline-width);
+  outline-style: var(--clay-ds-pane-split-tree-default-pane-rest-outline-style);
+  outline-color: var(--clay-ds-pane-split-tree-default-pane-rest-outline-color);
+  border-radius: var(--clay-ds-pane-split-tree-default-pane-rest-border-radius);
 }
 
+/* Focused pane: one 1px accent outline, no fill and no second edge. */
 .pane.active {
   outline-color: var(
-    --clay-ds-pane-split-tree-default-pane-active-outline-color,
-    var(--clay-border-focus)
+    --clay-ds-pane-split-tree-default-pane-active-outline-color
+  );
+  outline-width: var(
+    --clay-ds-pane-split-tree-default-pane-active-outline-width
+  );
+  outline-style: var(
+    --clay-ds-pane-split-tree-default-pane-active-outline-style
+  );
+  outline-offset: var(
+    --clay-ds-pane-split-tree-default-pane-active-outline-offset
   );
 }
 
+/* The handle is one hairline; the group's `resizeTargetMinimumSize` gives it
+ * a wider invisible grab area, so the visual stays a line and the target stays
+ * a target (DESIGN.md §11, §13.3). */
 .separator {
+  flex: 0 0 1px;
   background: var(
-    --clay-ds-pane-split-tree-default-handle-rest-background-color,
-    var(--clay-border-strong)
+    --clay-ds-pane-split-tree-default-handle-rest-background-color
   );
-  flex: 0 0
-    var(
-      --clay-ds-pane-split-tree-default-handle-rest-border-width,
-      var(--clay-dimension-border-thin, 2px)
-    );
+  border-radius: var(
+    --clay-ds-pane-split-tree-default-handle-rest-border-radius
+  );
+  transition: background-color
+    var(--clay-ds-pane-split-tree-default-handle-rest-transition-duration)
+    var(--clay-ds-pane-split-tree-default-handle-rest-transition-timing);
+}
+
+.separator:hover,
+.separator[data-resizing="true"] {
+  background: color-mix(in srgb, var(--clay-accent-primary) 40%, transparent);
+}
+
+.separator:active {
+  background: color-mix(in srgb, var(--clay-accent-primary) 70%, transparent);
 }
 
 .separator:focus-visible {
-  outline: var(
-      --clay-ds-pane-split-tree-default-handle-focus-outline-width,
-      2px
-    )
-    var(--clay-ds-pane-split-tree-default-handle-focus-outline-style, solid)
-    var(
-      --clay-ds-pane-split-tree-default-handle-focus-outline-color,
-      var(--clay-focus-ring)
-    );
+  outline: var(--clay-ds-pane-split-tree-default-handle-focus-outline-width)
+    var(--clay-ds-pane-split-tree-default-handle-focus-outline-style)
+    var(--clay-ds-pane-split-tree-default-handle-focus-outline-color);
   outline-offset: 0;
 }
 

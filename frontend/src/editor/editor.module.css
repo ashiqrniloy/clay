@@ -1,104 +1,170 @@
-/* Editor host: one compartment filling the pane main slot.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Editor host: one compartment filling the pane main slot. Appearance is
+ * design-system recipe data — the values live in `styles/tokens.css`, so the
+ * `@clay/core` baseline paints the same language as the shipped package. The
+ * editor is host chrome over CodeMirror: the recipe decides colour and geometry,
+ * the host decides structure. */
 
 .host {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   height: 100%;
   min-height: 0;
-  background: var(
-    --clay-ds-editor-default-container-rest-background-color,
-    var(
-      --clay-ds-editor-default-root-rest-background-color,
-      var(--clay-surface-main)
-    )
-  );
-  color: var(
-    --clay-ds-editor-default-container-rest-text-color,
-    var(--clay-text-primary)
-  );
-  border-radius: var(
-    --clay-ds-editor-default-container-rest-border-radius,
-    0
-  );
+  background: var(--clay-ds-editor-default-container-rest-background-color);
+  color: var(--clay-ds-editor-default-container-rest-text-color);
+  border-width: var(--clay-ds-editor-default-container-rest-border-width);
+  border-radius: var(--clay-ds-editor-default-container-rest-border-radius);
 }
 
+/* The document bar: identity, state and every document action in one row
+ * (DESIGN.md §12). It separates itself with whitespace, not a border (§5). */
 .chrome {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(
-    --clay-ds-editor-default-chrome-rest-gap,
-    var(--clay-spacing-sm, 12px)
-  );
-  padding: var(
-    --clay-ds-editor-default-chrome-rest-padding,
-    var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px)
-  );
-  background: var(
-    --clay-ds-editor-default-chrome-rest-background-color,
-    var(--clay-surface-panel)
-  );
-  border-bottom: var(
-      --clay-ds-editor-default-chrome-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-editor-default-chrome-rest-border-style, solid)
-    var(
-      --clay-ds-editor-default-chrome-rest-border-color,
-      var(--clay-border-hairline)
-    );
+  gap: var(--clay-ds-editor-default-chrome-rest-gap);
+  padding: var(--clay-ds-editor-default-chrome-rest-padding);
+  background: var(--clay-ds-editor-default-chrome-rest-background-color);
+  border-width: var(--clay-ds-editor-default-chrome-rest-border-width);
+  border-style: var(--clay-ds-editor-default-chrome-rest-border-style);
+  border-color: var(--clay-ds-editor-default-chrome-rest-border-color);
 }
 
-.meta {
+.crumb {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--clay-spacing-sm, 12px);
+  gap: 9px;
   min-width: 0;
-  flex: 1 0 100%;
+  flex: 1;
+}
+
+.docName {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-body-size);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docPath {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-status-size);
+  color: var(--clay-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badges {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 4px);
+  flex: none;
 }
 
 .actions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ---------- on-demand relative-path strip ------------------------------- */
+
+.openStrip {
+  display: flex;
   align-items: center;
   gap: var(--clay-spacing-xs, 8px);
+  padding: 8px var(--clay-ds-editor-default-chrome-rest-padding);
+  background: var(--clay-ds-panel-default-root-rest-background-color);
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+  border-bottom-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-divider-default-root-rest-border-color);
 }
 
+.openLabel {
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+  flex: none;
+}
+
+.openNote {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-status-size);
+  color: var(--clay-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alert {
+  padding: 4px var(--clay-ds-editor-default-chrome-rest-padding);
+}
+
+/* The open-path control is a text input, so it wears the input recipe; the
+ * editor family's `path` slot describes the read-only path label, not this
+ * field (see the task's divergence note). */
 .path {
-  min-width: 12rem;
+  width: min(24rem, 100%);
   height: 2rem;
-  padding: 0 var(--clay-spacing-xs, 8px);
-  border: var(
-      --clay-ds-editor-default-path-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-editor-default-path-rest-border-style, solid)
-    var(
-      --clay-ds-editor-default-path-rest-border-color,
-      var(--clay-border-subtle)
-    );
-  background: var(
-    --clay-ds-editor-default-path-rest-background-color,
-    var(--clay-surface-control)
-  );
-  color: var(
-    --clay-ds-editor-default-path-rest-text-color,
-    var(--clay-text-primary)
-  );
+  padding: var(--clay-ds-text-input-default-input-rest-padding);
+  border: var(--clay-ds-text-input-default-input-rest-border-width)
+    var(--clay-ds-text-input-default-input-rest-border-style)
+    var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  color: var(--clay-ds-text-input-default-input-rest-text-color);
   font: inherit;
   font-size: var(--clay-text-status-size);
+  transition: border-color
+    var(--clay-ds-text-input-default-input-hover-transition-duration)
+    var(--clay-ds-text-input-default-input-hover-transition-timing);
 }
 
+.path:hover {
+  border-color: var(--clay-ds-text-input-default-input-hover-border-color);
+}
+
+/* One ring per surface: the well draws the accent boundary and the recipe's
+ * halo; the inner control draws no second outline. */
 .path:focus-visible {
-  outline: 2px solid var(--clay-focus-ring);
-  outline-offset: 1px;
+  border-color: var(--clay-ds-text-input-default-input-focus-border-color);
+  box-shadow: var(--clay-ds-text-input-default-input-focus-shadow);
+  outline-style: var(--clay-ds-text-input-default-input-focus-outline-style);
+}
+
+/* Reading measure: gutter + 92ch, centred (DESIGN.md §5, §12). `ch` resolves
+ * against this element, so it wears the code face at the body size. */
+.column {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0 var(--clay-spacing-xs, 8px);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-body-size);
 }
 
 .canvas {
+  width: 100%;
+  max-width: calc(92ch + 4rem);
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--clay-ds-editor-default-root-rest-background-color);
+  border-width: var(--clay-ds-editor-default-root-rest-border-width);
 }
 
 .canvas :global(.cm-editor) {
@@ -106,97 +172,80 @@
 }
 
 .canvas :global(.cm-gutters) {
-  background: var(
-    --clay-ds-editor-default-gutter-rest-background-color,
-    var(--clay-surface-panel)
-  );
-  color: var(
-    --clay-ds-editor-default-gutter-rest-text-color,
-    var(--clay-text-muted)
-  );
-  border-right: var(
-      --clay-ds-editor-default-gutter-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(
-      --clay-ds-editor-default-gutter-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-editor-default-gutter-rest-border-color,
-      var(--clay-border-hairline)
-    );
+  background: var(--clay-ds-editor-default-gutter-rest-background-color);
+  color: var(--clay-ds-editor-default-gutter-rest-text-color);
+  border-width: var(--clay-ds-editor-default-gutter-rest-border-width);
+  border-style: var(--clay-ds-editor-default-gutter-rest-border-style);
+  border-color: var(--clay-ds-editor-default-gutter-rest-border-color);
+  padding: var(--clay-ds-editor-default-gutter-rest-padding);
 }
 
 .canvas :global(.cm-activeLine),
 .canvas :global(.cm-activeLineGutter) {
-  background: var(
-    --clay-ds-editor-default-active-line-rest-background-color,
-    var(--clay-surface-hover)
-  );
-  border: var(
-    --clay-ds-editor-default-active-line-rest-border-width,
-    0
-  ) var(
-    --clay-ds-editor-default-active-line-rest-border-style,
-    none
-  );
+  background: var(--clay-ds-editor-default-active-line-rest-background-color);
+  border-width: var(--clay-ds-editor-default-active-line-rest-border-width);
+  border-style: var(--clay-ds-editor-default-active-line-rest-border-style);
+}
+
+/* The current line number is a datum in the accent state colour; the line
+ * itself carries only the wash (DESIGN.md §10.3: one signal per surface). */
+.canvas :global(.cm-activeLineGutter) {
+  color: var(--clay-accent-primary);
 }
 
 .canvas :global(.cm-selectionBackground),
 .canvas :global(.cm-content ::selection) {
-  background: var(
-    --clay-ds-editor-default-selection-rest-background-color,
-    var(--clay-surface-active)
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-editor-default-selection-rest-background-color)
+      calc(
+        var(--clay-ds-editor-default-selection-rest-background-opacity, 1) *
+          100%
+      ),
+    transparent
   ) !important;
 }
 
 .canvas :global(.cm-matchingBracket) {
-  border: var(
-      --clay-ds-editor-default-matching-bracket-rest-border-width,
-      1px
-    )
-    var(
-      --clay-ds-editor-default-matching-bracket-rest-border-style,
-      solid
-    )
-    var(
-      --clay-ds-editor-default-matching-bracket-rest-border-color,
-      var(--clay-border-strong)
-    );
+  background: var(
+    --clay-ds-editor-default-matching-bracket-rest-background-color
+  );
+  border-width: var(
+    --clay-ds-editor-default-matching-bracket-rest-border-width
+  );
+  border-style: var(
+    --clay-ds-editor-default-matching-bracket-rest-border-style
+  );
+  border-color: var(
+    --clay-ds-editor-default-matching-bracket-rest-border-color
+  );
   border-radius: var(
-    --clay-ds-editor-default-matching-bracket-rest-border-radius,
-    0
+    --clay-ds-editor-default-matching-bracket-rest-border-radius
   );
 }
 
 .canvas :global(.cm-searchMatch) {
-  background: var(
-    --clay-ds-editor-default-find-match-rest-background-color,
-    var(--clay-accent-primary)
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-editor-default-find-match-rest-background-color)
+      calc(
+        var(--clay-ds-editor-default-find-match-rest-background-opacity, 1) *
+          100%
+      ),
+    transparent
   );
 }
 
 .canvas :global(.cm-tooltip),
 .canvas :global(.cm-panels) {
-  border: var(
-      --clay-ds-editor-default-tooltip-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    solid
-    var(
-      --clay-ds-editor-default-tooltip-rest-border-color,
-      var(--clay-border-strong)
-    );
-  background: var(
-    --clay-ds-editor-default-tooltip-rest-background-color,
-    var(--clay-surface-overlay)
-  );
-  color: var(
-    --clay-ds-editor-default-tooltip-rest-text-color,
-    var(--clay-text-primary)
-  );
-  box-shadow: none;
+  background: var(--clay-ds-editor-default-tooltip-rest-background-color);
+  color: var(--clay-ds-editor-default-tooltip-rest-text-color);
+  border-width: var(--clay-ds-editor-default-tooltip-rest-border-width);
+  border-style: var(--clay-ds-editor-default-tooltip-rest-border-style);
+  border-color: var(--clay-ds-editor-default-tooltip-rest-border-color);
+  border-radius: var(--clay-ds-editor-default-tooltip-rest-border-radius);
+  padding: var(--clay-ds-editor-default-tooltip-rest-padding);
+  box-shadow: var(--clay-ds-editor-default-tooltip-rest-shadow);
 }
 
 .canvas :global(.cm-tooltip-autocomplete > ul > li) {
@@ -204,19 +253,21 @@
 }
 
 .canvas :global(.cm-tooltip-autocomplete > ul > li[aria-selected]) {
-  background: var(
-    --clay-ds-editor-default-tooltip-selected-background-color,
-    var(--clay-surface-selected)
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-editor-default-tooltip-selected-background-color)
+      calc(
+        var(--clay-ds-editor-default-tooltip-selected-background-opacity, 1) *
+          100%
+      ),
+    transparent
   );
-  color: var(
-    --clay-ds-editor-default-tooltip-selected-text-color,
-    var(--clay-text-primary)
-  );
+  color: var(--clay-ds-editor-default-tooltip-selected-text-color);
 }
 
 .canvas :global(.cm-clay-inlay)::after {
   content: attr(data-label);
-  color: var(--clay-text-muted);
+  color: var(--clay-ds-label-detail-root-rest-text-color);
   background: var(--clay-surface-panel);
   font-size: var(--clay-text-detail-size);
   padding-inline: var(--clay-spacing-xxs, 4px);
@@ -606,12 +657,32 @@
   padding: var(--clay-spacing-xs, 8px);
 }
 
+/* Code-action buttons are host-built DOM inside a CodeMirror panel, so they
+ * cannot borrow the catalog button's React Aria state attributes; they consume
+ * the same recipe values directly. */
 .canvas :global(.cm-panel.cm-clay-actions button) {
-  border: var(--clay-dimension-border-hairline, 1px) solid
-    var(--clay-border-subtle);
-  background: var(--clay-surface-control);
-  color: var(--clay-text-primary);
-  padding: var(--clay-spacing-xxs, 4px) var(--clay-spacing-xs, 8px);
+  padding: var(--clay-ds-button-default-root-rest-padding);
+  border: var(--clay-ds-button-default-root-rest-border-width)
+    var(--clay-ds-button-default-root-rest-border-style)
+    var(--clay-ds-button-default-root-rest-border-color);
+  border-radius: var(--clay-ds-button-default-root-rest-border-radius);
+  background: var(--clay-ds-button-default-root-rest-background-color);
+  color: var(--clay-ds-button-default-root-rest-text-color);
+  transition:
+    background-color var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing),
+    border-color var(--clay-ds-button-default-root-rest-transition-duration)
+      var(--clay-ds-button-default-root-rest-transition-timing);
+}
+
+.canvas :global(.cm-panel.cm-clay-actions button:hover) {
+  background: var(--clay-ds-button-default-root-hover-background-color);
+  border-color: var(--clay-ds-button-default-root-hover-border-color);
+}
+
+.canvas :global(.cm-panel.cm-clay-actions button:disabled) {
+  color: var(--clay-ds-button-default-root-disabled-text-color);
+  opacity: var(--clay-ds-button-default-root-disabled-opacity);
 }
 
 .empty {

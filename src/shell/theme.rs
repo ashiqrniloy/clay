@@ -248,8 +248,8 @@ pub(crate) fn is_valid_dimension(value: f64) -> bool {
 // fixed-panel state both read them through PanelDefaults so one override
 // source feeds both. Values mirror the pre-20.1 hardcoded geometry so default
 // rendered geometry is unchanged unless an active theme override replaces it.
-pub(crate) const SIDEBAR_DEFAULT_WIDTH: f64 = 240.0;
-pub(crate) const PANEL_SIDE_DEFAULT: f64 = 240.0;
+pub(crate) const SIDEBAR_DEFAULT_WIDTH: f64 = 244.0;
+pub(crate) const PANEL_SIDE_DEFAULT: f64 = 244.0;
 pub(crate) const PANEL_SIDE_MIN: f64 = 48.0;
 pub(crate) const PANEL_SIDE_MAX: f64 = 480.0;
 pub(crate) const PANEL_VERTICAL_DEFAULT: f64 = 120.0;
@@ -417,27 +417,34 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
         },
         "text.disabled" => CoreThemeValue {
             token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x6f, 0x6a, 0x87)),
+            value: ColorValue(Color::from_rgb8(0x80, 0x7a, 0x9b)),
         },
         "accent.muted" => CoreThemeValue {
             token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x5a, 0x52, 0xb8)),
+            // The accent at 75 %, the ladder every shipped theme uses: quiet
+            // enough to read as a secondary signal, still >= 3:1 on the canvas.
+            value: ColorValue(Color::from_rgba8(0x7c, 0x6f, 0xff, 0xbf)),
         },
         "focus.ring" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x96, 0x8a, 0xff)),
         },
+        // Border ladder (`DESIGN.md` §10.1): the border grey at 34 % for the
+        // decorative hairline, the same grey at 100 % for the structural
+        // boundary, and ink for explicit separators. The grey is mid-tone so
+        // `border.subtle` clears 3:1 on both the canvas and the panel; the
+        // hairline is required only to stay visible (>= 1.2:1).
         "border.hairline" => CoreThemeValue {
             token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x28, 0x26, 0x38)),
+            value: ColorValue(Color::from_rgba8(0x72, 0x6b, 0x98, 0x57)),
         },
         "border.subtle" => CoreThemeValue {
             token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x2f, 0x2c, 0x40)),
+            value: ColorValue(Color::from_rgb8(0x72, 0x6b, 0x98)),
         },
         "border.strong" => CoreThemeValue {
             token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x45, 0x41, 0x5c)),
+            value: ColorValue(Color::from_rgb8(0xee, 0xea, 0xff)),
         },
         "border.focus" => CoreThemeValue {
             token_type: ColorRole,
@@ -575,7 +582,7 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
         },
         "dimension.panel.side.default" => CoreThemeValue {
             token_type: Dimension,
-            value: DimensionValue(240.0),
+            value: DimensionValue(244.0),
         },
         "dimension.panel.side.min" => CoreThemeValue {
             token_type: Dimension,
@@ -599,7 +606,13 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
         },
         "dimension.sidebar.default" => CoreThemeValue {
             token_type: Dimension,
-            value: DimensionValue(240.0),
+            value: DimensionValue(244.0),
+        },
+        // Mid-width windows keep a narrower sidebar so the reading measure
+        // survives (DESIGN.md §5; plan 118 task E1).
+        "dimension.sidebar.compact" => CoreThemeValue {
+            token_type: Dimension,
+            value: DimensionValue(224.0),
         },
         // --- Phase 20.1: near-invisible elevation levels ---
         "elevation.none" => CoreThemeValue {
@@ -976,9 +989,21 @@ pub(crate) fn validate_design_token_override(
 pub(crate) const TEXT_CONTRAST_MIN: f64 = 4.5;
 
 /// WCAG AA minimum contrast for non-text UI pairs (accent, focus ring, focus
-/// border) and standalone UI chips (`kbd`), which are not prose. WCAG 2.1
-/// non-text contrast (SC 1.4.11) floor is 3.0.
+/// border, structural boundaries, state fills) and standalone UI chips (`kbd`),
+/// which are not prose. WCAG 2.1 non-text contrast (SC 1.4.11) floor is 3.0.
 pub(crate) const UI_CONTRAST_MIN: f64 = 3.0;
+
+/// Visibility floor for `border.hairline`, the decorative zone separator
+/// (`DESIGN.md` §10.1: the theme's border grey at 34 %). It is deliberately
+/// *exempt* from [`UI_CONTRAST_MIN`] — a hairline is required to be quieter
+/// than `border.subtle`, which 34 % ink cannot be at 3:1 on either surface —
+/// but it must never become invisible, so it keeps a floor of its own: the
+/// smallest step that is still a perceivable edge on light or dark chrome.
+/// `border.subtle`/`border.strong` carry the structural 3:1 requirement.
+///
+/// ponytail: a flat visibility floor, not a luminance-difference model; raise
+/// it only if a hairline that passes 1.2:1 is reported as unreadable.
+pub(crate) const HAIRLINE_VISIBILITY_MIN: f64 = 1.2;
 
 /// A required foreground/background color-role pair that must meet a WCAG AA
 /// contrast threshold. Token names are core color-role tokens resolved through
@@ -993,11 +1018,30 @@ pub struct ContrastFailure {
 }
 
 /// Required SDUI foreground/background contrast pairs and their thresholds.
-/// `text.*` on `surface.*` are body/label/tooltip text (4.5); `accent.primary`,
-/// `focus.ring`, and `border.focus` on `surface.main` are non-text UI (3.0);
-/// `text.kbd`/`surface.kbd` is a standalone UI chip, not prose, so 3.0.
-/// ponytail: raise `text.kbd` to 4.5 only if kbd ever carries prose text.
+///
+/// Every pair is measured **composited**: the foreground role is alpha-blended
+/// over the background role first (`crate::editor::theme::composited_contrast_ratio`),
+/// because alpha is what the user sees — a 34 % hairline or a 75 % accent is not
+/// the opaque color its RGB bytes describe. Measured values per theme live in
+/// `design-artifacts/approved/quiet-instrument-migration/theme-values.md` and are
+/// re-derived by `tests/theme_packages.rs`.
+///
+/// Groups and their floors:
+/// - prose: `text.*` on the surface it is drawn on (4.5, WCAG 2.1 SC 1.4.3).
+/// - affordances: accent, focus ring, focus border on the canvas (3.0, SC 1.4.11).
+/// - structural boundaries: `border.subtle` and `border.strong` on both surfaces a
+///   boundary is drawn against — canvas and panel (3.0). A control outline that
+///   cannot be seen is a broken control, not a style choice.
+/// - hairline: [`HAIRLINE_VISIBILITY_MIN`], visibility only (see that constant).
+///
+/// State fills are gated by [`REQUIRED_FILL_PAIRS`] instead: they are painted
+/// *under* their text, so the pair needs the surface they sit on.
+///
+/// ponytail: floors are checked against the raw roles. Host CSS may attenuate a
+/// disabled control further (`opacity.disabled` on top of `text.disabled`), which
+/// is exempt from WCAG and measured by no pair here.
 pub(crate) const REQUIRED_CONTRAST_PAIRS: &[(&str, &str, f64)] = &[
+    // Prose: body/label/tooltip text on the surface it is drawn on.
     ("text.primary", "surface.main", TEXT_CONTRAST_MIN),
     ("text.muted", "surface.panel", TEXT_CONTRAST_MIN),
     ("text.primary", "surface.panel", TEXT_CONTRAST_MIN),
@@ -1005,28 +1049,90 @@ pub(crate) const REQUIRED_CONTRAST_PAIRS: &[(&str, &str, f64)] = &[
     ("text.badge", "surface.badge", TEXT_CONTRAST_MIN),
     ("text.kbd", "surface.kbd", UI_CONTRAST_MIN),
     ("text.tooltip", "surface.tooltip", TEXT_CONTRAST_MIN),
+    ("text.disabled", "surface.main", TEXT_CONTRAST_MIN),
+    // Affordances: accent and focus must be visible on the canvas.
     ("accent.primary", "surface.main", UI_CONTRAST_MIN),
+    ("accent.muted", "surface.main", UI_CONTRAST_MIN),
     ("focus.ring", "surface.main", UI_CONTRAST_MIN),
     ("border.focus", "surface.main", UI_CONTRAST_MIN),
+    // Structural boundaries: a zone edge must be perceivable on both surfaces it
+    // separates. Hairlines are decorative and keep only the visibility floor.
+    ("border.subtle", "surface.main", UI_CONTRAST_MIN),
+    ("border.subtle", "surface.panel", UI_CONTRAST_MIN),
+    ("border.strong", "surface.main", UI_CONTRAST_MIN),
+    ("border.hairline", "surface.main", HAIRLINE_VISIBILITY_MIN),
+    ("border.hairline", "surface.panel", HAIRLINE_VISIBILITY_MIN),
+];
+
+/// Required ``(text, fill, surface, threshold)`` triples: the text role must stay
+/// readable on a state fill.
+///
+/// The fill is composited over the surface it is painted on first (a 40 %
+/// selection tint is a light wash over the canvas, not the raw bytes), then the
+/// text is composited over *that* and measured against it — the layer order the
+/// user actually sees: surface, fill, text. The pre-migration uniform 40 %-alpha
+/// selection colour scored 1.03–1.43:1 against its own text on dark chrome, which
+/// is how a selected row became invisible.
+pub(crate) const REQUIRED_FILL_PAIRS: &[(&str, &str, &str, f64)] = &[
+    (
+        "text.primary",
+        "surface.hover",
+        "surface.main",
+        UI_CONTRAST_MIN,
+    ),
+    (
+        "text.primary",
+        "surface.active",
+        "surface.main",
+        UI_CONTRAST_MIN,
+    ),
+    (
+        "text.primary",
+        "surface.selected",
+        "surface.main",
+        UI_CONTRAST_MIN,
+    ),
 ];
 
 /// Validate that every required contrast pair in `theme` meets its threshold.
-/// Returns the first failing pair. Reuses [`crate::editor::theme::contrast_ratio`]
-/// as the WCAG engine; this helper only adds the required-pairs policy. A pair
-/// whose foreground or background color role does not resolve (returns `None`)
-/// is skipped — the core catalog guarantees all `REQUIRED_CONTRAST_PAIRS`
-/// tokens are color roles, so a `None` indicates a non-color override of a
-/// color token, which is a separate type-mismatch error surfaced elsewhere.
+/// Returns the first failing pair. Reuses
+/// [`crate::editor::theme::composited_contrast_ratio`] as the WCAG engine (alpha
+/// blended over the backdrop first); this helper only adds the required-pairs
+/// policy. A pair whose foreground or background color role does not resolve
+/// (returns `None`) is skipped — the core catalog guarantees all
+/// `REQUIRED_CONTRAST_PAIRS` tokens are color roles, so a `None` indicates a
+/// non-color override of a color token, which is a separate type-mismatch error
+/// surfaced elsewhere, not a bypass: an unresolved role falls back to the core
+/// catalog value rather than to no value at all.
 pub(crate) fn theme_meets_contrast(theme: &ResolvedUiTheme) -> Result<(), ContrastFailure> {
     for &(foreground, background, threshold) in REQUIRED_CONTRAST_PAIRS {
         let (Some(fg), Some(bg)) = (theme.color(foreground), theme.color(background)) else {
             continue;
         };
-        let ratio = crate::editor::theme::contrast_ratio(fg, bg);
+        let ratio = crate::editor::theme::composited_contrast_ratio(fg, bg);
         if ratio < threshold {
             return Err(ContrastFailure {
                 foreground,
                 background,
+                ratio,
+                threshold,
+            });
+        }
+    }
+    for &(text, fill_role, backdrop, threshold) in REQUIRED_FILL_PAIRS {
+        let (Some(fg), Some(fill), Some(backdrop)) = (
+            theme.color(text),
+            theme.color(fill_role),
+            theme.color(backdrop),
+        ) else {
+            continue;
+        };
+        let painted = crate::editor::theme::composite_over(fill, backdrop);
+        let ratio = crate::editor::theme::composited_contrast_ratio(fg, painted);
+        if ratio < threshold {
+            return Err(ContrastFailure {
+                foreground: text,
+                background: fill_role,
                 ratio,
                 threshold,
             });
@@ -1193,8 +1299,14 @@ impl ResolvedUiTheme {
             "text.disabled" | "accent.muted" | "text.icon" | "border.kbd" => base.placeholder,
             "text.badge" | "text.kbd" => base.status_text,
             "text.tooltip" => base.text,
-            "accent.primary" | "focus.ring" | "border.focus" => base.caret,
-            "border.hairline" | "border.subtle" | "border.strong" => base.scrollbar,
+            // The accent and the border ladder come from their own keys when a
+            // theme declares them, and keep the pre-vocabulary projection
+            // (caret / scrollbar) when it does not — so nothing shipped changes
+            // and a legacy theme can still express both (plan 118 task E7).
+            "accent.primary" | "focus.ring" | "border.focus" => base.accent.unwrap_or(base.caret),
+            "border.hairline" => base.border_hairline.unwrap_or(base.scrollbar),
+            "border.subtle" => base.border_subtle.unwrap_or(base.scrollbar),
+            "border.strong" => base.border_strong.unwrap_or(base.scrollbar),
             "diagnostic.error" => base.diagnostic_error,
             "diagnostic.warning" => base.diagnostic_warning,
             "diagnostic.info" => base.diagnostic_info,
@@ -1455,7 +1567,7 @@ mod tests {
             (
                 "text.disabled",
                 ThemeTokenType::ColorRole,
-                ResolvedThemeValue::Color(Color::from_rgb8(0x6f, 0x6a, 0x87)),
+                ResolvedThemeValue::Color(Color::from_rgb8(0x80, 0x7a, 0x9b)),
             ),
             (
                 "focus.ring",
@@ -1465,12 +1577,12 @@ mod tests {
             (
                 "border.hairline",
                 ThemeTokenType::ColorRole,
-                ResolvedThemeValue::Color(Color::from_rgb8(0x28, 0x26, 0x38)),
+                ResolvedThemeValue::Color(Color::from_rgba8(0x72, 0x6b, 0x98, 0x57)),
             ),
             (
                 "border.strong",
                 ThemeTokenType::ColorRole,
-                ResolvedThemeValue::Color(Color::from_rgb8(0x45, 0x41, 0x5c)),
+                ResolvedThemeValue::Color(Color::from_rgb8(0xee, 0xea, 0xff)),
             ),
             (
                 "diagnostic.success",
@@ -1533,7 +1645,7 @@ mod tests {
             (
                 "dimension.sidebar.default",
                 ThemeTokenType::Dimension,
-                ResolvedThemeValue::Dimension(240.0),
+                ResolvedThemeValue::Dimension(244.0),
             ),
             (
                 "dimension.panel.side.max",
@@ -1886,7 +1998,7 @@ mod tests {
         // Typed accessors resolve the new domains.
         assert_eq!(
             resolve_dimension(&resolver, "dimension.sidebar.default"),
-            Some(240.0)
+            Some(244.0)
         );
         assert_eq!(
             resolve_elevation(&resolver, "elevation.overlay"),
@@ -2026,7 +2138,7 @@ mod tests {
         );
         assert_eq!(ui.scalar_f64("spacing.panel"), Some(14.0));
         assert_eq!(ui.opacity("opacity.disabled"), Some(0.55));
-        assert_eq!(ui.dimension("dimension.sidebar.default"), Some(240.0));
+        assert_eq!(ui.dimension("dimension.sidebar.default"), Some(244.0));
         assert_eq!(ui.elevation("elevation.none"), Some(ElevationLevel::None));
         assert_eq!(ui.motion_duration("motion.instant"), Some(0.0));
         assert_eq!(ui.z_level("z.base"), Some(ZLevel::Base));
@@ -2054,6 +2166,10 @@ mod tests {
             diagnostic_error: Color::from_rgb8(0x11, 0x00, 0x0b),
             diagnostic_warning: Color::from_rgb8(0x11, 0x00, 0x0c),
             diagnostic_info: Color::from_rgb8(0x11, 0x00, 0x0d),
+            accent: None,
+            border_hairline: None,
+            border_subtle: None,
+            border_strong: None,
         };
         let ui = ResolvedUiTheme::from_active_theme(&[])
             .expect("empty ok")
@@ -2087,6 +2203,11 @@ mod tests {
         assert_eq!(ui.color("surface.active"), Some(base.selection));
         assert_eq!(ui.color("accent.primary"), Some(base.caret));
         assert_eq!(ui.color("border.focus"), Some(base.caret));
+        assert_eq!(ui.color("focus.ring"), Some(base.caret));
+        // The border ladder is flat until the theme expresses one (plan 118 E7).
+        assert_eq!(ui.color("border.hairline"), Some(base.scrollbar));
+        assert_eq!(ui.color("border.subtle"), Some(base.scrollbar));
+        assert_eq!(ui.color("border.strong"), Some(base.scrollbar));
         assert_eq!(ui.color("diagnostic.error"), Some(base.diagnostic_error));
         // Non-color tokens are not in the base palette: core catalog still wins.
         assert_eq!(ui.scalar_f64("spacing.panel"), Some(14.0));
@@ -2143,6 +2264,73 @@ mod tests {
         assert_eq!(failure.foreground, "text.primary");
         assert_eq!(failure.background, "surface.main");
         assert!(failure.ratio < TEXT_CONTRAST_MIN);
+    }
+
+    /// Plan 118 task E7: a legacy theme (`textStyles` only, no `designTokens`)
+    /// can express an accent hue and a real border ladder, and the projection
+    /// follows the theme's own keys instead of the caret / scrollbar stand-ins.
+    #[test]
+    fn legacy_theme_can_express_an_accent_and_a_border_ladder() {
+        use crate::editor::theme::BaseUiColors;
+
+        let base = BaseUiColors {
+            shell_bg: Color::from_rgb8(0xf7, 0xf7, 0xf7),
+            panel_bg: Color::from_rgb8(0xff, 0xff, 0xff),
+            text: Color::from_rgb8(0x11, 0x11, 0x11),
+            placeholder: Color::from_rgb8(0x66, 0x66, 0x66),
+            selection: Color::from_rgba8(0x33, 0x66, 0xcc, 0x33),
+            caret: Color::from_rgb8(0x11, 0x11, 0x11),
+            scrollbar: Color::from_rgb8(0x99, 0x99, 0x99),
+            scrollbar_track: Color::from_rgb8(0xee, 0xee, 0xee),
+            status_bg: Color::from_rgb8(0xf0, 0xf0, 0xf0),
+            status_text: Color::from_rgb8(0x22, 0x22, 0x22),
+            diagnostic_error: Color::from_rgb8(0xcc, 0x22, 0x22),
+            diagnostic_warning: Color::from_rgb8(0xaa, 0x66, 0x00),
+            diagnostic_info: Color::from_rgb8(0x22, 0x55, 0xaa),
+            accent: Some(Color::from_rgb8(0x2f, 0x6f, 0x4f)),
+            border_hairline: Some(Color::from_rgba8(0x11, 0x11, 0x11, 0x57)),
+            border_subtle: Some(Color::from_rgb8(0x33, 0x33, 0x33)),
+            border_strong: Some(Color::from_rgb8(0x00, 0x00, 0x00)),
+        };
+        let ui = ResolvedUiTheme::from_active_theme(&[])
+            .expect("empty ok")
+            .with_base_ui(&base);
+
+        assert_eq!(ui.color("accent.primary"), base.accent);
+        assert_eq!(ui.color("focus.ring"), base.accent);
+        assert_eq!(ui.color("border.focus"), base.accent);
+        assert_eq!(ui.color("border.hairline"), base.border_hairline);
+        assert_eq!(ui.color("border.subtle"), base.border_subtle);
+        assert_eq!(ui.color("border.strong"), base.border_strong);
+
+        // The same gate judges the declared ladder: identical shell and border
+        // colors are an invisible boundary and are refused by name.
+        let same = Some([0x10, 0x0f, 0x17, 0xff]);
+        let override_of = |token: &str| crate::protocol::TextThemeOverride {
+            token: token.to_string(),
+            color: same,
+            background: None,
+            bold: None,
+            italic: None,
+            underline: None,
+            strike: None,
+            scale: None,
+            provenance: "theme-legacy-ladder".to_string(),
+        };
+        let snapshot = crate::protocol::ActiveTheme {
+            specifier: "@clay/theme-legacy-ladder".to_string(),
+            overrides: vec![
+                override_of("shellBg"),
+                override_of("panelBg"),
+                override_of("borderSubtle"),
+            ],
+            design_tokens: Vec::new(),
+        };
+        let failure = validate_active_theme_contrast(&snapshot)
+            .expect_err("an invisible legacy boundary must be refused");
+        assert_eq!(failure.foreground, "border.subtle");
+        assert_eq!(failure.background, "surface.main");
+        assert!(failure.ratio < UI_CONTRAST_MIN);
     }
 
     #[test]
@@ -2713,6 +2901,107 @@ mod theme_snapshot_tests {
             Some(&ThemeTokenValueDto::Scalar(100.0))
         );
         assert_eq!(map.get("radius.xs"), Some(&ThemeTokenValueDto::Scalar(2.0)));
+    }
+
+    #[test]
+    fn core_catalog_meets_every_required_contrast_pair() {
+        // The core catalog is the palette Clay paints before any theme snapshot
+        // arrives, and what a role falls back to when a theme does not declare
+        // it. It therefore has to clear the same floors a theme does — this is
+        // also the only path that runs no runtime gate (no activation, no
+        // package), so the assertion lives here.
+        let core = ResolvedUiTheme::from_active_theme(&[]).expect("empty overrides are valid");
+        if let Err(failure) = theme_meets_contrast(&core) {
+            panic!(
+                "core catalog fails {}/{}: {:.2} < {:.1}",
+                failure.foreground, failure.background, failure.ratio, failure.threshold
+            );
+        }
+
+        // The border ladder is monotonic on every surface a boundary is drawn
+        // against (`DESIGN.md` §10.1: 34 % grey, 100 % grey, ink).
+        let ratio = |role: &str, surface: &str| {
+            crate::editor::theme::composited_contrast_ratio(
+                core.color(role).expect(role),
+                core.color(surface).expect(surface),
+            )
+        };
+        for surface in ["surface.main", "surface.panel"] {
+            let hairline = ratio("border.hairline", surface);
+            let subtle = ratio("border.subtle", surface);
+            let strong = ratio("border.strong", surface);
+            assert!(
+                hairline < subtle && subtle < strong,
+                "{surface} ladder is not monotonic: hairline {hairline:.2}, subtle {subtle:.2}, strong {strong:.2}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_theme_role_block_mirrors_the_core_catalog() {
+        // `frontend/src/styles/tokens.css` paints the shell before the theme
+        // snapshot lands. Every colour role it declares must equal the core
+        // catalog value the snapshot installs, or the window repaints on the
+        // first frame (the pre-bootstrap half of the task 16 invariant, for
+        // theme roles rather than design-system recipes). Ten roles had drifted
+        // from the catalog before this test existed.
+        fn css_rgba(value: &str) -> Option<[u8; 4]> {
+            let digits = value.trim().strip_prefix('#')?;
+            let byte = |from: usize| u8::from_str_radix(digits.get(from..from + 2)?, 16).ok();
+            match digits.len() {
+                6 => Some([byte(0)?, byte(2)?, byte(4)?, 0xff]),
+                8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+                _ => None,
+            }
+        }
+
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/frontend/src/styles/tokens.css"
+        );
+        let css = std::fs::read_to_string(path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+        // The design-system recipe block has its own mirror test; the theme-role
+        // block is everything before its marker.
+        let end = css
+            .find("/* Host fallback design-system recipe variables")
+            .unwrap_or(css.len());
+        let mut host = std::collections::BTreeMap::new();
+        for declaration in css[..end].split(';') {
+            let Some((name, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let Some(role) = name.trim().strip_prefix("--clay-") else {
+                continue;
+            };
+            if let Some(rgba) = css_rgba(value) {
+                host.insert(role.replace('-', "."), rgba);
+            }
+        }
+
+        let mut checked = 0usize;
+        for name in CORE_TOKEN_NAMES {
+            let Some(CoreThemeValue {
+                value: ResolvedThemeValue::Color(core),
+                ..
+            }) = core_theme_value(name)
+            else {
+                continue;
+            };
+            let Some(rgba) = host.get(*name) else {
+                continue; // the host states only the roles its CSS consumes
+            };
+            assert_eq!(
+                *rgba,
+                core.components(),
+                "`--clay-{}` must mirror the core catalog (`{name}`)",
+                name.replace('.', "-")
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 25,
+            "expected the host theme-role block to state the core palette (checked={checked})"
+        );
     }
 
     #[test]

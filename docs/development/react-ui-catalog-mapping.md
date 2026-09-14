@@ -155,6 +155,7 @@ Naming rule: `token.name.sub` → `--clay-token-name-sub`. Complete locked table
 | `dimension.panel.vertical.max` | `--clay-dimension-panel-vertical-max` |
 | `dimension.panel.vertical.min` | `--clay-dimension-panel-vertical-min` |
 | `dimension.scrollbar.width` | `--clay-dimension-scrollbar-width` |
+| `dimension.sidebar.compact` | `--clay-dimension-sidebar-compact` |
 | `dimension.sidebar.default` | `--clay-dimension-sidebar-default` |
 | `elevation.none` | `--clay-elevation-none` |
 | `elevation.overlay` | `--clay-elevation-overlay` |
@@ -318,7 +319,7 @@ The complete component, slot, state, property, and fallback inventory is documen
 - **`commandCentre`**: slots `scrim`, `dialog`, `input`, `listBox`, `item`, `status`, `empty` (React Owner: `CommandCentre`)
 - **`fileBrowser`**: slots `root`, `header`, `tree`, `item`, `itemIcon`, `itemLabel` (React Owner: `FileBrowser` / React Aria `Tree`)
 - **`settingsPanel`**: slots `panel`, `heading`, `actions`, `fields` (React Owner: `SettingsPanel`)
-- **`chatPanel`**: slots `root`, `header`, `transcript`, `userMessage`, `assistantMessage`, `thinking`, `composer`, `statusLine` (React Owner: `ChatPanel`)
+- **`chatPanel`** (removed in plan 118 with `@clay/chat`): slots `root`, `header`, `transcript`, `userMessage`, `assistantMessage`, `thinking`, `composer`, `statusLine` (no React owner survives; the agent panel paints the `coding-agent` surface)
 
 ## Verification
 

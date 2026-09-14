@@ -3828,7 +3828,7 @@
           "name": "specifier",
           "type": "string",
           "default": "required",
-          "description": "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-neobrutal`, `@clay/design-glass`). Also accepts `item_id` from dropdown action payloads."
+          "description": "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-instrument` — Quiet Instrument). Also accepts `item_id` from dropdown action payloads."
         }
       ],
       "security": "Validates the specifier server-side and persists an inert preference only: activation applies through the same inert-recipe path as theme.setDesignSystem (recipes reference theme color roles by name and never contain concrete colors, so no raw CSS or color authority exists) and the reload re-validates the stored value through apply_design_system, preserving the previous valid design system on failure. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package manager, WASM, client-side JavaScript, raw Deno ops, raw CSS, or renderer callback authority, and never promotes package trust by naming a specifier.",
@@ -4234,7 +4234,7 @@
       "phase": "Phase 22.4",
       "visibility": "public",
       "permissions": [],
-      "key_bindings": ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"],
+      "key_bindings": ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "Ctrl+Alt+4", "Ctrl+Alt+5", "Ctrl+Alt+6", "Ctrl+Alt+7", "Ctrl+Alt+8", "Ctrl+Alt+9"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned tab state via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
       "agent_guidance": "Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
@@ -4661,8 +4661,8 @@
           "description": "`@clay/core` (built-in baseline) or the name of one loaded package that contributes a `uiDesignSystem` declaration."
         }
       ],
-      "security": "Activates inert recipe data only: recipes may select among active-theme color roles and set bounded non-color values, but never contain concrete colors, so color authority always stays with the active theme and no raw CSS is possible. `@clay/core` is built in; any other specifier must already be an enabled package record or is adopted through the package service's existing enable/trust path — there is no automatic trust promotion, and provenance/trust-domain requirements come from that path. On failure or later package revocation the previous valid design system is preserved and the sanitized diagnostic surfaces; recipes resolve through `@clay/core` fallbacks for missing components. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
-      "agent_guidance": "Use setDesignSystem(\"@clay/core\") from init.js for the built-in baseline, or a loaded package name that contributes a `uiDesignSystem`. Colors come only from the active theme; never suggest raw CSS or package-owned colors. If the package is later removed, Clay keeps the last valid design system until a valid reload succeeds.",
+      "security": "Activates inert recipe data only: recipes may select among active-theme color roles and set bounded non-color values, but never contain concrete colors, so color authority always stays with the active theme and no raw CSS is possible. `@clay/core` is built in and always selectable; a bundled `@clay/` specifier (the shipped `@clay/design-instrument`, the approved Quiet Instrument language) resolves through the first-party bundled record path with its manifest read and nothing installed, and a third-party specifier must be an installed package that still passes the package service's existing enable/trust validation — selection itself never installs, adopts, or enables a capability, and there is no automatic trust promotion; provenance/trust-domain requirements come from that path. On failure or later package revocation the previous valid design system is preserved and the sanitized diagnostic surfaces; recipes resolve through `@clay/core` fallbacks for missing components. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "agent_guidance": "Use setDesignSystem(\"@clay/core\") from init.js for the built-in baseline, or a loaded package name that contributes a `uiDesignSystem` (the approved default language is Quiet Instrument, specified in DESIGN.md). Colors come only from the active theme; never suggest raw CSS or package-owned colors. If the package is later removed — for example by a migration that deletes a shipped design system — Clay keeps the last valid design system active, records one bounded diagnostic naming the rejected specifier and the system that stays active, and never fails the generation.",
       "lookup_tags": ["theme", "design-system", "recipes", "init", "core", "fallback"],
       "app_visible": true,
       "help_visible": true,
@@ -4730,7 +4730,7 @@
         }
       ],
       "security": "Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles and optional designTokens contributions, validates typed UI overrides against core token types and domain bounds, and sends inert RGBA/style-attribute data plus validated typed UI token overrides to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
-      "agent_guidance": "Use setTheme(\"@clay/theme-gruvbox-material-dark\") or setTheme(\"@clay/theme-gruvbox-material-light\") from init.js. Do not expose arbitrary CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
+      "agent_guidance": "Use a bundled specifier from init.js — the four shipped themes are `@clay/theme-modus-operandi` and `@clay/theme-modus-vivendi` (the canonical light/dark defaults) plus `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light`. Every shipped theme declares the language's theme-side roles and must pass the composited contrast gate, so never hand-edit a palette to \"fix\" contrast, and never suggest raw CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
       "lookup_tags": ["theme", "syntax", "colors", "gruvbox", "init"],
       "app_visible": true,
       "help_visible": true,

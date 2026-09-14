@@ -14,18 +14,18 @@
     "modes": [],
     "docs": "./docs/index.md",
     "performance": {
-      "estimatedManifestBytes": 2600,
+      "estimatedManifestBytes": 6500,
       "hotPathPolicy": "inert style data parsed at load; no hot-path JS"
     },
     "contributions": {
       "textStyles": [
         {
           "token": "shellBg",
-          "color": "#1d2021"
+          "color": "#282828"
         },
         {
           "token": "panelBg",
-          "color": "#282828"
+          "color": "#1d2021"
         },
         {
           "token": "text",
@@ -231,6 +231,60 @@
         {
           "token": "searchMatch",
           "color": "#d8a65755"
+        }
+      ],
+      "designTokens": [
+        {
+          "token": "border.hairline",
+          "value": "#92837457"
+        },
+        {
+          "token": "border.subtle",
+          "value": "#928374"
+        },
+        {
+          "token": "border.strong",
+          "value": "#d4be98"
+        },
+        {
+          "token": "surface.scrim",
+          "value": "#1d2021"
+        },
+        {
+          "token": "accent.primary",
+          "value": "#7daea3"
+        },
+        {
+          "token": "accent.muted",
+          "value": "#7daea3bf"
+        },
+        {
+          "token": "focus.ring",
+          "value": "#7daea3"
+        },
+        {
+          "token": "border.focus",
+          "value": "#7daea3"
+        },
+        {
+          "token": "text.muted",
+          "value": "#b3a284"
+        },
+        {
+          "token": "text.disabled",
+          "value": "#ab9d89"
+        },
+        {
+          "token": "surface.hover",
+          "value": "#3c3836"
+        },
+        {
+          "token": "surface.active",
+          "value": "#45403d"
+        },
+        {
+          "token": "surface.selected",
+          "value": "#3a4438"
         }
       ]
     },

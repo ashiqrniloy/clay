@@ -82,6 +82,25 @@ export function openAgentSettingsPayload(name: string): string {
   });
 }
 
+/** Launcher (plan 118 Part D): request the server-resolved start-surface
+ *  rows (recent workspaces + configured agent types). The reply
+ *  (`launcherEntries`) reaches feature listeners; the webview sends no path. */
+export function listLauncherEntriesPayload(): string {
+  return JSON.stringify({
+    family: "listLauncherEntries",
+    payload: { clientId: 0 },
+  });
+}
+
+/** Launcher: drop one recent workspace by its index in the server's own list
+ *  (never a path). The reply is a fresh `launcherEntries` listing. */
+export function removeLauncherRecentPayload(index: number): string {
+  return JSON.stringify({
+    family: "removeLauncherRecent",
+    payload: { clientId: 0, index },
+  });
+}
+
 export function getStatusPayload(documentId: number): string {
   return JSON.stringify({
     family: "getDocumentStatus",

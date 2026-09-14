@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#eff1f5">
+<title>Clay — Coding Agent · design proposal B (quiet instrument)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<style>
+/* ---------------------------------------------------------------------------
+   Screen 2 · Coding Agent — reimagined.
+
+   The shipped screen puts capability inventory (skills, MCP) in the middle of
+   the room and gives the conversation whatever space is left, then repeats the
+   same facts in three strips. The rethink gives the transcript the stage:
+
+     header     title · mode · model · context usage · effort
+     transcript the conversation itself, 72ch measure, hairline-separated turns
+     composer   one input surface with a nested send island
+     footer     working dir · git branch · MCP summary
+     inspector  Files · Memory · Context · Session Info · Settings, where
+                Context now owns everything contextual — the 13 skills with
+                their descriptions, the graft server, and the count table.
+   --------------------------------------------------------------------------- */
+
+.app { grid-template-columns: var(--side-w) minmax(0, 1fr) var(--inspector-w); }
+.app[data-inspector='collapsed'] { grid-template-columns: var(--side-w) minmax(0, 1fr) 0; }
+.app[data-inspector='collapsed'] .inspector { display: none; }
+
+.agent { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1; }
+
+/* ---------- header ----------------------------------------------------- */
+
+.agent-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px 12px; flex-wrap: wrap; }
+.agent-title { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.015em; }
+.agent-controls { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.ctl { display: flex; align-items: center; gap: 7px; }
+
+.meter { display: flex; align-items: center; gap: 8px; }
+.meter-track { width: 60px; height: 3px; border-radius: var(--r-pill); background: color-mix(in oklab, var(--c-text) 12%, transparent); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: var(--r-pill); background: var(--c-accent); transition: width var(--t); }
+.meter-value { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+
+select.select {
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, var(--c-text-3) 50%), linear-gradient(135deg, var(--c-text-3) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 13px, calc(100% - 10px) 13px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--c-text);
+  font-size: var(--fs-sm);
+  appearance: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+select.select:hover { border-color: var(--hairline-strong); }
+select.select:focus-visible { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); outline: none; }
+
+/* ---------- transcript ------------------------------------------------- */
+
+.transcript { flex: 1; min-height: 0; overflow: auto; padding: 4px 18px 18px; }
+.transcript-inner { max-width: 74ch; margin: 0 auto; display: flex; flex-direction: column; }
+
+.turn { padding: 16px 0; border-bottom: 1px solid var(--hairline); }
+.turn:last-child { border-bottom: 0; }
+
+.turn-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.turn-role { font: 500 10px/1 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+.turn[data-role='agent'] .turn-role { color: var(--c-accent); }
+.turn-time { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.turn-note { font: 400 var(--fs-xs) / 1.6 var(--font-mono); color: var(--c-text-3); margin-top: 8px; }
+.turn-body { font-size: var(--fs-md); line-height: 1.68; white-space: pre-wrap; }
+.turn-body code { font-family: var(--font-mono); background: var(--c-code-bg); border-radius: var(--r-xs); padding: 1px 4px; color: var(--c-code-span); }
+
+.typing { display: inline-flex; gap: 3px; align-items: center; }
+.typing i { width: 4px; height: 11px; border-radius: var(--r-pill); background: var(--c-accent); animation: pulse 1.1s ease-in-out infinite; }
+.typing i:nth-child(2) { animation-delay: 160ms; }
+.typing i:nth-child(3) { animation-delay: 320ms; }
+
+/* ---------- state strip + composer ------------------------------------ */
+
+.state-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  border-top: 1px solid var(--hairline);
+  font: 400 var(--fs-xs) / 1 var(--font-mono);
+  color: var(--c-text-3);
+}
+
+.composer { padding: 10px 18px 12px; }
+.composer-row { display: flex; align-items: flex-end; gap: 10px; max-width: 74ch; margin: 0 auto; }
+.composer .input-shell { flex: 1; min-width: 0; }
+.composer textarea { min-height: 48px; max-height: 32vh; overflow: auto; }
+.composer-hints { display: flex; align-items: center; gap: 14px; margin-top: 8px; max-width: 74ch; margin-left: auto; margin-right: auto; font-size: var(--fs-xs); color: var(--c-text-3); flex-wrap: wrap; }
+
+.agent-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  border-top: 1px solid var(--hairline);
+  font: 400 var(--fs-xs) / 1 var(--font-mono);
+  color: var(--c-text-3);
+  flex-wrap: wrap;
+}
+
+/* ---------- suggestion menu ------------------------------------------ */
+
+.menu {
+  position: absolute;
+  z-index: 45;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(520px, 94%);
+  padding: 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+  box-shadow: var(--shadow-pop);
+  max-height: 280px;
+  overflow: auto;
+}
+
+.menu[hidden] { display: none; }
+.menu-head { padding: 6px 8px 8px; }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 9px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--c-text); text-align: left; font-size: var(--fs-sm); transition: background var(--t-fast); }
+.menu-item[data-active='true'] { background: var(--c-accent-soft); }
+.menu-name { flex: none; min-width: 128px; font: 500 var(--fs-xs) / 1 var(--font-mono); }
+.menu-desc { color: var(--c-text-2); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-kind { margin-left: auto; font: 400 10px/1 var(--font-mono); color: var(--c-text-3); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* ---------- inspector ------------------------------------------------- */
+
+.inspector { border-left: 1px solid var(--hairline); background: color-mix(in oklab, var(--c-bg) 70%, transparent); }
+.inspector .tabs { overflow-x: auto; }
+.inspector-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+
+.section { display: flex; flex-direction: column; min-height: 0; }
+.section + .section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+.skill-row { align-items: flex-start; }
+.skill-row .row-main { gap: 3px; }
+.skill-detail { font: 400 var(--fs-xs) / 1.5 var(--font-mono); color: var(--c-text-3); padding: 8px 2px 0; min-height: 2.4em; }
+
+.mcp-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--r-sm); background: var(--veil); }
+.mcp-name { font: 500 var(--fs-sm) / 1 var(--font-mono); }
+
+.settings-group { padding-bottom: 14px; }
+.settings-group + .settings-group { padding-top: 14px; border-top: 1px solid var(--hairline); }
+.settings-group h3 { margin-bottom: 9px; }
+.theme-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.theme-item .kbd { margin-left: 0; }
+.theme-item .theme-mode { font: 400 10px/1 var(--font-mono); color: var(--c-text-3); text-transform: uppercase; letter-spacing: 0.08em; }
+/* ---------- narrow ---------- */
+
+@media (max-width: 1000px) {
+  .app,
+  .app[data-sidebar='expanded'],
+  .app[data-sidebar='collapsed'],
+  .app[data-inspector='expanded'],
+  .app[data-inspector='collapsed'] { grid-template-columns: minmax(0, 1fr); }
+  .app[data-inspector='expanded'] .inspector {
+    position: fixed;
+    z-index: 50;
+    inset: var(--titlebar-h) 0 var(--status-h) auto;
+    width: min(400px, 92vw);
+    background: var(--c-surface);
+    box-shadow: var(--shadow-overlay);
+    display: flex;
+  }
+  .agent-head, .composer, .state-strip { padding-left: 12px; padding-right: 12px; }
+  .transcript { padding-left: 12px; padding-right: 12px; }
+}
+
+</style>
+</head>
+<body>
+
+<div class="desk">
+  <div class="win" role="application" aria-label="Clay coding agent">
+
+    <header class="titlebar">
+      <span class="tb-brand">Clay</span>
+      <div class="tb-tabs" role="tablist" aria-label="Workspace tabs">
+        <button class="tb-tab" role="tab" aria-selected="true" data-active="true">Workspace</button>
+      </div>
+      <span class="tb-spacer"></span>
+      <nav class="tb-actions" aria-label="Application controls">
+        <span class="popwrap">
+          <button class="tb-btn" type="button" data-popover-toggle="theme" data-theme-trigger="true"
+                  data-shortcut="alt+t" aria-haspopup="menu" aria-expanded="false" title="Content theme">
+            <span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span data-theme-label>Modus Operandi</span>
+          </button>
+          <div class="popover popover--wide" data-popover="theme" role="menu" aria-label="Content theme">
+            <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">six palettes, one geometry</span></div>
+            <div id="theme-list"></div>
+            <p class="pop-note">Keys <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">1</kbd>–<kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">6</kbd> · cycle <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">`</kbd></p>
+          </div>
+        </span>
+
+        <button class="tb-btn" type="button" data-open="palette" title="Command palette">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+          <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">K</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-open="shortcuts" data-shortcut="shift+?" title="Keyboard map">
+          <kbd class="kbd kbd--sm">?</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-toggle="inspector" aria-expanded="true" data-shortcut="mod+i" title="Toggle inspector">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
+          <span data-inspector-toggle-label>Hide inspector</span>
+        </button>
+
+        <button class="tb-btn" type="button" data-toggle="sidebar" aria-expanded="true" data-shortcut="mod+b" title="Toggle files">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+          <span data-sidebar-toggle-label>Hide files</span>
+        </button>
+
+        <div class="win-btns">
+          <button class="win-btn" type="button" title="Minimise window" aria-label="Minimise window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="win-btn" type="button" title="Maximise window" aria-label="Maximise window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg>
+          </button>
+          <button class="win-btn win-btn--close" type="button" title="Close window" aria-label="Close window">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <div class="app" data-app data-sidebar="expanded" data-inspector="expanded">
+
+      <aside class="side" data-focus-zone=".side" aria-label="Workspace files">
+        <div class="side-head">
+          <h2 class="side-title">
+            Workspace
+            <button class="btn btn--ghost btn--icon" type="button" data-toggle="sidebar" title="Hide files" aria-label="Hide files">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 6 9 12l5 6"/></svg>
+            </button>
+          </h2>
+          <p class="side-kicker">Workspace · clay</p>
+        </div>
+        <div class="side-tools">
+          <label class="field">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+            <input type="search" data-filter-for="files" placeholder="Filter files" aria-label="Filter files" autocomplete="off" spellcheck="false">
+            <kbd class="kbd kbd--sm kbd--flat">/</kbd>
+          </label>
+        </div>
+        <div class="side-body">
+          <nav class="tree" data-tree="files" role="tree" aria-label="Workspace file tree" id="file-tree"></nav>
+        </div>
+        <div class="side-foot">
+          <span data-filter-count></span>
+          <span class="spacer"></span>
+          <span><kbd class="kbd kbd--sm kbd--flat">@</kbd> mention</span>
+        </div>
+      </aside>
+
+      <main class="pane agent" data-focus-zone=".agent">
+
+        <header class="agent-head">
+          <h1 class="agent-title">Coding Agent</h1>
+          <span class="chip chip--accent" title="Agent mode — configured per agent in Settings">coding</span>
+          <div class="agent-controls">
+            <span class="popwrap">
+              <button class="btn" type="button" data-popover-toggle="model" aria-haspopup="menu" aria-expanded="false" title="Model">
+                GLM 5.3 Flash
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="popover" data-popover="model" role="menu" aria-label="Model">
+                <div class="pop-head"><span class="label">Model</span><span class="panel-sub">provider hyper</span></div>
+                <button class="pop-item" type="button" role="menuitemradio" aria-checked="true"><span>GLM 5.3 Flash</span><kbd class="kbd kbd--sm">current</kbd></button>
+                <button class="pop-item" type="button" role="menuitem" data-open-tab="4"><span>Configure in Settings…</span></button>
+                <p class="pop-note">hyper/glm-5.3-flash · context window 1m</p>
+              </div>
+            </span>
+
+            <span class="meter" title="Context window usage">
+              <span class="meter-track"><span class="meter-fill" data-meter-fill style="width:0%"></span></span>
+              <span class="meter-value" data-meter-value>0/1m</span>
+            </span>
+
+            <span class="ctl">
+              <span class="label" id="effort-label">Effort</span>
+              <select class="select" data-effort aria-labelledby="effort-label">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+            </span>
+          </div>
+        </header>
+
+        <div class="transcript">
+          <div class="transcript-inner" data-transcript>
+            <div class="empty" data-convo-empty>
+              <p class="empty-title">No conversation yet.</p>
+              <p class="empty-text">Ask a question, or drive the session from the keyboard. Skills and tools live in the Context tab until they are needed.</p>
+              <div class="empty-keys">
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat">/</kbd> commands</span>
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat">@</kbd> files &amp; skills</span>
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">K</kbd> palette</span>
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd-shift>⇧</kbd><kbd class="kbd kbd--sm kbd--flat">↵</kbd> newline</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="state-strip">
+          <span class="dot dot--ok" data-state-dot></span>
+          <span data-state-text>Ready</span>
+          <span class="spacer"></span>
+          <span data-state-note>agent idle · no pending tool call</span>
+        </div>
+
+        <form class="composer" data-composer autocomplete="off">
+          <div class="composer-row">
+            <div class="input-shell" style="position:relative">
+              <textarea class="field-input" id="message" data-msg rows="2" placeholder="Ask, or type / or @" aria-label="Message to the coding agent"></textarea>
+              <div class="menu" data-menu hidden role="listbox" aria-label="Suggestions">
+                <div class="menu-head label" data-menu-title>Commands</div>
+                <div data-menu-list></div>
+              </div>
+            </div>
+            <button class="btn btn--primary btn--island" type="submit" data-send disabled title="Send">
+              Send
+              <span class="island-icon" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></svg>
+              </span>
+            </button>
+            <button class="btn btn--ghost btn--icon btn--danger" type="button" data-cancel title="Cancel turn" aria-label="Cancel turn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+            </button>
+          </div>
+          <div class="composer-hints">
+            <span><kbd class="kbd kbd--sm kbd--flat">/</kbd> commands</span>
+            <span><kbd class="kbd kbd--sm kbd--flat">@</kbd> mention file or skill</span>
+            <span><kbd class="kbd kbd--sm kbd--flat">↵</kbd> send · <kbd class="kbd kbd--sm kbd--flat" data-kbd-shift>⇧</kbd><kbd class="kbd kbd--sm kbd--flat">↵</kbd> newline</span>
+            <span class="spacer"></span>
+            <span data-char-count></span>
+          </div>
+        </form>
+
+        <div class="agent-foot">
+          <span>/home/arn/Projects/clay</span>
+          <span class="faint">·</span>
+          <span>git <strong>fix/coding-agent</strong></span>
+          <span class="spacer"></span>
+          <span class="faint">MCP</span>
+          <span>graft · 6 tools</span>
+        </div>
+      </main>
+
+      <aside class="pane inspector" data-tabs data-tab-key="agent" data-focus-zone=".inspector" aria-label="Agent inspector">
+        <div class="tabs" role="tablist" aria-label="Inspector sections">
+          <button class="tab" role="tab" aria-selected="true" aria-controls="panel-files" id="tab-files">Files</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="panel-memory" id="tab-memory" tabindex="-1">Memory</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="panel-context" id="tab-context" tabindex="-1">Context</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="panel-session" id="tab-session" tabindex="-1">Session Info</button>
+          <button class="tab" role="tab" aria-selected="false" aria-controls="panel-settings" id="tab-settings" tabindex="-1">Settings</button>
+        </div>
+
+        <div class="inspector-body">
+          <section role="tabpanel" id="panel-files" aria-labelledby="tab-files">
+            <div class="empty">
+              <p class="empty-title">No files attached</p>
+              <p class="empty-text">Files mentioned with <kbd class="kbd kbd--sm kbd--flat">@</kbd> are listed here and travel with the next message.</p>
+              <div class="empty-keys">
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat">@</kbd> mention a file</span>
+                <span class="empty-key"><kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">K</kbd> palette</span>
+              </div>
+            </div>
+          </section>
+
+          <section role="tabpanel" id="panel-memory" aria-labelledby="tab-memory" hidden>
+            <div class="empty">
+              <p class="empty-title">No memory entries</p>
+              <p class="empty-text">Durable notes the agent keeps across turns appear here once written.</p>
+            </div>
+          </section>
+
+          <section role="tabpanel" id="panel-context" aria-labelledby="tab-context" hidden>
+            <div class="section" data-panel>
+              <div class="section-head">
+                <span class="label">Skills loaded</span>
+                <span class="chip chip--accent" data-filter-count>13</span>
+                <span class="spacer"></span>
+                <label class="field field--quiet" style="max-width:150px">
+                  <input type="search" data-filter-list="#skill-rows" placeholder="Filter" aria-label="Filter skills" autocomplete="off" spellcheck="false">
+                  <kbd class="kbd kbd--sm kbd--flat">F</kbd>
+                </label>
+              </div>
+              <div class="rows" data-rows id="skill-rows" role="listbox" aria-label="Loaded skills"></div>
+              <p class="skill-detail" data-skill-detail>Focus a row for its full description · ↵ inserts the mention into the composer.</p>
+            </div>
+
+            <div class="section">
+              <div class="section-head"><span class="label">MCP servers</span></div>
+              <div class="mcp-row">
+                <span class="dot dot--ok"></span>
+                <span class="mcp-name">graft</span>
+                <span class="panel-sub">6 tools</span>
+                <span class="spacer"></span>
+                <button class="btn btn--ghost" type="button" data-mention="graft">Mention</button>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-head"><span class="label">Context counts</span></div>
+              <div class="stat-head"><span>Category</span><span>Count</span></div>
+              <div class="stats">
+                <div class="stat" data-stat="system"><span class="stat-label">System prompt</span><span class="stat-value" data-value="2">2</span><span class="stat-bar"><span style="width:100%"></span></span></div>
+                <div class="stat" data-stat="user"><span class="stat-label">User prompts</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+                <div class="stat" data-stat="skills"><span class="stat-label">Skills loaded</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+                <div class="stat" data-stat="tools"><span class="stat-label">Tool calls + outputs</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+                <div class="stat" data-stat="thinking"><span class="stat-label">Thinking</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+                <div class="stat" data-stat="agent"><span class="stat-label">Agent messages</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+                <div class="stat" data-stat="compact"><span class="stat-label">Compaction summaries</span><span class="stat-value" data-value="0">0</span><span class="stat-bar" data-zero="true"><span style="width:0%"></span></span></div>
+              </div>
+              <div class="stat-head" style="border-top:1px solid var(--hairline);border-bottom:0"><span>Total entries</span><span data-stat-total>2</span></div>
+              <p class="panel-sub" style="padding-top:8px">Counts refresh as the session runs; bars are relative to the largest category.</p>
+            </div>
+          </section>
+
+          <section role="tabpanel" id="panel-session" aria-labelledby="tab-session" hidden>
+            <dl class="kv">
+              <dt>Session</dt><dd>9223372036854775810</dd>
+              <dt>Client</dt><dd>3</dd>
+              <dt>Status</dt><dd>no active menu session</dd>
+              <dt>Workspace</dt><dd>/workspace</dd>
+              <dt>Working dir</dt><dd>/home/arn/Projects/clay</dd>
+              <dt>Git branch</dt><dd>fix/coding-agent</dd>
+              <dt>Model</dt><dd>hyper/glm-5.3-flash</dd>
+              <dt>Context</dt><dd>0/1m tokens</dd>
+              <dt>Effort</dt><dd data-session-effort>medium</dd>
+              <dt>MCP</dt><dd>graft · 6 tools</dd>
+              <dt>Skills</dt><dd data-session-skills>13 loaded</dd>
+            </dl>
+          </section>
+
+          <section role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" hidden>
+            <div class="settings-group">
+              <h3 class="label">Content theme</h3>
+              <div id="theme-list-panel"></div>
+            </div>
+            <div class="settings-group">
+              <h3 class="label">Row density</h3>
+              <div class="seg" role="group" aria-label="Row density">
+                <button class="seg-item" type="button" data-set-density="comfortable" data-active="true">comfortable</button>
+                <button class="seg-item" type="button" data-set-density="compact">compact</button>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h3 class="label">Motion</h3>
+              <div class="seg" role="group" aria-label="Motion">
+                <button class="seg-item" type="button" data-set-motion="full" data-active="true">full</button>
+                <button class="seg-item" type="button" data-set-motion="reduced">reduced</button>
+              </div>
+            </div>
+            <div class="settings-group">
+              <h3 class="label">Model</h3>
+              <p class="panel-sub">hyper/glm-5.3-flash · effort <span data-settings-effort>medium</span></p>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="statusbar">
+      <span class="status-seg"><span class="dot dot--ok"></span>/workspace</span>
+      <span class="status-seg status-seg--muted">no active menu session for id 9223372036854775810 (client 3)</span>
+      <span class="status-hints">
+        <button class="status-key" type="button" data-open="palette"><kbd class="kbd kbd--sm kbd--flat" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm kbd--flat">K</kbd> palette</button>
+        <button class="status-key" type="button" data-open-settings><kbd class="kbd kbd--sm kbd--flat">S</kbd> settings</button>
+        <button class="status-key" type="button" data-cycle-theme><kbd class="kbd kbd--sm kbd--flat" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm kbd--flat">`</kbd> theme</button>
+        <button class="status-key" type="button" data-open="shortcuts"><kbd class="kbd kbd--sm kbd--flat">?</kbd> keys</button>
+      </span>
+    </footer>
+  </div>
+</div>
+
+<section class="overlay" data-overlay="palette" role="dialog" aria-label="Command palette">
+  <div class="sheet palette">
+    <header class="sheet-head">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+      <input class="pal-input" data-pal-input placeholder="Agent commands, skills, tools, themes…" aria-label="Search commands" autofocus style="flex:1; border:0; background:transparent; font:400 14px/1.5 var(--font-ui);">
+      <div class="seg" role="group" aria-label="Scope">
+        <button class="seg-item" type="button" data-pal-scope-btn="all" data-active="true">All</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Session">Session</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Skills">Skills</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="MCP">MCP</button>
+      </div>
+    </header>
+    <div class="pal-list" data-pal-list role="listbox" aria-label="Commands"></div>
+    <p class="pal-empty" data-pal-empty hidden>No match. <kbd class="kbd kbd--sm">Esc</kbd> dismisses.</p>
+    <footer class="pal-foot">
+      <span>scope: <strong data-pal-scope>All commands</strong></span>
+      <span class="spacer"></span>
+      <span data-pal-count>0 results</span>
+      <span class="hint"><kbd class="kbd kbd--sm kbd--flat">↑↓</kbd> navigate</span>
+      <span class="hint"><kbd class="kbd kbd--sm kbd--flat">↵</kbd> run</span>
+    </footer>
+  </div>
+</section>
+
+<section class="overlay overlay--center" data-overlay="shortcuts" role="dialog" aria-label="Keyboard map">
+  <div class="sheet sheet--wide">
+    <header class="sheet-head">
+      <span class="label">Keyboard map</span>
+      <span class="spacer"></span>
+      <span class="panel-sub">this platform: <strong data-kbd-platform>⌘</strong></span>
+      <button class="btn btn--ghost btn--icon" type="button" data-close="shortcuts" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body">
+      <div class="keys">
+        <div class="key-group">
+          <h3>Global</h3>
+          <div class="key-row"><span class="key-desc">Command palette</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Keyboard map</span><span class="key-combo"><kbd class="kbd">?</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Files / inspector</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">B</kbd><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">I</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Theme 1–6 · cycle</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">1..6</kbd><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">`</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Composer</h3>
+          <div class="key-row"><span class="key-desc">Send</span><span class="key-combo"><kbd class="kbd">↵</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Newline</span><span class="key-combo"><kbd class="kbd" data-kbd-shift>⇧</kbd><kbd class="kbd">↵</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Slash commands</span><span class="key-combo"><kbd class="kbd">/</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Mention file / skill</span><span class="key-combo"><kbd class="kbd">@</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Suggestions · dismiss</span><span class="key-combo"><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd><kbd class="kbd">Esc</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Inspector</h3>
+          <div class="key-row"><span class="key-desc">Files · Memory · Context</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">1..3</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Session Info · Settings</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">4</kbd><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">5</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Filter skills</span><span class="key-combo"><kbd class="kbd">F</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Insert @skill</span><span class="key-combo"><kbd class="kbd">↵</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Session</h3>
+          <div class="key-row"><span class="key-desc">Cancel running turn</span><span class="key-combo"><kbd class="kbd">Esc</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Clear draft</span><span class="key-combo"><kbd class="kbd">Esc</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Clear conversation</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd><kbd class="kbd">/clear</kbd></span></div>
+        </div>
+      </div>
+    </div>
+    <footer class="sheet-foot">
+      <span class="panel-sub">Keys follow the platform modifier; the artifact reports <strong data-kbd-platform>⌘</strong>.</span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-close="shortcuts">Close</button>
+    </footer>
+  </div>
+</section>
+
+<script src="workspace-data.js"></script>
+<script src="ds.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var WORKSPACE = window.CLAY_WORKSPACE;
+
+  ClayDS.renderTree(document.getElementById('file-tree'), WORKSPACE.tree, {
+    selected: '',
+    sources: WORKSPACE.sources
+  });
+
+  /* ---------------- capability inventory (real skills + tools) --------- */
+
+  var SKILLS = [
+    ['find-docs', 'Retrieves up-to-date documentation, API references, and code examples for any developer technology.'],
+    ['clay-execution', 'Execute tasks from plan documents and any plan-less code change in this repository. Router to project docs and verification gates.'],
+    ['create-decision-log', 'Maintain a chronological project decision log whenever a conversation results in, approaches, or appears to finalize a project decision.'],
+    ['create-plan', 'Create and maintain numbered plan documents for work that requires documenting executable tasks: objectives, acceptance criteria, tests, compromises, follow-ups.'],
+    ['design-taste-frontend', 'Anti-slop frontend skill for landing pages, portfolios, and redesigns. The agent reads the brief, infers the right design direction, and ships interfaces that do not look templated.'],
+    ['full-output-enforcement', 'Overrides default LLM truncation behavior. Enforces complete code generation, bans placeholder patterns, and handles token-limit splits cleanly.'],
+    ['high-end-visual-design', 'Teaches the AI to design like a high-end agency. Defines the exact fonts, spacing, shadows, card structures, and animations that make a website feel expensive.'],
+    ['impeccable', 'Use when the user wants to design, redesign, shape, critique, audit, polish, clarify, distill, harden, optimize, adapt, animate, colorize, extract, or otherwise improve a frontend interface.'],
+    ['karpathy-guidelines', 'Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication and make surgical changes.'],
+    ['rust-async-patterns', 'Master Rust async programming with Tokio, async traits, error handling, and concurrent patterns.'],
+    ['rust-best-practices', "Guide for writing idiomatic Rust code based on Apollo GraphQL's best practices handbook. Use when writing new Rust code or reviewing existing code."],
+    ['skill-creator', 'Guide for creating effective skills. This skill should be used when users want to create a new skill or update an existing one.'],
+    ['typescript-advanced-types', "Master TypeScript's advanced type system including generics, conditional types, mapped types, and utility types."]
+  ];
+
+  var skillRows = document.getElementById('skill-rows');
+  skillRows.innerHTML = SKILLS.map(function (pair, index) {
+    return '<div class="row skill-row" data-row role="option" tabindex="' + (index === 0 ? '0' : '-1') + '" data-skill="' + pair[0] + '">'
+      + '<span class="row-main">'
+      + '<span class="row-name">' + pair[0] + '</span>'
+      + '<span class="row-desc clamp-2">' + pair[1] + '</span>'
+      + '</span>'
+      + '</div>';
+  }).join('');
+
+  var detail = document.querySelector('[data-skill-detail]');
+  document.querySelector('[data-session-skills]').textContent = SKILLS.length + ' loaded';
+
+  function showSkill(row) {
+    var found = SKILLS.filter(function (pair) { return pair[0] === row.dataset.skill; })[0];
+    if (found) detail.textContent = found[0] + ' — ' + found[1];
+  }
+
+  skillRows.addEventListener('focusin', function (event) {
+    var row = event.target.closest('[data-row]');
+    if (row) showSkill(row);
+  });
+
+  skillRows.addEventListener('mousemove', function (event) {
+    var row = event.target.closest('[data-row]');
+    if (row && detail.dataset.last !== row.dataset.skill) {
+      detail.dataset.last = row.dataset.skill;
+      showSkill(row);
+    }
+  });
+
+  skillRows.addEventListener('click', function (event) {
+    var row = event.target.closest('[data-row]');
+    if (row) mention(row.dataset.skill);
+  });
+
+  skillRows.addEventListener('keydown', function (event) {
+    var row = event.target.closest('[data-row]');
+    if (!row) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      mention(row.dataset.skill);
+    }
+  });
+
+  document.querySelectorAll('[data-mention]').forEach(function (node) {
+    node.addEventListener('click', function () { mention(node.dataset.mention); });
+  });
+
+  /* ---------------- composer ------------------------------------------- */
+
+  var form = document.querySelector('[data-composer]');
+  var input = document.querySelector('[data-msg]');
+  var sendBtn = document.querySelector('[data-send]');
+  var charCount = document.querySelector('[data-char-count]');
+  var menu = document.querySelector('[data-menu]');
+  var menuList = document.querySelector('[data-menu-list]');
+  var menuTitle = document.querySelector('[data-menu-title]');
+  var MENU_SOURCE = null;
+  var MENU_INDEX = 0;
+  var MENU_ITEMS = [];
+
+  var COMMANDS = [
+    ['/model', 'Switch the model for this agent', 'Session'],
+    ['/effort', 'Set reasoning effort: low, medium, high', 'Session'],
+    ['/context', 'Open the Context tab', 'Session'],
+    ['/skills', 'Filter the skills list', 'Skills'],
+    ['/mcp', 'Inspect graft and its tools', 'MCP'],
+    ['/clear', 'Clear the conversation', 'Session'],
+    ['/copy', 'Copy the transcript as markdown', 'Session'],
+    ['/theme', 'Choose a content theme', 'View'],
+    ['/keys', 'Open the keyboard map', 'View']
+  ];
+
+  var MENTIONS = WORKSPACE.files.slice(0, 24).map(function (path) {
+    return ['@' + path, 'workspace file', 'File'];
+  }).concat(SKILLS.map(function (pair) {
+    return ['@' + pair[0], pair[1], 'Skill'];
+  })).concat([['@graft', 'MCP server with 6 tools', 'MCP']]);
+
+  function menuSource() {
+    var text = input.value;
+    var slash = /(^|\s)\/([\w-]*)$/.exec(text);
+    var at = /(^|\s)@([\w./-]*)$/.exec(text);
+    if (slash) return { kind: 'cmd', query: slash[2], start: text.length - slash[2].length - 1 };
+    if (at) return { kind: 'mention', query: at[2], start: text.length - at[2].length - 1 };
+    return null;
+  }
+
+  function renderMenu() {
+    var source = menuSource();
+    MENU_SOURCE = source;
+    if (!source) { menu.hidden = true; MENU_ITEMS = []; return; }
+    var pool = source.kind === 'cmd' ? COMMANDS : MENTIONS;
+    var query = source.query.toLowerCase();
+    MENU_ITEMS = pool.filter(function (item) {
+      var haystack = (item[0] + ' ' + item[1]).toLowerCase();
+      if (!query) return true;
+      if (haystack.indexOf(query) !== -1) return true;
+      var i = 0;
+      for (var c = 0; c < haystack.length && i < query.length; c++) if (haystack[c] === query[i]) i++;
+      return i === query.length;
+    }).slice(0, 12);
+    MENU_INDEX = 0;
+    menuTitle.textContent = source.kind === 'cmd' ? 'Commands' : 'Mentions';
+    menuList.innerHTML = MENU_ITEMS.length
+      ? MENU_ITEMS.map(function (item, index) {
+        return '<button class="menu-item" type="button" role="option" data-index="' + index + '"' + (index === 0 ? ' data-active="true"' : '') + '>'
+          + '<span class="menu-name">' + item[0] + '</span>'
+          + '<span class="menu-desc">' + item[1] + '</span>'
+          + '<span class="menu-kind">' + item[2] + '</span>'
+          + '</button>';
+      }).join('')
+      : '<p class="pal-empty">No match for “' + source.query + '”</p>';
+    menu.hidden = false;
+  }
+
+  function pickMenu(index) {
+    var item = MENU_ITEMS[index];
+    if (!item) return;
+    input.value = input.value.slice(0, MENU_SOURCE.start) + item[0] + ' ';
+    menu.hidden = true;
+    MENU_ITEMS = [];
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+  }
+
+  menuList.addEventListener('click', function (event) {
+    var item = event.target.closest('.menu-item');
+    if (item) pickMenu(Number(item.dataset.index));
+  });
+
+  function paintMenuActive() {
+    Array.prototype.forEach.call(menuList.querySelectorAll('.menu-item'), function (node) {
+      var on = Number(node.dataset.index) === MENU_INDEX;
+      node.dataset.active = on ? 'true' : 'false';
+      if (on) node.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  input.addEventListener('input', function () {
+    sendBtn.disabled = input.value.trim().length === 0;
+    charCount.textContent = input.value.length ? input.value.length + ' chars' : '';
+    renderMenu();
+  });
+
+  input.addEventListener('keydown', function (event) {
+    if (!menu.hidden && MENU_ITEMS.length) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); MENU_INDEX = Math.min(MENU_INDEX + 1, MENU_ITEMS.length - 1); paintMenuActive(); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); MENU_INDEX = Math.max(MENU_INDEX - 1, 0); paintMenuActive(); return; }
+      if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); pickMenu(MENU_INDEX); return; }
+      if (event.key === 'Escape') { event.preventDefault(); menu.hidden = true; return; }
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (input.value.trim() && !pendingTimer) submit();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    }
+  });
+
+  document.addEventListener('click', function (event) {
+    if (!event.target.closest('[data-menu]') && !event.target.closest('[data-msg]')) menu.hidden = true;
+  });
+
+  function mention(name) {
+    var glue = input.value && !/\s$/.test(input.value) ? ' ' : '';
+    input.value += glue + '@' + name + ' ';
+    input.dispatchEvent(new Event('input'));
+    input.focus();
+    ClayDS.toast('Mentioned @' + name, { tone: 'quiet', ms: 1200 });
+  }
+
+  /* ---------------- transcript ----------------------------------------- */
+
+  var transcript = document.querySelector('[data-transcript]');
+  var empty = document.querySelector('[data-convo-empty]');
+  var stateText = document.querySelector('[data-state-text]');
+  var stateDot = document.querySelector('[data-state-dot]');
+  var stateNote = document.querySelector('[data-state-note]');
+  var pendingTimer = null;
+  var stats = { system: 2, user: 0, skills: 0, tools: 0, thinking: 0, agent: 0, compact: 0 };
+
+  function clock() {
+    var now = new Date();
+    return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  }
+
+  function esc(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function turn(role, html, note) {
+    var el = document.createElement('article');
+    el.className = 'turn';
+    el.dataset.role = role;
+    el.innerHTML = '<header class="turn-head">'
+      + '<span class="turn-role">' + (role === 'user' ? 'you' : 'agent') + '</span>'
+      + '<span class="turn-time">' + clock() + '</span>'
+      + '<span class="spacer"></span>'
+      + '<span class="turn-time">' + (role === 'user' ? 'prompt' : 'stub') + '</span>'
+      + '</header>'
+      + '<div class="turn-body">' + html + '</div>'
+      + (note ? '<p class="turn-note">' + note + '</p>' : '');
+    return el;
+  }
+
+  function renderStats() {
+    var max = Math.max.apply(null, Object.keys(stats).map(function (key) { return stats[key]; }).concat([1]));
+    var total = 0;
+    Object.keys(stats).forEach(function (key) {
+      var row = document.querySelector('[data-stat="' + key + '"]');
+      if (!row) return;
+      var value = stats[key];
+      total += value;
+      row.querySelector('.stat-value').textContent = String(value);
+      var bar = row.querySelector('.stat-bar');
+      bar.dataset.zero = value === 0 ? 'true' : 'false';
+      bar.firstElementChild.style.width = Math.round((value / max) * 100) + '%';
+    });
+    document.querySelector('[data-stat-total]').textContent = String(total);
+    /* The context meter reports the session's own token usage, which this
+       artifact does not simulate; it stays at the reported 0/1m. */
+  }
+
+  function submit() {
+    var text = input.value.trim();
+    if (!text) return;
+    if (empty) empty.hidden = true;
+    transcript.appendChild(turn('user', esc(text)));
+    stats.user += 1;
+    renderStats();
+
+    input.value = '';
+    sendBtn.disabled = true;
+    charCount.textContent = '';
+    menu.hidden = true;
+
+    var agentTurn = turn('agent', '<span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>',
+      'design artifact stub — no model is attached; this turn exists to show the transcript, thinking and cancel states.');
+    transcript.appendChild(agentTurn);
+    agentTurn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+
+    stateText.textContent = 'Working';
+    stateDot.className = 'dot dot--busy';
+    stateNote.textContent = 'streaming assistant turn · Esc cancels';
+
+    pendingTimer = setTimeout(function () {
+      pendingTimer = null;
+      agentTurn.querySelector('.turn-body').textContent =
+        'Stub response: this artifact does not run a model. Enter sends, Esc cancels, / opens commands and @ mentions a file or skill.';
+      stats.agent += 1;
+      stats.thinking += 1;
+      renderStats();
+      stateText.textContent = 'Ready';
+      stateDot.className = 'dot dot--ok';
+      stateNote.textContent = 'agent idle · no pending tool call';
+      ClayDS.toast('Turn complete', { tone: 'quiet', ms: 1200 });
+    }, 1600);
+
+    ClayDS.announce('Message sent');
+  }
+
+  function cancel() {
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+      var turns = transcript.querySelectorAll('.turn');
+      var last = turns[turns.length - 1];
+      if (last && last.dataset.role === 'agent') last.remove();
+      stateText.textContent = 'Cancelled';
+      stateDot.className = 'dot dot--warn';
+      stateNote.textContent = 'run cancelled by Esc';
+      ClayDS.toast('Turn cancelled', { kbd: 'Esc', tone: 'warn' });
+      setTimeout(function () {
+        stateText.textContent = 'Ready';
+        stateDot.className = 'dot dot--ok';
+        stateNote.textContent = 'agent idle · no pending tool call';
+      }, 1400);
+      return;
+    }
+    if (input.value) {
+      input.value = '';
+      sendBtn.disabled = true;
+      charCount.textContent = '';
+      ClayDS.toast('Draft cleared', { kbd: 'Esc', tone: 'quiet' });
+    }
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (pendingTimer) {
+      ClayDS.toast('A turn is already running', { tone: 'warn' });
+      return;
+    }
+    submit();
+  });
+
+  document.querySelector('[data-cancel]').addEventListener('click', cancel);
+
+  document.querySelector('[data-effort]').addEventListener('change', function (event) {
+    document.querySelector('[data-session-effort]').textContent = event.target.value;
+    document.querySelector('[data-settings-effort]').textContent = event.target.value;
+    ClayDS.toast('Effort ' + event.target.value, { tone: 'quiet', ms: 1100 });
+  });
+
+  /* ---------------- inspector ------------------------------------------ */
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.inspector [role="tab"]'));
+
+  function openTab(index) {
+    if (tabs[index]) tabs[index].click();
+  }
+
+  document.querySelectorAll('[data-open-tab]').forEach(function (node) {
+    node.addEventListener('click', function () { openTab(Number(node.dataset.openTab)); });
+  });
+  document.querySelectorAll('[data-open-settings]').forEach(function (node) {
+    node.addEventListener('click', function () { openTab(4); });
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+    var map = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4 };
+    var index = map[event.key];
+    if (index === undefined) return;
+    if (document.activeElement && (document.activeElement.isContentEditable || /^(input|textarea)$/i.test(document.activeElement.tagName))) return;
+    event.preventDefault();
+    openTab(index);
+    ClayDS.toast('Inspector: ' + tabs[index].textContent, { kbd: ClayDS.key('mod+' + event.key), tone: 'quiet', ms: 1100 });
+  });
+
+  document.addEventListener('keydown', function (event) {
+    var typing = document.activeElement && (document.activeElement.isContentEditable || /^(input|textarea)$/i.test(document.activeElement.tagName));
+    if (typing) return;
+    if (event.key === 'f' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      openTab(2);
+      document.querySelector('[data-filter-list="#skill-rows"]').focus();
+    }
+  });
+
+  /* ---------------- theme menu ----------------------------------------- */
+
+  function themeItems(host) {
+    ClayDS.themes.forEach(function (theme, index) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'pop-item theme-item';
+      btn.setAttribute('role', 'menuitemradio');
+      btn.dataset.setTheme = theme.id;
+      btn.setAttribute('aria-checked', 'false');
+      btn.innerHTML = '<span class="swatch" aria-hidden="true" data-theme="' + theme.id + '"><i></i><i></i><i></i></span>'
+        + '<span>' + theme.label + '</span>'
+        + '<span class="theme-mode">' + theme.mode + '</span>';
+      var kbd = document.createElement('kbd');
+      kbd.className = 'kbd kbd--sm';
+      kbd.textContent = ClayDS.key('alt+' + (index + 1));
+      btn.appendChild(kbd);
+      host.appendChild(btn);
+    });
+  }
+
+  themeItems(document.getElementById('theme-list'));
+  themeItems(document.getElementById('theme-list-panel'));
+
+  document.querySelectorAll('[data-cycle-theme]').forEach(function (node) {
+    node.addEventListener('click', function () { ClayDS.cycleTheme(1); });
+  });
+
+  /* ---------------- palette -------------------------------------------- */
+
+  function commandPalette() {
+    return COMMANDS.map(function (item) {
+      return {
+        id: 'cmd:' + item[0],
+        title: item[0] + '  ' + item[1],
+        group: item[2],
+        keywords: item[0].slice(1) + ' ' + item[1],
+        run: function () {
+          if (item[0] === '/context' || item[0] === '/skills' || item[0] === '/mcp') {
+            openTab(2);
+            if (item[0] === '/skills') document.querySelector('[data-filter-list="#skill-rows"]').focus();
+            return;
+          }
+          if (item[0] === '/model') { ClayDS.togglePopover('model', document.querySelector('[data-popover-toggle="model"]')); return; }
+          if (item[0] === '/effort') { document.querySelector('[data-effort]').focus(); return; }
+          if (item[0] === '/clear') {
+            transcript.querySelectorAll('.turn').forEach(function (t) { t.remove(); });
+            if (empty) empty.hidden = false;
+            stats.user = 0; stats.agent = 0; stats.thinking = 0; stats.tools = 0;
+            renderStats();
+            ClayDS.toast('Conversation cleared', { tone: 'quiet' });
+            return;
+          }
+          if (item[0] === '/copy') {
+            ClayDS.toast('Transcript copied', { tone: 'quiet' });
+            return;
+          }
+          if (item[0] === '/theme') { ClayDS.togglePopover('theme', document.querySelector('[data-theme-trigger]')); return; }
+          if (item[0] === '/keys') { ClayDS.openOverlay('shortcuts'); return; }
+        }
+      };
+    });
+  }
+
+  function skillPalette() {
+    return SKILLS.map(function (pair) {
+      return {
+        id: 'skill:' + pair[0],
+        title: pair[0],
+        group: 'Skills',
+        meta: pair[1].slice(0, 62) + (pair[1].length > 62 ? '…' : ''),
+        keywords: pair[1],
+        hint: '↵',
+        run: function () { mention(pair[0]); }
+      };
+    });
+  }
+
+  function paletteExtras() {
+    return [
+      { id: 'mcp:graft', title: 'graft  ·  6 tools', group: 'MCP', keywords: 'mcp server tools', run: function () { mention('graft'); } },
+      { id: 'view:context', title: 'Inspector: Context', group: 'Session', hint: ClayDS.key('mod+3'), run: function () { openTab(2); } },
+      { id: 'view:session', title: 'Inspector: Session Info', group: 'Session', hint: ClayDS.key('mod+4'), run: function () { openTab(3); } },
+      { id: 'view:settings', title: 'Inspector: Settings', group: 'Session', hint: ClayDS.key('mod+5'), run: function () { openTab(4); } },
+      { id: 'view:files', title: 'Toggle file list', group: 'View', hint: ClayDS.key('mod+b'), run: function () { ClayDS.toggleSidebar(); } },
+      { id: 'view:inspector', title: 'Toggle inspector', group: 'View', hint: ClayDS.key('mod+i'), run: function () { ClayDS.toggleInspector(); } },
+      { id: 'view:keys', title: 'Keyboard map', group: 'View', hint: '?', run: function () { ClayDS.openOverlay('shortcuts'); } }
+    ].concat(ClayDS.themes.map(function (theme) {
+      return {
+        id: 'theme:' + theme.id,
+        title: 'Theme: ' + theme.label,
+        group: 'View',
+        meta: theme.mode,
+        run: function () { ClayDS.setTheme(theme.id); }
+      };
+    }));
+  }
+
+  ClayDS.setCommands(commandPalette().concat(skillPalette(), paletteExtras()));
+
+  /* ---------------- boot ------------------------------------------------ */
+
+  document.querySelector('[data-kbd-platform]').textContent = ClayDS.mod;
+  document.addEventListener('clay:file', function (event) { mention(event.detail.id); });
+  renderStats();
+  document.querySelector('[data-msg]').focus();
+})();
+</script>
+</body>
+</html>

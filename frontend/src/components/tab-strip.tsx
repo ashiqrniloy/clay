@@ -10,9 +10,15 @@ import styles from "./tab-strip.module.css";
 export interface TabItem {
   id: string;
   label: ReactNode;
+  /** Tooltip on the tab itself (the shell uses the full folder path here,
+   *  because the label is only the basename). */
+  title?: string;
   dirty?: boolean;
   closable?: boolean;
   disabled?: boolean;
+  /** Agent marker (plan 118 task 33): shown as the approved mono word, and
+   *  `busy` pulses it while the agent works. */
+  agent?: { busy: boolean } | null;
   content?: ReactNode;
 }
 
@@ -29,6 +35,10 @@ export interface ClayTabStripProps {
   className?: string;
   style?: CSSProperties;
   actions?: ReactNode;
+  /** `panel` (default) is a standalone tab bar with its own inner hairline;
+   *  `inline` sits inside chrome that already draws the boundary — the shell's
+   *  titlebar — so the strip adds no second line (DESIGN.md §14.4). */
+  variant?: "panel" | "inline";
 }
 
 /**
@@ -49,6 +59,7 @@ export function ClayTabStrip({
   className,
   style,
   actions,
+  variant = "panel",
 }: ClayTabStripProps) {
   const hasPanels = tabs.some((tab) => tab.content !== undefined);
 
@@ -90,7 +101,11 @@ export function ClayTabStrip({
       isDisabled={disabled}
       {...recipeAttributes("tabList", "root")}
     >
-      <div className={styles.stripWrapper}>
+      <div
+        className={`${styles.stripWrapper} ${
+          variant === "inline" ? styles.inline : ""
+        }`}
+      >
         <TabList
           aria-label={ariaLabel}
           className={styles.tabStrip}
@@ -106,10 +121,19 @@ export function ClayTabStrip({
             >
               {tab.dirty ? <span className={styles.dirty} aria-hidden /> : null}
               {typeof tab.label === "string" ? (
-                <span>{tab.label}</span>
+                <span title={tab.title}>{tab.label}</span>
               ) : (
                 tab.label
               )}
+              {tab.agent ? (
+                <span
+                  className={styles.agent}
+                  data-busy={tab.agent.busy ? "true" : "false"}
+                  title={tab.agent.busy ? "Agent working" : "Agent attached"}
+                >
+                  agent
+                </span>
+              ) : null}
               {tab.closable && onClose ? (
                 <button
                   type="button"

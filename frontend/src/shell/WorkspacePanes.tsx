@@ -1,7 +1,9 @@
-import { lazy, Suspense, useSyncExternalStore } from "react";
+import { lazy, Suspense, useCallback, useSyncExternalStore } from "react";
 
 import { ClayButton, ClayModal, ClayText } from "../components";
-import { PaneTree } from "./PaneTree";
+import { AgentView } from "../coding-agent/AgentView";
+import { PaneTree, effortChordOf } from "./PaneTree";
+import { tabUncommitted } from "./tab-store";
 import type { WorkspaceController } from "./workspace-controller";
 
 import styles from "./workspace-panes.module.css";
@@ -21,9 +23,22 @@ export function WorkspacePanes({
 }: {
   workspace: WorkspaceController;
 }) {
-  useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+  const snapshot = useSyncExternalStore(
+    workspace.subscribe,
+    workspace.getSnapshot,
+  );
   const runtime = workspace.active();
   const pending = workspace.pendingClose();
+  const tab =
+    snapshot.tabs.find((entry) => entry.clientId === runtime?.clientId) ?? null;
+  // Stable identity: the agent panel reports its run state on every render.
+  const clientId = runtime?.clientId ?? null;
+  const onAgentBusy = useCallback(
+    (busy: boolean) => {
+      if (clientId != null) workspace.setAgentBusy(clientId, busy);
+    },
+    [clientId, workspace],
+  );
   if (!runtime) {
     return (
       <div className={styles.empty}>
@@ -33,6 +48,24 @@ export function WorkspacePanes({
       </div>
     );
   }
+  // Both of the tab's views stay mounted and the inactive one is hidden, so
+  // switching never reloads a package, re-fetches the tree, or loses the other
+  // view's scroll/selection state (plan 118 task 33, performance AC). The agent
+  // half mounts the first time it is shown — its session must not start for a
+  // tab the user only edits.
+  const activePane = runtime.panes.get(runtime.tree.activePaneId) ?? null;
+  const agentMounted = runtime.agentMounted || tab?.view === "agent";
+  // Plan 118 task 36: the Files tab's row action — the document opens through
+  // the same path every other open uses (server-contained to the workspace
+  // root), and the tab switches to the view that shows it. The agent view stays
+  // mounted, so its transcript and scroll position survive the handoff.
+  const openInWorkspace = useCallback(
+    (path: string) => {
+      workspace.openPath(path);
+      workspace.setView("workspace");
+    },
+    [workspace],
+  );
   const panes = (
     <PaneTree
       runtime={runtime}
@@ -44,9 +77,25 @@ export function WorkspacePanes({
       onOpenPath={(path) => workspace.openPath(path)}
       onOpenFile={() => workspace.openFileDialog()}
       onOpenFolder={() => workspace.openFolderDialog()}
-      onLaunchAgent={() => workspace.launchCodingAgent()}
+      onPickAgent={(agent) => workspace.attachAgent(agent)}
+      onOpenWorkspace={(root) => void workspace.openWorkspace(root)}
+      showLauncher={tab ? tabUncommitted(tab) : false}
     />
   );
+  const agentView = agentMounted ? (
+    <AgentView
+      packageUi={runtime.ui.packageUi}
+      uiVersion={runtime.ui.packageUi?.version ?? 0}
+      workspaceRoot={tab?.workspaceRoot || runtime.sessionRoot}
+      session={activePane?.session ?? null}
+      send={activePane?.session.request ?? null}
+      effortChord={activePane ? effortChordOf(activePane) : null}
+      onBusyChange={onAgentBusy}
+      agentType={tab?.agent?.type ?? null}
+      onPickAgent={(agent) => void workspace.pickAgent(agent)}
+      onOpenInWorkspace={openInWorkspace}
+    />
+  ) : null;
   const content =
     runtime.ui.sdui || runtime.ui.packageUi ? (
       <Suspense fallback={panes}>
@@ -65,9 +114,27 @@ export function WorkspacePanes({
     ) : (
       panes
     );
+  const workspaceActive = tab?.view !== "agent";
   return (
     <div className={styles.host} data-testid="workspace-panes">
-      {content}
+      <div
+        className={styles.viewSlot}
+        data-view="workspace"
+        data-active={workspaceActive ? "true" : "false"}
+        hidden={!workspaceActive}
+      >
+        {content}
+      </div>
+      {agentView ? (
+        <div
+          className={styles.viewSlot}
+          data-view="agent"
+          data-active={workspaceActive ? "false" : "true"}
+          hidden={workspaceActive}
+        >
+          {agentView}
+        </div>
+      ) : null}
       {runtime.menu && (
         <Suspense fallback={null}>
           <CommandCentre workspace={workspace} />
@@ -77,31 +144,37 @@ export function WorkspacePanes({
         title="Unsaved changes"
         open={pending != null}
         onClose={() => workspace.cancelClose()}
+        // The foot is the modal's own region (hairline top, wrapping), cancel
+        // leading and the primary action last.
+        footer={
+          <>
+            <ClayButton variant="muted" onPress={() => workspace.cancelClose()}>
+              Cancel
+            </ClayButton>
+            <ClayButton
+              variant="danger"
+              onPress={() => {
+                if (pending)
+                  void workspace.confirmClose(pending.clientId, false);
+              }}
+            >
+              Discard and close
+            </ClayButton>
+            <ClayButton
+              variant="primary"
+              onPress={() => {
+                if (pending)
+                  void workspace.confirmClose(pending.clientId, true);
+              }}
+            >
+              Save all and close
+            </ClayButton>
+          </>
+        }
       >
         <ClayText variant="body">
           Save or discard {pending?.dirtyPaths.join(", ")} before closing.
         </ClayText>
-        <div className={styles.actions}>
-          <ClayButton
-            variant="primary"
-            onPress={() => {
-              if (pending) void workspace.confirmClose(pending.clientId, true);
-            }}
-          >
-            Save all and close
-          </ClayButton>
-          <ClayButton
-            variant="danger"
-            onPress={() => {
-              if (pending) void workspace.confirmClose(pending.clientId, false);
-            }}
-          >
-            Discard and close
-          </ClayButton>
-          <ClayButton variant="muted" onPress={() => workspace.cancelClose()}>
-            Cancel
-          </ClayButton>
-        </div>
       </ClayModal>
     </div>
   );

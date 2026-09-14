@@ -4,7 +4,9 @@
 
 - `scripts/capture-ui-review.sh`
 - `scripts/capture-editor-performance-review.sh` (Plan 099 real Tauri editor states)
-- `tests/fixtures/configuration/ui-review-*` (eight deterministic fixtures)
+- `tests/fixtures/configuration/ui-review-*` (the script accepts 16 named
+  fixtures: the shell states, the design-system/theme runs, the icon runs, and
+  `ui-review-workspace` / `ui-review-coding-agent` / `ui-review-launcher`)
 - `frontend/src/routes/fixture.tsx` (Plan 098 document-transfer fixture routes)
 - `tests/manual_smoke_docs.rs` — command/fixture documentation drift guard
 - `docs/development/launch-and-gui-smoke.md` — harness documentation
@@ -23,7 +25,7 @@ Plan 087 adds one documented command that launches isolated, fixed-size Linux GU
 scripts/capture-ui-review.sh --fixture ui-review-default --output <artifact-dir>
 ```
 
-Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`). The script:
+Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`), `--theme <specifier>` / `--appearance light|dark|system` (seed `~/.clay/preferences.json` inside the isolated root, so any fixture can be captured under any shipped theme), `--example-config` (boot the canonical `examples/config/` tree instead of the fixture's own `init.js`), `--size <WxH>`, and `--drive <json>` (AT-SPI steps executed before the capture). The script:
 
 1. Creates a mode-700 `mktemp` root with isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `TMPDIR`.
 2. Copies the fixture `init.js` to `$home/.clay/init.js` and, for document-bearing fixtures, writes `layout.json` v2 with an explicit leaf-form `splitTree` (`{"leaf":{"paneId":1}}` — a null `splitTree` degrades to the default single-pane layout and never reopens documents).
@@ -44,9 +46,41 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 | `ui-review-completion`       | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
 | `ui-review-command-centre`   | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
 | `ui-review-rust`             | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
-| `ui-review-design-neobrutal` | `setDesignSystem('@clay/design-neobrutal')` under Gruvbox Dark | Default Neobrutal design system active (Plan 104) |
-| `ui-review-design-glass`     | `setDesignSystem('@clay/design-glass')` under Gruvbox Dark     | Reference Glass design system active (Plan 104) |
-| `ui-review-design-system-light` | `setDesignSystem('@clay/design-neobrutal')` under Gruvbox Light | Cross-theme color authority verification (Plan 104) |
+| `ui-review-design-system` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Dark | Shipped design system active (Plan 118) |
+| `ui-review-design-system-light` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Light | Cross-theme color authority verification (Plan 118) |
+| `ui-review-launcher` | `loadPackage('@clay/launcher')` under Gruvbox Material Dark | Bundled launcher landing on the empty tab (Plan 118 Part D) |
+
+#### `--example-config` and `--drive`
+
+`--example-config` copies the whole canonical tree (`init.js` plus
+`packages/`) into the isolated config root, exactly as
+`cp -r examples/config/. ~/.clay/` would, and records
+`config_source=examples/config` in `metadata.txt`. It is accepted only with
+`--fixture ui-review-launcher` (the landing the canonical config renders) and
+refused with exit 2 for fixtures whose checks assert their own panel content, so
+a mismatched pair can never be captured as a pass.
+
+`--drive` executes AT-SPI steps (`click`, `focus`, `type`, `clear`, `wait`)
+before the capture, which reaches palette/menu/modal/rail states without input
+synthesis. Every step is verified against the live AT-SPI tree; a step that
+cannot be applied records `UNRESOLVED` with its reason — never a pass. Two
+limits found in practice: a launcher `list item` does not select on AT-SPI
+`click`, and the Control Center `entry` exposes no
+`org.a11y.atspi.EditableText`, so palette **filtering** cannot be typed into from
+AT-SPI on this stack.
+
+A PASS capture also writes a bounded, root-redacted `server.diagnostics.txt`
+(diagnostic/configuration/generation lines plus `configuration_failed_lines` and
+`agent_registration_lines` counters) so the startup contract is evidenced
+without retaining full logs. A failed drive step keeps its whole probe
+transcript in `drive.failed.txt`.
+
+The approved design language is Quiet Instrument ([`DESIGN.md`](../../../DESIGN.md)),
+shipped as `@clay/design-instrument`. The dedicated `ui-review-design-instrument`
+states were never needed: the `ui-review-design-system` / `…-light` states were
+retargeted to the shipped system (plan 118 task 9), and the removed Neobrutal and
+Glass fixture names are rejected by the script's argument check. The table lists
+only states the script can capture.
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
 
@@ -245,6 +279,47 @@ tests pass; frontend format/lint/typecheck and 99 Vitest tests pass; frontend
 budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
 `security-audit.sh` and `package-smoke.sh` pass; Clay Agent tests pass 8/8.
 
+## Plan 118 landing launch test (2026-09-13)
+
+Evidence: `test-plan/artifacts/118-quiet-instrument-migration/launch-test/`
+(`README.md` + 5 PASS captures, one recorded `UNRESOLVED` handoff attempt, one
+recorded `UNRESOLVED` palette-typing attempt, `isolation.txt`).
+
+The migration's launch test ran the real GUI against the canonical example:
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-launcher --example-config \
+  --size 1500x950 --output test-plan/artifacts/.../launch-test/landing-1500x950
+```
+
+Findings and recorded limits:
+
+- The copied example boots healthy and lands on the launcher (`Start`, the
+  `Workspaces` and `Agents` panes, the action row, a disabled `Open`), with the
+  full shell chrome present. Every PASS run records
+  `configuration_failed_lines=0` and `agent_registration_lines=22` (the
+  example's `@clay/coding-agent` load entry ran) plus the expected
+  `store packages stay unloaded` note from an isolated root without
+  `node_modules`.
+- Four theme captures (modus-operandi, modus-vivendi, gruvbox-material-dark,
+  gruvbox-material-light) confirm the shipped design system under every palette.
+- The Command Centre opened over the landing exposes **94** command entries in
+  the AT-SPI tree with **0** hits for `chat`, `neobrutal`, `glass` — the
+  negative check for the removed surfaces that palette *filtering* would
+  otherwise provide.
+- A **fresh landing shows a stale error status**: `unknown workspace document 1 —
+  Hint: Open the document through the server before saving, reloading, or
+  querying it.` It is the bootstrap placeholder diagnostic
+  (`src/server/workspace/mod.rs`, cleared on `documentOpened`) and appears in
+  every capture back to plan 109 — pre-existing, not caused by the example
+  config, but it should not be visible on a surface that never opened a
+document.
+- Workspace isolation: both processes run with `HOME`, `XDG_CONFIG_HOME`,
+  `XDG_DATA_HOME`, `TMPDIR` and a private socket inside the mode-700 root; a
+  sha256 of the developer's real `~/.clay/*` and `~/.config/clay/*` is identical
+  before and after a run. The copied example activates no process/LSP grant
+  (`authorizeLanguageServer` records grants, and no session was started).
+
 ## Invariants and Constraints
 
 - Every run uses a fresh mode-700 root: no ambient `~/.clay`, no default socket, no ambient server/config.
@@ -253,13 +328,15 @@ budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
 - Clay AT-SPI dumps must contain no document secrets or host paths; fixture
   workspaces hold only review files. Full-desktop PNGs are inspected before
   retention because unrelated desktop context can be visible.
-- The drift guard `plan087_ui_review_harness_command_and_prerequisites_are_documented` in `tests/manual_smoke_docs.rs` (protocol suite) re-asserts the documented commands, the eight fixture `init.js` files, and script safety markers, and forbids `cargo run -- smoke-gui` as a review substitute.
+- The drift guard `plan087_ui_review_harness_command_and_prerequisites_are_documented` in `tests/manual_smoke_docs.rs` (protocol suite) re-asserts the documented commands, the fixture `init.js` files, and script safety markers, and forbids `cargo run -- smoke-gui` as a review substitute. The plan-118 additions are pinned in `plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`: the shipped system captures, the removed-specifier rejection, `--example-config` refusal for a mismatched fixture, and the `--help` text.
 
 ## Related
 
+- [Design Artifact Gate](design-artifact-gate.md) — the prototype/approved-artifact contract and the prototype-set + component-conformance tools
+- [Launcher Landing Surface](launcher-landing-surface.md) — the surface the `ui-review-launcher` fixture captures
 - [docs/development/launch-and-gui-smoke.md](../../development/launch-and-gui-smoke.md) — harness reference (fixture/state/capture table, `WINDOW_WIDTH`/`WINDOW_HEIGHT` constants, UNRESOLVED semantics)
 - [docs/development/ui-observability.md](../../development/ui-observability.md) — observability entry point
 - [Masonry Shell Runtime](../archive/masonry-shell.md) — shell/chrome hosting the states the harness captures
 - [Pane Document Views](../archive/pane-document-views.md) — welcome entry state and completion projection
-- [Centered Command Centre Surface](centered-command-centre-surface.md) — the centered modal the harness captures
+- [Command Centre Surface (Centered Origin)](centered-command-centre-surface.md) — the centered modal the harness captures
 - [test-plan/index.md](../../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)

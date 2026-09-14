@@ -287,6 +287,8 @@ fn every_server_message() -> Vec<AgentServerMessage> {
             provider: "mock".into(),
             model: "demo".into(),
             leaf_id: None,
+            // Plan 118 task 35: a session may name the agent type it runs as.
+            agent: Some("reviewer".into()),
             entries: vec![clay::protocol::AgentTranscriptEntry::new(
                 clay::protocol::AgentTranscriptKind::User,
                 "hi",
@@ -319,6 +321,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
                 args_digest: None,
                 output_digest: None,
                 skill_name: None,
+                file: None,
             },
         },
         AgentServerMessage::Event {
@@ -670,7 +673,7 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
     let cargo = read_src("Cargo.toml");
     let agent_pkg = read_src("clay-agent/package.json");
     let agent_readme = read_src("clay-agent/README.md");
-    let chat_docs = read_src("packages/chat/docs/index.md");
+    let agent_docs = read_src("packages/coding-agent/docs/index.md");
     // ACP/AG-UI and retired 0.3 names stay denied everywhere. MCP is a
     // package-declared bridge allowed only in the clay-agent JS graph, so the
     // MCP needles are Cargo.toml-only denies (Phase 1).
@@ -715,7 +718,7 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
     assert!(agent_readme.contains("0.5.5"));
     assert!(agent_readme.contains("Upgrade Prism"));
     assert!(agent_readme.contains("no tools and no sandbox"));
-    assert!(chat_docs.contains("no tools, no sandbox"));
+    assert!(agent_docs.contains("grants no execution authority"));
     // Phase 0 + Phase 1 (Prism 0.5.x, live pins 0.5.5): exact family pins,
     // no retired 0.3 package names.
     for pin in [

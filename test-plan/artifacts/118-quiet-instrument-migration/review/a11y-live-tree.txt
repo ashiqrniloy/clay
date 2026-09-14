@@ -1,0 +1,84 @@
+application: clay-desktop
+  frame: Clay
+          button: Minimise
+          button: Maximise
+          button: Close
+          label: Clay
+          label
+          scroll pane
+            document web: Clay
+              landmark
+                page tab list: Window tabs
+                  page tab: Workspace
+                landmark: Application controls
+                  button: Palette
+                  button: Files
+                  toggle button: Hide outline
+              landmark: Clay workspace
+                landmark
+                  list box: Server-driven items
+                    list item: .agents/ 1 items
+                    list item: .cargo/ 1 items
+                    list item: .github/ 1 items
+                    list item: .gitignore
+                    list item: .ignore
+                    list item: .impeccable/ 6 items
+                    list item: .mcp.json
+                    list item: AGENTS.md
+                    list item: Cargo.lock
+                    list item: Cargo.toml
+                    list item: DESIGN.md
+                    list item: PRODUCT.md
+                    list item: README.md
+                    list item: VENT.md
+                    list item: benches/ 1 items
+                    list item: build.rs
+                    list item: clay-agent/ 9 items
+                    list item: decision-logs/ 80 items
+                    list item: design-artifacts/ 5 items
+                    list item: distribution/ 2 items
+                    list item: docs/ 6 items
+                    list item: examples/ 1 items
+                    list item: frontend/ 13 items
+                    list item: opencode.json
+                    list item: package-lock.json
+                    list item: packages/ 22 items
+                    list item: plans/ 100 items
+                    list item: roadmap.md
+                    list item: runtime/ 1 items
+                    list item: scripts/ 9 items
+                    list item: skills-lock.json
+                    list item: src/ 19 items
+                    list item: src-tauri/ 8 items
+                    list item: test-plan/ 20 items
+                    list item: tests/ 40 items
+                    list item: tools/ 1 items
+                    list item: windows/ 1 items
+                  landmark: Pane 1
+                    panel: Empty tab
+                      button: Open file
+                      button: Open folder
+                landmark: Document outline
+                  button: Hide outline
+                  description list
+                    description term
+                    description value
+                    description term
+                    description value
+                    description term
+                    description value
+                    description term
+                    description value
+                    description term
+                    description value
+                  paragraph
+              landmark
+                status bar
+                button: palette Ctrl
+X
+P
+                button: files Ctrl
+B
+                button: hide outline Ctrl
+I
+            scroll bar

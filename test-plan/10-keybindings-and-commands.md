@@ -116,7 +116,7 @@ Tab command policy table (module 14 steps in parentheses):
 | `clientTabNext` / `clientTabPrev` | `Ctrl+Tab` / `Ctrl+Shift+Tab` | wrap around (T25–T26); fewer than 2 tabs = no-op (T28) |
 | `clientTabNew` | `Ctrl+T` | same flow as `+`; ignored while the picker is open (T29) |
 | `clientTabClose` | `Ctrl+Shift+W` | last tab protected (T31); dirty tabs get the save-all/discard/cancel confirm menu (T32–T35) |
-| `clientTabActivate.<N>` | `Ctrl+<N>` | 1-based card order; N in 1..=9; beyond count = no-op (T27, T39) |
+| `clientTabActivate.<N>` | `Ctrl+Alt+<N>` | 1-based card order; N in 1..=9; beyond count = no-op (T27, T39) |
 | `clientTabMoveLeft` / `clientTabMoveRight` | `Ctrl+Shift+[` / `]` | boundary = no-op; never wraps (T36–T37) |
 | `clientTabMoveTo.<N>` | `Ctrl+Shift+<N>` | 1-based; N in 1..=9; beyond count = no-op (T38) |
 

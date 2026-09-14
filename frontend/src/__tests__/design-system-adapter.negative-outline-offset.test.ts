@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { variableToCssValue } from "../theme/design-system-adapter";
 
 describe("design-system adapter dimension bounds", () => {
-  it("allows negative outline-offset (inset focus outline, glass recipes)", () => {
+  it("allows negative outline-offset (inset focus outlines)", () => {
     expect(
       variableToCssValue(
         { type: "dimension", value: -2 },

@@ -45,10 +45,10 @@ instructions, then the user's global `SYSTEM.md`
 workspace `AGENTS.md` app layer (repo-root project prompt; symlink-escape
 excluded, 64 KiB cap, silently absent-safe).
 
-The working-area empty tab stays `@clay/chat`: only one empty-tab
-pane-content contribution may exist, and the agent's 50/50 split surface is
-a later task in this plan. Loading both packages is safe; the Coding Agent
-adds profile/skill registrations and its chrome command without touching the
+The working-area empty tab is the launcher surface (plan 118): the landing is
+its own pane-content contribution, and this package contributes only the named
+`pane` surface. Loading is safe in any order; the Coding Agent adds
+profile/skill registrations and its chrome command without touching the
 landing.
 
 ## Activation
@@ -65,7 +65,7 @@ That line applies the manifest contributions (command, chrome extension
 point) and runs `dist/load.js`, which registers the coding profile. No
 copied manifests, no manual primitive registration, no raw
 facade plumbing. Loading is explicit — without the line nothing
-coding-agent-shaped registers and the Chat landing stays untouched.
+coding-agent-shaped registers and the landing stays untouched.
 Load entries never spawn or block on the daemon: while the daemon is down,
 declarations queue server-side and apply right after its next initialize
 handshake; in runtimes with no agent host at all they queue process-global
@@ -73,8 +73,8 @@ and apply when a host installs.
 
 Sessions then select the profile with `session.new { profile: "coding" }`.
 Disabling or deleting the package withdraws the profile registration, the
-slash surface, the pane surface, and the chrome commands; the daemon and
-`@clay/chat` keep working unchanged.
+slash surface, the pane surface, and the chrome commands; the daemon and the
+landing package keep working unchanged.
 
 ## Agent split surface
 

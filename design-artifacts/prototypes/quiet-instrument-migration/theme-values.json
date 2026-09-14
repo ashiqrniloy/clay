@@ -1,0 +1,159 @@
+{
+  "_comment": [
+    "Proposed theme-side values for Quiet Instrument (plan 118, task 5). This file is the",
+    "specification tasks 13-14 implement: every entry below is the exact",
+    "clay.contributions.designTokens entry a shipped theme package will gain, and nothing here",
+    "is a new colour source - every value comes from the theme's own approved palette.",
+    "tools/make-theme-values.py reads this file, measures every value composited against the",
+    "surface it is drawn on, asserts the floors, and writes theme-values.md + themes.html.",
+    "Roles that already resolve from the theme's textStyles (surface.main/panel/control, kbd,",
+    "badge, tooltip, diagnostic, syntax) are deliberately absent: they are not part of the",
+    "proposal and the migration must not restate them."
+  ],
+  "floors": {
+    "text": 4.5,
+    "ui": 3.0
+  },
+  "materials": {
+    "veil": {
+      "opacity": 0.55,
+      "owner": "design system",
+      "note": "surface.panel at opacity.veil; the theme supplies only surface.panel"
+    },
+    "scrim": {
+      "opacity": 0.5,
+      "blur": 3,
+      "owner": "design system",
+      "note": "surface.scrim at opacity.scrim(0.5) + backdrop blur 3; the theme supplies surface.scrim"
+    }
+  },
+  "rationale": {
+    "border.hairline": "The quiet step: the theme's own border grey (the approved palette's line-2) at 34% alpha. Zone dividers and resting control outlines, so it sits below the 3:1 floor on purpose - WCAG 1.4.11 covers information needed to identify a component or state; a divider is decoration, and the control is identified by its label and by its hover/active/focus states. The invariant it keeps is order: quieter than border.subtle. (DESIGN.md 10.1 asks for the same step in ink; at 34% of ink it composites ~2.4:1, still under the floor, so the floor is scoped by role rather than by alpha - finding 1.)",
+    "border.subtle": "The structural boundary, and the step the gate measures: the theme's border grey at full strength - exactly the value the approved screens already draw for the window frame and the split handle, so structural borders do not move at all. It also becomes the hover/emphasis outline, where hover is currently line-2 at 62% (2.05:1, under the floor): 100% of the grey is the smallest change that clears 3:1 without putting ink into the normal path.",
+    "border.strong": "DESIGN.md 10.1: ink at full strength, for rare explicit separators only. Kept a separate role so host CSS never reaches past the theme for a hard line.",
+    "surface.scrim": "The darker of the theme's ink and its canvas, so dimming always darkens whatever the theme's depth direction is. The theme supplies the colour, the design system the 0.5 opacity and the 3px blur.",
+    "accent.primary": "The theme's own accent (DESIGN.md 10). Today accent.primary resolves to the monochrome caret, so every accent-driven state is grey.",
+    "accent.muted": "The same accent one step down (75% alpha) for quieter affordances - inactive navigation, dimmed links - still required to clear 3:1 against canvas. It is the one alpha step in the proposal that is set by the floor rather than by the ladder, because the accent is a saturated hue rather than a grey.",
+    "focus.ring": "The accent: focus is a state, and states are the accent's only job (DESIGN.md 14.6).",
+    "border.focus": "The accent, so a focused control's border and its ring are one colour.",
+    "text.muted": "The theme's dim step, required to clear 4.5:1 against the panel.",
+    "text.disabled": "The theme's meta step, required to clear 4.5:1 against canvas. Today it resolves to the placeholder, which fails in the Gruvbox themes.",
+    "surface.hover": "Opaque hover fill (DESIGN.md 10.3). Today hover/active/selected all resolve to the theme's 40%-alpha selection colour, so no state is opaque.",
+    "surface.active": "Opaque pressed fill.",
+    "surface.selected": "Opaque selected-row fill that clears 3:1 against its own text.",
+    "_depth": "DESIGN.md 10.2: the chrome is the darker of the two surfaces on every theme, and the canvas is never the darker one ('rather than an inverted panel'). Measured per theme, today and after the proposal: where they disagree, the canvas has to move (the two Gruvbox themes) or the depth direction is inverted."
+  },
+  "themes": {
+    "@clay/theme-modus-operandi": {
+      "palette": "modus-operandi",
+      "ink": "#000000",
+      "canvas": "#ffffff",
+      "panel": "#f2f2f2",
+      "tokens": {
+        "border.hairline": "#87878757",
+        "border.subtle": "#878787",
+        "border.strong": "#000000",
+        "surface.scrim": "#000000",
+        "accent.primary": "#0031a9",
+        "accent.muted": "#0031a9bf",
+        "focus.ring": "#0031a9",
+        "border.focus": "#0031a9",
+        "text.muted": "#4f4f4f",
+        "text.disabled": "#6b6b6b",
+        "surface.hover": "#e6e6e6",
+        "surface.active": "#d8d8d8",
+        "surface.selected": "#c9e2ff"
+      },
+      "line2": "#878787",
+      "accent": "#0031a9",
+      "chrome": "#f0f0f0"
+    },
+    "@clay/theme-modus-vivendi": {
+      "palette": "modus-vivendi",
+      "ink": "#ffffff",
+      "canvas": "#000000",
+      "panel": "#1e1e1e",
+      "tokens": {
+        "border.hairline": "#6f6f6f57",
+        "border.subtle": "#6f6f6f",
+        "border.strong": "#ffffff",
+        "surface.scrim": "#000000",
+        "accent.primary": "#2fafff",
+        "accent.muted": "#2fafffbf",
+        "focus.ring": "#2fafff",
+        "border.focus": "#2fafff",
+        "text.muted": "#c3c3c3",
+        "text.disabled": "#8f8f8f",
+        "surface.hover": "#262626",
+        "surface.active": "#333333",
+        "surface.selected": "#2f447f"
+      },
+      "line2": "#6f6f6f",
+      "accent": "#2fafff",
+      "chrome": "#000000"
+    },
+    "@clay/theme-gruvbox-material-dark": {
+      "palette": "gruvbox-material-dark",
+      "ink": "#d4be98",
+      "canvas": "#282828",
+      "panel": "#1d2021",
+      "tokens": {
+        "border.hairline": "#92837457",
+        "border.subtle": "#928374",
+        "border.strong": "#d4be98",
+        "surface.scrim": "#1d2021",
+        "accent.primary": "#7daea3",
+        "accent.muted": "#7daea3bf",
+        "focus.ring": "#7daea3",
+        "border.focus": "#7daea3",
+        "text.muted": "#b3a284",
+        "text.disabled": "#ab9d89",
+        "surface.hover": "#3c3836",
+        "surface.active": "#45403d",
+        "surface.selected": "#3a4438"
+      },
+      "line2": "#928374",
+      "accent": "#7daea3",
+      "chrome": "#1d2021",
+      "text_styles_fix": {
+        "swapped": [
+          "shellBg",
+          "panelBg"
+        ],
+        "from": {
+          "shellBg": "#1d2021",
+          "panelBg": "#282828"
+        },
+        "to": {
+          "shellBg": "#282828",
+          "panelBg": "#1d2021"
+        },
+        "why": "The approved palette puts the canvas at #282828 and the chrome at #1d2021; the package ships the opposite (shellBg #1d2021 as the canvas), so today the theme inverts depth: the panel reads lighter than the canvas. DESIGN.md 10.2 requires the chrome to be the darker of the two on every theme. Swapping the two textStyles values fixes the shell, the editor and the SDUI in one move and needs no designTokens entry - the roles keep resolving from textStyles as they do today."
+      }
+    },
+    "@clay/theme-gruvbox-material-light": {
+      "palette": "gruvbox-material-light",
+      "ink": "#504940",
+      "canvas": "#fbf1c7",
+      "panel": "#f2e5bc",
+      "tokens": {
+        "border.hairline": "#8a7a6357",
+        "border.subtle": "#8a7a63",
+        "border.strong": "#504940",
+        "surface.scrim": "#504940",
+        "accent.primary": "#076678",
+        "accent.muted": "#076678bf",
+        "focus.ring": "#076678",
+        "border.focus": "#076678",
+        "text.muted": "#6b5c48",
+        "text.disabled": "#71624b",
+        "surface.hover": "#ece0b6",
+        "surface.active": "#e3d3a5",
+        "surface.selected": "#dbdfae"
+      },
+      "line2": "#8a7a63",
+      "accent": "#076678",
+      "chrome": "#f2e5bc"
+    }
+  }
+}

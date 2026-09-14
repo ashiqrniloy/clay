@@ -1249,6 +1249,10 @@ impl ResolvedComponentRecipe {
     }
 }
 
+/// The terminal of the resolution chain: the values a recipe gets when neither the
+/// package nor the core fallbacks say anything. It carries the language's neutral
+/// values (DESIGN.md §9 focus ring at offset 2; §7 "nothing linear", so an
+/// undeclared region declares no transition rather than a linear 100ms one).
 impl Default for ResolvedComponentRecipe {
     fn default() -> Self {
         Self {
@@ -1268,9 +1272,9 @@ impl Default for ResolvedComponentRecipe {
             opacity: 1.0,
             outline_color: ThemeColorRef("focus.ring".to_string()),
             outline_width: 2.0,
-            outline_offset: 1.0,
+            outline_offset: 2.0,
             outline_style: OutlineStyle::Solid,
-            transition_duration: 100.0,
+            transition_duration: 0.0,
             transition_timing: TransitionTiming::Linear,
             transform_preset: TransformPreset::None,
         }
@@ -1427,424 +1431,412 @@ impl ActiveDesignSystem {
     }
 }
 
-/// Returns the complete map of Clay core default recipes (restrained utilitarian Neobrutal baseline).
+/// Quiet Instrument geometry ladder (DESIGN.md §4/§5).
+///
+/// Literals rather than variables: `@clay/core` paints before any package is
+/// installed, and a build that has no design system installed must resolve the
+/// same values `@clay/design-instrument` activates — otherwise the activation
+/// swap would move geometry (plan 118 task 16).
+const RADIUS_XS: f64 = 5.0;
+const RADIUS_CONTROL: f64 = 8.0;
+const RADIUS_PANEL: f64 = 12.0;
+const RADIUS_SURFACE: f64 = 16.0;
+const RADIUS_PILL: f64 = 9999.0;
+/// Full-bleed regions keep a square outer edge (§5), and a text-only or
+/// layout-only recipe has no visible radius at all.
+const RADIUS_FLUSH: f64 = 0.0;
+
+/// Motion tiers (DESIGN.md §7): state transitions, surfaces entering, and — for a
+/// region that never animates — no transition at all. Nothing in the language is
+/// linear, so an inert region declares 0 rather than a linear transition.
+const MOTION_FAST: f64 = 150.0;
+const MOTION_ENTER: f64 = 240.0;
+const MOTION_NONE: f64 = 0.0;
+
+/// The two approved soft elevation stacks (DESIGN.md §6). Static regions get
+/// neither: a region that never floats must not look pressable (§14 bans hard
+/// offset shadows outright).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Elevation {
+    Flat,
+    Pop,
+    Overlay,
+}
+
+fn elevation_stack(elevation: Elevation) -> Vec<ShadowLayer> {
+    // (x, y, blur, spread, color role, opacity)
+    let layers: &[(f64, f64, f64, f64, &str, f64)] = match elevation {
+        Elevation::Flat => return Vec::new(),
+        Elevation::Pop => &[
+            (0.0, 14.0, 34.0, -14.0, "text.primary", 0.34),
+            (0.0, 1.0, 3.0, -1.0, "text.primary", 0.16),
+        ],
+        Elevation::Overlay => &[
+            (0.0, 24.0, 60.0, -16.0, "text.primary", 0.42),
+            (0.0, 2.0, 10.0, -4.0, "text.primary", 0.22),
+        ],
+    };
+    layers
+        .iter()
+        .map(|&(x, y, blur, spread, role, opacity)| ShadowLayer {
+            x,
+            y,
+            blur,
+            spread,
+            color_role: ThemeColorRef(role.to_string()),
+            opacity,
+            inset: false,
+        })
+        .collect()
+}
+
+/// One component kind or shell surface and the language values for its `root`
+/// rest recipe.
+struct FallbackKind {
+    component: &'static str,
+    fill: &'static str,
+    text: &'static str,
+    border: &'static str,
+    border_width: f64,
+    radius: f64,
+    padding: Option<&'static str>,
+    gap: Option<&'static str>,
+    background_opacity: f64,
+    motion: f64,
+    timing: TransitionTiming,
+    elevation: Elevation,
+}
+
+/// Component kinds the host shell consumes before a design-system snapshot exists.
+/// The shipped package declares most of these too; the values here are the same ones
+/// (asserted by `package_ui_conformance`), so installing a design system cannot move
+/// the pre-bootstrap paint.
+#[rustfmt::skip]
+const FALLBACK_KINDS: &[FallbackKind] = &[
+    FallbackKind { component: "dropdown", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: Some("spacing.xxs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "checkbox", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_XS, padding: None, gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "switch", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_PILL, padding: None, gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "slider", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "label", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "badge", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_XS, padding: Some("spacing.xxs"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "progressBar", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "tab", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "collapse", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_CONTROL, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "table", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "tree", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "flex", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "grid", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "scroll", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "seg", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_PILL, padding: Some("spacing.xxs"), gap: Some("spacing.none"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "sessionRow", fill: "transparent", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_CONTROL, padding: Some("spacing.xs"), gap: Some("spacing.sm"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "statRow", fill: "transparent", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_XS, padding: Some("spacing.xxs"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat },
+    FallbackKind { component: "empty", fill: "transparent", text: "text.muted", border: "border.subtle", border_width: 0.0, radius: RADIUS_FLUSH, padding: Some("spacing.lg"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "keyHint", fill: "transparent", text: "text.muted", border: "border.subtle", border_width: 0.0, radius: RADIUS_FLUSH, padding: Some("spacing.xxs"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+];
+
+/// Internal shell surfaces. The shipped package covers most of the shell chrome;
+/// these are the surfaces the host owns outright, plus the ones the chat removal
+/// (plan 118 tasks 23-24) deletes from the package.
+#[rustfmt::skip]
+const FALLBACK_SURFACES: &[FallbackKind] = &[
+    FallbackKind { component: "tooltip", fill: "surface.overlay", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_CONTROL, padding: Some("spacing.tooltip"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Pop },
+    FallbackKind { component: "tabBar", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_FLUSH, padding: Some("spacing.xs"), gap: Some("spacing.xxs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "paneSplitTree", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "statusBar", fill: "transparent", text: "text.muted", border: "border.hairline", border_width: 1.0, radius: RADIUS_FLUSH, padding: Some("spacing.xxs"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "commandCentre", fill: "surface.overlay", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_SURFACE, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_ENTER, timing: TransitionTiming::SpringSnappy, elevation: Elevation::Overlay },
+    FallbackKind { component: "fileBrowser", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "settingsPanel", fill: "surface.panel", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_PANEL, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 0.55, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "chatPanel", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "welcome", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "transientMenu", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "completion", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+    FallbackKind { component: "editorChrome", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
+];
+
+/// Auxiliary families whose consumed rest key is not the `<component>.default.root.rest`
+/// shape the loop above builds: the agent view's picker trigger, the key-hint
+/// slots, and the status dot's tone variants (plan 118 task E4). Values mirror what
+/// the shipped package resolves for those keys, so the core baseline stays the
+/// host-consumed subset of one language.
+#[rustfmt::skip]
+const FALLBACK_SLOT_EXTRAS: &[(&str, &str, &str, FallbackKind)] = &[
+    ("agentPicker", "default", "trigger", FallbackKind { component: "agentPicker", fill: "transparent", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_CONTROL, padding: Some("spacing.xxs"), gap: Some("spacing.xxs"), background_opacity: 1.0, motion: MOTION_FAST, timing: TransitionTiming::EaseOut, elevation: Elevation::Flat }),
+    ("keyHint", "default", "keys", FallbackKind { component: "keyHint", fill: "transparent", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: Some("spacing.xxs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("keyHint", "default", "row", FallbackKind { component: "keyHint", fill: "transparent", text: "text.muted", border: "border.subtle", border_width: 0.0, radius: RADIUS_FLUSH, padding: Some("spacing.xxs"), gap: Some("spacing.sm"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("statusDot", "busy", "root", FallbackKind { component: "statusDot", fill: "accent.primary", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("statusDot", "error", "root", FallbackKind { component: "statusDot", fill: "diagnostic.error", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("statusDot", "muted", "root", FallbackKind { component: "statusDot", fill: "text.muted", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("statusDot", "success", "root", FallbackKind { component: "statusDot", fill: "diagnostic.success", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+    ("statusDot", "warning", "root", FallbackKind { component: "statusDot", fill: "diagnostic.warning", text: "text.primary", border: "border.subtle", border_width: 0.0, radius: RADIUS_PILL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat }),
+];
+
+/// The complete map of Clay core default recipes: the values the shell paints
+/// before (or without) a design-system snapshot, and the base every package recipe
+/// resolves against. Keys and values are asserted against the shipped package by
+/// `tests/package_ui_conformance.rs`.
 pub fn core_design_system_fallbacks() -> BTreeMap<RecipeKey, ResolvedComponentRecipe> {
     let mut map = BTreeMap::new();
 
-    // 1. Button recipes
-    for variant in ["default", "muted", "primary", "danger"] {
-        let (bg, fg, border) = match variant {
-            "primary" => ("accent.primary", "surface.main", "accent.primary"),
-            "danger" => ("diagnostic.error", "surface.main", "diagnostic.error"),
-            "muted" => ("transparent", "text.muted", "border.subtle"),
-            _ => ("surface.control", "text.primary", "border.subtle"),
-        };
+    // 1. Buttons: rest / hover / active / focus / disabled for each variant.
+    #[rustfmt::skip]
+    let button_variants = [
+        // variant, rest fill, text, rest border, rest border width, hover fill,
+        // hover fill opacity, hover text, hover border width, hover border,
+        // active fill, active fill opacity, disabled fill
+        ("default", "transparent", "text.primary", "border.hairline", 1.0, "surface.hover", 1.0, "text.primary", 1.0, "border.subtle", "surface.active", 1.0, "transparent"),
+        ("primary", "accent.primary", "surface.main", "transparent", 0.0, "accent.primary", 0.92, "surface.main", 0.0, "transparent", "accent.primary", 1.0, "surface.disabled"),
+        ("muted", "transparent", "text.muted", "transparent", 0.0, "surface.hover", 1.0, "text.primary", 0.0, "transparent", "surface.active", 1.0, "transparent"),
+        ("danger", "transparent", "diagnostic.error", "border.hairline", 1.0, "diagnostic.error", 0.16, "diagnostic.error", 0.0, "border.hairline", "diagnostic.error", 0.24, "transparent"),
+    ];
 
-        // button root rest
-        map.insert(
-            RecipeKey::new("button", variant, "root", RecipeState::Rest),
-            ResolvedComponentRecipe {
-                background_color: ThemeColorRef(bg.to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef(fg.to_string()),
-                border_color: ThemeColorRef(border.to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 2.0,
-                outline_offset: 1.0,
-                outline_style: OutlineStyle::None,
-                transition_duration: 100.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
-            },
-        );
-
-        // button root hover
-        map.insert(
-            RecipeKey::new("button", variant, "root", RecipeState::Hover),
-            ResolvedComponentRecipe {
-                background_color: ThemeColorRef("surface.hover".to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef(fg.to_string()),
-                border_color: ThemeColorRef("border.strong".to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 2.0,
-                outline_offset: 1.0,
-                outline_style: OutlineStyle::None,
-                transition_duration: 100.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
-            },
-        );
-
-        // button root active
-        map.insert(
-            RecipeKey::new("button", variant, "root", RecipeState::Active),
-            ResolvedComponentRecipe {
-                background_color: ThemeColorRef("surface.active".to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef(fg.to_string()),
-                border_color: ThemeColorRef("border.strong".to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 2.0,
-                outline_offset: 1.0,
-                outline_style: OutlineStyle::None,
-                transition_duration: 50.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::PressShiftDown,
-            },
-        );
-
-        // button root focus
-        map.insert(
-            RecipeKey::new("button", variant, "root", RecipeState::Focus),
-            ResolvedComponentRecipe {
-                background_color: ThemeColorRef(bg.to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef(fg.to_string()),
-                border_color: ThemeColorRef("border.focus".to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 2.0,
-                outline_offset: 1.0,
-                outline_style: OutlineStyle::Solid,
-                transition_duration: 100.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
-            },
-        );
-
-        // button root disabled
-        map.insert(
-            RecipeKey::new("button", variant, "root", RecipeState::Disabled),
-            ResolvedComponentRecipe {
-                background_color: ThemeColorRef("surface.disabled".to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef("text.disabled".to_string()),
-                border_color: ThemeColorRef("border.hairline".to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 0.5,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 0.0,
-                outline_offset: 0.0,
-                outline_style: OutlineStyle::None,
-                transition_duration: 0.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
-            },
-        );
-    }
-
-    // 2. Text Input recipes
-    map.insert(
-        RecipeKey::new("textInput", "default", "root", RecipeState::Rest),
-        ResolvedComponentRecipe {
-            background_color: ThemeColorRef("surface.control".to_string()),
+    for (
+        variant,
+        fill,
+        text,
+        border,
+        border_width,
+        hover_fill,
+        hover_opacity,
+        hover_text,
+        hover_border_width,
+        hover_border,
+        active_fill,
+        active_opacity,
+        disabled_fill,
+    ) in button_variants
+    {
+        let rest = ResolvedComponentRecipe {
+            background_color: ThemeColorRef(fill.to_string()),
             background_opacity: 1.0,
-            text_color: ThemeColorRef("text.primary".to_string()),
-            border_color: ThemeColorRef("border.subtle".to_string()),
-            border_width: 1.0,
-            border_style: BorderStyle::Solid,
-            border_radius: 0.0,
-            padding: Some("spacing.sm".to_string()),
-            gap: None,
+            text_color: ThemeColorRef(text.to_string()),
+            border_color: ThemeColorRef(border.to_string()),
+            border_width,
+            border_style: if border_width > 0.0 {
+                BorderStyle::Solid
+            } else {
+                BorderStyle::None
+            },
+            border_radius: RADIUS_CONTROL,
+            padding: Some("spacing.xs".to_string()),
+            gap: Some("spacing.xs".to_string()),
             shadow: Vec::new(),
             backdrop_blur: 0.0,
             backdrop_saturate: 1.0,
             inner_highlight: None,
             opacity: 1.0,
             outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            outline_width: 2.0,
+            outline_offset: 2.0,
             outline_style: OutlineStyle::None,
-            transition_duration: 100.0,
-            transition_timing: TransitionTiming::Linear,
+            transition_duration: MOTION_FAST,
+            transition_timing: TransitionTiming::EaseOut,
             transform_preset: TransformPreset::None,
+        };
+        map.insert(
+            RecipeKey::new("button", variant, "root", RecipeState::Rest),
+            rest.clone(),
+        );
+
+        // Hover and active change fill/text/border only; the fill is a state role,
+        // never a lift, so no shadow appears (§6).
+        map.insert(
+            RecipeKey::new("button", variant, "root", RecipeState::Hover),
+            ResolvedComponentRecipe {
+                background_color: ThemeColorRef(hover_fill.to_string()),
+                background_opacity: hover_opacity,
+                text_color: ThemeColorRef(hover_text.to_string()),
+                border_color: ThemeColorRef(hover_border.to_string()),
+                border_width: hover_border_width,
+                ..rest.clone()
+            },
+        );
+        map.insert(
+            RecipeKey::new("button", variant, "root", RecipeState::Active),
+            ResolvedComponentRecipe {
+                background_color: ThemeColorRef(active_fill.to_string()),
+                background_opacity: active_opacity,
+                border_width: hover_border_width,
+                transform_preset: TransformPreset::PressShiftDown,
+                ..rest.clone()
+            },
+        );
+        map.insert(
+            RecipeKey::new("button", variant, "root", RecipeState::Focus),
+            ResolvedComponentRecipe {
+                outline_color: ThemeColorRef("focus.ring".to_string()),
+                outline_width: 2.0,
+                outline_offset: 2.0,
+                outline_style: OutlineStyle::Solid,
+                ..rest.clone()
+            },
+        );
+        map.insert(
+            RecipeKey::new("button", variant, "root", RecipeState::Disabled),
+            ResolvedComponentRecipe {
+                background_color: ThemeColorRef(disabled_fill.to_string()),
+                text_color: ThemeColorRef("text.disabled".to_string()),
+                opacity: 0.5,
+                outline_style: OutlineStyle::None,
+                ..rest
+            },
+        );
+    }
+
+    // 2. Text inputs: the composer shell (`field`/`root`) and the single-line well.
+    // `root` is the composer/textarea shell (DESIGN.md §11: `surface.control` fill,
+    // one hairline, radius 12); `input` is the single-line well inside it.
+    map.insert(
+        RecipeKey::new("textInput", "default", "root", RecipeState::Rest),
+        ResolvedComponentRecipe {
+            background_color: ThemeColorRef("surface.control".to_string()),
+            border_color: ThemeColorRef("border.hairline".to_string()),
+            border_width: 1.0,
+            border_style: BorderStyle::Solid,
+            border_radius: RADIUS_PANEL,
+            padding: Some("spacing.xs".to_string()),
+            gap: Some("spacing.xs".to_string()),
+            outline_style: OutlineStyle::None,
+            transition_duration: MOTION_FAST,
+            transition_timing: TransitionTiming::EaseOut,
+            ..ResolvedComponentRecipe::default()
         },
     );
     map.insert(
         RecipeKey::new("textInput", "default", "input", RecipeState::Rest),
         ResolvedComponentRecipe {
-            // Fields sit darker than button control fills so inputs read as
-            // recessed wells (plan 110 task 9 baseline hierarchy).
-            background_color: ThemeColorRef("surface.main".to_string()),
-            background_opacity: 1.0,
+            background_color: ThemeColorRef("surface.control".to_string()),
             text_color: ThemeColorRef("text.primary".to_string()),
-            border_color: ThemeColorRef("border.subtle".to_string()),
+            border_color: ThemeColorRef("border.hairline".to_string()),
             border_width: 1.0,
             border_style: BorderStyle::Solid,
-            border_radius: 0.0,
-            padding: Some("spacing.sm".to_string()),
-            gap: None,
-            shadow: Vec::new(),
-            backdrop_blur: 0.0,
-            backdrop_saturate: 1.0,
-            inner_highlight: None,
-            opacity: 1.0,
-            outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            border_radius: RADIUS_CONTROL,
+            padding: Some("spacing.xs".to_string()),
             outline_style: OutlineStyle::None,
-            transition_duration: 100.0,
-            transition_timing: TransitionTiming::Linear,
-            transform_preset: TransformPreset::None,
+            transition_duration: MOTION_FAST,
+            transition_timing: TransitionTiming::EaseOut,
+            ..ResolvedComponentRecipe::default()
         },
     );
 
-    // 3. Modal recipes
+    // 3. Modal: the portal container, the scrim, and the dialog that lifts.
     map.insert(
         RecipeKey::new("modal", "default", "root", RecipeState::Rest),
         ResolvedComponentRecipe {
             background_color: ThemeColorRef::transparent(),
-            background_opacity: 1.0,
-            text_color: ThemeColorRef("text.primary".to_string()),
             border_color: ThemeColorRef::transparent(),
             border_width: 0.0,
             border_style: BorderStyle::None,
-            border_radius: 0.0,
-            padding: None,
-            gap: None,
-            shadow: Vec::new(),
-            backdrop_blur: 0.0,
-            backdrop_saturate: 1.0,
-            inner_highlight: None,
-            opacity: 1.0,
-            outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            border_radius: RADIUS_FLUSH,
             outline_style: OutlineStyle::None,
-            transition_duration: 150.0,
-            transition_timing: TransitionTiming::EaseOut,
-            transform_preset: TransformPreset::None,
+            ..ResolvedComponentRecipe::default()
         },
     );
     map.insert(
         RecipeKey::new("modal", "default", "scrim", RecipeState::Rest),
         ResolvedComponentRecipe {
             background_color: ThemeColorRef("surface.scrim".to_string()),
-            background_opacity: 0.75,
-            text_color: ThemeColorRef("text.primary".to_string()),
+            background_opacity: 0.5,
             border_color: ThemeColorRef::transparent(),
             border_width: 0.0,
             border_style: BorderStyle::None,
-            border_radius: 0.0,
-            padding: None,
-            gap: None,
-            shadow: Vec::new(),
-            backdrop_blur: 0.0,
-            backdrop_saturate: 1.0,
-            inner_highlight: None,
-            opacity: 1.0,
-            outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            border_radius: RADIUS_FLUSH,
+            backdrop_blur: 3.0,
             outline_style: OutlineStyle::None,
-            transition_duration: 150.0,
-            transition_timing: TransitionTiming::EaseOut,
-            transform_preset: TransformPreset::None,
+            transition_duration: MOTION_ENTER,
+            transition_timing: TransitionTiming::SpringSnappy,
+            ..ResolvedComponentRecipe::default()
         },
     );
     map.insert(
         RecipeKey::new("modal", "default", "dialog", RecipeState::Rest),
         ResolvedComponentRecipe {
             background_color: ThemeColorRef("surface.overlay".to_string()),
-            background_opacity: 1.0,
             text_color: ThemeColorRef("text.primary".to_string()),
-            border_color: ThemeColorRef("border.strong".to_string()),
-            border_width: 2.0,
+            border_color: ThemeColorRef("border.hairline".to_string()),
+            border_width: 1.0,
             border_style: BorderStyle::Solid,
-            border_radius: 0.0,
-            padding: Some("spacing.lg".to_string()),
-            gap: Some("spacing.md".to_string()),
-            shadow: vec![ShadowLayer {
-                x: 4.0,
-                y: 4.0,
-                blur: 0.0,
-                spread: 0.0,
-                color_role: ThemeColorRef("border.strong".to_string()),
-                opacity: 1.0,
-                inset: false,
-            }],
-            backdrop_blur: 0.0,
-            backdrop_saturate: 1.0,
-            inner_highlight: None,
-            opacity: 1.0,
-            outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            border_radius: RADIUS_SURFACE,
+            padding: Some("spacing.md".to_string()),
+            gap: Some("spacing.sm".to_string()),
+            shadow: elevation_stack(Elevation::Overlay),
             outline_style: OutlineStyle::None,
-            transition_duration: 150.0,
-            transition_timing: TransitionTiming::EaseOut,
-            transform_preset: TransformPreset::None,
+            transition_duration: MOTION_ENTER,
+            transition_timing: TransitionTiming::SpringSnappy,
+            ..ResolvedComponentRecipe::default()
         },
     );
 
-    // 4. Panel recipes
+    // 4. Panel: one veil fill, one hairline, radius 12, never a shadow (§6).
     map.insert(
         RecipeKey::new("panel", "default", "root", RecipeState::Rest),
         ResolvedComponentRecipe {
             background_color: ThemeColorRef("surface.panel".to_string()),
-            background_opacity: 1.0,
+            background_opacity: 0.55,
             text_color: ThemeColorRef("text.primary".to_string()),
-            border_color: ThemeColorRef("border.subtle".to_string()),
+            border_color: ThemeColorRef("border.hairline".to_string()),
             border_width: 1.0,
             border_style: BorderStyle::Solid,
-            border_radius: 0.0,
-            padding: Some("spacing.md".to_string()),
-            gap: Some("spacing.sm".to_string()),
-            shadow: Vec::new(),
-            backdrop_blur: 0.0,
-            backdrop_saturate: 1.0,
-            inner_highlight: None,
-            opacity: 1.0,
-            outline_color: ThemeColorRef("focus.ring".to_string()),
-            outline_width: 0.0,
-            outline_offset: 0.0,
+            border_radius: RADIUS_PANEL,
+            padding: Some("spacing.sm".to_string()),
+            gap: Some("spacing.xs".to_string()),
             outline_style: OutlineStyle::None,
-            transition_duration: 100.0,
+            transition_duration: MOTION_NONE,
             transition_timing: TransitionTiming::Linear,
-            transform_preset: TransformPreset::None,
+            ..ResolvedComponentRecipe::default()
         },
     );
 
-    // 5. Remaining component kind fallbacks (root rest + primary slots)
-    let standard_components = [
-        ("dropdown", "surface.main", "border.subtle", 1.0),
-        ("checkbox", "surface.control", "border.subtle", 1.0),
-        ("switch", "surface.control", "border.subtle", 1.0),
-        ("slider", "surface.control", "border.subtle", 1.0),
-        ("label", "transparent", "transparent", 0.0),
-        ("badge", "surface.control", "border.subtle", 1.0),
-        ("progressBar", "surface.control", "border.subtle", 1.0),
-        ("tab", "surface.panel", "border.subtle", 1.0),
-        ("collapse", "surface.panel", "border.subtle", 1.0),
-        ("table", "surface.panel", "border.subtle", 1.0),
-        ("tree", "surface.panel", "border.subtle", 1.0),
-        ("flex", "transparent", "transparent", 0.0),
-        ("grid", "transparent", "transparent", 0.0),
-        ("scroll", "transparent", "transparent", 0.0),
-        ("tooltip", "surface.overlay", "border.strong", 1.0),
-    ];
-
-    for (comp, bg, border, bw) in standard_components {
+    // 5. The remaining host-consumed kinds and shell surfaces: rest only.
+    for kind in FALLBACK_KINDS.iter().chain(FALLBACK_SURFACES) {
         map.insert(
-            RecipeKey::new(comp, "default", "root", RecipeState::Rest),
+            RecipeKey::new(kind.component, "default", "root", RecipeState::Rest),
             ResolvedComponentRecipe {
-                background_color: ThemeColorRef(bg.to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef("text.primary".to_string()),
-                border_color: ThemeColorRef(border.to_string()),
-                border_width: bw,
-                border_style: if bw > 0.0 {
+                background_color: ThemeColorRef(kind.fill.to_string()),
+                background_opacity: kind.background_opacity,
+                text_color: ThemeColorRef(kind.text.to_string()),
+                border_color: ThemeColorRef(kind.border.to_string()),
+                border_width: kind.border_width,
+                border_style: if kind.border_width > 0.0 {
                     BorderStyle::Solid
                 } else {
                     BorderStyle::None
                 },
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 0.0,
-                outline_offset: 0.0,
+                border_radius: kind.radius,
+                padding: kind.padding.map(str::to_string),
+                gap: kind.gap.map(str::to_string),
+                shadow: elevation_stack(kind.elevation),
                 outline_style: OutlineStyle::None,
-                transition_duration: 100.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
+                transition_duration: kind.motion,
+                transition_timing: kind.timing,
+                ..ResolvedComponentRecipe::default()
             },
         );
     }
 
-    // 6. Internal surface fallbacks
-    let surfaces = [
-        "tabBar",
-        "paneSplitTree",
-        "statusBar",
-        "commandCentre",
-        "fileBrowser",
-        "settingsPanel",
-        "chatPanel",
-        "welcome",
-        "transientMenu",
-        "completion",
-        "editorChrome",
-    ];
-
-    for surface in surfaces {
+    // 6. Consumed slots outside the `default/root` shape (picker trigger,
+    // key-hint slots, status-dot tones).
+    for (component, variant, slot, kind) in FALLBACK_SLOT_EXTRAS {
         map.insert(
-            RecipeKey::new(surface, "default", "root", RecipeState::Rest),
+            RecipeKey::new(*component, *variant, *slot, RecipeState::Rest),
             ResolvedComponentRecipe {
-                background_color: ThemeColorRef("surface.panel".to_string()),
-                background_opacity: 1.0,
-                text_color: ThemeColorRef("text.primary".to_string()),
-                border_color: ThemeColorRef("border.subtle".to_string()),
-                border_width: 1.0,
-                border_style: BorderStyle::Solid,
-                border_radius: 0.0,
-                padding: Some("spacing.sm".to_string()),
-                gap: Some("spacing.xs".to_string()),
-                shadow: Vec::new(),
-                backdrop_blur: 0.0,
-                backdrop_saturate: 1.0,
-                inner_highlight: None,
-                opacity: 1.0,
-                outline_color: ThemeColorRef("focus.ring".to_string()),
-                outline_width: 0.0,
-                outline_offset: 0.0,
+                background_color: ThemeColorRef(kind.fill.to_string()),
+                background_opacity: kind.background_opacity,
+                text_color: ThemeColorRef(kind.text.to_string()),
+                border_color: ThemeColorRef(kind.border.to_string()),
+                border_width: kind.border_width,
+                border_style: if kind.border_width > 0.0 {
+                    BorderStyle::Solid
+                } else {
+                    BorderStyle::None
+                },
+                border_radius: kind.radius,
+                padding: kind.padding.map(str::to_string),
+                gap: kind.gap.map(str::to_string),
+                shadow: elevation_stack(kind.elevation),
                 outline_style: OutlineStyle::None,
-                transition_duration: 100.0,
-                transition_timing: TransitionTiming::Linear,
-                transform_preset: TransformPreset::None,
+                transition_duration: kind.motion,
+                transition_timing: kind.timing,
+                ..ResolvedComponentRecipe::default()
             },
         );
     }
@@ -2186,9 +2178,10 @@ mod tests {
         // Custom override applied
         assert_eq!(button_primary.background_color.as_str(), "accent.muted");
         assert_eq!(button_primary.border_radius, 8.0);
-        // Fallback properties filled in from core
-        assert_eq!(button_primary.border_width, 1.0);
-        assert_eq!(button_primary.border_style, BorderStyle::Solid);
+        // Fallback properties filled in from core: the shipped primary button is a
+        // fill-only control with no border of its own (DESIGN.md §11).
+        assert_eq!(button_primary.border_width, 0.0);
+        assert_eq!(button_primary.border_style, BorderStyle::None);
         assert_eq!(button_primary.text_color.as_str(), "surface.main");
 
         // Non-overridden recipes (e.g. modal) populated from core
@@ -2197,6 +2190,10 @@ mod tests {
             .get(&RecipeKey::parse("modal.default.dialog.rest").unwrap())
             .unwrap();
         assert_eq!(modal_dialog.background_color.as_str(), "surface.overlay");
-        assert_eq!(modal_dialog.border_width, 2.0);
+        // The core fallback supplies the dialog's own geometry: one hairline, radius 16,
+        // and the approved overlay stack (DESIGN.md §11 panels/overlays).
+        assert_eq!(modal_dialog.border_width, 1.0);
+        assert_eq!(modal_dialog.border_radius, 16.0);
+        assert_eq!(modal_dialog.shadow.len(), 2);
     }
 }

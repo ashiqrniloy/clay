@@ -69,7 +69,7 @@ const globalScope = globalThis as typeof globalThis & {
   __clayAgentStream?: AgentStreamModule;
 };
 
-/** Process-wide relay stream (native parity: one chat stream per client). */
+/** Process-wide relay stream (native parity: one agent stream per client). */
 export const agentStream: AgentStreamModule = (globalScope.__clayAgentStream ??=
   createAgentStream());
 

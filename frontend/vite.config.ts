@@ -27,11 +27,20 @@ export default defineConfig({
         // startup.
         manualChunks(id: string) {
           if (id.includes("/node_modules/@codemirror/")) return "codemirror";
-          // Plan 108 task 8: the shared AG-UI state/relay modules are
-          // chat-lane machinery (one daemon stream); naming the chunk keeps
+          // Plan 108 task 8: the shared AG-UI state/relay modules are the
+          // agent lane's machinery (one daemon stream); naming the chunk keeps
           // the filename-lane budget gate from counting them as startup
-          // shell when a second lazy surface (CodingAgentPanel) imports them.
-          if (/[\\/]frontend[\\/]src[\\/]agent[\\/]/.test(id)) return "chat-agent-core";
+          // shell, because the lazy agent surface imports them too.
+          if (/[\\/]frontend[\\/]src[\\/]agent[\\/]/.test(id))
+            return "agent-core";
+          // The bridge client is imported by the eager shell *and* by the
+          // agent modules. Rollup hoists a manual chunk's dependencies into
+          // it, so leaving it unassigned would drag the whole 37 kB AG-UI core
+          // into startup as a preloaded chunk (plan 118 chat-frontend task:
+          // "confirm the agent chunk still loads lazily"). Its own chunk keeps
+          // the agent lane lazy.
+          if (/[\\/]frontend[\\/]src[\\/]bridge[\\/]client\.ts$/.test(id))
+            return "bridge";
         },
       },
     },
@@ -45,7 +54,6 @@ export default defineConfig({
       ["src/editor/**/*.test.ts", "jsdom"],
       ["src/command-centre/**/*.test.tsx", "jsdom"],
       ["src/settings/**/*.test.tsx", "jsdom"],
-      ["src/chat/**/*.test.tsx", "jsdom"],
       ["src/agent/**/*.test.ts", "jsdom"],
     ],
     setupFiles: ["src/test/setup.ts"],

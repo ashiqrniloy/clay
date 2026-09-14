@@ -112,12 +112,15 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 
 | # | Action | Expected |
 |---|--------|----------|
-| F32 | Fresh launch on an empty tab (no restored document) | Welcome entry state is the Clay-owned surface: `Welcome to Clay` with `Open File` and `Open Folder` buttons; no prototype/stale document text; status bar normal |
-| F33 | Activate `Open File` (click or Space/Enter on the button) | Native file dialog opens (user dialog, no implicit authority); cancelling leaves the welcome state intact |
-| F34 | Select a file in the native dialog and accept | Document opens in the pane; welcome hides; status/entry show `doc N` with the basename only (e.g. `review.md — doc 3 — v1`) |
-| F35 | Repeat with `Open Folder` and accept a directory | Workspace root rebinds to the chosen folder (existing validated-grant path); welcome stays absent while a document is open |
-| F36 | Close the last document/pane | Pane returns to the welcome state (`welcome_visible`), buttons functional again |
-| F37 | Negative: check AT-SPI names for the welcome state | Labels show basenames and sanitized copy only — no host path segments (`/home/…`, `/tmp/…`) or secrets |
+| F32 | Fresh launch on an empty tab (no restored document) | The empty tab is the **landing** (plan 118 Part D): the bundled `@clay/launcher` contribution renders the `Start` surface (module [01](01-launch-and-connection.md) L12a) when it is loaded, and the Clay-owned `Start with a file or folder` card with `Open file` / `Open folder` when no empty-tab contribution is installed (module [01](01-launch-and-connection.md) L12 — no product name in core). Either way: no prototype/stale document text, no document opened by rendering the landing, status bar normal |
+| F32a | With the launcher loaded, pick a recents row and activate the primary button (`Open <name>`) | The chosen folder becomes the tab's workspace and the landing is replaced by the editor pane + docbar; the tab label updates. UNRESOLVED on hosts without input synthesis — automated legs `frontend/src/launcher/LauncherPanel.test.tsx`, `frontend/src/shell/WorkspacePanes.test.tsx` |
+| F33 | Activate `Open file` (fallback card) or `Open folder…` (launcher, workspace pane foot) | Native file/folder dialog opens (user dialog, no implicit authority); cancelling leaves the current state intact |
+| F34 | Select a file in the native dialog and accept | Document opens in the pane; the landing hides; status/entry show `doc N` with the basename only (e.g. `review.md — doc 3 — v1`) |
+| F35 | Repeat with the folder dialog and accept a directory | Workspace root rebinds to the chosen folder (existing validated-grant path) **and the folder is stamped into the launcher recents** (one entry, newest first, duplicates moved to the front); the landing stays absent while a document is open |
+| F36 | Close the last document/pane | Pane returns to the landing state (the launcher when its package is loaded, else the core card), functional again |
+| F37 | Negative: check AT-SPI names for the landing state | Labels show basenames and sanitized copy only — no host path segments or secrets, with one documented exception: the launcher's recents rows deliberately show the stored absolute workspace path (module [01](01-launch-and-connection.md) L14) |
+| F37a | Negative: recents hygiene | A stored recent whose folder no longer exists is pruned on the next launcher read (not listed); removing a row (`⌫`) removes it from the server list only, never from disk; the launcher's own `listLauncherEntries` request never opens or writes a workspace |
+| F37b | Negative: first-run store | With no `launcher.json` (or a malformed one) the launcher shows its first-run note instead of placeholder rows, and the read path does not create the data root |
 
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
@@ -136,7 +139,7 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | # | Action | Expected |
 |---|--------|----------|
 | F38 | Toggle the workspace browser on a real workspace and inspect its header/rows | Header uses `Workspace · <sanitized name>`; visible directory labels are bounded and sanitized; no full `/home/...` or `/tmp/...` authorization path leaks |
-| F39 | Return to an empty tab/welcome state after closing its document | Welcome uses the sanitized workspace basename and keeps Open File/Open Folder accessible; it does not reserve an unnecessary left browser slot |
+| F39 | Return to an empty tab/landing state after closing its document | The landing uses the sanitized workspace basename in the status chrome and keeps its actions accessible (launcher rows/primary button, or the fallback card); it does not reserve an unnecessary left browser slot |
 | F40 | Use long/control-character/path-separator file and workspace names where the host permits | Labels truncate/fallback safely, never expose host path layout, and accessibility names stay bounded |
 | F41 | Inspect browser and welcome trees while a file is selected | Browser/welcome labels and status diagnostics remain non-color-only and contain no document secrets or absolute paths |
 
@@ -270,3 +273,21 @@ File-browser rows carry semantic kind icons (folder/file/symlink from
 by the shared ClayIcon primitive from the active icon pack; labels and
 keyboard behavior are unchanged. Steps: [18 — Icon packs](18-icon-packs.md)
 (ICON-02, ICON-07, ICON-10, executed 2026-09-07).
+
+## Plan 118 execution record (2026-09-13)
+
+Executed against the freshly rebuilt Linux desktop build; artifacts under
+`test-plan/artifacts/118-quiet-instrument-migration/` (shared with modules
+01/13/14/15/17 — the evidence set is captured once per state).
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F32 (landing, both states) | PASS live | `core-fallback/` and `launcher-landing/` captures: the empty tab renders the fallback card and the launcher respectively; no document is opened by either, the workspace sidebar/rail still show the tab's empty state |
+| F35 (folder → workspace + recents stamp) | PASS live (read side) / UNRESOLVED interactive | `launcher-landing/accessibility.txt` lists exactly one recents row for the harness workspace — the row the client's own tab bootstrap stamped — proving the write path ran on a real build; driving the native dialog by hand stays input-blocked on this host |
+| F36 (close last document → landing) | UNRESOLVED interactive / PASS structural | `close_pane` resets the pane to the empty tab, which now resolves to the landing (`WorkspacePanes.test.tsx`: "keeps the core Open File / Open Folder fallback with no empty-tab contribution" + the launcher variant); no live input backend for the close chord |
+| F37/F37a/F37b negative checks | PASS structural | Sanitize tests unchanged; launcher store tests (`launcher.rs`: malformed file ⇒ empty store, missing folder pruned on read and persisted, out-of-range removal is a no-op, cap/prune bounds) and the read-path test that a listing never creates the data root |
+| F39 (landing after close) | PASS live (static) | The landing capture shows the sanitized `Workspace · workspace` chrome with the landing actions available |
+
+No existing step was deleted or weakened; F32's expected result was rewritten
+because the empty tab is a package contribution now, and F32a/F37a/F37b add
+the launcher-specific negative coverage.

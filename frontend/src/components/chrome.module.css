@@ -1,72 +1,98 @@
-/* Badge / kbd / divider chrome primitives (catalog planned entries with
- * locked token mappings). */
+/* Badge / kbd / divider chrome primitives.
+ *
+ * The badge carries the chip roles (`badge.{default,accent,muted,error,
+ * warning,success}`) so the chip declares no family of its own (DESIGN.md §11).
+ * Every visual property is a `--clay-ds-*` recipe value or a `--clay-*` theme
+ * role; padding/height stay host-owned layout. */
 
 .badge {
   display: inline-flex;
   align-items: center;
-  background: var(
-    --clay-ds-badge-default-root-rest-background-color,
-    var(--clay-surface-badge)
-  );
-  color: var(
-    --clay-ds-badge-default-root-rest-text-color,
-    var(--clay-text-badge)
-  );
-  border: var(--clay-ds-badge-default-root-rest-border-width, 0px)
-    var(--clay-ds-badge-default-root-rest-border-style, solid)
-    var(--clay-ds-badge-default-root-rest-border-color, transparent);
-  border-radius: var(
-    --clay-ds-badge-default-root-rest-border-radius,
-    var(--clay-radius-xs, 2px)
-  );
-  padding: var(
-    --clay-ds-badge-default-root-rest-padding,
-    0 var(--clay-spacing-badge, 4px)
-  );
+  padding: var(--clay-ds-badge-default-root-rest-padding);
   font-size: var(--clay-text-caption-size);
+
+  border-width: var(--clay-ds-badge-default-root-rest-border-width);
+  border-style: var(--clay-ds-badge-default-root-rest-border-style);
+  border-color: var(--clay-ds-badge-default-root-rest-border-color);
+  border-radius: var(--clay-ds-badge-default-root-rest-border-radius);
+  --fill: var(--clay-ds-badge-default-root-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-badge-default-root-rest-text-color);
+}
+
+.accent {
+  --fill: var(--clay-ds-badge-accent-root-rest-background-color);
+  --fill-opacity: var(--clay-ds-badge-accent-root-rest-background-opacity);
+  color: var(--clay-ds-badge-accent-root-rest-text-color);
+}
+.muted {
+  border-color: var(--clay-ds-badge-muted-root-rest-border-color);
+  --fill: var(--clay-ds-badge-muted-root-rest-background-color);
+  --fill-opacity: var(--clay-ds-badge-muted-root-rest-background-opacity);
+  color: var(--clay-ds-badge-muted-root-rest-text-color);
+}
+
+/* Semantic tones: the role text with a role-tinted border at the catalog's
+ * 34% (DESIGN.md §11) — the recipe carries the role, the tint is the language. */
+.error {
+  border-color: color-mix(
+    in srgb,
+    var(--clay-ds-badge-error-root-rest-border-color) 34%,
+    transparent
+  );
+  background: var(--clay-ds-badge-error-root-rest-background-color);
+  color: var(--clay-ds-badge-error-root-rest-text-color);
+}
+.warning {
+  border-color: color-mix(
+    in srgb,
+    var(--clay-ds-badge-warning-root-rest-border-color) 34%,
+    transparent
+  );
+  background: var(--clay-ds-badge-warning-root-rest-background-color);
+  color: var(--clay-ds-badge-warning-root-rest-text-color);
+}
+.success {
+  border-color: color-mix(
+    in srgb,
+    var(--clay-ds-badge-success-root-rest-border-color) 34%,
+    transparent
+  );
+  background: var(--clay-ds-badge-success-root-rest-background-color);
+  color: var(--clay-ds-badge-success-root-rest-text-color);
 }
 
 .kbd {
   display: inline-flex;
   align-items: center;
-  background: var(
-    --clay-ds-kbd-default-root-rest-background-color,
-    var(--clay-surface-kbd)
-  );
-  color: var(--clay-ds-kbd-default-root-rest-text-color, var(--clay-text-kbd));
-  border: var(
-      --clay-ds-kbd-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-kbd-default-root-rest-border-style, solid)
-    var(--clay-ds-kbd-default-root-rest-border-color, var(--clay-border-kbd));
-  border-radius: var(
-    --clay-ds-kbd-default-root-rest-border-radius,
-    var(--clay-radius-xs, 2px)
-  );
-  min-height: var(
-    --clay-ds-kbd-default-root-rest-min-height,
-    var(--clay-dimension-kbd-height, 20px)
-  );
-  padding: var(
-    --clay-ds-kbd-default-root-rest-padding,
-    0 var(--clay-spacing-xxs, 4px)
-  );
+  min-height: var(--clay-dimension-kbd-height, 18px);
+  padding: var(--clay-ds-kbd-default-root-rest-padding);
   font-family: var(--clay-font-monospace);
   font-size: var(--clay-text-caption-size);
+
+  border-width: var(--clay-ds-kbd-default-root-rest-border-width);
+  border-style: var(--clay-ds-kbd-default-root-rest-border-style);
+  border-color: var(--clay-ds-kbd-default-root-rest-border-color);
+  border-radius: var(--clay-ds-kbd-default-root-rest-border-radius);
+  --fill: var(--clay-ds-kbd-default-root-rest-background-color);
+  --fill-opacity: var(--clay-ds-kbd-default-root-rest-background-opacity);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-kbd-default-root-rest-text-color);
 }
 
 .divider {
   border: none;
-  border-top: var(
-      --clay-ds-divider-default-root-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-divider-default-root-rest-border-style, solid)
-    var(
-      --clay-ds-divider-default-root-rest-border-color,
-      var(--clay-border-hairline)
-    );
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
   margin: 0;
   width: 100%;
 }

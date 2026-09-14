@@ -1,0 +1,13 @@
+fixture=ui-review-default
+window_requested_size=1024x800
+theme=@clay/theme-modus-operandi
+appearance=light
+drive_steps=none
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 1024x800, compositor kept 1024x1151
+window_viewport=1024x1107
+window_frame=1076x1203
+screenshot=1024x1151

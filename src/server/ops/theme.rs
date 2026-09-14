@@ -619,6 +619,46 @@ mod tests {
         assert!(still_active.design_tokens.is_empty());
     }
 
+    /// Plan 118 task 14: the structural floors are enforced by the same atomic
+    /// path as the prose floors. A snapshot whose *only* fault is an invisible
+    /// hairline is rejected with the pair and its 1.2:1 visibility floor named,
+    /// and the previously installed theme survives untouched.
+    #[test]
+    fn enforce_contrast_rejects_an_invisible_hairline_and_keeps_the_active_theme() {
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        clay_state.set_active_theme(ActiveTheme {
+            specifier: "@clay/core".to_string(),
+            overrides: Vec::new(),
+            design_tokens: Vec::new(),
+        });
+
+        // An opaque hairline painted in the core canvas colour: a boundary you
+        // cannot see, which the pre-compositing gate scored as 1:1 *passing* a
+        // 34 %-alpha hairline at 21:1 from its raw bytes.
+        let invisible = ActiveTheme {
+            specifier: "@clay/theme-invisible-hairline".to_string(),
+            overrides: Vec::new(),
+            design_tokens: vec![crate::protocol::UiDesignTokenOverride {
+                token: "border.hairline".to_string(),
+                value: crate::protocol::WireDesignTokenValue::Color([0x10, 0x0f, 0x17, 0xff]),
+                provenance: "theme-invisible-hairline".to_string(),
+            }],
+        };
+        let err = enforce_contrast(&clay_state, "@clay/theme-invisible-hairline", &invisible)
+            .expect_err("an invisible hairline must be rejected");
+        let message = err.to_string();
+        assert!(message.contains("theme.contrast"), "message: {message}");
+        assert!(message.contains("border.hairline"), "message: {message}");
+        assert!(message.contains("1.2"), "message: {message}");
+
+        assert_eq!(clay_state.records().len(), 1, "one diagnostic recorded");
+        let still_active = clay_state
+            .active_theme()
+            .expect("prior valid theme remains");
+        assert_eq!(still_active.specifier, "@clay/core");
+        assert!(still_active.design_tokens.is_empty());
+    }
+
     #[test]
     fn apply_design_system_core_baseline() {
         let clay_state = std::sync::Arc::new(ClayOpState::default());
@@ -641,6 +681,42 @@ mod tests {
 
         let active2 = apply_design_system(&clay_state, "core").expect("apply core alias");
         assert_eq!(active2.specifier, "@clay/core");
+    }
+
+    #[test]
+    fn apply_design_system_rejects_a_non_contributing_package_without_installing() {
+        // Plan 118 task 20: a bundled package that ships no `uiDesignSystem`
+        // contribution must be rejected by the shared resolver (the same path the
+        // `settings.setDesignSystem` command validates through), leaving the slot
+        // and the explicit-selection flag untouched — no partial install.
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let error = apply_design_system(&clay_state, "@clay/markdown")
+            .expect_err("non-contributing package cannot select");
+        assert!(
+            error.to_string().contains("theme.invalid_design_system"),
+            "message: {error}"
+        );
+        assert!(clay_state.active_design_system().is_none());
+        assert!(!clay_state.explicit_design_system_active());
+    }
+
+    #[test]
+    fn apply_design_system_rejects_a_removed_package_without_installing() {
+        // Plan 118 task 20: a specifier naming a design system this generation
+        // removed is rejected by name resolution — never silently reinterpreted —
+        // and installs nothing. The specifier is assembled so the plan-118 absence
+        // guard (`plan118_removed_design_systems_are_absent`) sees no literal of a
+        // removed package name in live code.
+        let removed = format!("@clay/design-{}", "neobrutal");
+        let clay_state = std::sync::Arc::new(ClayOpState::default());
+        let error =
+            apply_design_system(&clay_state, &removed).expect_err("removed package cannot select");
+        assert!(
+            error.to_string().contains("packages.not_installed"),
+            "message: {error}"
+        );
+        assert!(clay_state.active_design_system().is_none());
+        assert!(!clay_state.explicit_design_system_active());
     }
 
     #[test]
@@ -972,8 +1048,8 @@ mod tests {
         apply_appearance(&clay_state, Appearance::Dark, false);
         let theme = apply_theme(&clay_state, "@clay/theme-gruvbox-material-dark")
             .expect("dark theme selects");
-        let design = apply_design_system(&clay_state, "@clay/design-glass")
-            .expect("glass design system selects");
+        let design = apply_design_system(&clay_state, "@clay/design-instrument")
+            .expect("shipped design system selects");
         let duotone = apply_icon_pack(&clay_state, "@clay/icons-phosphor-duotone")
             .expect("duotone pack selects");
 

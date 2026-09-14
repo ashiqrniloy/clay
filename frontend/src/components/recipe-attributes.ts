@@ -30,6 +30,17 @@ export const KNOWN_COMPONENT_KINDS = [
   "divider",
   "iconSlot",
   "tooltip",
+  "statusDot",
+  // View switcher (plan 118 task 33): the `seg` family is the segmented
+  // control the switcher is — declared in the design system, consumed by the
+  // shell titlebar.
+  "seg",
+  // Agent-type picker (plan 118 task 35): a dropdown whose *trigger* is the
+  // agent view's title, so only the trigger slot takes this family.
+  "agentPicker",
+  // Session files (plan 118 task 36): the Files tab's row — the session's own
+  // file history, one row per path it touched.
+  "sessionRow",
 ] as const;
 
 export type ComponentKind = (typeof KNOWN_COMPONENT_KINDS)[number];

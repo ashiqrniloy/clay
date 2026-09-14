@@ -92,15 +92,13 @@ export function ClayIcon({ name, label, className, style }: ClayIconProps) {
       {...aria}
       {...recipeAttributes("iconSlot", "root")}
     >
-      {paths
-        .filter(isValidPath)
-        .map((path, index) => (
-          <path
-            key={index}
-            d={path.d as string}
-            opacity={path.opacity as number | undefined}
-          />
-        ))}
+      {paths.filter(isValidPath).map((path, index) => (
+        <path
+          key={index}
+          d={path.d as string}
+          opacity={path.opacity as number | undefined}
+        />
+      ))}
     </svg>
   );
 }

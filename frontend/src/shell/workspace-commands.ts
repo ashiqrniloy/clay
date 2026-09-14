@@ -4,7 +4,7 @@
 // (2026-08-31 review P2-2) with an explicit context seam.
 
 import type { BootstrapDto } from "../bridge/types";
-import type { TabStore } from "./tab-store";
+import { patchTab, type TabStore } from "./tab-store";
 import {
   addEqualPane,
   closePane,
@@ -16,14 +16,22 @@ import {
   splitPane,
   type SplitTree,
 } from "./split-tree";
-import type { TabRuntime, WorkspaceAdapters } from "./workspace-controller";
+import type {
+  TabIdentity,
+  TabRuntime,
+  WorkspaceAdapters,
+} from "./workspace-controller";
 
 export interface CommandContext {
   adapters: WorkspaceAdapters;
   tabs: TabStore;
   notify: () => void;
   setTree: (runtime: TabRuntime, tree: SplitTree | null) => void;
-  mountRuntime: (bootstrap: BootstrapDto, tree?: SplitTree) => TabRuntime;
+  mountRuntime: (
+    bootstrap: BootstrapDto,
+    tree?: SplitTree,
+    identity?: TabIdentity,
+  ) => TabRuntime;
 }
 
 const sendTabCommand = (
@@ -117,16 +125,20 @@ export function dispatchClientCommand(
       runtime.settingsOpen = false;
       ctx.notify();
     },
-    // Coding Agent split surface (plan 108 task 8): launch pins the surface
-    // to the active pane; close releases it. Client-local presentation only.
+    // The Coding Agent's two view commands (plan 118 task 33): opening shows
+    // the tab's agent view, closing returns to its workspace view. The agent
+    // half stays attached either way — the switcher is chrome, not state.
     "coding-agent.profile": () => {
-      runtime.agentSurfaceOpen = true;
-      runtime.agentSurfacePaneId = runtime.tree.activePaneId;
+      runtime.agentMounted = true;
+      ctx.tabs.set(
+        patchTab(ctx.tabs.get(), runtime.clientId, { view: "agent" }),
+      );
       ctx.notify();
     },
     "coding-agent.close": () => {
-      runtime.agentSurfaceOpen = false;
-      runtime.agentSurfacePaneId = null;
+      ctx.tabs.set(
+        patchTab(ctx.tabs.get(), runtime.clientId, { view: "workspace" }),
+      );
       ctx.notify();
     },
   };
@@ -153,9 +165,12 @@ export function dispatchClientCommand(
   else if (commandId === "shell.clientTabMoveRight" && runtime.tabId != null)
     void sendTabCommand(ctx, runtime, { moveRight: { tabId: runtime.tabId } });
   else if (commandId === "shell.clientTabNew")
+    // New tabs land on the launcher (plan 118 Part D): uncommitted, so the
+    // tab's own landing surface is what the user sees.
     void (async () => {
-      const bootstrap = await ctx.adapters.openTabDialog?.();
-      if (bootstrap) ctx.mountRuntime(bootstrap);
+      const bootstrap = await ctx.adapters.openTab?.("");
+      if (!bootstrap) return;
+      ctx.mountRuntime(bootstrap, undefined, { workspaceRoot: "" });
       ctx.notify();
     })();
   else {

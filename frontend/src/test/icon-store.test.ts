@@ -44,7 +44,9 @@ describe("icon store", () => {
     store.subscribe(listener);
     store.setIconPack(pack());
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(store.getIcon("action.close")?.paths[0]?.d).toBe("M 4,4 L 20,20 L 4,20 Z");
+    expect(store.getIcon("action.close")?.paths[0]?.d).toBe(
+      "M 4,4 L 20,20 L 4,20 Z",
+    );
     // Missing key: per-key fallback is the consumer's job (host subset).
     expect(store.getIcon("git.branch")).toBeUndefined();
   });
@@ -60,7 +62,9 @@ describe("icon store", () => {
 
   it("rejects stale generations and keeps the last authorized state", () => {
     const store = createIconStore();
-    store.setIconPack(pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }));
+    store.setIconPack(
+      pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }),
+    );
     const listener = vi.fn();
     store.subscribe(listener);
 
@@ -70,14 +74,18 @@ describe("icon store", () => {
     expect(store.get().pack?.generation).toBe(9);
 
     // Same generation + same identity: idempotent no-op.
-    store.setIconPack(pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }));
+    store.setIconPack(
+      pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }),
+    );
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("accepts a same-generation identity swap (explicit user switch)", () => {
     const store = createIconStore();
     store.setIconPack(pack({ generation: 9 }));
-    store.setIconPack(pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }));
+    store.setIconPack(
+      pack({ specifier: "@clay/icons-phosphor-duotone", generation: 9 }),
+    );
     expect(store.get().pack?.specifier).toBe("@clay/icons-phosphor-duotone");
   });
 
@@ -93,7 +101,12 @@ describe("icon store", () => {
       {},
       { ...pack(), icons: {} },
       { ...pack(), specifier: "  " },
-      { ...pack(), icons: { "action.close": { viewBox: [0, 0, 24], paths: [{ d: "M 0,0" }] } } },
+      {
+        ...pack(),
+        icons: {
+          "action.close": { viewBox: [0, 0, 24], paths: [{ d: "M 0,0" }] },
+        },
+      },
       {
         ...pack(),
         icons: {
@@ -113,7 +126,10 @@ describe("icon store", () => {
       {
         ...pack(),
         icons: {
-          "action.close": { viewBox: [0, 0, 24, 24], paths: [{ d: "M 0,0", opacity: 3 }] },
+          "action.close": {
+            viewBox: [0, 0, 24, 24],
+            paths: [{ d: "M 0,0", opacity: 3 }],
+          },
         },
       },
     ]) {

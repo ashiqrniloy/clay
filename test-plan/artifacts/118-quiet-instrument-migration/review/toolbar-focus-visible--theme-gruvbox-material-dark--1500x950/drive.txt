@@ -1,0 +1,4 @@
+
+(process:2313230): dbind-WARNING **: 19:43:29.315: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-VASRV3/socket: No such file or directory
+OK step 1: focus 'Palette'
+OK step 2: wait 600ms

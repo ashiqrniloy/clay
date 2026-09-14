@@ -39,20 +39,42 @@ Palette). P16/P17/P18 above are subsumed by C8–C11/C20 for plan 109.
 | C4 | Effort control: Shift+Tab cycles declared levels; dropdown sets one | Status row shows the pending effort; run carries `thinkingLevel` (daemon applies model-aware level); no-op when the model declares none | thinking-level suites (I4) |
 | C5 | Effort rebinding: `bindKey("Ctrl+M", "coding-agent.clientCycleEffort", { scope: "global" })` in init.js | PaneTree passes the bound chord; Ctrl+M cycles on the agent surface; unbound surfaces keep Shift+Tab | keybindings ops suites (I4) |
 | C6 | Full transcript: prompt → tool call → tool output → assistant text → steer | Rows render in arrival order; tool rows show name + bounded redacted args/output; `load_skill` rows show the skill name; thinking rows present; steer lands as a user-kind entry | transcript-lifecycle.test (I5) |
-| C7 | Files tab: select a file in the workspace tree | Right pane Files tab hosts the document's editor view (no second tree); `Ctrl+B` toggles the left tree (Global default) | CodingAgentPanel FilesTab tests (I6) |
+| C7 | Files tab: run a session that reads/edits/creates files, then open the Files tab and `⏎` a row (plan 118 task 36 replaced the editor-in-inspector) | The tab lists the session's own file records, newest first, one row per path (role mark + word, basename, muted directory); `⏎` switches the tab to its workspace view at that file and the agent view stays mounted; no editor and no tree in the inspector (`Ctrl+B` toggles the left tree) | `session-files.test.ts`, `CodingAgentPanel.test.tsx` (files), `WorkspacePanes.test.tsx` (handoff) |
 | C8 | Context tab: open the drawer, open an item | Seven server-authoritative categories with counts; drawer lists items; item detail shows full redacted content; Back returns | context.test + ContextTab test (I7) |
 | C9 | Context across compaction: `/compact`, reopen Context tab | Compaction summary category reflects the compaction entry; counts refresh event-driven (no polling) | context.test compaction drill (I7) |
 | C10 | OM tab: run observe→reflect→drop via real worker models | Activity log lists observations, reflections, drops (drops visible, not silently vanished), compaction folds; bounded to 200 rows | om.test drill (I8) |
 | C11 | OM worker-model selection: pick distinct observation/reflection models | Selection persists per workspace and per session; restored on resume; clear resets; **the panel keeps its live session** — the selection broadcast carries the tab's session id, transcript and branch instead of a session-less snapshot (the Memory/Context/Settings tabs must not fall back to "No active agent session.") | om.test retention (I8); `book_selection_broadcast_keeps_the_tab_session` |
 | C12 | `/resume` | Workspace-scoped picker lists this workspace's sessions (most-recent first, bounded); other workspaces absent | resume.test scoping (I9) |
 | C13 | Resume restore drill: resume a session with a switched model | Both turns reload; session resumes on its persisted model; follow-up prompt continues the branch | resume.test restart drill (I9) |
-| C14 | Session Info: click a chat card | Right pane auto-selects the Session Info tab with that entry's full detail (kind, content, tool/skill metadata); Back restores the prior tab; no selection shows guidance | CodingAgentPanel I10 tests |
+| C14 | Session Info: click a transcript entry | Right pane auto-selects the Session Info tab with that entry's full detail (kind, content, tool/skill metadata); Back restores the prior tab; no selection shows guidance | CodingAgentPanel I10 tests |
 | C15 | Branch readout: open the surface in a git repo; create a commit on another branch | Status row shows the real branch; cached within a run; refreshed on run completion; `—` outside a repo | read_git_branch/refresh_branch unit tests (R2) |
 | C16 | Extension strip | Lists loaded opt-in extensions (wiki/graft); segment omitted when none report; MCP segment lists servers truthfully | parse_environment test (R3) |
 | C17 | Slash completion: type `/` then `/de` | Daemon-registered commands complete from session state; `/deploy` (unregistered) never completes; `/model` + `/resume` always offered | CodingAgentPanel R1 test |
 | C18 | New daemon command appears: register a command via a package | Completion lists it after the next session/attach snapshot without frontend changes | environment.list invalidation tests (R1) |
 | C19 | Transcript budget feel: long session (200+ entries) | Scroll stays responsive; server snapshot bounded (200 entries / 256 KB); oversized single entries clamped | AGENT_MAX_* budgets (I5) |
 | C20 | Status row truth: workspace path, provider/model, context usage, git branch, extensions | All segments match reality; no placeholder text remains | R1/R2/R3 frontend tests |
+
+## Plan 118 steps (landing → agent view, 2026-09-13)
+
+The Coding Agent is a **pane surface**, not the window landing: the window
+landing is the launcher (module [01](01-launch-and-connection.md) L12a), whose
+agent pane opens this view in the tab. The composition itself (measure, turns,
+inspector, composer) is verified once in module
+[15](15-ui-design-systems.md) UI-DS-35 — these steps only cover the launch
+route and the agent-specific facts.
+
+| # | Action | Expected |
+|---|--------|----------|
+| C38 | With `@clay/coding-agent` loaded, open the agent view from the landing (agent row → primary button) or via the `coding-agent.profile` command | The tab's pane switches to the agent view: header (title, model dropdown, effort control, context meter, inspector toggle), transcript (turns or the designed empty state), state strip with the status dot, composer, and the agent foot (workspace · branch · extensions · MCP). The package claims **no** empty-tab landing — with no launcher installed the empty tab stays the core `Start with a file or folder` card (module 01 L12). UNRESOLVED on hosts without input synthesis; automated: `frontend/src/shell/WorkspacePanes.test.tsx`, `packages/coding-agent` manifest test |
+| C39 | Open the inspector's `Settings` tab in the agent view | The tab lists the session's delivered agent files (name, mono size, provenance badge) with its `.agents/skills/*/SKILL.md` + `SYSTEM.md` caption and a designed empty state — the Agent Settings surface lives here, not on a separate page (module [15](15-ui-design-systems.md) UI-DS-36) |
+| C40 | Open the inspector's `Files` tab after reading and editing files in the session | The tab lists **every file the session has touched** (basename + directory, status marker: `M` modified, `R` read, `A` added, `D` deleted) and opens the selected file's editor view — not a second workspace tree and not a single hard-coded document |
+
+### Negative checks (plan 118)
+
+| # | Check | Expected |
+|---|-------|----------|
+| C-N12 | Chat surface absence | No chat pane, chat command (`chat.*`) or chat package is offered anywhere: the removed `@clay/chat` is not in the bundled inventory, not loadable by name from the example config, and no launcher/status entry opens it |
+| C-N13 | Landing ownership | The agent package never wins the empty-tab election (its contribution is `activation: pane`); a second empty-tab contribution from another package still conflicts in one-winner order |
 
 ## Steps
 
@@ -213,7 +235,7 @@ root from `examples/config/`, per the launch-test setup in plan 117).
 | C29 | Open the coding agent's right-hand **Settings** tab | Lists exactly `SYSTEM.md` + `skills/<name>/SKILL.md` files with size and built-in-vs-edited provenance (untouched seeds read built-in); selecting one opens it in the pane editor (the agent surface releases, the tab does not open a side panel); edits save and provenance flips to edited; deleted seed files regenerate at next daemon start | `tests/agent_settings_listing.rs` (real `clay::client` connection); agent_settings listing/provenance/resolve suites (7); AgentSettingsPanel tests (3); CodingAgentPanel Settings-tab test |
 | C30 | Type `@` in the composer | Sectioned dropdown (Skills + Files) appears; type to filter; ArrowUp/Down navigate, Tab/Enter select, Escape dismisses; selecting a skill embeds `@skill:<name>` (body loaded for the run); selecting a file embeds `@file:<path>` and attaches its content (images as image blocks) | CodingAgentPanel mention tests; mentions.test (skill load, unknown-skill passthrough, unavailable-tool skip, file attach, symlink-escape rejection) |
 | C31 | Send a prompt and watch the status row token meter after the first finished turn | Meter shows `occupancy/ceiling` (e.g. `12k/270k`) from the last provider turn's prompt tokens vs the active model's context window; tone turns warning above 60% and error above 80%; ceiling follows model switches; when usage is unreported the meter estimates from transcript chars (calibration, not measurement) | CodingAgentPanel meter tests (thresholds, model switch, heuristic); clay.contextTokens state tests |
-| C32 | In a wiki-configured workspace submit `/wiki-init` | Daemon enables the wiki binding: wiki slash commands + skills appear; re-running is idempotent; with wiki disabled in skills.json the command stays a chat-safe prompt with no residue | skills-commands wiki intercept tests; daemon dispatch arm tests |
+| C32 | In a wiki-configured workspace submit `/wiki-init` | Daemon enables the wiki binding: wiki slash commands + skills appear; re-running is idempotent; with wiki disabled in skills.json the command stays a prompt-only no-op with no residue | skills-commands wiki intercept tests; daemon dispatch arm tests |
 | C33 | Open a coding session with the graft CLI available / absent | Graft available: graft skill registered + graft tools surface (extension strip shows the graft extension); graft absent: binding fails closed silently — no graft tools, no error surface; graft skill body still loads for guidance | graftBindAttempted/ensureGraftBound fail-closed tests; extension naming tests |
 | C34 | Open `/resume` (composer intercept) and the Files-tab recent list | Both list workspace sessions with a human label (first user-message words) **and the last-active local time**, never a bare profile + raw UTC stamp; clicking a row restores the full transcript (user/thinking/tool/assistant rows), model, and leaf into the live view without an entry-less snapshot wiping it; the next prompt continues the **resumed** session rather than starting a new one | resumable label/local-stamp tests (clay-agent resume suite); `resume_after_daemon_load_restores_bounded_history` (persisted entry shape); `resumed_tab_keeps_its_session_on_the_next_prompt`; `session_picker_rows_show_the_label_and_the_local_stamp`; FilesTab labeled-row tests |
 | C35 | Open a fresh session in a git workspace; check effort before any prompt | Status row shows the real branch from the first snapshot (no `—` placeholder); effort dropdown is visible and changeable pre-first-prompt (levels resolved from the models inventory), and a changed level applies from the next prompt | ensure_tab_session refresh_branch tests; effort-from-inventory tests; unit-variant wire contract test (bare-string client commands) |
@@ -297,3 +319,24 @@ session rows compacted to distinct `session.resume` icon actions; agent tab
 labels and approval Allow/Deny keep text. Steps:
 [18 — Icon packs](18-icon-packs.md) (ICON-02, ICON-08, ICON-09, executed
 2026-09-07).
+
+## Plan 118 coding-agent view record (2026-09-13)
+
+The shipped agent view composition was adopted earlier in this plan (module
+[15](15-ui-design-systems.md) UI-DS-35, with `design-artifacts/screenshots/quiet-instrument-agent/report.json`
+and 34 `CodingAgentPanel` tests). This record covers the plan 118 *landing*
+change and re-executes the agent module's legs that touch it. Artifacts:
+`test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| C38 (launch route) | UNRESOLVED live / PASS structural | The live capture (`coding-agent/`) reached the empty tab but not the agent view: the pane is activated by a *package-contributed* command (`coding-agent.profile`), which is not dispatchable from the same `init.js` generation and needs keyboard/pointer input this host cannot synthesize. Fixture updated to load the package explicitly (finding 2 in module 15's record). Structural legs: `WorkspacePanes.test.tsx`, the manifest `activation: pane` test, and the DEV-harness captures recorded under UI-DS-35 |
+| C39 (Settings tab) | PASS automated | `frontend/src/agent-settings/AgentSettingsPanel.test.tsx` (6) + UI-DS-36 evidence; the tab renders in the shipped inspector |
+| C40 (Files tab session history) | PASS automated | `CodingAgentPanel` Files-tab tests (session files with status markers, editor view for the selected file) |
+| C-N12 (chat absence) | PASS automated | `tests/package_ui_conformance.rs` + `frontend/src/test/chat-surface-absence.test.ts` pin that the removed chat surface has no package, command, recipe or entry point |
+| C-N13 (landing ownership) | PASS automated | Empty-tab election tests: the agent keeps its `pane` surface and never claims the landing; the launcher's landing + the agent's pane coexist, and two landings still conflict in one-winner order |
+| C1–C20, C24–C37 regression class | PASS automated | Daemon and frontend suites green on this tree (frontend 357; the agent daemon suites are unchanged by plan 118) — the landing change touches only how the view is reached |
+| Real-provider streaming legs | UNRESOLVED | Standing provider-credential ceiling, unchanged |
+
+No existing step was deleted or weakened. New steps were added rather than
+duplicating module 15's visual composition checks.

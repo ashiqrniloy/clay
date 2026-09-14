@@ -10,6 +10,16 @@
 
 ## 1. Overview and Objectives
 
+Scope note (2026-09-11): the recipe primitives reviewed here carry the approved
+design language too ([`DESIGN.md`](../../DESIGN.md), Quiet Instrument). The
+migration ships it as a third first-party package, `@clay/design-instrument`,
+using exactly these primitives — no new manifest, record, service, or recipe
+engine primitive is required (opacity fills, inset-shadow state marks,
+spread-shadow focus halos, and negative-spread soft elevation all fit the
+existing typed domains).
+
+**Historical record (2026-09-11):** this review was written before Plan 104 shipped `@clay/design-neobrutal` and `@clay/design-glass`; both were removed by the Quiet Instrument migration (plan 118 task 9), and `@clay/design-instrument` now occupies the same primitives. The primitive findings below still hold verbatim — read the two removed package names as "the design-system packages".
+
 Before authoring and shipping the `@clay/design-neobrutal` default design system and the `@clay/design-glass` reference design system packages in Plan 104, this primitive review:
 1. Inventories all existing package manifest, package record, service, bundled inventory, adoption, selection, and recipe engine primitives.
 2. Identifies and closes generic data-only package gaps so purely declarative packages (design systems, theme packages, and metadata-only packages) do not require dummy JavaScript files or unnecessary runtime worker evaluation.

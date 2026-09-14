@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
-// Live-path regression test (plan 108 task 8 defect): launching the Coding
-// Agent must actually render the split surface. This exercises the exact
-// production chain — runtimeSnapshot envelope → packageUi.surfaces →
-// launchCodingAgent → PaneContent agent branch — that previously broke when
-// a wire layer dropped `surfaces` and no test noticed.
+// Live-path regression tests for the tab's two views (plan 118 task 33):
+// entering the agent view must actually render the agent surface (the chain
+// runtimeSnapshot envelope → packageUi.surfaces → view switch → AgentView),
+// the inactive view must stay mounted, and the launcher must be the landing of
+// an *uncommitted* tab only.
 
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => undefined),
@@ -52,7 +57,8 @@ vi.mock("../bridge/client", () => ({
 import { createWorkspace } from "./workspace-controller";
 import type { BootstrapDto } from "../bridge/types";
 import { WorkspacePanes } from "./WorkspacePanes";
-import { resetChatAgentForTests } from "../agent/state";
+import type { PackageSurface } from "../sdui/types";
+import { resetAgentSessionForTests } from "../agent/state";
 
 function bootstrap(
   over: Partial<BootstrapDto> & { clientId: number },
@@ -122,16 +128,53 @@ const agentSurface = {
   },
 };
 
-async function mountedWorkspace(withSurface: boolean) {
+const launcherSurface: PackageSurface = {
+  id: "launcher.start",
+  actionTargets: ["workspace.clientOpenFolderDialog"],
+  provenance: {
+    packageName: "@clay/launcher",
+    packageVersion: "0.1.0",
+    apiPrefix: "launcher",
+    trustDomain: "trusted" as const,
+  },
+  component: {
+    kind: "panel" as const,
+    id: "launcher.root",
+    title: "Start",
+    children: [
+      {
+        kind: "button" as const,
+        id: "launcher.openFolder",
+        label: "Open folder…",
+        action: { commandId: "workspace.clientOpenFolderDialog" },
+      },
+    ],
+  },
+};
+
+async function mountedWorkspace(
+  withSurface: boolean,
+  emptyTab: PackageSurface | null = null,
+  options: { persistLayout?: boolean } = {},
+) {
   const ws = createWorkspace({
     send: async () => undefined,
-    loadLayout: async () => ({
-      version: 2,
-      tabs: [
-        { workspaceRoot: "/tmp/ws1", panes: { "0": null }, activePane: 1 },
-      ],
-      activeTab: 0,
-    }),
+    // A persisted layout restores the tab's picked folder (a launcher tab is
+    // committed from then on); the launcher tests start with no layout at all.
+    loadLayout: async () =>
+      options.persistLayout === false
+        ? null
+        : {
+            version: 2,
+            tabs: [
+              {
+                workspaceRoot: "/tmp/ws1",
+                panes: { "0": null },
+                activePane: 1,
+              },
+            ],
+            activeTab: 0,
+          },
   });
   ws.installBootstrap(bootstrap({ clientId: 1, tabId: 10 }));
   ws.handleEnvelope({
@@ -168,7 +211,7 @@ async function mountedWorkspace(withSurface: boolean) {
         },
         packageUi: {
           version: 2,
-          emptyTab: null,
+          emptyTab,
           surfaces: withSurface ? [agentSurface] : [],
           panels: [],
           overlays: [],
@@ -184,32 +227,181 @@ async function mountedWorkspace(withSurface: boolean) {
   return ws;
 }
 
-describe("WorkspacePanes coding agent launch", () => {
+describe("WorkspacePanes two views", () => {
   afterEach(() => {
     cleanup();
-    resetChatAgentForTests();
+    resetAgentSessionForTests();
   });
 
-  it("launches the Coding Agent surface from the empty-tab landing", async () => {
+  it("renders the agent surface in the tab's agent view", async () => {
     const ws = await mountedWorkspace(true);
     render(<WorkspacePanes workspace={ws} />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Coding Agent" }));
+    // The agent half is inert tab data (attached from the launcher); the view
+    // switch is tab chrome (Ctrl+2 / the titlebar segmented control).
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    // The agent view is a fixed composition (transcript column + inspector
+    // column), not a resizable split.
     expect(
-      await screen.findByLabelText("Coding Agent split"),
+      await screen.findByRole("region", { name: "Coding Agent" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent inspector")).toBeInTheDocument();
+  });
+
+  it("opens a session file in the workspace view from the Files tab (plan 118 task 36)", async () => {
+    const ws = await mountedWorkspace(true);
+    const openPath = vi.spyOn(ws, "openPath");
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+
+    // The session's own file records (a tool row the server derived from the
+    // call's arguments) are what the Files tab lists.
+    const store = (await import("../agent/state")).agentSession;
+    const release = store.start();
+    try {
+      // The seed type is the panel's own row shape; the file record is what
+      // the server puts on the message's metadata.
+      store.seedForDev({
+        messages: [
+          {
+            id: "clay-tool-t1",
+            role: "tool",
+            content: 'edit {"path":"notes/plan.md"}',
+            metadata: {
+              clayKind: "tool",
+              toolName: "edit",
+              sessionFile: { path: "notes/plan.md", op: "edit" },
+            },
+          },
+        ] as never,
+      });
+      fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+      const row = await screen.findByRole("button", {
+        name: "Open notes/plan.md in the workspace view",
+      });
+      fireEvent.click(row);
+
+      // The document opens through the same path every other open uses, and
+      // the tab switches to the view that shows it — the agent half stays
+      // mounted so its transcript is untouched.
+      expect(openPath).toHaveBeenCalledWith("notes/plan.md");
+      const workspaceSlot = document.querySelector(
+        '[data-view="workspace"]',
+      ) as HTMLElement;
+      const agentSlot = document.querySelector(
+        '[data-view="agent"]',
+      ) as HTMLElement;
+      expect(workspaceSlot.hidden).toBe(false);
+      expect(agentSlot.hidden).toBe(true);
+      expect(agentSlot).not.toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  it("keeps both views mounted and hides the inactive one", async () => {
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    // The workspace view is hidden, not unmounted: switching back must not
+    // re-fetch the tree or lose editor state (plan 118 task 33, performance).
+    const workspaceSlot = document.querySelector(
+      '[data-view="workspace"]',
+    ) as HTMLElement;
+    const agentSlot = document.querySelector(
+      '[data-view="agent"]',
+    ) as HTMLElement;
+    expect(workspaceSlot.hidden).toBe(true);
+    expect(agentSlot.hidden).toBe(false);
+    await act(async () => {
+      ws.setView("workspace");
+    });
+    expect(workspaceSlot.hidden).toBe(false);
+    expect(agentSlot.hidden).toBe(true);
+    expect(document.querySelector('[data-view="agent"]')).toBe(agentSlot);
+  });
+
+  it("shows the agent view's own prompt when no agent surface is installed", async () => {
+    const ws = await mountedWorkspace(false);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.setView("agent");
+    });
+    expect(await screen.findByText("No agent in this tab")).toBeInTheDocument();
+  });
+
+  it("keeps the core Open File / Open Folder fallback with no empty-tab contribution", async () => {
+    const ws = await mountedWorkspace(false, null, { persistLayout: false });
+    render(<WorkspacePanes workspace={ws} />);
+    expect(
+      screen.getByRole("group", { name: "Empty tab" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open file" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open folder" }),
+    ).toBeInTheDocument();
+    // No product-named landing lives in core (plan 118 Part D).
+    expect(screen.queryByRole("button", { name: "Coding Agent" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Start" })).toBeNull();
+  });
+
+  it("does not show the launcher inside a committed tab", async () => {
+    // The launcher is what a tab *opens on*: once the tab has a folder (here
+    // restored from layout.json) its empty pane is the plain open prompt, not
+    // a second, stale picker (plan 118 task 33's gating rule).
+    const ws = await mountedWorkspace(false, launcherSurface);
+    render(<WorkspacePanes workspace={ws} />);
+    expect(screen.queryByRole("group", { name: "Start" })).toBeNull();
+    expect(
+      screen.getByRole("group", { name: "Empty tab" }),
     ).toBeInTheDocument();
   });
 
-  it("keeps the landing when the surface never reached the snapshot", async () => {
-    const ws = await mountedWorkspace(false);
+  it("renders the launcher panel for the trusted launcher contribution", async () => {
+    const ws = await mountedWorkspace(false, launcherSurface, {
+      persistLayout: false,
+    });
     render(<WorkspacePanes workspace={ws} />);
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Coding Agent" }));
+    // The panel is the host's trusted renderer; with no server listing yet it
+    // shows the specified first-run state rather than fabricated rows.
     expect(
-      screen.queryByLabelText("Coding Agent split"),
-    ).not.toBeInTheDocument();
+      await screen.findByRole("group", { name: "Start" }),
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole("group", { name: "Empty tab" }),
+      screen.getByText(/No workspace has been opened yet/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Agents are folders under ~\/\.clay\/agents\//),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a third-party empty-tab contribution through generic SDUI", async () => {
+    const ws = await mountedWorkspace(
+      false,
+      {
+        ...launcherSurface,
+        provenance: {
+          ...launcherSurface.provenance,
+          packageName: "@vendor/start",
+          trustDomain: "thirdParty",
+        },
+      },
+      { persistLayout: false },
+    );
+    render(<WorkspacePanes workspace={ws} />);
+    expect(screen.queryByRole("group", { name: "Start" })).toBeNull();
+    // The declared tree renders instead: a panel titled Start with one button.
+    expect(
+      await screen.findByRole("button", { name: "Open folder…" }),
     ).toBeInTheDocument();
   });
 });

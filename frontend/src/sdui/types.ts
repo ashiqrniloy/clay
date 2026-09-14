@@ -34,8 +34,16 @@ export interface SduiListItem {
 export type SduiNodeKind =
   | { panel: { title: string; children: SduiNodeId[] } }
   | { label: { text: string; icon?: string | null } }
-  | { button: { label: string; icon?: string | null; action: SduiActionIntent } }
-  | { list: { items: SduiListItem[] } }
+  | {
+      button: { label: string; icon?: string | null; action: SduiActionIntent };
+    }
+  | {
+      list: {
+        items: SduiListItem[];
+        /** Filter affordance (plan 118 task E1); absent = a plain list. */
+        filter?: { placeholder: string; shortcut?: string | null } | null;
+      };
+    }
   | {
       editorView: {
         binding: { documentId: number; expectedVersion: number | null };
@@ -47,6 +55,9 @@ export type SduiNodeKind =
 export interface SduiNode {
   id: SduiNodeId;
   kind: SduiNodeKind;
+  /** Host-owned size token for a region node (`dimension.sidebar.default`):
+   *  the host sizes it from the typed token instead of a flex share. */
+  size?: string | null;
 }
 
 export interface SduiTree {

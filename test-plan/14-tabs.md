@@ -19,6 +19,16 @@ policies),
 sections 7–8 (the tab command IDs/chords and per-active-tab pane
 commands/focus policy), `docs/development/launch-and-gui-smoke.md`.
 
+> **Plan 118 status (2026-09-13):** the *approved* tab model — one tab holding
+> one workspace **and** one agent with a titlebar view switcher (`⌘1`/`⌘2`), an
+> agent-type picker and a session-files inspector — is drawn in
+> `design-artifacts/approved/quiet-instrument-migration/` and is **not shipped
+> yet** (plan 118 Part D task 33). Every step below still describes the shipped
+> tab: one view per tab, opened from the landing. The only landing-visible
+> change is that an empty tab now renders the bundled launcher when its package
+> is loaded (module [01](01-launch-and-connection.md) L12a) instead of the old
+> Clay-owned card, which stays as the no-contribution fallback (L12).
+
 ## Setup
 
 ```bash
@@ -120,8 +130,8 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 |---|--------|----------|
 | T25 | 2 tabs open (card order A B, A active); `Ctrl+Tab` repeatedly | Active tab advances one card per press in card order (A → B); from the LAST tab it WRAPS to the FIRST (B → A); no flicker, switch feels instant |
 | T26 | `Ctrl+Shift+Tab` repeatedly | Active tab steps back one card per press (B → A); from the FIRST tab it WRAPS to the LAST (A → B) |
-| T27 | 2 tabs open; `Ctrl+1`, `Ctrl+2`, `Ctrl+3` | `Ctrl+1` activates the first card, `Ctrl+2` the second (1-based, card order); `Ctrl+3` is a SILENT no-op (beyond tab count) |
-| T28 | One tab open; `Ctrl+1`, `Ctrl+Tab`, `Ctrl+Shift+Tab` | All silent no-ops — next/prev need two tabs, numbered activation has no second position; nothing flickers, active tab unchanged |
+| T27 | 2 tabs open; `Ctrl+Alt+1`, `Ctrl+Alt+2`, `Ctrl+Alt+3` | `Ctrl+Alt+1` activates the first card, `Ctrl+Alt+2` the second (1-based, card order); `Ctrl+Alt+3` is a SILENT no-op (beyond tab count) (`Ctrl+1`/`Ctrl+2` are the tab's view switcher since plan 118 task 33) |
+| T28 | One tab open; `Ctrl+Alt+1`, `Ctrl+Tab`, `Ctrl+Shift+Tab` | All silent no-ops — next/prev need two tabs, numbered activation has no second position; nothing flickers, active tab unchanged |
 | T29 | `Ctrl+T` with 2 tabs open | Same flow as the `+` affordance: native folder picker opens; picking a folder mounts a new tab (becomes active) with the new workspace; a second `Ctrl+T` while the picker is open is ignored |
 | T30 | Clean tab active; `Ctrl+Shift+W` | The active tab closes (connection released, registry entry removed, bar reflows); the remaining tab becomes active with layout/documents intact — same contract as `✕` (T15) |
 | T31 | Single tab open; `Ctrl+Shift+W` | NO-OP — the last tab is protected from the keyboard too (same contract as T7; the client also refuses defensively) |
@@ -132,8 +142,8 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 | T36 | 3 tabs open (order A B C, A active); `Ctrl+Shift+]` twice | First press moves A right → B A C (A stays active); second press moves A right again → B C A; a further press at the LAST position is a silent no-op; moves NEVER wrap; active-tab status survives (switch away and back, A still active) |
 | T37 | 3 tabs open (order A B C, A active); `Ctrl+Shift+[` | NO-OP — A is already first (boundary); with B active, `Ctrl+Shift+[` moves B left → B A C; at the first position moves are silent no-ops |
 | T38 | 3 tabs open (order A B C, C active); `Ctrl+Shift+1` | C moves to position 1 → C A B (C stays active); `Ctrl+Shift+2` on the result moves C to position 2 → A C B; `Ctrl+Shift+4` (beyond count) is a silent no-op; numbered moves are 1-based, capped at 9 |
-| T39 | Move a tab (T36–T38), then `Ctrl+<N>` at its new position | Numbered activation follows the NEW card order — the registry is authoritative (switch-then-activate round trip stays consistent) |
-| T40 | With 3 tabs open, run `Ctrl+Tab`, `Ctrl+1`, `Ctrl+Shift+]`, `Ctrl+Shift+2` back-to-back | Every chord lands immediately with no lag — switch = one layout pass; move/close reflow is immediate (subjective responsiveness check) |
+| T39 | Move a tab (T36–T38), then `Ctrl+Alt+<N>` at its new position | Numbered activation follows the NEW card order — the registry is authoritative (switch-then-activate round trip stays consistent) |
+| T40 | With 3 tabs open, run `Ctrl+Tab`, `Ctrl+Alt+1`, `Ctrl+Shift+]`, `Ctrl+Shift+2` back-to-back | Every chord lands immediately with no lag — switch = one layout pass; move/close reflow is immediate (subjective responsiveness check) |
 
 ## Window-state persistence (Phase 22.5)
 
@@ -200,7 +210,7 @@ resize the window to ~900 px wide.
 | T57 | 8 tabs at ~900 px wide | Every card is ≥100 px wide (cards stop shrinking at the floor); the rightmost cards are CLIPPED at the `+` slot — the strip overflows; the `+` stays pinned at the bar's right edge, always fully visible; no layout break, no overlap |
 | T58 | Wheel up/down over the tab bar | The strip scrolls left/right smoothly; scrolling CLAMPS at both ends — no overscroll, no bounce, no elastic; wheel over the working area (below the bar) does NOT scroll the strip |
 | T59 | 5 or fewer tabs (or a wide window) | No overflow: the strip starts flush at the left edge, every card fully visible, and wheel over the bar is a NO-OP — scrolling is only active while cards hit the minimum width |
-| T60 | Scroll the strip so a card is scrolled out of view, then activate it via `Ctrl+<N>` numbered activation | The strip AUTO-SCROLLS the active card fully into view — the active card is never left clipped; switching back and forth keeps the active card visible |
+| T60 | Scroll the strip so a card is scrolled out of view, then activate it via `Ctrl+Alt+<N>` numbered activation | The strip AUTO-SCROLLS the active card fully into view — the active card is never left clipped; switching back and forth keeps the active card visible |
 | T61 | Scroll so a card is partially clipped, then click its visible part | Hit-testing follows the SCROLLED position: the click activates the card under the pointer in the scrolled strip (not the card that would sit there at scroll 0); clicking a clipped-away region does nothing |
 | T62 | Scroll the strip, then type in the active tab and run `Ctrl+\` / `Ctrl+-` | The scroll offset is chrome-only: editing, splits, pane focus, and the working area are unaffected; the strip keeps its offset until an activation auto-scrolls |
 
@@ -410,3 +420,16 @@ accessible names preserved (`Close ${label}`, `New tab`); the empty-state
 "New tab" discovery button keeps visible text. Steps:
 [18 — Icon packs](18-icon-packs.md) (ICON-02, ICON-08, ICON-09, executed
 2026-09-07).
+
+## Plan 118 execution record (2026-09-13)
+
+The tab model itself is unchanged in this plan step (the approved
+workspace+agent tab is task 33); the empty-tab *content* changed to the package
+landing. Artifacts: `test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| T67/T71/T73/T75 (reconnect, large type, labels, recovery) | PASS live (static) / UNRESOLVED interactive | `recovery/` shows `Reconnect session` with the sanitized status bar; `launcher-landing/` and `core-fallback/` expose the `Window tabs` page-tab list with the selected `Workspace` tab and no absolute path outside the launcher's intended recents row; multi-tab keyboard legs remain input-blocked as recorded above |
+| Tab model (approved, not shipped) | NOT RUN — not built | Recorded here so no reader assumes the titlebar view switcher exists; tracking: plan 118 Part D task 33 |
+
+No existing step was deleted or weakened.

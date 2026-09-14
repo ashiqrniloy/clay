@@ -10,7 +10,7 @@
 // Agent split surface launched through the `coding-agent.profile` chrome
 // command. The declared tree is inert data — dynamic content rides the
 // core-owned AG-UI stream in the host-rendered surface module; the empty-tab
-// landing stays @clay/chat. Tool execution keeps the Phase 1 acceptance
+// landing is the launcher surface (plan 118). Tool execution keeps the Phase 1 acceptance
 // policy; registration grants no execution authority. No raw ops, no client
 // JavaScript.
 import { profileRegister, commandRegister } from "clay:agent";

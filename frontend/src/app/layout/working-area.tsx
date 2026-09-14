@@ -23,13 +23,15 @@ export function WorkingArea({ left, children }: WorkingAreaProps) {
     );
   }
   return (
-    <Group orientation="horizontal" className={styles.workingArea}>
+    <Group
+      orientation="horizontal"
+      className={styles.workingArea}
+      resizeTargetMinimumSize={{ coarse: 24, fine: 8 }}
+    >
       <Panel defaultSize="24%" minSize="5%" maxSize="60%">
         {left}
       </Panel>
-      <Separator
-        style={{ width: "var(--clay-dimension-border-hairline, 1px)" }}
-      />
+      <Separator className={styles.splitHandle} />
       <Panel minSize="40%">{children}</Panel>
     </Group>
   );

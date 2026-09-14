@@ -132,19 +132,18 @@ Clay core/bootstrap, `core.text`, `core.code`, server authority, and native shel
 
     ### Bundled package and API coverage
 
-    Fifteen manifests have a name plus Clay metadata. All are version `0.1.0`, all declare `./dist/load.js`, and none currently declares `dependsOn`, `extends`, `disables`, or `replaces`. `packages/lsp-shared/package.json` is private metadata with no package name/Clay manifest and is not PackageService-managed.
+    Nineteen manifests have a name plus Clay metadata. All are version `0.1.0`, all declare `./dist/load.js`, and none currently declares `dependsOn`, `extends`, `disables`, or `replaces`. `packages/lsp-shared/package.json` is private metadata with no package name/Clay manifest and is not PackageService-managed.
 
     <!-- plan061-task1-package-inventory:start -->
     | Current package | Current runtime API/module use | Future domain / owner |
     | --- | --- | --- |
-    | `@clay/chat` | `clay:packages`, `clay:ui`; `command-registration` permission; replaceable empty-tab pane content | Trusted bundled inventory T3/T4; generic package UI/agent host surface T8; replaceable T11 |
-    | `@clay/coding-agent` | `clay:packages`, `clay:agent` (profile/skill registration); `command-registration` permission; no empty-tab claim while Chat owns the landing | Trusted bundled inventory T3/T4; replaceable T11 |
-| `@clay/design-glass` | Inert manifest UI design system; no runtime execution | Trusted inert recipes T8; reference glass UI design system; replaceable T11 |
-    | `@clay/design-neobrutal` | Inert manifest UI design system; no runtime execution | Trusted inert recipes T8; default UI design system; replaceable T11 |
+    | `@clay/coding-agent` | `clay:packages`, `clay:agent` (profile/skill registration); `command-registration` permission; named pane surface, no empty-tab claim (the launcher package owns the landing, plan 118) | Trusted bundled inventory T3/T4; replaceable T11 |
+    | `@clay/design-instrument` | Inert manifest UI design system; no runtime execution | Trusted inert recipes T8; default UI design system (plan 118); replaceable T11 |
     | `@clay/git` | `clay:packages`, `clay:sdui`, `clay:git`; no declared permissions | Trusted bundled inventory T3/T4; generic Git/UI extension surface T8; replaceable T11 |
     | `@clay/icons-phosphor-duotone` | Inert manifest icon geometry; no runtime execution | Trusted inert values T8; replaceable T11 |
     | `@clay/icons-phosphor-regular` | Inert manifest icon geometry; no runtime execution | Trusted inert values T8; replaceable T11 |
     | `@clay/javascript` | `clay:behavior`, `clay:syntax`, `clay:modes`, `clay:commands`, `clay:completion`, `clay:ui` | Trusted; generic language contribution APIs T8; replaceable T11 |
+    | `@clay/launcher` | `clay:packages`, `clay:ui` (empty-tab pane-content contribution); no permissions | Trusted bundled inventory T3/T4; owns the window landing (plan 118), replaceable T11 |
     | `@clay/lsp-javascript` | `clay:language`, then analyzer imports `clay:language-server`, `clay:decorations`, `clay:diagnostics` | Trusted; fixed own process grant and generic provider APIs T8/T12; replaceable T11 |
     | `@clay/lsp-markdown` | `clay:language`, then analyzer imports `clay:language-server`, `clay:decorations`, `clay:diagnostics` | Trusted; fixed own process grant and generic provider APIs T8/T12; replaceable T11 |
     | `@clay/lsp-rust` | `clay:language`, then analyzer imports `clay:language-server`, `clay:decorations`, `clay:diagnostics` | Trusted; fixed own process grant and generic provider APIs T8/T12; replaceable T11 |

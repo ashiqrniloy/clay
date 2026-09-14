@@ -65,7 +65,13 @@ export function PackageWorkspace({
           <div className={styles.right}>{panel("right")}</div>
         )}
         {settingsOpen && settings && (
-          <SettingsPanel uiVersion={packageUi?.version ?? 0} send={send} />
+          // The settings surface is `@clay/settings`' own right slot (the
+          // package declares `slot: right, kind: fixed`), so it is mounted in
+          // the slot's wrapper rather than beside it: same column, same
+          // divider hairline, no second boundary.
+          <div className={`${styles.right} ${styles.rightFixed}`}>
+            <SettingsPanel uiVersion={packageUi?.version ?? 0} send={send} />
+          </div>
         )}
       </div>
       {panels?.some((candidate) => candidate.slot === "bottom") && (

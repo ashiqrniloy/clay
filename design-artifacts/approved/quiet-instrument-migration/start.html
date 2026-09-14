@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi" data-scene="default">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Start (migration prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<style>
+/* The launcher: what a new tab opens on. One tab holds one workspace and one
+   agent, so the launcher offers exactly those two things, side by side, and
+   lets them be chosen together — picking either one is enough to open a tab,
+   and the other can follow inside it without leaving the tab. */
+.start-inner { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 14px; padding: 22px 26px 0; min-height: 0; min-width: 0; width: 100%; max-width: 1320px; margin: 0 auto; }
+.start-head { display: flex; flex-direction: column; gap: 5px; max-width: 92ch; }
+.start-title { font: 600 var(--fs-xl) / 1.2 var(--font-ui); letter-spacing: -0.02em; }
+.start-sub { font: 400 var(--fs-sm) / 1.6 var(--font-ui); color: var(--c-text-2); }
+.start-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; min-height: 0; flex: 1 1 auto; }
+.start-pane { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--hairline); border-radius: var(--r-md); }
+.start-pane-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+.start-pane-head .field { max-width: 190px; }
+.start-pane-body { padding: 5px; min-height: 138px; overflow: auto; flex: 1 1 auto; }
+.start-note { padding: 10px 12px; font: 400 var(--fs-xs) / 1.6 var(--font-ui); color: var(--c-text-3); }
+.start-pane-body[data-empty='true'] > .rows { display: none; }
+.start-pane-body:not([data-empty='true']) > .start-note { display: none; }
+.start-pane-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--hairline); }
+.start-actions { display: flex; align-items: center; gap: 10px; margin-top: auto; padding: 12px 0 14px; border-top: 1px solid var(--hairline); }
+.start-hint { display: flex; align-items: center; gap: 10px; font: 400 var(--fs-xs) / 1.5 var(--font-ui); color: var(--c-text-3); flex-wrap: wrap; }
+.start-hint > span { display: inline-flex; align-items: center; gap: 5px; }
+.start-sum { font: 400 var(--fs-xs) / 1.5 var(--font-mono); color: var(--c-text-3); }
+@media (max-width: 1080px) {
+  .start-grid { grid-template-columns: minmax(0, 1fr); }
+  .start-pane-body { min-height: 96px; }
+}
+</style>
+</head>
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Quiet Instrument — Start</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">migration prototype</span>
+  </span>
+  <nav class="proto-nav" data-nav aria-label="Prototype pages"><a class="proto-link" href="start.html">Start</a><a class="proto-link" href="shell.html">Shell</a><a class="proto-link" href="workspace.html">Workspace</a><a class="proto-link" href="agent-landing.html">Agent</a><a class="proto-link" href="settings.html">Settings</a><a class="proto-link" href="agent-settings.html">Agent files</a><a class="proto-link" href="command-centre.html">Command centre</a><a class="proto-link" href="package-workspace.html">Packages</a><a class="proto-link" href="overlays.html">Overlays</a><a class="proto-link" href="themes.html">Theme values</a></nav>
+  <span class="proto-note">The launcher: what a new tab opens on. Pick a workspace, an agent, or both — the tab holds the two views either way.</span>
+  <div class="proto-actions">
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Surface state"><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="default">Recently used</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="workspace">Workspace picked</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="agent">Agent picked</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="both">Both picked</button><button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="first-run">First run</button></span>
+    <span class="seg" role="radiogroup" aria-label="Row density">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="comfortable">comfortable</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-density="compact">compact</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+<div class="proto-stage">
+  <div class="proto-frame">
+
+<div class="win" role="application" aria-label="Clay" data-clay-ds="shell.default.root.rest">
+  <header class="titlebar" data-clay-ds="shell.default.header.rest">
+    <span class="tb-brand" data-clay-ds="shell.default.brand.rest">Clay</span>
+    <div class="tb-tabs" role="tablist" aria-label="Workspace tabs">
+      <button class="tb-tab" role="tab" aria-selected="true" data-active="true" data-clay-ds="tab.default.item.rest">
+        <span class="faint">New tab</span>
+      </button>
+    </div>
+    <span class="seg viewswitch" role="tablist" aria-label="Tab view" data-viewswitch="empty">
+      <button class="seg-item" type="button" role="tab" aria-selected="false" disabled title="Pick a workspace first">Workspace</button>
+      <button class="seg-item" type="button" role="tab" aria-selected="false" disabled title="Pick an agent first">Agent</button>
+    </span>
+    <span class="tb-spacer"></span>
+    <nav class="tb-actions" aria-label="Application controls">
+      <span class="popwrap">
+        <button class="tb-btn" type="button" data-popover-toggle="theme" data-theme-trigger="true" aria-haspopup="menu" aria-expanded="false" title="Content theme" data-clay-ds="button.muted.root.rest">
+          <span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span data-theme-label>Modus Operandi</span>
+        </button>
+        <div class="popover popover--wide" data-popover="theme" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+          <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+          <div id="theme-list"></div>
+        </div>
+      </span>
+      <button class="tb-btn" type="button" data-open="palette" title="Command palette" data-clay-ds="button.muted.root.rest">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+        <kbd class="kbd kbd--sm" data-kbd="mod+k" data-clay-ds="kbd.default.root.rest"></kbd>
+      </button>
+      <button class="tb-btn" type="button" data-open="shortcuts" title="Keyboard map" data-clay-ds="button.muted.root.rest"><kbd class="kbd kbd--sm" data-clay-ds="kbd.default.root.rest">?</kbd></button>
+      <div class="win-btns">
+        <button class="win-btn" type="button" title="Minimise window" aria-label="Minimise window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+        <button class="win-btn" type="button" title="Maximise window" aria-label="Maximise window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="13" height="13" rx="1.5"/></svg></button>
+        <button class="win-btn win-btn--close" type="button" title="Close window" aria-label="Close window" data-clay-ds="button.muted.root.rest"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+    </nav>
+  </header>
+
+  <div class="app start" data-app data-sidebar="collapsed" data-inspector="collapsed" data-clay-ds="shell.default.workingArea.rest">
+    <div class="start-inner">
+      <header class="start-head">
+        <h1 class="start-title">Start</h1>
+        <p class="start-sub">A tab is one workspace plus one agent, and it holds both views: the workspace view edits the folder, the agent view talks to the agent. Pick either side here — the other can be added later without leaving the tab.</p>
+      </header>
+
+      <div class="start-grid">
+        <section class="start-pane" data-panel data-start-pane="workspace" aria-label="Recent workspaces">
+          <div class="start-pane-head">
+            <h2 class="label" id="start-ws">Workspaces</h2>
+            <span class="chip" data-filter-count>3</span>
+            <span class="spacer"></span>
+            <label class="field field--quiet" data-clay-ds="textInput.default.field.rest">
+              <input type="search" data-filter-list="#start-ws-rows" placeholder="Filter" aria-label="Filter workspaces" autocomplete="off" spellcheck="false">
+              <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">F</kbd>
+            </label>
+          </div>
+          <div class="start-pane-body" data-start-body>
+            <div class="rows" id="start-ws-rows" role="listbox" aria-label="Recent workspaces"><button class="row recent-row" type="button" role="option" data-row data-pick="workspace" data-id="clay" aria-selected="false" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="row-main"><span class="row-name">clay</span><span class="row-desc">/home/arn/Projects/clay</span></span><span class="row-meta">redesign/uiux · 1 mcp</span></button><button class="row recent-row" type="button" role="option" data-row data-pick="workspace" data-id="prism" aria-selected="false" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="row-main"><span class="row-name">prism</span><span class="row-desc">/home/arn/Projects/prism</span></span><span class="row-meta">main</span></button><button class="row recent-row" type="button" role="option" data-row data-pick="workspace" data-id="synapta-core" aria-selected="false" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="row-main"><span class="row-name">synapta-core</span><span class="row-desc">/home/arn/Projects/synapta-core</span></span><span class="row-meta">feature/core · 1 mcp</span></button></div>
+            <p class="start-note">No workspace has been opened yet. Open a folder to start — recent ones appear here afterwards.</p>
+          </div>
+          <div class="start-pane-foot">
+            <button class="btn" type="button" data-start-folder data-clay-ds="button.default.root.rest">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <span>Open folder…</span>
+            </button>
+            <kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+o" data-clay-ds="kbd.default.root.rest"></kbd>
+          </div>
+        </section>
+
+        <section class="start-pane" data-panel data-start-pane="agent" aria-label="Agents">
+          <div class="start-pane-head">
+            <h2 class="label" id="start-ag">Agents</h2>
+            <span class="chip" data-filter-count>1</span>
+            <span class="spacer"></span>
+            <label class="field field--quiet" data-clay-ds="textInput.default.field.rest">
+              <input type="search" data-filter-list="#start-ag-rows" placeholder="Filter" aria-label="Filter agents" autocomplete="off" spellcheck="false">
+              <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">F</kbd>
+            </label>
+          </div>
+          <div class="start-pane-body" data-start-body>
+            <div class="rows" id="start-ag-rows" role="listbox" aria-label="Agents"><button class="row recent-row" type="button" role="option" data-row data-pick="agent" data-id="coding-agent" aria-selected="false" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="row-main"><span class="row-name">Coding Agent</span><span class="row-desc">~/.clay/agents/coding-agent</span></span><span class="row-meta">3 skills</span></button></div>
+            <p class="start-note">No agent is configured. Agents are folders under <span class="mono">~/.clay/agents/</span>; one appears here as soon as it exists.</p>
+          </div>
+          <div class="start-pane-foot">
+            <span class="t-caption" data-clay-ds="label.caption.root.rest">One folder per agent in <span class="mono">~/.clay/agents/</span></span>
+            <span class="spacer"></span>
+            <a class="btn" href="settings.html" data-clay-ds="button.default.root.rest"><span>Agent settings</span></a>
+          </div>
+        </section>
+      </div>
+
+      <footer class="start-actions">
+        <p class="start-hint">
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd="tab" data-clay-ds="kbd.default.root.rest"></kbd> panes</span>
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd="up" data-clay-ds="kbd.default.root.rest"></kbd><kbd class="kbd kbd--sm kbd--flat" data-kbd="down" data-clay-ds="kbd.default.root.rest"></kbd> move</span>
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd="enter" data-clay-ds="kbd.default.root.rest"></kbd> pick</span>
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+enter" data-clay-ds="kbd.default.root.rest"></kbd> open both</span>
+          <span><kbd class="kbd kbd--sm kbd--flat" data-kbd="esc" data-clay-ds="kbd.default.root.rest"></kbd> clear</span>
+        </p>
+        <span class="spacer"></span>
+        <span class="start-sum" data-start-sum>Nothing picked yet</span>
+        <button class="btn btn--primary" type="button" data-start-open disabled data-clay-ds="button.primary.root.rest">Open</button>
+      </footer>
+    </div>
+  </div>
+
+  <footer class="statusbar" data-clay-ds="statusBar.default.root.rest">
+    <span class="status-seg" data-clay-ds="statusItem.default.root.rest"><span class="dot"></span>start</span>
+    <span class="status-seg status-seg--muted" data-clay-ds="statusItem.default.root.rest">no folder open · no session yet</span>
+    <span class="status-hints">
+      <button class="status-key" type="button" data-open="palette"><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+k" data-clay-ds="kbd.default.root.rest"></kbd> palette</button>
+      <button class="status-key" type="button" data-start-folder><kbd class="kbd kbd--sm kbd--flat" data-kbd="mod+o" data-clay-ds="kbd.default.root.rest"></kbd> open folder</button>
+      <button class="status-key" type="button" data-open="shortcuts"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">?</kbd> keys</button>
+    </span>
+  </footer>
+</div>
+
+  </div>
+</div>
+
+<script src="ds.js"></script>
+<script>
+
+(function () {
+  var picks = { workspace: null, agent: null };
+  var openBtn = document.querySelector('[data-start-open]');
+  var sum = document.querySelector('[data-start-sum]');
+
+  function rows(kind) {
+    return Array.prototype.slice.call(document.querySelectorAll('[data-pick="' + kind + '"]'));
+  }
+
+  function rowLabel(kind, id) {
+    var row = rows(kind).filter(function (r) { return r.dataset.id === id; })[0];
+    return row ? row.querySelector('.row-name').textContent.trim() : id;
+  }
+
+  function render() {
+    Object.keys(picks).forEach(function (kind) {
+      rows(kind).forEach(function (row) {
+        var on = row.dataset.id === picks[kind];
+        row.setAttribute('aria-selected', on ? 'true' : 'false');
+        row.tabIndex = on ? 0 : -1;
+      });
+    });
+    var parts = [];
+    if (picks.workspace) parts.push('workspace ' + picks.workspace);
+    if (picks.agent) parts.push('agent ' + rowLabel('agent', picks.agent));
+    sum.textContent = parts.length ? parts.join(' · ') : 'Nothing picked yet';
+    openBtn.disabled = !picks.workspace && !picks.agent;
+    if (!parts.length) {
+      openBtn.textContent = 'Open';
+      openBtn.title = '';
+      return;
+    }
+    var label = picks.workspace && picks.agent
+      ? picks.workspace + ' + ' + rowLabel('agent', picks.agent)
+      : rowLabel('agent', picks.agent) || picks.workspace;
+    openBtn.textContent = 'Open ' + label;
+    openBtn.title = picks.agent
+      ? 'Opens the tab on the agent view; the workspace view is one keystroke away'
+      : 'Opens the tab on the workspace view; attach an agent whenever you want one';
+  }
+
+  function pick(kind, id) {
+    picks[kind] = picks[kind] === id ? null : id;
+    render();
+  }
+
+  function open() {
+    if (openBtn.disabled) return;
+    // an agent means you came to talk to it: the tab opens on that view
+    var target = picks.agent ? 'agent-landing.html' : 'workspace.html';
+    var url = new URL(target, window.location.href);
+    var current = new URLSearchParams(window.location.search);
+    ['theme', 'width'].forEach(function (key) {
+      if (current.get(key)) url.searchParams.set(key, current.get(key));
+    });
+    window.location.href = url.href;
+  }
+
+  function activeRow(scope) {
+    var list = rows(scope.dataset.startPane);
+    return list.filter(function (r) { return r.dataset.active === 'true'; })[0] || list[0];
+  }
+
+  function setActive(row) {
+    rows(row.dataset.pick).forEach(function (r) { r.dataset.active = r === row ? 'true' : 'false'; });
+    row.focus();
+  }
+
+  document.querySelectorAll('[data-start-pane]').forEach(function (pane) {
+    pane.addEventListener('click', function (event) {
+      var row = event.target.closest('[data-pick]');
+      if (!row) return;
+      setActive(row);
+      pick(row.dataset.pick, row.dataset.id);
+    });
+    pane.addEventListener('keydown', function (event) {
+      var row = event.target.closest('[data-pick]');
+      if (!row) return;
+      var list = rows(row.dataset.pick).filter(function (r) { return !r.hidden; });
+      var i = list.indexOf(row);
+      if (event.key === 'ArrowDown') { event.preventDefault(); setActive(list[Math.min(i + 1, list.length - 1)]); }
+      else if (event.key === 'ArrowUp') { event.preventDefault(); setActive(list[Math.max(i - 1, 0)]); }
+      else if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) { event.preventDefault(); pick(row.dataset.pick, row.dataset.id); }
+      else if (event.key === ' ') { event.preventDefault(); pick(row.dataset.pick, row.dataset.id); }
+    });
+  });
+
+  document.querySelectorAll('[data-start-folder]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      ClayDS.toast('The folder dialog opens here', { kbd: 'mod+o', tone: 'quiet' });
+    });
+  });
+
+  openBtn.addEventListener('click', open);
+
+  document.addEventListener('keydown', function (event) {
+    var mod = event.metaKey || event.ctrlKey;
+    if (mod && event.key === 'Enter') { event.preventDefault(); open(); return; }
+    if (event.key === 'Escape' && !event.target.closest('[data-popover], [data-overlay]')) {
+      picks.workspace = null;
+      picks.agent = null;
+      render();
+    }
+  });
+
+  /* The launcher's states are selections, so the review bar drives the page
+     instead of swapping markup: `?scene=both` and clicking both rows run the
+     same code path. `first-run` is the one state that is not a selection. */
+  document.addEventListener('clay:scene', function (event) {
+    var name = event.detail.name;
+    document.querySelectorAll('[data-start-body]').forEach(function (body) {
+      body.dataset.empty = name === 'first-run' ? 'true' : 'false';
+    });
+    picks.workspace = name === 'workspace' || name === 'both' ? (rows('workspace')[0] || {}).dataset.id : null;
+    picks.agent = name === 'agent' || name === 'both' ? (rows('agent')[0] || {}).dataset.id : null;
+    render();
+  });
+
+  render();
+})();
+
+</script>
+</body>
+</html>

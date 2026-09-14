@@ -1,107 +1,240 @@
-/* Shell chrome: header/tab strip, status bar, working-area grid. Mechanical
- * geometry: hairline dividers, zero radius, grid-anchored regions.
- * Consumes host-owned design-system recipe variables with fallback to core tokens. */
+/* Shell chrome: the window's three rows — title bar, working area, status bar —
+ * as one canvas with hairline zoning (DESIGN.md §5, §6, §12). Row heights are
+ * host-owned geometry (a typed dimension token may override them; the fallbacks
+ * are the §5 table values). Every visual property is a `--clay-ds-*` recipe
+ * value or a `--clay-*` theme role. */
 
 .shell {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows:
+    var(--clay-dimension-titlebar-height, 40px)
+    minmax(0, 1fr)
+    var(--clay-dimension-statusbar-height, 28px);
   height: 100%;
-  background: var(
-    --clay-ds-shell-default-root-rest-background-color,
-    var(--clay-surface-main)
-  );
+  min-height: 0;
+  background: var(--clay-ds-shell-default-root-rest-background-color);
 }
+
+/* ---------- titlebar ---------------------------------------------------- */
 
 .header {
   display: flex;
-  align-items: stretch;
-  gap: 1px;
-  background: var(
-    --clay-ds-shell-default-header-rest-background-color,
-    var(--clay-border-hairline)
-  );
-  border-bottom: var(
-      --clay-ds-shell-default-header-rest-border-width,
-      var(--clay-dimension-border-hairline, 1px)
-    )
-    var(--clay-ds-shell-default-header-rest-border-style, solid)
-    var(
-      --clay-ds-shell-default-header-rest-border-color,
-      var(--clay-border-hairline)
-    );
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: 0 var(--clay-spacing-sm, 12px);
+  min-width: 0;
+  background: var(--clay-ds-shell-default-header-rest-background-color);
+  border-bottom-width: var(--clay-ds-shell-default-header-rest-border-width);
+  border-bottom-style: var(--clay-ds-shell-default-header-rest-border-style);
+  border-bottom-color: var(--clay-ds-shell-default-header-rest-border-color);
 }
 
+/* The window mark: mono, tracked, with the approved accent dot. */
 .brand {
   display: flex;
   align-items: center;
-  padding: var(
-    --clay-ds-shell-default-brand-rest-padding,
-    0 var(--clay-spacing-sm, 12px)
-  );
-  background: var(
-    --clay-ds-shell-default-brand-rest-background-color,
-    var(--clay-surface-panel)
-  );
-  color: var(
-    --clay-ds-shell-default-brand-rest-text-color,
-    var(--clay-text-muted)
-  );
-  font-size: var(--clay-text-section-size);
-  letter-spacing: 0.08em;
+  gap: 7px;
+  padding: var(--clay-ds-shell-default-brand-rest-padding);
+  color: var(--clay-ds-shell-default-brand-rest-text-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
   user-select: none;
+}
+
+.brand::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--clay-accent-primary);
+}
+
+.titlebarSpacer {
+  flex: 1;
+}
+
+/* The tab's view switcher (`seg` family, DESIGN.md §12): tab chrome, so it sits
+ * between the strip and the window actions and never inside a view. */
+.viewSwitch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--clay-ds-seg-default-root-rest-gap);
+  padding: var(--clay-ds-seg-default-root-rest-padding);
+  border-width: var(--clay-ds-seg-default-root-rest-border-width);
+  border-style: var(--clay-ds-seg-default-root-rest-border-style);
+  border-color: var(--clay-ds-seg-default-root-rest-border-color);
+  border-radius: var(--clay-ds-seg-default-root-rest-border-radius);
+  background: var(--clay-ds-seg-default-root-rest-background-color);
+}
+
+.viewSwitchItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-ds-seg-default-item-rest-gap);
+  padding: var(--clay-ds-seg-default-item-rest-padding);
+  font-family: inherit;
+  font-size: var(--clay-text-caption-size);
+  border-width: var(--clay-ds-seg-default-item-rest-border-width);
+  border-radius: var(--clay-ds-seg-default-item-rest-border-radius);
+  --fill: var(--clay-ds-seg-default-item-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-seg-default-item-rest-text-color);
+  cursor: pointer;
+  transition:
+    background-color var(--clay-ds-seg-default-item-rest-transition-duration)
+      var(--clay-ds-seg-default-item-rest-transition-timing),
+    color var(--clay-ds-seg-default-item-rest-transition-duration)
+      var(--clay-ds-seg-default-item-rest-transition-timing);
+}
+
+.viewSwitchItem:hover:not(:disabled) {
+  --fill: var(--clay-ds-seg-default-item-hover-background-color);
+  color: var(--clay-ds-seg-default-item-hover-text-color);
+}
+
+.viewSwitchItem[data-active="true"] {
+  --fill: var(--clay-ds-seg-default-item-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-seg-default-item-selected-background-opacity,
+    1
+  );
+  color: var(--clay-ds-seg-default-item-selected-text-color);
+}
+
+.viewSwitchItem:focus-visible {
+  outline: var(--clay-ds-seg-default-item-focus-outline-width)
+    var(--clay-ds-seg-default-item-focus-outline-style)
+    var(--clay-ds-seg-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-seg-default-item-focus-outline-offset);
+}
+
+.viewSwitchItem:disabled {
+  color: var(--clay-ds-seg-default-item-disabled-text-color);
+  opacity: var(--clay-ds-seg-default-item-disabled-opacity);
+  transform: var(--clay-ds-seg-default-item-disabled-transform-preset);
+  cursor: default;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
 }
 
 .workingArea {
   height: 100%;
   min-height: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+}
+
+/* Fixed-slot split: one hairline (the whole hairline belongs to the fixed
+ * slot's edge), with the group's wider pointer target behind it. */
+.splitHandle {
+  flex: 0 0 1px;
   background: var(
-    --clay-ds-shell-default-working-area-rest-background-color,
-    var(--clay-surface-main)
+    --clay-ds-pane-split-tree-default-handle-rest-background-color
   );
 }
+
+.splitHandle:hover {
+  background: color-mix(in srgb, var(--clay-accent-primary) 40%, transparent);
+}
+
+/* ---------- status bar -------------------------------------------------- */
 
 .footer {
   display: flex;
   align-items: center;
-  gap: var(--clay-spacing-sm, 12px);
-  border-top: var(
-      --clay-ds-status-bar-default-root-rest-border-width,
-      var(
-        --clay-ds-shell-default-footer-rest-border-width,
-        var(--clay-dimension-border-hairline, 1px)
-      )
-    )
-    var(
-      --clay-ds-status-bar-default-root-rest-border-style,
-      var(--clay-ds-shell-default-footer-rest-border-style, solid)
-    )
-    var(
-      --clay-ds-status-bar-default-root-rest-border-color,
-      var(
-        --clay-ds-shell-default-footer-rest-border-color,
-        var(--clay-border-hairline)
-      )
-    );
+  gap: 14px;
+  padding: 0 var(--clay-spacing-sm, 12px);
+  min-width: 0;
+  overflow: hidden;
   background: var(
     --clay-ds-status-bar-default-root-rest-background-color,
-    var(
-      --clay-ds-shell-default-footer-rest-background-color,
-      var(--clay-surface-panel)
-    )
+    var(--clay-ds-shell-default-footer-rest-background-color)
   );
   color: var(
     --clay-ds-status-bar-default-root-rest-text-color,
-    var(
-      --clay-ds-shell-default-footer-rest-text-color,
-      var(--clay-text-muted)
-    )
+    var(--clay-ds-shell-default-footer-rest-text-color)
   );
-  padding: var(
-    --clay-ds-status-bar-default-root-rest-padding,
-    var(
-      --clay-ds-shell-default-footer-rest-padding,
-      var(--clay-spacing-xxs, 4px) var(--clay-spacing-sm, 12px)
-    )
+  border-top-width: var(
+    --clay-ds-status-bar-default-root-rest-border-width,
+    var(--clay-ds-shell-default-footer-rest-border-width)
   );
+  border-top-style: var(
+    --clay-ds-status-bar-default-root-rest-border-style,
+    var(--clay-ds-shell-default-footer-rest-border-style)
+  );
+  border-top-color: var(
+    --clay-ds-status-bar-default-root-rest-border-color,
+    var(--clay-ds-shell-default-footer-rest-border-color)
+  );
+  font-family: var(--clay-font-monospace);
   font-size: var(--clay-text-status-size);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One status datum: mono, tabular, never wrapped. */
+.statusGroup {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* The document status is the one datum that may be long (a save/reload error,
+ * a server hint). It shrinks and truncates so it can never overlap the hint
+ * strip at large typography, while the live region keeps its full text. */
+.statusMessage {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.statusValue {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusSpacer {
+  flex: 1;
+}
+
+.statusHints {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+}
+
+/* A status hint is a real control: it runs what its key runs (statusBar.item,
+ * DESIGN.md §11 — hover is the theme's hover fill, radius from the recipe). */
+.statusHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--clay-ds-status-item-default-root-rest-padding);
+  border: 0;
+  border-radius: var(--clay-ds-status-item-default-root-rest-border-radius);
+  background: var(--clay-ds-status-item-default-root-rest-background-color);
+  color: var(--clay-ds-status-item-default-root-rest-text-color);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 150ms ease-out;
+}
+
+.statusHint:hover {
+  background: var(--clay-surface-hover);
+  color: var(--clay-text-primary);
 }

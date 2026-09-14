@@ -1,1 +1,7 @@
+# Build output.
 dist/
+
+# Generated: scripts/generate-icon-packs.mjs owns this file's shape and
+# `--check` fails on any drift, so a repo-wide `prettier --write` must not
+# touch it (plan 118 task E3).
+src/icons/fallback.generated.ts

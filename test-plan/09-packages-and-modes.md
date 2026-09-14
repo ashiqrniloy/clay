@@ -83,7 +83,7 @@ Workspace `/tmp/clay-manual` with `test.rs`, `test.md`, `plain.txt`.
 | P33 | PASS automated + visual | `frontend/src/sdui/{state,registry}.test.*` preserves surviving object/input/disclosure state; wide/narrow/large-type captures remain contained |
 | P34 | PASS automated + rendered provenance | Package graph/loading/cross-domain suites pass; fixture renders exact host-stamped trusted label; `package_loading::spoofed_clay_prefixed_package_stays_third_party` and replacement tests pass |
 | P35 | PASS automated + CDP interaction | Registry and SDUI renderer tests assert typed payloads; `package-ui-dropdown.png` and CDP tree expose Dialog/ListBox/Option keyboard semantics |
-| P36 | PASS automated / live package replacement not rerun | Chat one-line registration and absent-package fallback tests pass; package graph adoption/revoke/replace/rollback suites pass |
+| P36 | PASS automated / live package replacement not rerun (historical: the chat lane was removed with `@clay/chat` in plan 118; the same one-line registration path is exercised by the launcher/agent packages) | One-line registration and absent-package fallback tests pass; package graph adoption/revoke/replace/rollback suites pass |
 
 Linux `computer-use-linux_get_app_state` ran first. AT-SPI exposed only the Chrome frame and the compositor window list omitted Chrome-for-Testing, so no desktop-targeted keyboard claim is made; CDP supplied the bounded DOM accessibility and interaction evidence.
 
@@ -292,7 +292,7 @@ Deep references: `docs/reference/packages/creating-packages.md`,
 |---|---|---|
 | Package UI beside editor | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/package-ui/fixture-*` shows bounded package surface, editor, status footer, and no absolute path |
 | Settings package | PASS static visual/a11y | `settings/fixture-*` shows hidden/expanded sections, dropdown controls, apply/reset actions, and invalid-state-compatible layout |
-| Chat package landing | PASS static + real AT-SPI | `chat/fixture-*` and `chat-landing/accessibility.txt` expose provenance-backed setup actions, transcript log, composer, and status |
+| Chat package landing (removed) | PASS static + real AT-SPI (historical — plan 118 deleted `@clay/chat`; the same package-UI lane is covered by the agent pane rows above) | `chat/fixture-*` and `chat-landing/accessibility.txt` expose provenance-backed setup actions, transcript log, composer, and status |
 | Package actions/trust domain | PASS automated | Package UI conformance, package loading, cross-domain, and replacement tests remain green |
 
 ## Plan 101 UI design-system recipe foundation execution record (2026-08-29)
