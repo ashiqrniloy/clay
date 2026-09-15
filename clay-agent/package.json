@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Clay-owned Node daemon hosting Prism 0.5.4 over stdio JSON-RPC.",
+  "description": "Clay-owned Node daemon hosting Prism 0.5.5 over stdio JSON-RPC.",
   "bin": {
     "clay-agent": "./dist/main.js"
   },

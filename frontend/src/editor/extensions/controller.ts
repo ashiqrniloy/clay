@@ -22,6 +22,7 @@ import {
 import { EditorView, hoverTooltip, keymap } from "@codemirror/view";
 
 import type { BridgeEnvelope } from "../../bridge/types";
+import { detached } from "../../lib/detached";
 import type { DocumentMeta } from "../../state/document-store";
 import { behaviorCompartment } from "../compartments";
 import { positionIndex } from "../position-index";
@@ -736,16 +737,18 @@ export class EditorProjection {
     if (local[alias]) return local[alias]();
     const meta = this.options.meta();
     if (!meta) return false;
-    void this.options.send(
-      JSON.stringify({
-        family: "commandIntent",
-        payload: {
-          clientId: this.options.clientId(),
-          documentId: meta.documentId,
-          behaviorVersion: meta.behaviorVersion,
-          commandId,
-        },
-      }),
+    detached(
+      this.options.send(
+        JSON.stringify({
+          family: "commandIntent",
+          payload: {
+            clientId: this.options.clientId(),
+            documentId: meta.documentId,
+            behaviorVersion: meta.behaviorVersion,
+            commandId,
+          },
+        }),
+      ),
     );
     return true;
   }
@@ -761,24 +764,26 @@ export class EditorProjection {
       head: range.head,
     }));
     const index = positionIndex(view.state);
-    void this.options.send(
-      JSON.stringify({
-        family: "selectionQueryRequest",
-        payload: {
-          request: {
-            requestId,
-            clientId: this.options.clientId(),
-            documentId: meta.documentId,
-            documentVersion: meta.version + meta.pending,
-            behaviorVersion: meta.behaviorVersion,
-            query,
-            selections: this.pendingSelections.map((range) => ({
-              anchor: utf16ToUtf8Indexed(index, range.anchor),
-              focus: utf16ToUtf8Indexed(index, range.head),
-            })),
+    detached(
+      this.options.send(
+        JSON.stringify({
+          family: "selectionQueryRequest",
+          payload: {
+            request: {
+              requestId,
+              clientId: this.options.clientId(),
+              documentId: meta.documentId,
+              documentVersion: meta.version + meta.pending,
+              behaviorVersion: meta.behaviorVersion,
+              query,
+              selections: this.pendingSelections.map((range) => ({
+                anchor: utf16ToUtf8Indexed(index, range.anchor),
+                focus: utf16ToUtf8Indexed(index, range.head),
+              })),
+            },
           },
-        },
-      }),
+        }),
+      ),
     );
     return true;
   }

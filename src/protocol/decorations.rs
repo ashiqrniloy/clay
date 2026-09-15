@@ -13,6 +13,8 @@ use crate::protocol::{DocumentFontRole, DocumentId, DocumentVersion, TextByteRan
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DecorationProvenance {
     pub package_name: String,
     pub package_version: String,
@@ -34,6 +36,8 @@ pub struct DecorationProvenance {
     serde::Deserialize,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DecorationKind {
     Syntax,
     Semantic,
@@ -96,6 +100,8 @@ pub enum DecorationIntent {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DecorationTarget {
     WorkspacePath {
         relative_path: String,
@@ -316,6 +322,8 @@ fn paths_equal(left: &str, right: &str) -> bool {
     serde::Deserialize,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum TokenType {
     // LSP SemanticTokenType base (23).
     Namespace,
@@ -378,6 +386,8 @@ pub enum TokenType {
     serde::Deserialize,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct Modifiers(pub u16);
 
 impl Modifiers {
@@ -604,6 +614,8 @@ impl TokenType {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DecorationSpan {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -633,6 +645,8 @@ pub struct DecorationSpan {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct InlayHintPayload {
     pub label: String,
     pub placement: InlayPlacement,
@@ -651,6 +665,8 @@ pub struct InlayHintPayload {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum InlayPlacement {
     Before,
     After,
@@ -804,6 +820,8 @@ pub struct DecorationChunkKey {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DecorationSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

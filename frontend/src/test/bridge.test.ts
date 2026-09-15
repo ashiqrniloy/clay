@@ -5,18 +5,22 @@ import {
   asDocumentId,
   type BridgeEnvelope,
   type BootstrapDto,
-  type ThemeSnapshot,
-  type TypographySnapshot,
-  type DesignSystemSnapshot,
 } from "../bridge/types";
+import type {
+  ThemeSnapshot,
+  TypographySnapshot,
+  DesignSystemSnapshot,
+} from "../theme/types";
 import {
   applyEnvelope,
   createConnectionStore,
 } from "../state/connection-store";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 const themeSnapshot: ThemeSnapshot = {
   specifier: "",
   tokens: { "surface.main": { type: "color", value: "#100f17" } },
+  editorStyles: {},
   densityScale: 1,
 };
 const typographySnapshot: TypographySnapshot = {
@@ -24,17 +28,35 @@ const typographySnapshot: TypographySnapshot = {
   monospace: {
     families: ["monospace"],
     size: 13,
-    ligatures: { enableStandard: true },
+    ligatures: {
+      enableStandard: true,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   proportional: {
     families: ["serif"],
     size: 13,
-    ligatures: { enableStandard: true },
+    ligatures: {
+      enableStandard: true,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   ui: {
     families: ["system-ui"],
     size: 13,
-    ligatures: { enableStandard: true },
+    ligatures: {
+      enableStandard: true,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   hierarchy: {
     display: 1.5,
@@ -78,15 +100,12 @@ const bootstrap: BootstrapDto = {
     documentId: asDocumentId(1),
     version: 1,
     head: { totalBytes: 0, firstChunk: "" },
-    access: {},
+    access: "readOnly",
     workspaceRoot: "/tmp/ws",
   },
-  behaviorManifest: {
-    manifestId: "m",
-    behaviorVersion: 1,
-    commands: [],
-    keymaps: [],
-  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
+  tabId: null,
+  performanceProfile: false,
   activeTheme: themeSnapshot,
   activeTypography: typographySnapshot,
   activeDesignSystem: designSystemSnapshot,
@@ -181,7 +200,7 @@ describe("design system DTO projection", () => {
         tabId: null,
         snapshot: {
           runtimeGenerationId: 2,
-          behaviorManifest: {},
+          behaviorManifest: behaviorManifestFixture(),
           activeTheme: themeSnapshot,
           activeTypography: typographySnapshot,
           activeDesignSystem: {
@@ -203,6 +222,9 @@ describe("design system DTO projection", () => {
                 borderWidth: 1,
                 borderStyle: "solid",
                 borderRadius: 8,
+                padding: null,
+                gap: null,
+                innerHighlight: null,
                 shadow: [],
                 backdropBlur: 12,
                 backdropSaturate: 1.2,
@@ -231,11 +253,13 @@ describe("design system DTO projection", () => {
           packageUi: {
             version: 2,
             emptyTab: null,
+            surfaces: [],
             panels: [],
             overlays: [],
             components: [],
             inputRoutes: [],
           },
+          uiChoices: { themes: [], designSystems: [] },
           documents: [],
           diagnostics: [],
         },

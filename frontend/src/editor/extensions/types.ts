@@ -1,96 +1,26 @@
-export type TokenType =
-  | "namespace"
-  | "type"
-  | "class"
-  | "enum"
-  | "interface"
-  | "struct"
-  | "typeParameter"
-  | "parameter"
-  | "variable"
-  | "property"
-  | "enumMember"
-  | "event"
-  | "function"
-  | "method"
-  | "macro"
-  | "keyword"
-  | "modifier"
-  | "comment"
-  | "string"
-  | "number"
-  | "regexp"
-  | "operator"
-  | "decorator"
-  | "heading1"
-  | "heading2"
-  | "heading3"
-  | "heading4"
-  | "heading5"
-  | "heading6"
-  | "listItem"
-  | "quote"
-  | "codeBlock"
-  | "codeSpan"
-  | "link"
-  | "paragraph";
+// Decoration and diagnostic wire shapes are generated from the Rust DTO layer
+// (plan 119 SC-1) — do not restate them. Only the event-only payloads below
+// (folding, viewport patches, completion, language intelligence, keybindings)
+// stay hand-written: they are the shell's narrowing of `ClientConnectionEvent`,
+// which the contract generation deliberately excludes.
+import type {
+  DecorationProvenance as Provenance,
+  DecorationSet,
+  DiagnosticSet,
+  TextByteRange as ByteRange,
+} from "../../bridge/types";
 
-export type DecorationKind =
-  "syntax" | "semantic" | "diagnostic" | "searchMatch" | "link" | "inlayHint";
-
-export interface ByteRange {
-  byteStart: number;
-  byteEnd: number;
-}
-export interface Provenance {
-  packageName: string;
-  packageVersion: string;
-  packagePrefix: string;
-}
-export type DecorationTarget =
-  | { workspacePath: { relativePath: string; range: ByteRange | null } }
-  | { documentRange: { range: ByteRange } }
-  | { displayOnly: { text: string } };
-
-export interface DecorationSpan extends ByteRange {
-  kind: DecorationKind;
-  tokenType: TokenType;
-  modifiers: number;
-  scope: string | null;
-  fontRole: "monospace" | "proportional" | "inherit" | null;
-  priority: number;
-  provenance: Provenance;
-  target: DecorationTarget | null;
-  inlay: { label: string; placement: "before" | "after" } | null;
-}
-
-export interface DecorationSet {
-  documentId: number;
-  documentVersion: number;
-  packagePrefix: string;
-  kind: DecorationKind;
-  viewportByteStart: number;
-  viewportByteEnd: number;
-  spans: DecorationSpan[];
-  traceId?: number;
-}
-
-export interface DiagnosticSpan extends ByteRange {
-  severity: "error" | "warning" | "info";
-  code: string;
-  message: string;
-  source: string;
-  provenance: Provenance;
-}
-export interface DiagnosticSet {
-  documentId: number;
-  documentVersion: number;
-  viewportByteStart: number;
-  viewportByteEnd: number;
-  source: string;
-  provenance: Provenance;
-  spans: DiagnosticSpan[];
-}
+export type {
+  DecorationKind,
+  DecorationProvenance as Provenance,
+  DecorationSet,
+  DecorationSpan,
+  DecorationTarget,
+  DiagnosticSet,
+  DiagnosticSpan,
+  TextByteRange as ByteRange,
+  TokenType,
+} from "../../bridge/types";
 
 export interface FoldingRange extends ByteRange {
   label: string | null;

@@ -73,14 +73,19 @@ describe("retired chat surface", () => {
     expect(hits, "the removed chat surface still referenced").toEqual([]);
   });
 
-  it("keeps the shared agent module under session naming", () => {
+  it("keeps the agent module under tab-session naming", () => {
     const state = fs.readFileSync(
       path.join(srcRoot, "agent", "state.ts"),
       "utf8",
     );
-    expect(state).toContain("export const agentSession");
-    expect(state).toContain("export function resetAgentSessionForTests");
+    // Plan 119 SC-6: one store per tab runtime. The module is still named for
+    // the session it binds, but there is no process-global agent session and
+    // no chat-era singleton seam behind it.
+    expect(state).toContain("export function createAgentSession");
+    expect(state).toContain("export interface AgentSessionModule");
     expect(state).toContain("export interface AgentSnapshot");
+    expect(state).not.toContain("__clayAgentSession");
+    expect(state).not.toContain("resetAgentSessionForTests");
     expect(fs.existsSync(path.join(srcRoot, "chat"))).toBe(false);
   });
 });

@@ -11,6 +11,7 @@ beforeEach(() => {
   themeStore.setTheme({
     specifier: "@clay/theme-modus-vivendi",
     tokens: {},
+    editorStyles: {},
     densityScale: 1,
   });
   themeStore.setTypography({
@@ -18,14 +19,36 @@ beforeEach(() => {
     monospace: {
       families: ["Mono"],
       size: 16,
-      ligatures: { enableStandard: true },
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
     },
     proportional: {
       families: ["Sans"],
       size: 16,
-      ligatures: { enableStandard: true },
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
     },
-    ui: { families: ["UI"], size: 12, ligatures: { enableStandard: true } },
+    ui: {
+      families: ["UI"],
+      size: 12,
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
+    },
     hierarchy: {
       display: 1.5,
       title: 1.16,

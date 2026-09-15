@@ -39,17 +39,35 @@ const typography: TypographySnapshot = {
   ui: {
     families: ["System Sans"],
     size: 13,
-    ligatures: { enableStandard: false },
+    ligatures: {
+      enableStandard: false,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   monospace: {
     families: ["Code Mono"],
     size: 12,
-    ligatures: { enableStandard: true },
+    ligatures: {
+      enableStandard: true,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   proportional: {
     families: ["Read Serif"],
     size: 14,
-    ligatures: { enableStandard: true },
+    ligatures: {
+      enableStandard: true,
+      enableContextual: true,
+      discretionaryFeatures: [],
+      rawFeatures: null,
+      disableFeatures: [],
+    },
   },
   hierarchy: {
     display: 1.5,
@@ -94,6 +112,7 @@ describe("theme adapter", () => {
   it("pre-scales only the spacing rhythm with the density scale", () => {
     const scaled: ThemeSnapshot = {
       ...theme,
+      editorStyles: {},
       densityScale: 1.125,
       tokens: {
         "spacing.sm": { type: "scalar", value: 12 },
@@ -129,7 +148,13 @@ describe("typography adapter", () => {
       ui: {
         families: ["A B", "C"],
         size: 10,
-        ligatures: { enableStandard: true },
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
       },
     };
     const vars = new Map(typographyCssVariables(stacked));

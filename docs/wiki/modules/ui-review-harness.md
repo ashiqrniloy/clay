@@ -36,19 +36,19 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 
 ### Fixtures
 
-| Fixture                      | init.js content                                                                                                | State captured                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `ui-review-default`          | empty comment                                                                                                  | welcome entry state (empty-tab bootstrap)                           |
-| `ui-review-loading`          | static SDUI `Loading workspace…` panel                                                                         | published loading panel via watcher reload                          |
-| `ui-review-error`            | `setTheme('@clay/does-not-exist')`                                                                             | sanitized `Runtime packages.not_installed` diagnostic, usable shell |
-| `ui-review-recovery`         | empty comment                                                                                                  | disconnected/reconnect-guidance state                               |
-| `ui-review-large-typography` | `setTypography` with UI 24 and document 20/21                                                                  | bounded large-type shell                                            |
-| `ui-review-completion`       | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
-| `ui-review-command-centre`   | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
-| `ui-review-rust`             | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
-| `ui-review-design-system` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Dark | Shipped design system active (Plan 118) |
-| `ui-review-design-system-light` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Light | Cross-theme color authority verification (Plan 118) |
-| `ui-review-launcher` | `loadPackage('@clay/launcher')` under Gruvbox Material Dark | Bundled launcher landing on the empty tab (Plan 118 Part D) |
+| Fixture                         | init.js content                                                                                                | State captured                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `ui-review-default`             | empty comment                                                                                                  | welcome entry state (empty-tab bootstrap)                           |
+| `ui-review-loading`             | static SDUI `Loading workspace…` panel                                                                         | published loading panel via watcher reload                          |
+| `ui-review-error`               | `setTheme('@clay/does-not-exist')`                                                                             | sanitized `Runtime packages.not_installed` diagnostic, usable shell |
+| `ui-review-recovery`            | empty comment                                                                                                  | disconnected/reconnect-guidance state                               |
+| `ui-review-large-typography`    | `setTypography` with UI 24 and document 20/21                                                                  | bounded large-type shell                                            |
+| `ui-review-completion`          | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
+| `ui-review-command-centre`      | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
+| `ui-review-rust`                | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
+| `ui-review-design-system`       | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Dark                                       | Shipped design system active (Plan 118)                             |
+| `ui-review-design-system-light` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Light                                      | Cross-theme color authority verification (Plan 118)                 |
+| `ui-review-launcher`            | `loadPackage('@clay/launcher')` under Gruvbox Material Dark                                                    | Bundled launcher landing on the empty tab (Plan 118 Part D)         |
 
 #### `--example-config` and `--drive`
 
@@ -83,6 +83,36 @@ Glass fixture names are rejected by the script's argument check. The table lists
 only states the script can capture.
 
 The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
+
+### Plan 119 agent-panel review (2026-09-15)
+
+`ui-review-coding-agent` now reaches the agent **view**, not just the landing:
+the fixture loads `@clay/coding-agent` and the AT-SPI drive step selects the
+shell's `Agent` tab, so the capture is a PASS for the first time (the state
+historically recorded UNRESOLVED for want of input synthesis).
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-coding-agent \
+  --drive '[{"find":{"role":"tab","name":"Agent"},"do":"click"}]' \
+  --output <artifact-dir>
+```
+
+The retained AT-SPI dump exposes `landmark "Coding Agent"`,
+`log "Transcript"`, `entry "Message"`, `button "Send"`, and
+`page tab list "Agent detail"`. Evidence:
+`code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/`. Interactive
+keyboard work that the harness cannot synthesize was driven through the
+browser-fixture route instead (`/?fixture=coding-agent&state=…`, keyboard and
+accessibility transcripts in the same directory).
+
+The plan-119 further-actions pass added a second evidence set:
+`code-reviews/screenshots/2026-09-15-plan119-further-actions/` (D2 inspector-strip
+affordance measurements, F3 approval focus, the live two-tab attempt with its
+rerun recipe, and the bundle-ceiling decision). The live two-tab leg ran a real
+`clay server` + `clay client` with two tabs rooted at distinct scratch folders;
+driving the composer from the desktop stayed impossible on this host because
+`ydotool` cannot open `/dev/uinput` and the portal keyboard grant is
+interactive — recorded in that folder's `review-log.md` §4, not waived.
 
 ### Plan 099 Tauri/React editor review
 
@@ -276,7 +306,7 @@ Review findings and resolutions:
 Final verification for this review: Rust fmt/check/clippy and 1117 Rust lib
 plus 4 launch, 30 presentation, 184 protocol, 68 runtime, and 130 security
 tests pass; frontend format/lint/typecheck and 99 Vitest tests pass; frontend
-budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 400 kB limits;
+budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 404 kB limits;
 `security-audit.sh` and `package-smoke.sh` pass; Clay Agent tests pass 8/8.
 
 ## Plan 118 landing launch test (2026-09-13)
@@ -305,15 +335,15 @@ Findings and recorded limits:
   gruvbox-material-light) confirm the shipped design system under every palette.
 - The Command Centre opened over the landing exposes **94** command entries in
   the AT-SPI tree with **0** hits for `chat`, `neobrutal`, `glass` — the
-  negative check for the removed surfaces that palette *filtering* would
+  negative check for the removed surfaces that palette _filtering_ would
   otherwise provide.
 - A **fresh landing shows a stale error status**: `unknown workspace document 1 —
-  Hint: Open the document through the server before saving, reloading, or
-  querying it.` It is the bootstrap placeholder diagnostic
+Hint: Open the document through the server before saving, reloading, or
+querying it.` It is the bootstrap placeholder diagnostic
   (`src/server/workspace/mod.rs`, cleared on `documentOpened`) and appears in
   every capture back to plan 109 — pre-existing, not caused by the example
   config, but it should not be visible on a surface that never opened a
-document.
+  document.
 - Workspace isolation: both processes run with `HOME`, `XDG_CONFIG_HOME`,
   `XDG_DATA_HOME`, `TMPDIR` and a private socket inside the mode-700 root; a
   sha256 of the developer's real `~/.clay/*` and `~/.config/clay/*` is identical

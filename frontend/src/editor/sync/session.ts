@@ -139,11 +139,38 @@ export function createDocumentSession(options: Options): DocumentSession {
    * is attached. When a view exists, `view.state.doc` owns the document. */
   let detachedDoc: Text = Text.empty;
   let clientId = 0;
+  // Fallback until the bootstrap installs the real manifest. Complete shape:
+  // the generated contract type is produced by `BehaviorManifest::minimal_text_editing`
+  // Rust-side, so the fields below mirror that constructor's empty defaults.
   let behaviorManifest: BootstrapDto["behaviorManifest"] = {
     manifestId: "default.text",
     behaviorVersion: 0,
-    commands: [],
+    scope: "globalDefault",
+    documentFontRole: "inherit",
     keymaps: [],
+    commands: [],
+    editorRules: {
+      textEdits: [],
+      enter: "preserveLeadingWhitespace",
+      tab: { mode: "insertSpaces", spacesPerTab: 2 },
+      pairs: [],
+      comments: [],
+      headingPrefixes: [],
+      electricCharacters: [],
+      autocompleteTriggers: [],
+      movement: {
+        wordSeparators: "code",
+        treatUnderscoreAsWord: true,
+        camelCaseSubWord: true,
+        paragraphStyle: "blankLine",
+        stopAtEolWordEnd: false,
+        lineMovement: "character",
+        stickyColumn: true,
+      },
+      caretStyle: null,
+      chrome: null,
+      layout: null,
+    },
   };
   const featureEvents: BridgeEnvelope[] = [];
   const featureListeners = new Set<(envelope: BridgeEnvelope) => void>();
@@ -689,7 +716,8 @@ export function createDocumentSession(options: Options): DocumentSession {
         documentId: 0,
         version: 0,
         dirty: false,
-        access: {},
+        // Unbound placeholder; the open reply supplies the real access.
+        access: "readOnly",
         path: "",
         workspaceRootId: null,
         workspaceRoot: "",

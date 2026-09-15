@@ -1068,7 +1068,7 @@ gzip gate (`frontend/scripts/bundle-budget.mjs`, wired into CI).
 | Surface        | Budget                          | Enforcement                          |
 | -------------- | ------------------------------- | ------------------------------------ |
 | Startup shell  | <= 180 kB gzip (startup shell)  | `frontend/scripts/bundle-budget.mjs` |
-| Total frontend | <= 400 kB gzip (total frontend) | `frontend/scripts/bundle-budget.mjs` |
+| Total frontend | <= 404 kB gzip (total frontend) | `frontend/scripts/bundle-budget.mjs` |
 
 Latest measured production build (2026-08-24): shell 161.0 kB gzip,
 total 343.7 kB gzip — within budget, none raised.

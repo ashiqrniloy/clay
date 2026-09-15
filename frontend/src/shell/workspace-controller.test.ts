@@ -6,6 +6,8 @@ import type { RuntimeSnapshot } from "../sdui/types";
 import { tabsFromWindow } from "./persist";
 import { agentInspector, workspaceRail } from "./layout-state";
 import { createWorkspace } from "./workspace-controller";
+import { createAgentSession } from "../agent/state";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 function bootstrap(
   over: Partial<BootstrapDto> & { clientId: number },
@@ -21,24 +23,31 @@ function bootstrap(
       access: { editable: { leaseId: 1 } },
       workspaceRoot: `/tmp/ws${over.clientId}`,
     },
-    behaviorManifest: {
-      manifestId: "m",
-      behaviorVersion: 2,
-      commands: [],
-      keymaps: [],
-    },
+    behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
     activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
     activeTypography: {
       revision: 1,
       monospace: {
         families: ["m"],
         size: 13,
-        ligatures: { enableStandard: true },
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
       },
       proportional: {
         families: ["p"],
         size: 13,
-        ligatures: { enableStandard: true },
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
       },
       ui: { families: ["u"], size: 13, ligatures: { enableStandard: true } },
       hierarchy: {
@@ -559,14 +568,16 @@ describe("workspace controller", () => {
       activeTheme: initial.activeTheme,
       activeTypography: initial.activeTypography,
       activeDesignSystem: initial.activeDesignSystem,
+      uiChoices: { themes: [], designSystems: [] },
       sduiTree: {
         uiVersion: 8,
         rootId: 1,
-        nodes: [{ id: 1, kind: { label: { text: "Git" } } }],
+        nodes: [{ id: 1, kind: { label: { text: "Git", icon: null } } }],
       },
       packageUi: {
         version: 8,
         emptyTab: null,
+        surfaces: [],
         panels: [],
         overlays: [],
         components: [],
@@ -581,7 +592,7 @@ describe("workspace controller", () => {
     });
     expect(ws.runtime(1)?.ui.runtimeGeneration).toBe(8);
     expect(ws.runtime(1)?.ui.sdui?.nodes.get(1)?.kind).toEqual({
-      label: { text: "Git" },
+      label: { text: "Git", icon: null },
     });
     expect(JSON.parse(sent.at(-1) ?? "")).toMatchObject({
       family: "runtimeGenerationInstalled",
@@ -704,10 +715,8 @@ describe("workspace controller", () => {
         sent.push(payload);
       },
     });
-    const manifest = {
-      manifestId: "m",
+    const manifest = behaviorManifestFixture({
       behaviorVersion: 7,
-      commands: [],
       keymaps: [
         {
           commandId: "controlCenter.open",
@@ -731,8 +740,8 @@ describe("workspace controller", () => {
               },
             },
           ],
-          context: "Global",
-          routingPolicy: "ServerFirst",
+          context: "global",
+          routingPolicy: "serverFirst",
         },
         {
           commandId: "shell.clientSplitPaneVertical",
@@ -747,16 +756,16 @@ describe("workspace controller", () => {
               },
             },
           ],
-          context: "Global",
-          routingPolicy: "ClientUiCommand",
+          context: "global",
+          routingPolicy: "clientUiCommand",
         },
       ],
-    };
+    });
     ws.installBootstrap(bootstrap({ clientId: 1, behaviorManifest: manifest }));
     const keymaps = ws.serverKeymaps();
-    // serde emits unit-variant enum names as written ("Global",
-    // "ServerFirst") — the filter must match the wire spelling, and the
-    // ClientUiCommand-routed pane chord must stay client-owned.
+    // The generated contract carries the wire spelling (camelCase); the filter
+    // normalizes spelling so package-authored kebab case still matches, and the
+    // client-routed pane chord must stay client-owned.
     expect(keymaps).toHaveLength(1);
     expect(keymaps[0]?.commandId).toBe("controlCenter.open");
 
@@ -921,6 +930,63 @@ describe("workspace controller", () => {
     await ws.confirmClose(2, false);
     expect(closed).toEqual([11]);
     expect(ws.getSnapshot().tabs.map((tab) => tab.clientId)).toEqual([1]);
+  });
+
+  it("adopts one agent session store per tab and disposes it on close (plan 119 SC-6)", async () => {
+    const ws = createWorkspace({
+      send: async () => undefined,
+      closeTab: async () => undefined,
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1, tabId: 10 }));
+    ws.installBootstrap(bootstrap({ clientId: 2, tabId: 11 }));
+    // No agent view has mounted yet: the tab owns no session state, so a tab
+    // the user only edits never starts one.
+    expect(ws.runtime(1)?.agent ?? null).toBeNull();
+    expect(ws.runtime(2)?.agent ?? null).toBeNull();
+
+    // The agent view creates the store; the runtime adopts it (and a repeat
+    // mount is idempotent).
+    const first = createAgentSession({});
+    const second = createAgentSession({});
+    ws.attachAgentStore(1, first);
+    ws.attachAgentStore(2, second);
+    ws.attachAgentStore(1, first);
+    expect(ws.runtime(1)?.agent).toBe(first);
+    expect(ws.runtime(2)?.agent).toBe(second);
+    expect(first).not.toBe(second);
+
+    // Every agent intent rides the tab's own connection, lazily stamped (the
+    // registry may deliver the tab id after the runtime mounts).
+    const sent: Array<{ payload: string; tabId?: number }> = [];
+    const routed = createWorkspace({
+      send: async (payload, tabId) => {
+        sent.push({ payload, tabId });
+      },
+    });
+    routed.installBootstrap(bootstrap({ clientId: 5, tabId: 12 }));
+    routed.runtime(5)?.send("{}");
+    // The pane session's own document traffic shares the lane; the agent
+    // intent is the one this store's sender just wrote.
+    expect(sent.filter((entry) => entry.payload === "{}")).toEqual([
+      { payload: "{}", tabId: 12 },
+    ]);
+
+    const seen = vi.fn();
+    const watch = first.subscribe(seen);
+    first.seedForDev({ statusText: "before close" });
+    // Notifications are coalesced into a frame (a macrotask without rAF).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen).toHaveBeenCalled();
+    seen.mockClear();
+
+    await ws.confirmClose(1, false);
+    // Disposed with the tab: no further notification, no further application.
+    first.seedForDev({ statusText: "after close" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(seen).not.toHaveBeenCalled();
+    expect(first.getSnapshot().messages).toEqual([]);
+    expect(ws.runtime(1)).toBeNull();
+    watch();
   });
 
   it("refuses to close the last tab", () => {

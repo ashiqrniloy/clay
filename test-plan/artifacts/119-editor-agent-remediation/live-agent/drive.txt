@@ -1,0 +1,2 @@
+OK step 1: click 'Agent'
+OK step 2: wait 600ms

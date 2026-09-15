@@ -2,8 +2,10 @@ import { lazy, Suspense, useCallback, useSyncExternalStore } from "react";
 
 import { ClayButton, ClayModal, ClayText } from "../components";
 import { AgentView } from "../coding-agent/AgentView";
+import type { AgentSessionModule } from "../agent/state";
 import { PaneTree, effortChordOf } from "./PaneTree";
 import { tabUncommitted } from "./tab-store";
+import { detached } from "../lib/detached";
 import type { WorkspaceController } from "./workspace-controller";
 
 import styles from "./workspace-panes.module.css";
@@ -39,6 +41,25 @@ export function WorkspacePanes({
     },
     [clientId, workspace],
   );
+  // Plan 118 task 36: the Files tab's row action — the document opens through
+  // the same path every other open uses (server-contained to the workspace
+  // root), and the tab switches to the view that shows it. The agent view stays
+  // mounted, so its transcript and scroll position survive the handoff.
+  const openInWorkspace = useCallback(
+    (path: string) => {
+      workspace.openPath(path);
+      workspace.setView("workspace");
+    },
+    [workspace],
+  );
+  // The agent view creates its tab's store on first mount; the tab runtime
+  // adopts it and disposes it with the tab (plan 119 SC-6).
+  const adoptAgentStore = useCallback(
+    (store: AgentSessionModule) => {
+      if (clientId != null) workspace.attachAgentStore(clientId, store);
+    },
+    [clientId, workspace],
+  );
   if (!runtime) {
     return (
       <div className={styles.empty}>
@@ -55,17 +76,6 @@ export function WorkspacePanes({
   // tab the user only edits.
   const activePane = runtime.panes.get(runtime.tree.activePaneId) ?? null;
   const agentMounted = runtime.agentMounted || tab?.view === "agent";
-  // Plan 118 task 36: the Files tab's row action — the document opens through
-  // the same path every other open uses (server-contained to the workspace
-  // root), and the tab switches to the view that shows it. The agent view stays
-  // mounted, so its transcript and scroll position survive the handoff.
-  const openInWorkspace = useCallback(
-    (path: string) => {
-      workspace.openPath(path);
-      workspace.setView("workspace");
-    },
-    [workspace],
-  );
   const panes = (
     <PaneTree
       runtime={runtime}
@@ -78,7 +88,7 @@ export function WorkspacePanes({
       onOpenFile={() => workspace.openFileDialog()}
       onOpenFolder={() => workspace.openFolderDialog()}
       onPickAgent={(agent) => workspace.attachAgent(agent)}
-      onOpenWorkspace={(root) => void workspace.openWorkspace(root)}
+      onOpenWorkspace={(root) => detached(workspace.openWorkspace(root))}
       showLauncher={tab ? tabUncommitted(tab) : false}
     />
   );
@@ -88,11 +98,14 @@ export function WorkspacePanes({
       uiVersion={runtime.ui.packageUi?.version ?? 0}
       workspaceRoot={tab?.workspaceRoot || runtime.sessionRoot}
       session={activePane?.session ?? null}
-      send={activePane?.session.request ?? null}
+      agent={runtime.agent}
+      agentClientId={clientId}
+      onAgentStore={adoptAgentStore}
+      send={runtime.send}
       effortChord={activePane ? effortChordOf(activePane) : null}
       onBusyChange={onAgentBusy}
       agentType={tab?.agent?.type ?? null}
-      onPickAgent={(agent) => void workspace.pickAgent(agent)}
+      onPickAgent={(agent) => workspace.pickAgent(agent)}
       onOpenInWorkspace={openInWorkspace}
     />
   ) : null;
@@ -155,7 +168,7 @@ export function WorkspacePanes({
               variant="danger"
               onPress={() => {
                 if (pending)
-                  void workspace.confirmClose(pending.clientId, false);
+                  detached(workspace.confirmClose(pending.clientId, false));
               }}
             >
               Discard and close
@@ -164,7 +177,7 @@ export function WorkspacePanes({
               variant="primary"
               onPress={() => {
                 if (pending)
-                  void workspace.confirmClose(pending.clientId, true);
+                  detached(workspace.confirmClose(pending.clientId, true));
               }}
             >
               Save all and close

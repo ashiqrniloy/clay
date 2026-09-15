@@ -43,6 +43,7 @@ test("built-in Chat profile exists on a fresh host", async () => {
 
 test("prompt streams mock events, persists, and resumes", async () => {
   const dataDir = await tempDir();
+  const workspaceRoot = await tempDir();
   const events: unknown[] = [];
   const host = await ClayAgentHost.create({
     dataDir,
@@ -55,6 +56,7 @@ test("prompt streams mock events, persists, and resumes", async () => {
     profile: "chat",
     provider: "mock",
     model: "demo",
+    workspaceRoot,
   })) as { sessionId: string };
   const prompted = (await host.handle("session.prompt", {
     sessionId: created.sessionId,
@@ -74,8 +76,15 @@ test("prompt streams mock events, persists, and resumes", async () => {
   };
   assert.ok(loaded.entries.length > 0);
   assert.equal(loaded.profile, "chat");
-  const resumed = (await resumedHost.handle("session.resume", { sessionId: created.sessionId })) as { sessionId: string };
+  const resumed = (await resumedHost.handle("session.resume", { sessionId: created.sessionId })) as {
+    sessionId: string;
+    workspaceRoot: string;
+  };
   assert.equal(resumed.sessionId, created.sessionId);
+  // Plan 119 SC-6: a restored session binds to the workspace it was created
+  // in (recorded metadata), never the daemon's launch cwd — the tool cwd,
+  // acceptance roots, and wiki/graft binding all resolve from it.
+  assert.equal(resumed.workspaceRoot, workspaceRoot);
   resumedHost.close();
 });
 

@@ -19,6 +19,7 @@ import {
   setTheme,
 } from "../editor/create-editor";
 import { createDocumentSession } from "../editor/sync/session";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 afterEach(cleanup);
 
@@ -34,12 +35,7 @@ const bootstrap = {
     access: { editable: { leaseId: 1 } },
     workspaceRoot: "/tmp/ws",
   },
-  behaviorManifest: {
-    manifestId: "m",
-    behaviorVersion: 2,
-    commands: [],
-    keymaps: [],
-  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
 } as unknown as BootstrapDto;
 
 describe("editor lifecycle", () => {
@@ -218,7 +214,7 @@ describe("editor lifecycle", () => {
               documentId: 1,
               version: 2,
               dirty: false,
-              access: { readOnly: null },
+              access: "readOnly",
               path: "",
             },
             head: { totalBytes: 4, firstChunk: "seed" },

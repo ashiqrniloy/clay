@@ -1807,6 +1807,7 @@ export class ClayAgentHost {
       return rest.length > 0 ? rest.map((name) => this.kernel.registries.tools.resolve(name)) : undefined;
     }
     const tools = buildCodingTools({
+      sessionId,
       workspaceRoot: options.workspaceRoot,
       request: (method, params) => this.request(method, params),
       fullAutonomy: () => this.live.get(sessionId)?.fullAutonomy ?? options.fullAutonomy,
@@ -2509,6 +2510,10 @@ export class ClayAgentHost {
       // server keeps labelling turns with their producer after a restart.
       agent: live.agentType,
       agentRoot: live.agentRoot,
+      // Plan 119 SC-6: the resumed session's workspace is the one it was
+      // created in (metadata), so callers can see the binding the restored
+      // tools and prompts actually use.
+      workspaceRoot: live.workspaceRoot,
       leafId: live.session.leafId,
     };
   }
@@ -2534,9 +2539,18 @@ export class ClayAgentHost {
     );
     const agentType = this.agentTypeOf(agentRoot);
     const agent = await this.agentRootConfig(agentRoot);
-    await this.ensureSkillDiscovery(process.cwd());
+    // Plan 119 SC-6: a resumed session runs against the workspace it was
+    // created in — the root the server recorded at `session.new` — never the
+    // daemon's launch cwd (`process.cwd()`), which would bind the restored
+    // tool cwd, acceptance roots, and wiki/graft binding to the wrong folder.
+    // Only pre-workspace records (no metadata) fall back to the cwd.
+    const workspaceRoot =
+      typeof metadata[SESSION_SEARCH_WORKSPACE_METADATA_KEY] === "string"
+        ? (metadata[SESSION_SEARCH_WORKSPACE_METADATA_KEY] as string)
+        : process.cwd();
+    await this.ensureSkillDiscovery(workspaceRoot);
     const created = this.createSession(sessionId, profile, provider, model, {
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
       fullAutonomy: metadata.fullAutonomy !== false,
       observationalMemory,
       agent,
@@ -2549,7 +2563,7 @@ export class ClayAgentHost {
       profile,
       provider,
       model,
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
       agentType,
       agentRoot,
       mcpAllowList: this.mcpAllowListFor(agentRoot),

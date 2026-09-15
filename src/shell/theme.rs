@@ -2738,6 +2738,8 @@ pub const CORE_TOKEN_NAMES: &[&str] = &[
 /// Wire form of one resolved typed token value.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum ThemeTokenValueDto {
     /// CSS-ready `#rrggbb` (opaque) or `#rrggbbaa`.
     Color(String),

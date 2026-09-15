@@ -14,7 +14,7 @@ import { Observable, type Subscription } from "rxjs";
 
 import type { BaseEvent, RunAgentInput } from "@ag-ui/core";
 
-import { pipeRelay } from "./events";
+import { pipeRelay, type AgentStreamEvent } from "./events";
 import { sendRequest } from "../bridge/client";
 
 const RUN_TERMINAL = new Set(["RUN_FINISHED", "RUN_ERROR"]);
@@ -55,19 +55,38 @@ function agentIntentPayload(
 
 type AgentSender = (payload: string) => Promise<void>;
 
+/** `AbstractAgent`'s own config parameter (the package does not export the
+ *  interface, so the constructor's parameter type is the source of truth). */
+type AgentConfigInput = ConstructorParameters<typeof AbstractAgent>[0];
+
+/** Construction-scoped wiring (plan 119 SC-6): the sender is the owning tab's
+ *  own connection, and `accept` is that tab store's session filter — the run
+ *  pipeline must never adopt another session's lifecycle events. */
+export interface TauriClayAgentOptions {
+  sender?: AgentSender;
+  accept?: (event: AgentStreamEvent) => boolean;
+}
+
 export class TauriClayAgent extends AbstractAgent {
   private pendingPrompt: string | null = null;
   private pendingEffort: string | undefined = undefined;
   private uiVersion = 0;
-  private sender: AgentSender = sendRequest;
+  private readonly sender: AgentSender;
+  private readonly accept: (event: AgentStreamEvent) => boolean;
+
+  constructor(
+    config: AgentConfigInput = {},
+    options: TauriClayAgentOptions = {},
+  ) {
+    super(config);
+    this.sender = options.sender ?? sendRequest;
+    // Default accepts everything: a standalone agent (fixtures, tests) has no
+    // tab and therefore nothing to filter against.
+    this.accept = options.accept ?? (() => true);
+  }
 
   setUiVersion(uiVersion: number) {
     this.uiVersion = uiVersion;
-  }
-
-  /** Pane-scoped sender (stamps tab id). Falls back to the process sendRequest. */
-  setSender(sender: AgentSender) {
-    this.sender = sender;
   }
 
   /** Queues composer text for the next `runAgent()` call. */
@@ -96,6 +115,8 @@ export class TauriClayAgent extends AbstractAgent {
       relaySubscription = pipeRelay({
         next: (event) => {
           if (subscriber.closed) return;
+          // Another session's traffic: this run is not one of its runs.
+          if (!this.accept(event)) return;
           if (!started) {
             if (event.type === "RUN_STARTED") {
               started = true;

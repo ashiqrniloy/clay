@@ -37,6 +37,25 @@ const LARGE_SIZE_BYTES: usize = 50 * 1024 * 1024;
 const OVERSIZE_SIZE_BYTES: usize = 257 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Debug-profile open throughput floor for the head round trip.
+///
+/// The head is sent only after the whole file is read, validated, and built
+/// into the resident rope (plan 098 design: the full rope must be resident for
+/// editing/save/analysis; chunking bounds the wire, not the load). Plan 098
+/// measured 287-302 ms for this fixture on a quiet host and the 2026-09-11
+/// review measured 1.0-1.4 s on a loaded one, so the previous flat 500 ms
+/// ceiling encoded an unstated release-profile assumption and flaked under CI
+/// load. 25 MiB/s keeps ~4x headroom over the quiet-host number and still
+/// catches structural regressions (per-chunk allocations, whole-document
+/// copies). The 5 s full-load budget below stays the loose end-to-end guard.
+const DEBUG_OPEN_MIN_BYTES_PER_SEC: f64 = 25.0 * 1024.0 * 1024.0;
+const DEBUG_OPEN_BUDGET_FLOOR: Duration = Duration::from_millis(500);
+
+fn open_latency_budget(bytes: usize) -> Duration {
+    Duration::from_secs_f64(bytes as f64 / DEBUG_OPEN_MIN_BYTES_PER_SEC)
+        .max(DEBUG_OPEN_BUDGET_FLOOR)
+}
+
 #[tokio::test]
 async fn large_document_open_edit_save_reload_roundtrip_is_chunked() {
     let root = temp_dir("large-doc-roundtrip");
@@ -108,11 +127,13 @@ async fn roundtrip_scenario(
         opened.head.first_chunk.len(),
         opened.head.total_bytes
     );
-    assert!(
-        head_latency < Duration::from_millis(500),
-        "open->head took {head_latency:?}, budget is 500 ms"
-    );
     assert_eq!(opened.path, "large.txt");
+    let head_budget = open_latency_budget(opened.head.total_bytes as usize);
+    println!("open->head budget: {head_budget:?}");
+    assert!(
+        head_latency < head_budget,
+        "open->head took {head_latency:?}, budget is {head_budget:?}"
+    );
     assert!(
         opened.head.first_chunk.len() <= MAX_CHUNK_BYTES,
         "head chunk exceeds the wire budget"

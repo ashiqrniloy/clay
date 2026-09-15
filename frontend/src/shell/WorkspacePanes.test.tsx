@@ -12,7 +12,9 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async () => undefined),
@@ -22,8 +24,8 @@ type StreamEvent = Record<string, unknown> & { type: string };
 const harness = vi.hoisted(() => {
   const listeners = new Set<(event: StreamEvent) => void>();
   return {
-    emit(_event: StreamEvent): void {
-      for (const listener of listeners) listeners.add(listener);
+    emit(event: StreamEvent): void {
+      for (const listener of [...listeners]) listener(event);
     },
     subscribe(next: (event: StreamEvent) => void): void {
       listeners.add(next);
@@ -56,9 +58,9 @@ vi.mock("../bridge/client", () => ({
 
 import { createWorkspace } from "./workspace-controller";
 import type { BootstrapDto } from "../bridge/types";
+import { sendRequest } from "../bridge/client";
 import { WorkspacePanes } from "./WorkspacePanes";
-import type { PackageSurface } from "../sdui/types";
-import { resetAgentSessionForTests } from "../agent/state";
+import type { PackageSurfaceDto, PackageUiSnapshotDto } from "../bridge/types";
 
 function bootstrap(
   over: Partial<BootstrapDto> & { clientId: number },
@@ -75,13 +77,13 @@ function bootstrap(
       access: { none: {} },
       workspaceRoot: `/tmp/ws${over.clientId}`,
     },
-    behaviorManifest: {
-      manifestId: "m",
-      behaviorVersion: 2,
-      commands: [],
-      keymaps: [],
+    behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
+    activeTheme: {
+      specifier: "",
+      tokens: {},
+      editorStyles: {},
+      densityScale: 1,
     },
-    activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
     activeTypography: {
       revision: 1,
       monospace: { families: ["m"], size: 13, lineScale: 1 },
@@ -128,7 +130,7 @@ const agentSurface = {
   },
 };
 
-const launcherSurface: PackageSurface = {
+const launcherSurface: PackageSurfaceDto = {
   id: "launcher.start",
   actionTargets: ["workspace.clientOpenFolderDialog"],
   provenance: {
@@ -154,11 +156,15 @@ const launcherSurface: PackageSurface = {
 
 async function mountedWorkspace(
   withSurface: boolean,
-  emptyTab: PackageSurface | null = null,
-  options: { persistLayout?: boolean } = {},
+  emptyTab: PackageUiSnapshotDto["emptyTab"] = null,
+  options: {
+    persistLayout?: boolean;
+    /** Spy for the tab's stamped sender (plan 119 SC-6 lane assertions). */
+    send?: (payload: string) => Promise<void>;
+  } = {},
 ) {
   const ws = createWorkspace({
-    send: async () => undefined,
+    send: options.send ?? (async () => undefined),
     // A persisted layout restores the tab's picked folder (a launcher tab is
     // committed from then on); the launcher tests start with no layout at all.
     loadLayout: async () =>
@@ -184,13 +190,13 @@ async function mountedWorkspace(
       tabId: 10,
       snapshot: {
         runtimeGenerationId: 2,
-        behaviorManifest: {
-          manifestId: "m",
-          behaviorVersion: 2,
-          commands: [],
-          keymaps: [],
+        behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
+        activeTheme: {
+          specifier: "",
+          tokens: {},
+          editorStyles: {},
+          densityScale: 1,
         },
-        activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
         activeTypography: bootstrap({ clientId: 1 }).activeTypography,
         activeDesignSystem: bootstrap({ clientId: 1 }).activeDesignSystem,
         // Live shape: the default tree is a single editorView node — the
@@ -218,6 +224,7 @@ async function mountedWorkspace(
           components: [],
           inputRoutes: [],
         },
+        uiChoices: { themes: [], designSystems: [] },
         documents: [],
         diagnostics: [],
       },
@@ -230,7 +237,6 @@ async function mountedWorkspace(
 describe("WorkspacePanes two views", () => {
   afterEach(() => {
     cleanup();
-    resetAgentSessionForTests();
   });
 
   it("renders the agent surface in the tab's agent view", async () => {
@@ -243,10 +249,75 @@ describe("WorkspacePanes two views", () => {
     });
     // The agent view is a fixed composition (transcript column + inspector
     // column), not a resizable split.
+    // The agent panel is a lazy chunk; under full-suite parallelism the first
+    // mount can exceed the default 1 s findBy timeout.
     expect(
-      await screen.findByRole("region", { name: "Coding Agent" }),
+      await screen.findByRole(
+        "region",
+        { name: "Coding Agent" },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Agent inspector")).toBeInTheDocument();
+  });
+
+  it("a panel-created store's commands ride the tab's own sender (plan 119 SC-6)", async () => {
+    // AgentView hands the panel the tab's stamped sender; the store the panel
+    // creates on first mount must use it (not the process-wide active client,
+    // which is whichever tab was activated last).
+    const send = vi.fn(async (payload: string) => {
+      void payload;
+      return undefined;
+    });
+    const ws = await mountedWorkspace(true, null, { send });
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(send)
+          .mock.calls.map(([payload]) => String(payload))
+          .some((payload) => payload.includes("listSessions")),
+      ).toBe(true),
+    );
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+
+  it("keeps a tab's agent store on the relay after its view unmounts (plan 119 SC-6)", async () => {
+    const ws = await mountedWorkspace(true);
+    const view = render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const runtime = ws.active();
+    if (!runtime?.agent) throw new Error("no active tab store");
+    const store = runtime.agent;
+    // The surface goes away (another tab is up) but the tab keeps its store:
+    // a run that outlives the view still streams into this transcript.
+    view.unmount();
+    act(() => {
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.agentRpc",
+        value: {
+          code: "session.bound",
+          result: {
+            clientId: runtime.clientId,
+            tabId: runtime.tabId,
+            sessionId: "sess-hidden",
+          },
+        },
+        clientId: runtime.clientId,
+      });
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(store.sessionId()).toBe("sess-hidden");
   });
 
   it("opens a session file in the workspace view from the Files tab (plan 118 task 36)", async () => {
@@ -260,7 +331,10 @@ describe("WorkspacePanes two views", () => {
 
     // The session's own file records (a tool row the server derived from the
     // call's arguments) are what the Files tab lists.
-    const store = (await import("../agent/state")).agentSession;
+    // The tab runtime owns the store (plan 119 SC-6): no process global.
+    const runtime = ws.active();
+    if (!runtime?.agent) throw new Error("no active tab store");
+    const store = runtime.agent;
     const release = store.start();
     try {
       // The seed type is the panel's own row shape; the file record is what

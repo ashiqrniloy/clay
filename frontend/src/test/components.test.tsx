@@ -455,7 +455,7 @@ describe("ClayTabStrip catalog primitive and unification", () => {
     expect(tabs[2]).toHaveAttribute("data-disabled", "true");
 
     // Click tab 1
-    await user.click(tabs[0]!);
+    await user.click(tabs[0] as HTMLElement);
     expect(onActivate).toHaveBeenCalledWith("1");
 
     // Click close button on tab 1

@@ -76,6 +76,8 @@ pub struct PackageUiSnapshot {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackageUiProvenance {
     pub package_name: String,
     pub package_version: String,
@@ -96,6 +98,8 @@ pub struct PackageUiProvenance {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum PackageUiTrustDomain {
     Trusted,
     ThirdParty,
@@ -175,6 +179,8 @@ pub struct PackageComponentContent {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackageInputRouteContent {
     pub id: String,
     pub scope: String,
@@ -235,6 +241,8 @@ pub struct EmptyTabContent {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DocumentRuntimeRenderState {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -299,6 +307,8 @@ fn default_active_design_system() -> ActiveDesignSystem {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct UiChoiceOption {
     pub specifier: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -322,6 +332,8 @@ pub struct UiChoiceOption {
     Eq,
 )]
 #[serde(rename_all = "camelCase", default)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct UiChoicesSnapshot {
     pub themes: Vec<UiChoiceOption>,
     pub design_systems: Vec<UiChoiceOption>,

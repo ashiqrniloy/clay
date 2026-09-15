@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 
 import {
@@ -20,11 +20,13 @@ import { WorkspaceView } from "./workspace";
 import { createWorkspace } from "../shell/workspace-controller";
 import { PackageWorkspace } from "../packages/PackageWorkspace";
 import { AgentSettingsPanel } from "../agent-settings/AgentSettingsPanel";
+import { createAgentSession, type AgentSessionModule } from "../agent/state";
 import type { AgentSettingsFileInfo } from "../agent-settings/AgentSettingsPanel";
 import { themeStore } from "../state/stores";
 import { installSduiTree } from "../sdui/state";
 import type { ThemeSnapshot } from "../theme/types";
 import type { PackageUiSnapshot, UiChoicesSnapshot } from "../sdui/types";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 // Plan 104 source-independence guard: package specifiers live in `const`
 // declarations only. Plan 118: `@clay/core` + the shipped design system are the
@@ -261,18 +263,21 @@ function WorkspaceSidebarFixture() {
                         id: "src/alpha.md",
                         label: "alpha.md",
                         detail: "src",
+                        icon: null,
                         action: null,
                       },
                       {
                         id: "src/beta.md",
                         label: "beta.md",
                         detail: "src",
+                        icon: null,
                         action: null,
                       },
                       {
                         id: "docs/gamma.md",
                         label: "gamma.md",
                         detail: "docs",
+                        icon: null,
                         action: null,
                       },
                     ],
@@ -293,11 +298,13 @@ function WorkspaceSidebarFixture() {
           packageUi: {
             version: 1,
             emptyTab: null,
+            surfaces: [],
             panels: [],
             overlays: [],
             components: [],
             inputRoutes: [],
           },
+          uiChoices: { themes: [], designSystems: [] },
           documents: [],
           diagnostics: [],
         },
@@ -711,7 +718,7 @@ function PackageUiFixture({
           // The server's file-browser region is a flat stack, not a panel: the
           // host's left slot owns the region's paint (src/shell/file_browser.rs).
           { id: 2, kind: { stack: { children: [3, 5] } } },
-          { id: 3, kind: { label: { text: "Workspace · clay" } } },
+          { id: 3, kind: { label: { text: "Workspace · clay", icon: null } } },
           {
             id: 4,
             kind: {
@@ -873,6 +880,7 @@ function DocumentErrorFixture({ kind }: { kind: DocumentErrorKind }) {
 const packageFixtureSnapshot: PackageUiSnapshot = {
   version: 4,
   emptyTab: null,
+  surfaces: [],
   overlays: [],
   inputRoutes: [],
   components: [
@@ -963,29 +971,42 @@ const fixtureBootstrap = {
     access: { editable: { leaseId: 1 } },
     workspaceRoot: "/tmp/ws",
   },
-  behaviorManifest: {
-    manifestId: "fixture",
-    behaviorVersion: 1,
-    commands: [],
-    keymaps: [],
-  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
   activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
   activeTypography: {
     revision: 1,
     monospace: {
       families: ["monospace"],
       size: 13,
-      ligatures: { enableStandard: true },
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
     },
     proportional: {
       families: ["serif"],
       size: 13,
-      ligatures: { enableStandard: true },
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
     },
     ui: {
       families: ["system-ui"],
       size: 13,
-      ligatures: { enableStandard: true },
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
     },
     hierarchy: {
       display: 1.5,
@@ -1002,16 +1023,14 @@ const fixtureBootstrap = {
 function CodingAgentFixture() {
   const [params] = useSearchParams();
   const state = params.get("state") ?? "landing";
+  // Plan 119 SC-6: the fixture owns its tab store (there is no process-global
+  // agent session any more), seeds it, and hands it to the panel.
+  const storeRef = useRef<AgentSessionModule | null>(null);
+  storeRef.current ??= createAgentSession({});
+  const store = storeRef.current;
   useEffect(() => {
-    let cancelled = false;
-    void import("../agent/state").then(({ agentSession }) => {
-      if (cancelled) return;
-      seedAgentFixture(agentSession, state === "landing" ? "landing" : state);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [state]);
+    seedAgentFixture(store, state === "landing" ? "landing" : state);
+  }, [store, state]);
   return (
     <div
       className={styles.packageFixture}
@@ -1022,6 +1041,7 @@ function CodingAgentFixture() {
           surface={codingAgentFixtureSurface}
           uiVersion={4}
           workspaceRoot="/tmp/project"
+          agent={store}
         />
       </Suspense>
     </div>
@@ -1072,19 +1092,9 @@ const codingAgentFixtureSurface = {
   },
 } as never;
 
-function seedAgentFixture(
-  agentSession: {
-    seedForDev(input: {
-      messages?: unknown;
-      state?: Record<string, unknown>;
-      streaming?: boolean;
-      statusText?: string | null;
-    }): void;
-  },
-  state: string,
-) {
+function seedAgentFixture(store: AgentSessionModule, state: string) {
   if (state === "landing") {
-    agentSession.seedForDev({
+    store.seedForDev({
       messages: [],
       state: {},
       streaming: false,
@@ -1093,7 +1103,7 @@ function seedAgentFixture(
     return;
   }
   if (state === "conversation") {
-    agentSession.seedForDev({
+    store.seedForDev({
       messages: [
         { id: "f0", role: "user", content: "Summarize notes.md" },
         {
@@ -1158,15 +1168,88 @@ function seedAgentFixture(
           content: "42 tokens",
           metadata: { clayKind: "usage" },
         },
-      ],
-      state: { provider: "mock", model: "mock-mini" },
+      ] as never,
+      // The panel's full inventory surface: branch, extensions, MCP servers,
+      // the models/providers pair the picker and the effort levels resolve
+      // from, and the catalog skills the Context tab pins. A fixture with only
+      // `provider` renders the transcript but none of those inspected tabs.
+      state: {
+        provider: "mock",
+        model: "mock-mini",
+        agent: "coding-agent",
+        // A bound session id + OM view: Settings and Memory render their real
+        // bodies (both fall back to "no session" without one), and the
+        // @-mention fetch gate keys off the same field.
+        sessionId: "fixture-session",
+        omView: {
+          sessionId: "fixture-session",
+          attached: true,
+          observation: { provider: "mock", model: "mock-mini" },
+          reflection: { provider: "mock", model: "mock-mini" },
+          activity: [
+            {
+              kind: "observation",
+              summary: "Noted the SC-4 module split.",
+              at: "09:12",
+            },
+            {
+              kind: "reflection",
+              summary: "Consolidated the panel ownership rule.",
+              at: "09:40",
+            },
+          ],
+        },
+        branch: "main",
+        extensions: ["wiki", "graft"],
+        contextTokens: 4210,
+        effort: "medium",
+        mcpServers: [
+          { serverId: "prism", connected: true, tools: 7, error: "" },
+          {
+            serverId: "filesystem",
+            connected: false,
+            tools: 0,
+            error: "connect timed out",
+          },
+        ],
+        models: [
+          {
+            provider: "mock",
+            model: "mock-mini",
+            displayName: "Mock Mini",
+            contextWindow: 1_000_000,
+            thinkingLevels: ["low", "medium", "high"],
+          },
+          {
+            provider: "mock",
+            model: "mock-large",
+            displayName: "Mock Large",
+            contextWindow: 2_000_000,
+            thinkingLevels: ["low", "medium", "high"],
+          },
+        ],
+        providers: [
+          { id: "mock", configured: true },
+          { id: "unconfigured", configured: false },
+        ],
+        skills: [
+          {
+            name: "clay-execution",
+            description: "Plan, execute, and verify repo work.",
+          },
+          {
+            name: "design-taste-frontend",
+            description: "Anti-slop frontend direction.",
+          },
+        ],
+      },
       streaming: false,
       statusText: null,
     });
     return;
   }
   if (state === "streaming") {
-    agentSession.seedForDev({
+    store.seedForDev({
       messages: [
         {
           id: "s0",
@@ -1184,8 +1267,31 @@ function seedAgentFixture(
     });
     return;
   }
+  if (state === "approval") {
+    store.seedForDev({
+      messages: [
+        { id: "a0", role: "user", content: "Clean up the build directory" },
+        {
+          id: "a1",
+          role: "tool",
+          content: 'bash {"command":"rm -rf target/debug"}',
+          metadata: { clayKind: "tool", toolName: "bash" },
+        },
+      ] as never,
+      state: { provider: "mock", model: "mock-mini" },
+      streaming: false,
+      statusText: "waiting for approval",
+      pendingApproval: {
+        sessionId: "fixture-session",
+        runId: "fixture-run",
+        requestId: "fixture-request",
+        toolName: "bash",
+      },
+    });
+    return;
+  }
   if (state === "error") {
-    agentSession.seedForDev({
+    store.seedForDev({
       messages: [
         { id: "e0", role: "user", content: "List files" },
         {
@@ -1194,7 +1300,7 @@ function seedAgentFixture(
           content: "provider unreachable",
           metadata: { clayKind: "error" },
         },
-      ],
+      ] as never,
       state: { provider: "mock", model: "mock-mini" },
       streaming: false,
       statusText: null,

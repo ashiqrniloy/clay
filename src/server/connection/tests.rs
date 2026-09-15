@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc, time::SystemTime}
 
 use crate::packages::commands::CommandRegistry;
 use crate::protocol::ViewportRenderStatus;
-use crate::protocol::{KeyBindingContext, KeyCode};
+use crate::protocol::{AgentServerMessage, KeyBindingContext, KeyCode};
 
 use tokio::{
     io::duplex,
@@ -10,7 +10,9 @@ use tokio::{
     time::{Duration, timeout},
 };
 
-use super::{RuntimeDiagnosticStore, handle_connection, route_connection_tab_state};
+use super::{
+    RuntimeDiagnosticStore, handle_connection, route_connection_tab_state, session_bound_message,
+};
 // Moved family helpers (Plan 090 task 2) are glob re-exported in the
 // connection module scope; the few names tests also import explicitly are
 // imported from their family modules for unambiguous unqualified use.
@@ -8360,4 +8362,29 @@ async fn agent_surface_commands_project_client_toggle_without_server_state() {
             "{command_id} should project one shell-client request"
         );
     }
+}
+
+/// Plan 119 SC-6: the tab's own `TabState` answer must name its session *and*
+/// the requesting client, because the relay is a process-wide fan-out — a
+/// store can only adopt the binding that carries its own connection identity.
+#[test]
+fn tab_state_binding_names_the_requesting_client_and_session() {
+    let message = session_bound_message(7, 3, "sess-42");
+    let AgentServerMessage::AgentRpc { code, result_json } = message else {
+        panic!("a tab binding is an agent-RPC answer");
+    };
+    assert_eq!(code, "session.bound");
+    let value: serde_json::Value = serde_json::from_str(&result_json).expect("json payload");
+    assert_eq!(value["clientId"], 7);
+    assert_eq!(value["tabId"], 3);
+    assert_eq!(value["sessionId"], "sess-42");
+
+    // A tab with no session yet still adopts: the empty id means "this tab
+    // owns nothing", never "unknown owner" (which stays a client-side state).
+    let message = session_bound_message(7, 3, "");
+    let AgentServerMessage::AgentRpc { result_json, .. } = message else {
+        panic!("a tab binding is an agent-RPC answer");
+    };
+    let value: serde_json::Value = serde_json::from_str(&result_json).expect("json payload");
+    assert_eq!(value["sessionId"], "");
 }

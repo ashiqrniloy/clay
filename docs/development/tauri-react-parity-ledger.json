@@ -241,6 +241,7 @@
             "F52",
             "F53",
             "F54",
+            "F55",
             "F32a",
             "F37a",
             "F37b"
@@ -720,8 +721,7 @@
       ],
       "current_tests": [
         "tests/package_loading.rs",
-        "tests/theme_packages.rs",
-        "tests/runtime_sandbox_harness.rs"
+        "tests/theme_packages.rs"
       ],
       "manual_steps": [
         {
@@ -1110,7 +1110,7 @@
         "ViewportRenderPatch"
       ],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build — boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build \u2014 boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
     },
     {
       "capability_id": "platform.windows",
@@ -1478,7 +1478,6 @@
         "src/packages/record/mod.rs"
       ],
       "current_tests": [
-        "tests/runtime_sandbox_harness.rs",
         "tests/rust_visibility_api_mapping.rs"
       ],
       "manual_steps": [],
@@ -1653,7 +1652,11 @@
             "C37",
             "C38",
             "C39",
-            "C40"
+            "C40",
+            "C41",
+            "C42",
+            "C43",
+            "C44"
           ]
         }
       ],

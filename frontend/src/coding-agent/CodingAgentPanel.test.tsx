@@ -62,11 +62,10 @@ import { CodingAgentPanel, groupModelsByProvider } from "./CodingAgentPanel";
 /** Mirrors the panel's worker-dropdown clear value (plan 109 I8). */
 const OM_WORKER_CLEAR_VALUE = "om-worker:none";
 import { sendRequest } from "../bridge/client";
-import { resetAgentSessionForTests } from "../agent/state";
+import { createAgentSession } from "../agent/state";
 import { createDocumentSession } from "../editor/sync/session";
 
 beforeEach(() => {
-  resetAgentSessionForTests();
   // Per-test isolation: intents are asserted per test, so a previous test's
   // send history must not leak into another's "every intent is declared" check.
   vi.clearAllMocks();
@@ -147,8 +146,10 @@ describe("CodingAgentPanel", () => {
   });
 
   it("renders transcript boxes from the AG-UI stream and colors them by type", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
@@ -156,7 +157,6 @@ describe("CodingAgentPanel", () => {
     );
     // Seed via the shared relay seam (same flow the transport tests use): the
     // out-of-run snapshot path applies messages + state and notifies.
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -190,14 +190,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("shows the full content of a selected card in Session Info (plan 109 I10)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -244,14 +245,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Back from Session Info restores the tab the selection came from (plan 109 I10)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -279,14 +281,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Session Info with no selection shows guidance (plan 109 I10)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Session Info" }));
@@ -299,14 +302,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("completes daemon-registered commands from session state (plan 109 R1)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // The daemon registry rides STATE (plan-108 registry is the single
@@ -354,9 +358,11 @@ describe("CodingAgentPanel", () => {
   });
 
   it("requests the tab's state at mount so branch + MCP are known before the first prompt (plan 117 follow-up)", async () => {
+    const store = createAgentSession({});
     vi.mocked(sendRequest).mockClear();
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
@@ -371,7 +377,6 @@ describe("CodingAgentPanel", () => {
       expect.stringContaining("tabState"),
     );
 
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -399,15 +404,16 @@ describe("CodingAgentPanel", () => {
   });
 
   it("renders `git —` and omits the extension segment without daemon data (plan 109 R2/R3)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
     // The state store is a module singleton; pin the fields under test.
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -448,8 +454,10 @@ describe("CodingAgentPanel", () => {
   });
 
   it("cycles declared effort levels via the manifest-bound chord and offers the dropdown", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
@@ -462,7 +470,6 @@ describe("CodingAgentPanel", () => {
         }}
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -496,8 +503,10 @@ describe("CodingAgentPanel", () => {
   });
 
   it("rebound chord: the composer's cycle key follows the manifest binding", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
@@ -510,7 +519,6 @@ describe("CodingAgentPanel", () => {
         }}
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -558,7 +566,7 @@ describe("CodingAgentPanel", () => {
     );
     const composer = screen.getByLabelText(/Message/);
     fireEvent.change(composer, { target: { value: "/resume" } });
-    fireEvent.submit(composer.closest("form")!);
+    fireEvent.submit(composer.closest("form") as HTMLFormElement);
     expect(sendRequest).toHaveBeenCalledWith(
       expect.stringContaining("clientOpenSessionPicker"),
     );
@@ -574,21 +582,22 @@ describe("CodingAgentPanel", () => {
     );
     const composer = screen.getByLabelText(/Message/);
     fireEvent.change(composer, { target: { value: "/model" } });
-    fireEvent.submit(composer.closest("form")!);
+    fireEvent.submit(composer.closest("form") as HTMLFormElement);
     expect(sendRequest).toHaveBeenCalledWith(
       expect.stringContaining("clientOpenModelPicker"),
     );
   });
 
   it("renders the model dropdown with the active selection from inventory state", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -641,14 +650,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Context tab (plan 109 I7): server-authoritative categories, drawer, and item detail", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // A live session id activates the context fetch path.
@@ -723,14 +733,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Context tab accepts AgentRpc result as a JSON string", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -766,14 +777,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Memory tab (plan 109 I8): activity log with drops plus OM worker-model dropdowns", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -840,9 +852,10 @@ describe("CodingAgentPanel", () => {
       // the selection into a hidden native select, so the label may appear
       // twice; the observation slot shows the selected model, the
       // reflection slot the cleared placeholder.
-      const observationTrigger = (
-        await screen.findAllByText("Mock demo")
-      )[0]!.closest("button")!;
+      const observationLabel = (await screen.findAllByText("Mock demo"))[0];
+      expect(observationLabel).toBeTruthy();
+      const observationTrigger = observationLabel?.closest("button");
+      expect(observationTrigger).toBeTruthy();
       expect(observationTrigger).toBeTruthy();
       expect(
         (await screen.findAllByText("Not set (workers off)")).length,
@@ -858,7 +871,7 @@ describe("CodingAgentPanel", () => {
       );
       expect(hiddenSelect).toBeTruthy();
       await act(async () => {
-        fireEvent.change(hiddenSelect!, {
+        fireEvent.change(hiddenSelect as HTMLSelectElement, {
           target: { value: "model:mock/mini" },
         });
       });
@@ -904,17 +917,18 @@ describe("CodingAgentPanel", () => {
   });
 
   it("streaming state offers Stop and keeps the composer as a steering lane (plan 118 port)", async () => {
+    const store = createAgentSession({});
     // Ported from the deleted landing panel's suite: the cancel handler and the
     // streaming state have exactly one owner — this panel drives the shared
     // transport's `agent.cancel`; nothing surface-specific owned them.
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -981,8 +995,10 @@ describe("CodingAgentPanel", () => {
   });
 
   it("agent tab labels and approval actions keep text; no icon takeover (plan 112 T8)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
@@ -994,7 +1010,6 @@ describe("CodingAgentPanel", () => {
     }
     // Permission prompt (approval strip) keeps text buttons — no icon-only
     // Allow/Deny. Approval arrives as clay.permissionRequest (plan 108).
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1011,6 +1026,126 @@ describe("CodingAgentPanel", () => {
       const allow = await screen.findByRole("button", { name: "Allow" });
       expect(allow.querySelector("svg")).toBeNull();
       expect(allow.textContent).toContain("Allow");
+    } finally {
+      release();
+    }
+  });
+
+  it("hands a panel-created store the panel's own sender (plan 119 SC-6)", async () => {
+    // The store is created inside this lazy chunk on first mount; its sender
+    // must be the tab's, not the process-wide active client. AgentView
+    // forwards the tab's `send` for exactly this (a dropped pass-through made
+    // prompts ride whichever tab was activated last).
+    const send = vi.fn(async (payload: string) => {
+      void payload;
+      return undefined;
+    });
+    render(
+      <CodingAgentPanel
+        surface={surface}
+        uiVersion={4}
+        workspaceRoot="/tmp/ws"
+        send={send}
+      />,
+    );
+    // Mount asks for the session list and the tab's binding on this lane.
+    await waitFor(() => expect(send).toHaveBeenCalled());
+    const composer = screen.getByLabelText(/Message/);
+    fireEvent.change(composer, { target: { value: "/resume" } });
+    fireEvent.submit(composer.closest("form") as HTMLFormElement);
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(send)
+          .mock.calls.map(([payload]) => String(payload))
+          .some((payload) => payload.includes("clientOpenSessionPicker")),
+      ).toBe(true),
+    );
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+
+  it("approval Allow/Deny each send the runResume decision for that request (plan 119 SC-4)", async () => {
+    // The decision payload is the security-relevant half of the strip; the
+    // extraction kept it in the panel, on the store's own command lane.
+    const store = createAgentSession({});
+    const release = store.start();
+    try {
+      render(
+        <CodingAgentPanel
+          agent={store}
+          surface={surface}
+          uiVersion={4}
+          workspaceRoot="/tmp/ws"
+        />,
+      );
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.permissionRequest",
+        value: {
+          sessionId: "s1",
+          runId: "r1",
+          requestId: "req1",
+          toolName: "write",
+        },
+        clientId: 1,
+      } as never);
+      (await screen.findByRole("button", { name: "Allow" })).click();
+      await waitFor(() =>
+        expect(sendRequest).toHaveBeenCalledWith(
+          expect.stringContaining('"runId":"r1"'),
+        ),
+      );
+      const payload = String(
+        vi.mocked(sendRequest).mock.calls.at(-1)?.[0] ?? "",
+      );
+      expect(payload).toContain("runResume");
+      expect(payload).toContain("approvalId");
+      expect(payload).toContain("req1");
+      expect(payload).toContain("allow_once");
+      // The strip clears optimistically; the resumed run re-announces.
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Deny" })).toBeNull(),
+      );
+    } finally {
+      release();
+    }
+  });
+
+  it("approval strip takes focus while suspended and gives it back (plan 119 review F3)", async () => {
+    // `alertdialog` promises the user is taken to the decision; announcing it
+    // while focus stayed in the composer was the review's F3 finding.
+    const store = createAgentSession({});
+    const release = store.start();
+    try {
+      render(
+        <CodingAgentPanel
+          agent={store}
+          surface={surface}
+          uiVersion={4}
+          workspaceRoot="/tmp/ws"
+        />,
+      );
+      const composer = screen.getByRole("tab", { name: "Files" });
+      composer.focus();
+      expect(document.activeElement).toBe(composer);
+      harness.emit({
+        type: "CUSTOM",
+        name: "clay.permissionRequest",
+        value: {
+          sessionId: "s1",
+          runId: "r1",
+          requestId: "req1",
+          toolName: "write",
+        },
+        clientId: 1,
+      } as never);
+      const allow = await screen.findByRole("button", { name: "Allow" });
+      await waitFor(() => expect(document.activeElement).toBe(allow));
+      allow.click();
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Deny" })).toBeNull(),
+      );
+      await waitFor(() => expect(document.activeElement).toBe(composer));
     } finally {
       release();
     }
@@ -1044,16 +1179,17 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Files tab (plan 118 task 36): lists the files this session touched, newest first", async () => {
+    const store = createAgentSession({});
     const onOpen = vi.fn();
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
         onOpenInWorkspace={onOpen}
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Files" }));
@@ -1123,14 +1259,15 @@ describe("CodingAgentPanel", () => {
   });
 
   it("Files tab (plan 118 task 36): filters by path and keeps the editor out", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Files" }));
@@ -1258,14 +1395,15 @@ describe("Settings tab (plan 117 follow-up)", () => {
 
 describe("MCP UI surfaces (plan 117)", () => {
   it("Context tab lists connected servers with tool counts and marks hidden ones", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1300,14 +1438,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("server section is absent when no server is configured", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1330,14 +1469,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("the foot shows the MCP summary and the Context tab the detail, both across transcript growth", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1385,14 +1525,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("@-mentions: dropdown merges catalog + files, filter narrows, selection embeds (plan 117)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1449,14 +1590,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("@-mentions: Tab selects the highlighted match (plan 117)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1480,14 +1622,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("token meter: compact occupancy vs ceiling with diagnostic threshold tones (plan 117)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     const emitState = (
       tokens: number | null,
@@ -1542,14 +1685,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("token meter: heuristic estimates occupancy when usage is unreported (plan 117)", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // 7200 chars ÷ 3.6 chars/token (claude family) = 2000 tokens.
@@ -1578,14 +1722,15 @@ describe("MCP UI surfaces (plan 117)", () => {
   });
 
   it("effort dropdown is active from session start (plan 117): levels resolve from the model inventory before any prompt", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       // Mount-time inventory STATE: trio + models inventory, NO session and
@@ -1779,15 +1924,16 @@ describe("MCP UI surfaces (plan 117)", () => {
 
 describe("Per-turn agent labels (plan 118 task 35)", () => {
   it("labels turns with their producer and notes the switch when the tab changes agent", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
         agentType="reviewer"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({
@@ -1828,15 +1974,16 @@ describe("Per-turn agent labels (plan 118 task 35)", () => {
   });
 
   it("shows no agent labels when one agent wrote the whole transcript", async () => {
+    const store = createAgentSession({});
     render(
       <CodingAgentPanel
+        agent={store}
         surface={surface}
         uiVersion={4}
         workspaceRoot="/tmp/ws"
         agentType="coding-agent"
       />,
     );
-    const store = (await import("../agent/state")).agentSession;
     const release = store.start();
     try {
       harness.emit({

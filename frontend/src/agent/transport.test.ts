@@ -64,7 +64,7 @@ vi.mock("../bridge/client", () => ({
 }));
 
 import { TauriClayAgent } from "./TauriClayAgent";
-import { agentSession, resetAgentSessionForTests } from "./state";
+import { createAgentSession, type AgentSessionModule } from "./state";
 
 const emit = harness.emit as (event: AgentStreamEvent) => void;
 
@@ -73,9 +73,11 @@ const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 /** Lets rAF-coalesced store notifications land (jsdom fires at ~16 ms). */
 const frame = () => new Promise<void>((resolve) => setTimeout(resolve, 40));
 
+let tabStore: AgentSessionModule;
+
 beforeEach(() => {
   harness.sendRequestCalls.length = 0;
-  resetAgentSessionForTests();
+  tabStore = createAgentSession({});
 });
 
 afterEach(() => {
@@ -173,7 +175,7 @@ describe("TauriClayAgent transport", () => {
   });
 
   it("maps wire errors to RUN_ERROR and surfaces status", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     try {
       await flush();
@@ -202,7 +204,7 @@ describe("TauriClayAgent transport", () => {
 
 describe("agent state glue", () => {
   it("applies out-of-run snapshots via the agent's public API", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     await flush();
     try {
@@ -236,7 +238,7 @@ describe("agent state glue", () => {
   });
 
   it("tracks streaming status across run lifecycle events", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     await flush();
     try {
@@ -262,7 +264,7 @@ describe("agent state glue", () => {
   });
 
   it("forwards clay.diagnostic customs into status", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     await flush();
     try {
@@ -276,6 +278,119 @@ describe("agent state glue", () => {
       expect(store.getSnapshot().status.status).toBe("no running session");
     } finally {
       release();
+    }
+  });
+
+  it("drops another tab's delivery and another session's traffic", async () => {
+    // Plan 119 SC-6: the relay is a process-wide fan-out stamped with the
+    // *receiving* connection, so a tab store accepts only its own deliveries
+    // and only the session the server bound it to.
+    const store = createAgentSession({ clientId: 7 });
+    const release = store.start();
+    await flush();
+    try {
+      // Another tab's copy of a broadcast (its own connection stamped it).
+      emit({
+        type: EventType.STATE_SNAPSHOT,
+        snapshot: { provider: "other" },
+        clientId: 8,
+      } as AgentStreamEvent);
+      // Our connection, but the server says this tab owns session "sess-9".
+      emit({
+        type: EventType.CUSTOM,
+        name: "clay.agentRpc",
+        value: {
+          code: "session.bound",
+          result: { clientId: 7, tabId: 3, sessionId: "sess-9" },
+        },
+        clientId: 7,
+      } as unknown as AgentStreamEvent);
+      await frame();
+      expect(store.sessionId()).toBe("sess-9");
+
+      // Another session's transcript and lifecycle, delivered on our
+      // connection: dropped, never adopted.
+      emit({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: "x", role: "user", content: "foreign" }],
+        clientId: 7,
+        sessionId: "sess-other",
+      } as unknown as AgentStreamEvent);
+      emit({
+        type: EventType.RUN_STARTED,
+        threadId: "sess-other",
+        runId: "run-other",
+        clientId: 7,
+        sessionId: "sess-other",
+      } as unknown as AgentStreamEvent);
+      await frame();
+      expect(store.getSnapshot().messages).toEqual([]);
+      expect(store.getSnapshot().status.streaming).toBe(false);
+      expect(store.getSnapshot().state["provider"]).toBeUndefined();
+
+      // Our own session's snapshot applies.
+      emit({
+        type: EventType.MESSAGES_SNAPSHOT,
+        messages: [{ id: "m0", role: "user", content: "mine" }],
+        clientId: 7,
+        sessionId: "sess-9",
+      } as unknown as AgentStreamEvent);
+      await frame();
+      expect(store.getSnapshot().messages.map((row) => row.id)).toEqual(["m0"]);
+    } finally {
+      release();
+    }
+  });
+
+  it("ignores a binding claim addressed to another tab", async () => {
+    const store = createAgentSession({ clientId: 7 });
+    const release = store.start();
+    await flush();
+    try {
+      emit({
+        type: EventType.CUSTOM,
+        name: "clay.agentRpc",
+        value: {
+          code: "session.bound",
+          result: { clientId: 8, tabId: 4, sessionId: "sess-8" },
+        },
+        clientId: 7,
+      } as unknown as AgentStreamEvent);
+      await frame();
+      // Never guess an owner: the claim must name this connection.
+      expect(store.sessionId()).toBeNull();
+    } finally {
+      release();
+    }
+  });
+
+  it("stops applying and notifying once the tab closes", async () => {
+    const store = createAgentSession({ clientId: 7 });
+    const seen = vi.fn();
+    const unsubscribe = store.subscribe(seen);
+    store.start();
+    await flush();
+    try {
+      emit({
+        type: EventType.STATE_SNAPSHOT,
+        snapshot: { provider: "mock" },
+        clientId: 7,
+      } as AgentStreamEvent);
+      await frame();
+      expect(seen).toHaveBeenCalled();
+
+      store.dispose();
+      seen.mockClear();
+      emit({
+        type: EventType.STATE_SNAPSHOT,
+        snapshot: { provider: "late" },
+        clientId: 7,
+      } as AgentStreamEvent);
+      await frame();
+      expect(seen).not.toHaveBeenCalled();
+      expect(store.getSnapshot().state["provider"]).toBe("mock");
+    } finally {
+      unsubscribe();
     }
   });
 

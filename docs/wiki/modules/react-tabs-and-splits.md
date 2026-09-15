@@ -47,7 +47,7 @@ package SDUI slots (Phase 7), native Masonry chrome (delete after parity).
 `Tabs` implementation shared by three hosts: this shell window tab bar
 (`frontend/src/app/layout/tab-bar.tsx`), the SDUI `PackageTabList` registry
 entry (packages render tab UI through the `tabList` kind — never custom tab
-strips), and `CodingAgentPanel`. It exposes closed recipe attributes
+strips), and the agent view's inspector (`frontend/src/coding-agent/InspectorTabs.tsx`). It exposes closed recipe attributes
 (`tabList.root`/`strip`/`tab`/`panel`); visual styling flows through the
 `tab.default.item.*` and `tabBar.default.root.rest` design-system recipes, so
 all three hosts restyle together under a design-system switch with no remount.

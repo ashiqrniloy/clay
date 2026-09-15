@@ -66,7 +66,7 @@ assume one open workspace with a scratch file.
 | PERF-2 | UI responsiveness while streaming | Composer input, slash completion, and tab switching stay immediate while the transcript streams; no dropped frames from transcript box re-render (uniform-height boxes) |
 
 Regressions against the Phase 1 Chat budgets (shell bundle 180 kB gzip,
-total 400 kB; render budgets in `test-plan/11-performance.md`) are defects.
+total 404 kB; render budgets in `test-plan/11-performance.md`) are defects.
 
 ## Recorded runs
 

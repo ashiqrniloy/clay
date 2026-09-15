@@ -431,6 +431,12 @@ fn frontend_bridge_sources_stay_free_of_forbidden_authority_markers() {
         }
         let mut files = Vec::new();
         collect_sources(&dir, &mut files);
+        // Generated type declarations are excluded: ts-rs writes them from the
+        // Rust DTO layer (plan 119 SC-1, `scripts/check-bindings.sh`) and they
+        // quote Rust doc comments, so markers like `rkyv` appear as
+        // documentation text with no frontend authority behind them. Every
+        // hand-written bridge source is still scanned.
+        files.retain(|file| !file.to_string_lossy().contains("bridge/generated"));
         scanned.extend(files);
     }
     if scanned.is_empty() {

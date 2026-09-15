@@ -1,11 +1,27 @@
-// Typed mirror of the Rust bridge surface (`src-tauri/src/bridge`).
+// Webview bridge types.
 //
-// Naming contract (pinned by Rust tests in `tests/dto_roundtrips.rs`):
-// - Envelope kinds and event discriminants are camelCase strings.
-// - Protocol payload fields are camelCase (blanket serde attrs on every
-//   protocol type).
-// - Menu session ids cross as strings (they carry the server high bit);
-//   other ids are sequential counters safe in JS numbers.
+// The contract's *shapes* are generated from the Rust DTO layer
+// (`src-tauri/src/bridge/dto.rs` + `errors.rs`) into `./generated/bridge.ts` by
+// `cargo test -p clay-desktop --features ts-bindings
+// export_webview_contract_bindings` — never restate a generated shape here
+// (plan 119 SC-1; `scripts/check.sh` fails on stale bindings).
+//
+// What stays hand-written, and why:
+//
+//  1. Branded ids (`MenuSessionId`, `DocumentId`): a TypeScript-only nominal
+//     distinction; the wire carries plain numbers, and menu session ids cross
+//     as strings because they can exceed the safe-integer range.
+//  2. The client-event narrowing (`ShellEvent` and the payload types of the
+//     families the shell consumes). `BridgeEnvelope`'s `event`/`routed` variants
+//     are deliberately `ts(skip)`-ed on the Rust side: generating the full
+//     `ClientConnectionEvent` union would drag the internal event graph
+//     (server messages, agent frames, viewport patches) into the contract. The
+//     shell narrows it to what it consumes and keeps an opaque catch-all for the
+//     rest — a narrowing, not a copy.
+//
+// Naming contract (pinned by `src-tauri/tests/dto_roundtrips.rs` and the
+// generated file): envelope kinds and event discriminants are camelCase
+// strings; protocol payload fields are camelCase.
 
 /** Branded id for menu session handles (string on the wire). */
 export type MenuSessionId = string & {
@@ -19,32 +35,123 @@ export const asMenuSessionId = (raw: string): MenuSessionId =>
   raw as MenuSessionId;
 export const asDocumentId = (raw: number): DocumentId => raw as DocumentId;
 
-// ------------------------------------------------------------- bootstrap
-
-import type {
-  ThemeSnapshot,
-  TypographySnapshot,
-  DesignSystemSnapshot,
-} from "../theme/types";
-import type { IconPackSnapshot } from "../icons/types";
-import type { RuntimeSnapshot } from "../sdui/types";
+// Generated contract (everything except the envelope, which this file composes).
 export type {
-  ThemeSnapshot,
-  TypographySnapshot,
-  DesignSystemSnapshot,
-  ThemeTokenValue,
-  FontProfile,
-  TypographyHierarchy,
-  DesignSystemVariableValue,
+  AutocompleteTrigger,
+  BehaviorManifest,
+  BehaviorScope,
+  BlinkStyle,
+  BootstrapDto,
+  BridgeError,
+  BridgeErrorCode,
+  CaretShape,
+  CaretStyle,
+  CommandAuthority,
+  CommandDeclaration,
+  CommentContinuationRule,
   ComponentRecipeDto,
+  DecorationKind,
+  DecorationProvenance,
+  DecorationSet,
+  DecorationSpan,
+  DecorationTarget,
   DesignSystemProvenanceDto,
-  ShadowLayerDto,
+  DesignSystemSnapshotDto,
+  DesignSystemVariableValueDto,
+  DiagnosticSet,
+  DiagnosticSeverity,
+  DiagnosticSpan,
+  DocumentAccess,
+  DocumentFontRole,
+  DocumentRuntimeRenderState,
+  DocumentTextHead,
+  EditorBehaviorRules,
+  EditorChrome,
+  EditorLayoutRules,
+  EditorStyleDto,
+  ElectricCharacterRule,
+  ElectricEffect,
+  EnterRule,
+  FontProfile,
+  IconGeometryDto,
+  IconPackSnapshotDto,
+  IconPathDto,
+  InitialDocumentDto,
+  InlayHintPayload,
+  InlayPlacement,
   InnerHighlightDto,
-} from "../theme/types";
+  KeyBindingContext,
+  KeyBindingRule,
+  KeyCode,
+  KeyModifiers,
+  KeyStroke,
+  LigaturePolicy,
+  LineMovementStyle,
+  LockScope,
+  Modifiers,
+  MovementRules,
+  PackageInputRouteContent,
+  PackageOverlayDto,
+  PackagePanelDto,
+  PackageSurfaceDto,
+  PackageUiProvenance,
+  PackageUiSnapshotDto,
+  PackageUiTrustDomain,
+  PairRule,
+  PairRuleContext,
+  ParagraphStyle,
+  RoutingPolicy,
+  RuntimeDiagnostic,
+  RuntimeSnapshotDto,
+  SduiActionArgument,
+  SduiActionIntent,
+  SduiActionSource,
+  SduiActionValue,
+  SduiEditorBinding,
+  SduiFlexDirection,
+  SduiListFilter,
+  SduiListItem,
+  SduiNode,
+  SduiNodeId,
+  SduiNodeKind,
+  SduiTree,
+  ShadowLayerDto,
+  TabMode,
+  TabRule,
+  TextByteRange,
+  TextEditCapability,
+  ThemeSnapshotDto,
+  ThemeTokenValueDto,
+  TokenType,
+  TypographySnapshotDto,
+  UiChoiceOption,
+  UiChoicesSnapshot,
+  UiTypographyHierarchy,
+  WordSeparatorPolicy,
+  WrapPolicy,
+} from "./generated/bridge";
+export type { JsonValue } from "./generated/serde_json/JsonValue";
+export type { JsonValue as BridgeJsonValue } from "./generated/serde_json/JsonValue";
 
-export interface DocumentTextHeadDto {
-  totalBytes: number;
-  firstChunk: string;
+import type { BridgeEnvelope as GeneratedBridgeEnvelope } from "./generated/bridge";
+import type { BridgeError, RuntimeDiagnostic } from "./generated/bridge";
+
+/** Previous name of the generated bridge error; kept for import compatibility. */
+export type BridgeErrorDto = BridgeError;
+
+/** Bridge-owned lifecycle notice (generated variant, named for consumers). */
+export type DisconnectedNotice = Extract<
+  GeneratedBridgeEnvelope,
+  { kind: "disconnected" }
+>;
+
+// ------------------------------------------------- document chunk payloads
+
+export interface DocumentChunkDto {
+  documentId: DocumentId;
+  documentVersion: number;
+  offset: number;
+  text: string;
 }
 
 export type DocumentChunkRejectionDto =
@@ -59,13 +166,6 @@ export type DocumentChunkRejectionDto =
   | { staleVersion: { currentVersion: number } }
   | "unknownDocument";
 
-export interface DocumentChunkDto {
-  documentId: DocumentId;
-  documentVersion: number;
-  offset: number;
-  text: string;
-}
-
 export interface DocumentChunkRejectedDto {
   documentId: DocumentId;
   documentVersion: number;
@@ -73,52 +173,12 @@ export interface DocumentChunkRejectedDto {
   reason: DocumentChunkRejectionDto;
 }
 
-export interface InitialDocumentDto {
-  documentId: DocumentId;
-  version: number;
-  head: DocumentTextHeadDto;
-  access: { readOnly?: null; editable?: { leaseId: number | null } };
-  workspaceRoot: string;
-}
-
-export interface CommandEntryDto {
-  id: string;
-  title?: string;
-  [key: string]: unknown;
-}
-
-export interface BootstrapDto {
-  clientId: number;
-  /** Present after the server binds this connection to a tab. */
-  tabId?: number | null;
-  protocolVersion: number;
-  endpoint: string;
-  generation: number;
-  /** Developer-only profiling flag inherited from `--profile-perf`. */
-  performanceProfile?: boolean;
-  initialDocument: InitialDocumentDto;
-  behaviorManifest: {
-    manifestId: string;
-    behaviorVersion: number;
-    commands: CommandEntryDto[];
-    keymaps: unknown[];
-    // Additional manifest fields are inert data; the shell only counts them.
-    [key: string]: unknown;
-  };
-  /** Fully resolved by the Rust bridge; the adapter only projects CSS vars. */
-  activeTheme: ThemeSnapshot;
-  activeTypography: TypographySnapshot;
-  activeDesignSystem: DesignSystemSnapshot;
-  /** Resolved active icon pack; absent = host fallback subset active. */
-  activeIconPack?: IconPackSnapshot | null;
-}
-
 // ------------------------------------------------------------ envelopes
 
 /**
  * Validated client-layer events. Only the families the shell consumes today
  * are fully typed; the rest stay opaque but still flow. Extend this union as
- * React surfaces land (Phase 5+), never by loosening `BridgeEnvelope`.
+ * React surfaces land, never by loosening `BridgeEnvelope`.
  */
 export interface TabEntryDto {
   tabId: number;
@@ -137,14 +197,11 @@ export interface TabRegistryEvent {
 
 export interface RuntimeDiagnosticEvent {
   kind: "runtimeDiagnostic";
-  data: RuntimeDiagnosticDto;
+  data: RuntimeDiagnostic;
 }
 
-export interface RuntimeDiagnosticDto {
-  severity: "info" | "warning" | "error" | string;
-  code: string;
-  message: string;
-}
+/** Previous name of the generated `RuntimeDiagnostic`; kept for consumers. */
+export type RuntimeDiagnosticDto = RuntimeDiagnostic;
 
 export interface TransientMenuItemDto {
   id: string;
@@ -193,12 +250,6 @@ export type ShellEvent =
   | ServerErrorEvent
   | { kind: string; data: unknown };
 
-/** Bridge-owned lifecycle notices. */
-export interface DisconnectedNotice {
-  kind: "disconnected";
-  data: { reason: string; clientId?: number | null; tabId?: number | null };
-}
-
 export interface RoutedEvent {
   kind: "routed";
   data: {
@@ -208,32 +259,10 @@ export interface RoutedEvent {
   };
 }
 
+/**
+ * Everything the webview can observe: the generated envelope (resolved theme
+ * and runtime snapshots, disconnect notice) plus the narrowed client-event
+ * variants the Rust side excludes from generation.
+ */
 export type BridgeEnvelope =
-  | { kind: "event"; data: ShellEvent }
-  | RoutedEvent
-  /** Rust-resolved replacement for raw ActiveTheme pushes. */
-  | { kind: "themeSnapshot"; data: ThemeSnapshot }
-  | {
-      kind: "runtimeSnapshot";
-      data: {
-        clientId: number;
-        tabId: number | null;
-        snapshot: RuntimeSnapshot;
-      };
-    }
-  | DisconnectedNotice;
-
-// ---------------------------------------------------------------- errors
-
-export interface BridgeErrorDto {
-  code:
-    | "notConnected"
-    | "busy"
-    | "timeout"
-    | "serverUnreachable"
-    | "invalidRequest"
-    | "requestTooLarge"
-    | "forbidden"
-    | "queueFull";
-  message: string;
-}
+  GeneratedBridgeEnvelope | { kind: "event"; data: ShellEvent } | RoutedEvent;

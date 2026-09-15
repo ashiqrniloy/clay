@@ -12,11 +12,12 @@ use crate::protocol::{DocumentAccess, EditOperation, FileErrorCode, ServerMessag
 use super::super::super::perf::budgets::MAX_DOCUMENTS_PER_CLIENT;
 use super::{
     ATOMIC_WRITE_PAUSES, AtomicSaveError, AtomicWritePause, BEFORE_REVALIDATE_HOOKS,
-    BETWEEN_METADATA_AND_READ_HOOKS, FileListEntryKind, FileListRequest, FileMetadata,
-    SaveIoOutcome, TEST_TEMP_NAMES, TargetIdentity, UserBrowseEntryKind, UserBrowseError,
-    UserBrowseListingPlan, WorkspaceError, WorkspaceState, atomic_write_file, build_ignore_set,
-    execute_user_browse_listing, open_existing_file_unlocked, open_selected_file_unlocked,
-    resolve_user_browse_seed, save_document_unlocked, traverse_user_browse_directory,
+    BETWEEN_METADATA_AND_READ_HOOKS, FILE_READ_BUFFER_BYTES, FileListEntryKind, FileListRequest,
+    FileMetadata, SaveIoOutcome, TEST_TEMP_NAMES, TargetIdentity, UserBrowseEntryKind,
+    UserBrowseError, UserBrowseListingPlan, WorkspaceError, WorkspaceState, atomic_write_file,
+    build_ignore_set, execute_user_browse_listing, open_existing_file_unlocked,
+    open_selected_file_unlocked, read_file_streamed, resolve_user_browse_seed,
+    save_document_unlocked, traverse_user_browse_directory,
 };
 use tokio::sync::Mutex;
 
@@ -160,6 +161,45 @@ async fn open_invalid_utf8_reports_file_io_error_without_document_entry() {
 
     let _ = fs::remove_file(file);
     let _ = fs::remove_dir(root);
+}
+
+#[tokio::test]
+async fn streamed_read_carries_utf8_scalars_across_read_boundaries() {
+    let root = temp_workspace("utf8-carry");
+    // A 4-byte scalar split 1..=3 bytes before a 64 KiB read boundary must
+    // reassemble byte-identically: plan 119 P1-1 rewrote the carry buffer, so
+    // this pins the byte-split contract for every split position.
+    for split in 1..=3usize {
+        let scalar = "\u{1F980}";
+        let mut text = "a".repeat(FILE_READ_BUFFER_BYTES - (scalar.len() - split));
+        text.push_str(scalar);
+        text.push_str("\u{00E9}\u{4E2D}tail");
+        let file = root.join(format!("carry-{split}.txt"));
+        fs::write(&file, text.as_bytes()).unwrap();
+
+        let (rope, _) = match read_file_streamed(&file, &file, u64::MAX, 0).await {
+            Ok(read) => read,
+            Err(error) => panic!("split scalar {split} must reassemble, got {error:?}"),
+        };
+        assert_eq!(
+            rope.byte_slice(0..rope.byte_len()).to_string(),
+            text,
+            "scalar split {split} bytes before the read boundary reassembled wrong"
+        );
+    }
+
+    // A scalar truncated at EOF stays a typed refusal after the rewrite.
+    let truncated = root.join("truncated.txt");
+    let mut bytes = "b".repeat(FILE_READ_BUFFER_BYTES + 1).into_bytes();
+    bytes.extend_from_slice(&[0xF0, 0x9F]);
+    fs::write(&truncated, &bytes).unwrap();
+    let error = match read_file_streamed(&truncated, &truncated, u64::MAX, 0).await {
+        Ok(_) => panic!("truncated scalar must be refused"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, WorkspaceError::InvalidUtf8 { .. }));
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[tokio::test]

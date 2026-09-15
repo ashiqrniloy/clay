@@ -83,7 +83,7 @@ internal.
 | IPC frame / document load | `DEFAULT_MAX_FRAME_SIZE` = 1 MiB; heads/chunks use `MAX_CHUNK_BYTES` = 256 KiB; server-owned resident rope budget = 256 MiB; no full-doc IPC on ordinary edits (deltas only) |
 | Syntax scheduling / retained parser state | `SYNTAX_EXECUTOR_MAX_JOBS` = 4; `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES` = 64; `SYNTAX_CACHE_BUDGET_BYTES` = 30 MiB; latest-wins per-document session, native CPU never runs on Tokio workers |
 | Developer traces | `PERF_SNAPSHOT_CAPACITY` = 4,096; disabled by default; numeric IDs/versions/byte counts and sanitized stage names only |
-| Frontend bundle budgets | Startup shell ≤ 180 kB gzip, total application ≤ 400 kB gzip; enforced by `frontend/scripts/bundle-budget.mjs` in CI |
+| Frontend bundle budgets | Startup shell ≤ 180 kB gzip, total application ≤ 404 kB gzip (`decision-logs/2026-09-15-1153-frontend-total-bundle-ceiling-404-kb.md`); enforced by `frontend/scripts/bundle-budget.mjs` in CI |
 | Tests pinning these | `src/perf/budgets.rs` constants, `benches/protocol_server_baselines.rs`, `tests/performance_budgets.rs`, `tests/package_loading.rs`, codec/malformed-archive suites, frontend Vitest editor/SDUI/agent suites |
 
 ## Security: canonical identity and cleanup authority (not relocatable)

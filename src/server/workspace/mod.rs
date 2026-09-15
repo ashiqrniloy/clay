@@ -471,6 +471,11 @@ struct ReloadIoOutcome {
 #[derive(Debug)]
 pub(crate) struct WorkspaceState {
     roots: HashMap<WorkspaceRootId, WorkspaceRoot>,
+    /// Directory-root index by canonical path (plan 119 SC-6): one lookup
+    /// resolves a session's recorded workspace root to this state's root id,
+    /// and `add_root` dedupes through it. Single-file grants stay out (their
+    /// canonical path is a file, never a workspace root).
+    directory_roots_by_path: HashMap<PathBuf, WorkspaceRootId>,
     documents: HashMap<DocumentId, OpenDocument>,
     path_to_document: HashMap<PathBuf, DocumentId>,
     /// Resident bytes held by canonical file-backed document ropes. The
@@ -490,6 +495,7 @@ impl WorkspaceState {
     pub(crate) fn new() -> Self {
         Self {
             roots: HashMap::new(),
+            directory_roots_by_path: HashMap::new(),
             documents: HashMap::new(),
             path_to_document: HashMap::new(),
             resident_document_bytes: 0,
@@ -530,13 +536,8 @@ impl WorkspaceState {
         }
 
         // Deduplicate directory roots by canonical path.
-        if let Some(existing) = self.roots.values().find(|root| {
-            matches!(
-                &root.authority,
-                WorkspaceAuthority::Directory { canonical_path: path } if path == &canonical_path
-            )
-        }) {
-            return Ok(existing.id);
+        if let Some(existing) = self.directory_roots_by_path.get(&canonical_path) {
+            return Ok(*existing);
         }
 
         if self.roots.len() >= MAX_WORKSPACE_ROOTS {
@@ -545,6 +546,8 @@ impl WorkspaceState {
 
         let id = self.next_root_id;
         self.next_root_id = self.next_root_id.saturating_add(1);
+        self.directory_roots_by_path
+            .insert(canonical_path.clone(), id);
         self.roots.insert(
             id,
             WorkspaceRoot {
@@ -1289,9 +1292,15 @@ impl WorkspaceState {
         self.path_to_document.get(canonical_path).copied()
     }
 
-    /// Lowest workspace root id, used as the agent document-op default root.
-    pub(crate) fn first_root_id(&self) -> Option<WorkspaceRootId> {
-        self.roots.keys().copied().min()
+    /// The directory root registered for exactly this canonical path (plan
+    /// 119 SC-6): agent tool calls resolve the session's recorded workspace
+    /// root to the root id of the state the folder is open in. `None` = this
+    /// state does not carry that root — the caller fails closed.
+    pub(crate) fn root_id_for_canonical_path(
+        &self,
+        canonical_path: &Path,
+    ) -> Option<WorkspaceRootId> {
+        self.directory_roots_by_path.get(canonical_path).copied()
     }
 
     /// Canonicalized, containment-checked path for an existing file
@@ -2137,6 +2146,10 @@ fn validate_regular_file_metadata(metadata: &fs::Metadata) -> Result<(), Workspa
 
 const FILE_READ_BUFFER_BYTES: usize = 64 * 1024;
 
+/// Maximum bytes of an incomplete UTF-8 scalar carried between reads (a
+/// 4-byte scalar can be split with at most three bytes still pending).
+const UTF8_CARRY_BYTES: usize = 3;
+
 /// Stream one authorized file into a Crop rope without materializing a
 /// document-sized `String`. The reservation is established while the
 /// workspace mutex is held; this read enforces it again against the opened
@@ -2180,18 +2193,26 @@ async fn read_file_streamed(
     }
 
     let mut builder = RopeBuilder::new();
-    let mut buffer = Box::new([0u8; FILE_READ_BUFFER_BYTES]);
-    let mut carry = Vec::with_capacity(3);
+    // One scratch buffer for the whole read (plan 119 P1-1): `pending` bytes
+    // at the front are the incomplete UTF-8 scalar carried from the previous
+    // read, and the window after them stays exactly `FILE_READ_BUFFER_BYTES`,
+    // so the read loop allocates nothing per 64 KiB chunk. A fresh `combined`
+    // Vec here cost ~800 allocations on a 50 MiB open.
+    let mut buffer = Box::new([0u8; FILE_READ_BUFFER_BYTES + UTF8_CARRY_BYTES]);
+    let mut pending = 0usize;
     let mut total_read = 0u64;
     let mut sniffed = 0usize;
 
     loop {
-        let read = file.read(&mut buffer[..]).await.map_err(unavailable)?;
+        let read = file
+            .read(&mut buffer[pending..pending + FILE_READ_BUFFER_BYTES])
+            .await
+            .map_err(unavailable)?;
         if read == 0 {
             break;
         }
         let sniff_len = BINARY_SNIFF_BYTES.saturating_sub(sniffed).min(read);
-        if buffer[..sniff_len].contains(&0) {
+        if buffer[pending..pending + sniff_len].contains(&0) {
             return Err(WorkspaceError::BinaryFileNotSupported {
                 path: error_path.to_path_buf(),
             });
@@ -2216,35 +2237,36 @@ async fn read_file_streamed(
         }
         total_read = next_total;
 
-        let mut combined = Vec::with_capacity(carry.len().saturating_add(read));
-        combined.extend_from_slice(&carry);
-        combined.extend_from_slice(&buffer[..read]);
-        carry.clear();
-        match std::str::from_utf8(&combined) {
+        let total = pending + read;
+        match std::str::from_utf8(&buffer[..total]) {
             Ok(text) => {
                 builder.append(text);
+                pending = 0;
             }
             Err(error) if error.error_len().is_none() => {
                 let valid_up_to = error.valid_up_to();
                 builder.append(
-                    std::str::from_utf8(&combined[..valid_up_to])
+                    std::str::from_utf8(&buffer[..valid_up_to])
                         .expect("UTF-8 prefix before an incomplete scalar is valid"),
                 );
-                carry.extend_from_slice(&combined[valid_up_to..]);
+                buffer.copy_within(valid_up_to..total, 0);
+                pending = total - valid_up_to;
             }
             Err(_) => {
                 return Err(WorkspaceError::InvalidUtf8 {
                     path: error_path.to_path_buf(),
-                    source: String::from_utf8(combined).expect_err("invalid UTF-8 was detected"),
+                    source: String::from_utf8(buffer[..total].to_vec())
+                        .expect_err("invalid UTF-8 was detected"),
                 });
             }
         }
     }
 
-    if !carry.is_empty() {
+    if pending != 0 {
         return Err(WorkspaceError::InvalidUtf8 {
             path: error_path.to_path_buf(),
-            source: String::from_utf8(carry).expect_err("incomplete UTF-8 was detected"),
+            source: String::from_utf8(buffer[..pending].to_vec())
+                .expect_err("incomplete UTF-8 was detected"),
         });
     }
 
@@ -2475,6 +2497,26 @@ async fn atomic_write_file(
     expected: Option<&TargetIdentity>,
 ) -> Result<FileMetadata, AtomicSaveError> {
     atomic_write_chunks(target, std::iter::once(bytes), expected).await
+}
+
+/// Atomically create a brand-new file (temp + write + fsync + rename) so a
+/// crash mid-write cannot leave a partial file where a caller already reported
+/// success. A file that did not exist has no stable identity to revalidate, so
+/// this is `atomic_write_file` with `expected: None`: a file created by someone
+/// else between the caller's existence check and this rename is replaced
+/// without a change check (pre-atomic `fs::write` clobbered it too, and this at
+/// least never leaves it torn).
+pub(crate) async fn atomic_create_file(target: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write_file(target, bytes, None)
+        .await
+        .map(|_| ())
+        .map_err(|error| match error {
+            AtomicSaveError::Io(error) => error,
+            // Unreachable with `expected: None`; keep the result typed anyway.
+            AtomicSaveError::TargetChanged => {
+                io::Error::new(io::ErrorKind::NotFound, "target vanished during save")
+            }
+        })
 }
 
 async fn atomic_write_chunks(

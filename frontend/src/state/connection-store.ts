@@ -6,7 +6,7 @@ import type {
   BootstrapDto,
   BridgeEnvelope,
   TabRegistryEvent,
-  ThemeSnapshot,
+  ThemeSnapshotDto as ThemeSnapshot,
 } from "../bridge/types";
 
 export type ConnectionState =

@@ -5,6 +5,7 @@
 
 import type { BootstrapDto } from "../bridge/types";
 import { patchTab, type TabStore } from "./tab-store";
+import { detached } from "../lib/detached";
 import {
   addEqualPane,
   closePane,
@@ -38,7 +39,7 @@ const sendTabCommand = (
   ctx: CommandContext,
   runtime: TabRuntime,
   command: unknown,
-) =>
+): Promise<void> =>
   ctx.adapters.send(
     JSON.stringify({
       family: "tabCommand",
@@ -154,39 +155,48 @@ export function dispatchClientCommand(
     const target = snapshot.tabs.at(
       (index + offset + snapshot.tabs.length) % snapshot.tabs.length,
     );
-    if (target?.tabId != null) void ctx.adapters.activateTab?.(target.tabId);
+    if (target?.tabId != null)
+      detached(ctx.adapters.activateTab?.(target.tabId));
   };
   if (commandId === "shell.clientTabNext") activateOffset(1);
   else if (commandId === "shell.clientTabPrev") activateOffset(-1);
   else if (commandId === "shell.clientTabClose" && runtime.tabId != null)
-    void ctx.adapters.closeTab?.(runtime.tabId);
+    detached(ctx.adapters.closeTab?.(runtime.tabId));
   else if (commandId === "shell.clientTabMoveLeft" && runtime.tabId != null)
-    void sendTabCommand(ctx, runtime, { moveLeft: { tabId: runtime.tabId } });
+    detached(
+      sendTabCommand(ctx, runtime, { moveLeft: { tabId: runtime.tabId } }),
+    );
   else if (commandId === "shell.clientTabMoveRight" && runtime.tabId != null)
-    void sendTabCommand(ctx, runtime, { moveRight: { tabId: runtime.tabId } });
+    detached(
+      sendTabCommand(ctx, runtime, { moveRight: { tabId: runtime.tabId } }),
+    );
   else if (commandId === "shell.clientTabNew")
     // New tabs land on the launcher (plan 118 Part D): uncommitted, so the
     // tab's own landing surface is what the user sees.
-    void (async () => {
-      const bootstrap = await ctx.adapters.openTab?.("");
-      if (!bootstrap) return;
-      ctx.mountRuntime(bootstrap, undefined, { workspaceRoot: "" });
-      ctx.notify();
-    })();
+    detached(
+      (async () => {
+        const bootstrap = await ctx.adapters.openTab?.("");
+        if (!bootstrap) return;
+        ctx.mountRuntime(bootstrap, undefined, { workspaceRoot: "" });
+        ctx.notify();
+      })(),
+    );
   else {
     const position = Number(commandId.split(".").at(-1));
     if (Number.isInteger(position) && position >= 1 && position <= 9) {
       if (commandId.startsWith("shell.clientTabActivate.")) {
         const target = snapshot.tabs[position - 1];
         if (target?.tabId != null)
-          void ctx.adapters.activateTab?.(target.tabId);
+          detached(ctx.adapters.activateTab?.(target.tabId));
       } else if (
         commandId.startsWith("shell.clientTabMoveTo.") &&
         runtime.tabId != null
       ) {
-        void sendTabCommand(ctx, runtime, {
-          moveTo: { tabId: runtime.tabId, position },
-        });
+        detached(
+          sendTabCommand(ctx, runtime, {
+            moveTo: { tabId: runtime.tabId, position },
+          }),
+        );
       }
     }
   }

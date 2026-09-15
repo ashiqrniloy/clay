@@ -216,6 +216,9 @@ export const CODING_TOOL_NAMES = [
 ] as const;
 
 export interface CodingToolsOptions {
+  /** Session id stamped on every document call (plan 119 SC-6): the server
+   *  resolves the workspace root from it, never from a launch fallback. */
+  readonly sessionId: string;
   /** Workspace root bound to the tool cwd. */
   readonly workspaceRoot: string;
   /** Reverse-RPC transport for document read/write/edit backends. */
@@ -238,7 +241,7 @@ export interface CodingToolsOptions {
  * these tools, so Chat stays no-tools.
  */
 export function buildCodingTools(options: CodingToolsOptions): ToolDefinition[] {
-  const ops = createClayDocumentOps({ request: options.request });
+  const ops = createClayDocumentOps({ request: options.request, sessionId: options.sessionId });
   const policy = createClayAcceptancePolicy({
     roots: [options.workspaceRoot],
     fullAutonomy: options.fullAutonomy,

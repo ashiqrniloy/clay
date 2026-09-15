@@ -49,6 +49,11 @@ fn workspace_open_path_stays_streamed_and_head_bounded() {
     assert!(helper.contains("RopeBuilder"));
     assert!(!helper.contains("read_to_end"));
     assert!(!helper.contains("String::from_utf8(bytes)"));
+    // Plan 119 P1-1: the read loop reuses one scratch buffer and carries the
+    // incomplete UTF-8 scalar inside it; a per-chunk `combined` Vec cost ~800
+    // allocations on a 50 MiB open in the debug profile.
+    assert!(helper.contains("copy_within"));
+    assert!(!helper.contains("let mut combined"));
 
     let document_source = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -874,7 +879,7 @@ fn tauri_react_bundle_budgets_are_documented() {
     let doc = performance_doc();
     for expected in [
         "<= 180 kB gzip (startup shell)",
-        "<= 400 kB gzip (total frontend)",
+        "<= 404 kB gzip (total frontend)",
         "npm --prefix frontend run check:budget",
     ] {
         assert!(

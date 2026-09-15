@@ -18,6 +18,8 @@ fn sanitize(detail: impl fmt::Display) -> String {
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum BridgeErrorCode {
     NotConnected,
     Busy,
@@ -31,6 +33,8 @@ pub enum BridgeErrorCode {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct BridgeError {
     pub code: BridgeErrorCode,
     pub message: String,

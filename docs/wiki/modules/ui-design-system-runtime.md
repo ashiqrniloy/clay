@@ -375,7 +375,7 @@ name — see [Launcher Landing Surface](launcher-landing-surface.md).
 design-system payload from 89,135 B to 57,218 B raw (−35.8%) and 5,345 B to
 3,110 B gzip (−41.8%). Plan 118's surface work moved the shell budget from
 164.5 kB to 169.8 kB gzip (limit 180 kB) and total from 381.0 kB to 390.9 kB
-(limit 400 kB). Recipe resolution is a `BTreeMap` lookup on a cached struct: no
+(limit 404 kB). Recipe resolution is a `BTreeMap` lookup on a cached struct: no
 parsing, no JS, no color math on the paint path; the frontend applies one
 `document.documentElement.style` batch per generation. `frontend/src/styles/tokens.css`
 carries a generated host fallback block (512 `--clay-ds-*` declarations today,

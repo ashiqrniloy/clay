@@ -11,6 +11,7 @@
 import { lazy, Suspense } from "react";
 
 import { ClayText } from "../components";
+import type { AgentSessionModule } from "../agent/state";
 import type { PackageSurface, PackageUiSnapshot } from "../sdui/types";
 import type { DocumentSession } from "../editor/sync/session";
 import { hostRenderedSurface } from "../shell/PaneTree";
@@ -36,6 +37,16 @@ export interface AgentViewProps {
   /** Active pane session: the Settings tab lists the agent's delivered files
    *  through it (plan 118 task 36 made the Files tab session history). */
   session: DocumentSession | null;
+  /** The tab's agent session store (plan 119 SC-6), once its agent view has
+   *  mounted one; the panel creates and adopts it on first mount. */
+  agent: AgentSessionModule | null;
+  /** The tab's connection id (the store's delivery filter) and the tab-stamped
+   *  sender its agent intents ride. */
+  agentClientId: number | null;
+  /** Adopt the store the panel created into the tab runtime. */
+  onAgentStore?: ((store: AgentSessionModule) => void) | null;
+  /** SDUI package surfaces send through the pane session; the coding-agent
+   *  panel uses its tab store instead. */
   send: ((payload: string) => Promise<void>) | null;
   effortChord: EffortChord | null;
   /** Agent working / idle: the tab strip's marker pulses while busy. */
@@ -67,6 +78,9 @@ export function AgentView({
   uiVersion,
   workspaceRoot,
   session,
+  agent,
+  agentClientId,
+  onAgentStore = null,
   send,
   effortChord,
   onBusyChange,
@@ -104,6 +118,9 @@ export function AgentView({
           uiVersion={uiVersion}
           workspaceRoot={workspaceRoot}
           session={session}
+          agent={agent}
+          agentClientId={agentClientId}
+          onAgentStore={onAgentStore}
           send={send ?? undefined}
           effortChord={effortChord}
           onBusyChange={onBusyChange}

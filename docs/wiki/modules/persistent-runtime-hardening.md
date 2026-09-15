@@ -4,13 +4,10 @@
 
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md`
 - `src/server/js_runtime/mod.rs`
-- `src/server/runtime_sandbox.rs`
-- `src/bin/clay-runtime-sandbox.rs`
 - `src/server/ops/packages.rs`
 - `src/server/parse_coordinator.rs`
 - `src/perf/budgets.rs`
 - `docs/reference/primitives/package-security.md`
-- `tests/runtime_sandbox_harness.rs`
 
 ## Overview
 
@@ -61,7 +58,7 @@ These capabilities are grantable to any package source after user authorization.
 - V8 heap limits are installed for the current in-process runtime using server-owned compiled `JS_RUNTIME_HEAP_LIMIT_BYTES` and sanitized `runtime.heap_limit` diagnostics.
 - Treat heap-limit and timeout termination as worker poisoning: callers receive sanitized diagnostics, the worker exits, and the next controlled evaluation starts a fresh worker.
 - The separate-process sandbox design is documented in [`docs/design/persistent-runtime-sandbox.md`](../../design/persistent-runtime-sandbox.md). It remains an optional runtime profile / hardening primitive, not a mandatory third-party-only boundary.
-- A minimal internal harness exists in `src/server/runtime_sandbox.rs` plus `src/bin/clay-runtime-sandbox.rs`. It proves spawn/handshake, controlled fixture evaluation, parent timeout kill, fresh restart, parent-side payload rejection, sanitized child diagnostics, and no filesystem/network/shell globals in the child runtime. Its evidence-only newline framing is read with `AsyncBufRead::fill_buf`: the parent retains at most `maxPayloadBytes + 1`, accepts a newline only after at most `maxPayloadBytes`, and kills then awaits the child on overflow, EOF before a delimiter, I/O failure, or malformed JSON. It never calls unbounded `read_line`.
+- The plan-034 minimal internal harness (`src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`, `tests/runtime_sandbox_harness.rs`) was deleted in plan 119 (2026-09-14): it had no production caller (the persistent JS runtime owns in-process heap-limit and timeout termination), and reviving it would have shipped an unbounded process-isolation path. The design above remains the migration gate for any future separate-process profile.
 - Keep package guards centralized in package load/enable/resolver code, not mode-specific branches.
 - Heap and timeout budgets, sandbox kill/restart policy, and source-aware package authorization are server-owned controls, not hidden `init.js` keys.
 
@@ -85,7 +82,6 @@ Plan 034 hardening is verified by focused security tests plus repository-wide ga
 - `src/server/js_runtime/mod.rs::tests::js_runtime_heap_growth_is_terminated_with_heap_limit_diagnostic`: verifies heap growth terminates with `runtime.heap_limit`.
 - `src/server/js_runtime/mod.rs::tests::js_runtime_timeout_recovery_uses_fresh_worker`: verifies a timeout-poisoned worker is replaced.
 - `src/server/js_runtime/mod.rs::tests::js_runtime_heap_limit_recovery_uses_fresh_worker`: verifies a heap-poisoned worker is replaced.
-- `tests/runtime_sandbox_harness.rs`: verifies child start/evaluate, timeout kill and fresh restart, valid oversized JSON rejection, absence of filesystem/network/shell globals, and hostile newline-terminated/unterminated streams. Linux fixture scripts emit exactly `max + 1` bytes (one then sleeps without a delimiter); both fail immediately at the bound and `/proc/<pid>` confirms the supervisor reaped each child.
 
 ## Related
 

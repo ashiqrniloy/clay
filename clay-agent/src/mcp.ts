@@ -11,6 +11,16 @@ import type { ToolDefinition } from "@arnilo/prism";
 /** Maximum allow-listed servers per connect (matches Prism ACP bounds spirit). */
 export const MAX_MCP_SERVERS = 32;
 
+/**
+ * Connect/handshake floor (plan 119 P1-3). Prism 0.5.5 exposes one timeout
+ * knob, `callTimeoutMs`, and applies it to the `initialize` handshake and the
+ * first `tools/list` page as well as to every call — so a call-shaped
+ * `timeoutMs` ("this tool must answer in 200 ms") used to hide any server whose
+ * process needs longer than that to boot. The floor buys the connect phase room;
+ * calls still honour `timeoutMs` exactly (see {@link withCallDeadline}).
+ */
+export const CONNECT_FLOOR_MS = 5_000;
+
 /** Hard ceiling on literal argv per entry. */
 const MAX_ARGV = 64;
 
@@ -21,7 +31,11 @@ export interface McpAllowListEntry {
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly cwd?: string;
-  /** Per-server tool-call/connect ceiling in ms (config source only; absent = Prism default 60s). */
+  /**
+   * Per-server tool-call ceiling in ms (config source only; absent = Prism default 60s).
+   * The connect/handshake always keeps at least {@link CONNECT_FLOOR_MS}, so a
+   * small value cannot hide a slow-booting server.
+   */
   readonly timeoutMs?: number;
 }
 
@@ -44,6 +58,43 @@ export interface ConnectedMcpServers {
 
 function fail(message: string): never {
   throw Object.assign(new Error(message), { rpcCode: -32602 });
+}
+
+/**
+ * Clay-owned per-call deadline, used when `timeoutMs` is below the connect
+ * floor and Prism's own (deliberately looser) timer therefore cannot serve as
+ * the call ceiling. Aborting through the execution-context signal is the
+ * documented Prism seam: the SDK cancels the in-flight request and notifies
+ * the server, so nothing keeps running after the call has been reported as
+ * timed out. Prism maps the abort to an error ToolResult, like its own timer.
+ */
+function withCallDeadline(tool: ToolDefinition, timeoutMs: number): ToolDefinition {
+  return {
+    ...tool,
+    execute: async (args, context) => {
+      const controller = new AbortController();
+      const onAbort = () => controller.abort(context.signal?.reason);
+      if (context.signal?.aborted) controller.abort(context.signal.reason);
+      else context.signal?.addEventListener("abort", onAbort, { once: true });
+      const timer = setTimeout(
+        () => controller.abort(new Error(`MCP tool call timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+      try {
+        return await tool.execute(args, { ...context, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+        context.signal?.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+/** Bridge tools for one server, bounded by that server's own call ceiling. */
+function boundedTools(bridge: McpToolBridge, timeoutMs: number | undefined): ToolDefinition[] {
+  const tools = [...bridge.tools];
+  if (timeoutMs === undefined || timeoutMs >= CONNECT_FLOOR_MS) return tools;
+  return tools.map((tool) => withCallDeadline(tool, timeoutMs));
 }
 
 function canonicalCommand(entry: McpAllowListEntry, index: number): string {
@@ -159,15 +210,17 @@ export async function connectAllowListedMcpServers(
           // Bounded stderr capture; the host drains/limits it, not the model.
           stderr: "pipe",
         },
-        ...(entry.timeoutMs === undefined ? {} : { callTimeoutMs: entry.timeoutMs }),
+        ...(entry.timeoutMs === undefined
+          ? {}
+          : { callTimeoutMs: Math.max(entry.timeoutMs, CONNECT_FLOOR_MS) }),
       }),
     ),
   );
-  const bridges: McpToolBridge[] = [];
+  const bridges: { bridge: McpToolBridge; timeoutMs: number | undefined }[] = [];
   const outcomes: McpServerOutcome[] = entries.map((entry, index) => {
     const result = settled[index];
     if (result.status === "fulfilled") {
-      bridges.push(result.value);
+      bridges.push({ bridge: result.value, timeoutMs: entry.timeoutMs });
       return { serverId: entry.serverId, connected: true, tools: result.value.tools.length };
     }
     const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
@@ -175,10 +228,10 @@ export async function connectAllowListedMcpServers(
     return { serverId: entry.serverId, connected: false, tools: 0, error };
   });
   return {
-    tools: bridges.flatMap((bridge) => [...bridge.tools]),
+    tools: bridges.flatMap(({ bridge, timeoutMs }) => boundedTools(bridge, timeoutMs)),
     outcomes,
     close: async () => {
-      for (const bridge of bridges) await bridge.close().catch(() => {});
+      for (const { bridge } of bridges) await bridge.close().catch(() => {});
     },
   };
 }

@@ -2,6 +2,8 @@
 # Clay supported check wrapper (Linux host).
 #   scripts/check.sh quick  — non-release quick feedback: fmt + library unit tests
 #   scripts/check.sh full   — serial release gate under one repo-local lock
+#                             (includes the generated-webview-binding staleness
+#                             guard, scripts/check-bindings.sh)
 #   scripts/check.sh report — advisory target-size/executable report
 set -eu
 
@@ -72,6 +74,10 @@ case "${1:-}" in
         run_stage clippy cargo clippy --all-targets -- -D warnings
         run_stage test cargo test --all-targets --quiet
         run_stage bench-compile cargo bench --no-run
+        # Last: this stage compiles `clay` with the codegen-only feature, which
+        # is a different flavor than the stages above and would otherwise force
+        # them to rebuild.
+        run_stage bindings scripts/check-bindings.sh
         echo "full check PASSED"
         ;;
     report)

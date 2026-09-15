@@ -117,6 +117,56 @@ test("timeoutMs rides the connect options: slow tool call times out", async () =
   }
 });
 
+test("timeoutMs bounds calls, not the connect handshake: a slow-booting server still connects", async () => {
+  // 2026-09-14 review P1-3: Prism 0.5.5 has a single timeout knob
+  // (`callTimeoutMs`) — it bounds the initialize handshake and the first
+  // tools/list page as well as every call — so a small call-shaped timeoutMs
+  // used to hide a server whose process needs ~1s to answer initialize.
+  const connected = await connectAllowListedMcpServers([
+    {
+      serverId: "slowboot",
+      command: process.execPath,
+      args: [FIXTURE],
+      env: { CLAY_MCP_BOOT_DELAY_MS: "1000" },
+      timeoutMs: 200,
+    },
+  ]);
+  try {
+    const outcome = connected.outcomes[0];
+    assert.ok(
+      outcome?.connected,
+      `slow-booting server must connect (got ${outcome?.error ?? "no outcome"})`,
+    );
+    const tool = connected.tools.find((t) => t.name === "mcp:slowboot:sleep");
+    assert.ok(tool, "slow-booting server's tools must be bridged");
+    // ...and the small timeoutMs still bounds the call itself.
+    const result = (await tool.execute({}, ctx)) as { error?: { message?: string } };
+    assert.match(result.error?.message ?? "", /timed out after 200ms/);
+  } finally {
+    await connected.close();
+  }
+});
+
+test("a run cancellation still aborts an in-flight bounded call", async () => {
+  // The Clay-owned call deadline must forward the run's own abort, not
+  // replace it: a cancelled session must not leave the call running.
+  const connected = await connectAllowListedMcpServers([
+    { serverId: "cancel", command: process.execPath, args: [FIXTURE], timeoutMs: 200 },
+  ]);
+  try {
+    const tool = connected.tools.find((t) => t.name === "mcp:cancel:sleep");
+    assert.ok(tool, "fixture sleep tool bridged");
+    const cancelled = new AbortController();
+    cancelled.abort(new Error("session cancelled"));
+    const result = (await tool.execute({}, { ...ctx, signal: cancelled.signal })) as {
+      error?: { message?: string };
+    };
+    assert.match(result.error?.message ?? "", /session cancelled/);
+  } finally {
+    await connected.close();
+  }
+});
+
 test("validation: null cwd/timeoutMs read as absent, not as invalid values", async () => {
   // Plan 117 regression: the Rust allow-list builder used to emit
   // `"cwd": null` / `"timeoutMs": null` for entries without them, which

@@ -6,6 +6,7 @@
 - `src/server/mod.rs`
 - `src/server/tab_registry.rs`
 - `src/server/connection/mod.rs`
+- `src/server/connection/delivery.rs` — Plan 119 per-lane delivery policy.
 - `src/server/workspace/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
@@ -23,6 +24,9 @@
 | `src/server/connection/tabs.rs` | `TabCommand` arm + `send_tab_*` helpers + `TabDispatch` (Continue/CloseConnection) |
 | `src/server/connection/menus.rs` | `MenuQueryUpdate`/`Backspace`/`SelectionMove`/`Activate`/`Cancel` + `open_command_centre_session` |
 | `src/server/connection/runtime.rs` | `SduiAction`/`CommandIntent`/`RequestResync`/`DecorationViewportRequest`/completion/language-intelligence + `execute_command_intent` + persist helpers |
+| `src/server/connection/delivery.rs` | Per-lane delivery policy (Plan 119 SC-2): `Delivery` (State/Advice lag policy), `Flow` (Continue/Close), and one helper per broadcast or result lane (`typography`, `editor_command`, `caret_style`, `editor_layout`, `shell_preferences`, `tab_registry`, `runtime_generation`, `result`, `analysis`, `agent`) |
+
+Lane policy (Plan 119 SC-2). The loop selects over one lane per family and hands the receive outcome to that family's helper, so the loop body stays a router. `Delivery::State` lanes (`typography`, `caret_style`, `editor_layout`, `shell_preferences`, `tab_registry`, `runtime_generation`) replay the family's *current* value on a broadcast lag — a gap in state is worse than a repeated value — while `Delivery::Advice` lanes (`editor_command`) drop a lagged request, whose moment has passed. A closed sender ends the connection on those lanes; the coding-agent lane is the deliberate exception (its subscription outlives a daemon restart, and an event too large for one frame becomes an `agent.frame_too_large` diagnostic instead of a codec error that would kill the view). The decision table and the per-lane writes are unit-tested in `delivery.rs` without a connection.
 
 ## Overview
 
@@ -127,6 +131,7 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 - `src/main.rs`: launch tests verify direct child-process command construction, restart parsing/default-server command-line matching, config-fixture smoke forwarding, bounded readiness retry diagnostics, local-fallback messages, and early child-exit handling for smoke mode.
 - `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync, region-lock rejection, and runtime reload open-document refresh coverage; `src/server/tests.rs::server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies typed construction failure, and `src/server/tests.rs::production_server_binaries_use_fallible_constructor` prevents panic-constructor regression. Plan 030 adds `src/server/tests.rs::unix_socket_is_created_with_owner_only_permissions` and `windows_pipe_creation_applies_current_user_security_descriptor`.
 - `src/client/mod.rs`: client queue tests cover selected-file and selected-folder non-edit messages, and Windows named-pipe integration tests cover deferred initial snapshot delivery, edit acknowledgement, independent per-tab welcome documents, and stale-edit resync recovery; tests are now robust to an ambient default `~/.clay/init.js` that publishes a behavior manifest.
+- `src/server/connection/delivery.rs`: unit tests pin State replay, Advice drop, closed-lane flow, agent restart survival, and oversized-event diagnostics (`cargo test --lib server::connection::delivery`).
 - Relevant commands: `cargo test server --quiet`, `cargo test protocol --quiet`, `cargo test --all-targets`, `cargo check --all-targets`.
 
 ## Related

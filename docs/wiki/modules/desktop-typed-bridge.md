@@ -2,7 +2,8 @@
 
 ## Source
 
-- `src-tauri/src/bridge/dto.rs` — typed bootstrap, runtime/theme DTOs, and envelope projection.
+- `src-tauri/src/bridge/dto.rs` — typed bootstrap, runtime/theme DTOs, envelope projection, and the **single hand-written definition of the webview contract** (the contract types derive `TS` under the codegen feature).
+- `frontend/src/bridge/generated/` — generated TypeScript for that contract (checked in; `scripts/check-bindings.sh` fails on drift).
 - `src-tauri/src/bridge/errors.rs` — bounded sanitized bridge errors.
 - `src-tauri/src/bridge/session.rs` — bootstrap/reconnect lifecycle, request validation, identity stamping, and event pump.
 - `src-tauri/src/bridge/forwarder.rs` — bounded FIFO/latest-wins delivery lanes.
@@ -37,6 +38,18 @@ patch's decoration/diagnostic/fold members independently.
 
 The bridge does not own document text, parser state, syntax executors, render
 fields, request completion, package execution, or filesystem authority.
+
+## Generated webview contract (Plan 119 SC-1)
+
+`dto.rs` plus `errors.rs` are the only hand-written definition of what the
+webview receives. `#[derive(ts_rs::TS)]` on those types (gated by the
+`ts-bindings` feature) generates `frontend/src/bridge/generated/bridge.ts` and
+`…/serde_json/JsonValue.ts`; nothing in the frontend restates a contract shape.
+
+- **Codegen:** `cargo test -p clay-desktop --features ts-bindings --lib export_webview_contract_bindings` (the export test lives in `dto.rs`'s `runtime_projection_tests`). `scripts/check-bindings.sh` = regenerate + fail on any change; `scripts/check.sh full` runs it last.
+- **Feature:** `ts-bindings` is off for shipped builds and for the frontend toolchain. It enables ts-rs derives on the serde-JSON types the DTO layer is composed of (protocol/editor/shell projection types); the rkyv Rust-to-Rust wire is untouched either way.
+- **Excluded on purpose:** `BridgeEnvelope`'s `event`/`routed` variants are `ts(skip)`-ed. Generating the full `ClientConnectionEvent` union would pull the internal event graph (server messages, agent frames, viewport patches, completion sets) into the contract; `frontend/src/bridge/types.ts` narrows those to `ShellEvent` + the families the shell consumes, with an opaque catch-all for the rest, and composes the envelope as `generated ∪ {event,routed}`.
+- **64-bit ids:** generated 64-bit integers are `number` (`Config::with_large_int`), matching the wire; ids that can exceed the safe-integer range cross as strings (menu session ids).
 
 ## Session and request flow
 

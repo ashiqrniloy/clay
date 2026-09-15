@@ -116,7 +116,7 @@ npm run lint    # eslint (typescript-eslint + react-hooks)
 npm run format:check
 npm test        # vitest (theme adapter, components, shell, bridge)
 npm run build   # tsc -b && vite build → dist/
-npm run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 400 kB
+npm run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 404 kB
 ```
 
 ### Plan 099 editor performance verification

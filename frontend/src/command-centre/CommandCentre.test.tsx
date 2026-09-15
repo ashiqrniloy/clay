@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { BootstrapDto } from "../bridge/types";
 import { createWorkspace } from "../shell/workspace-controller";
 import { CommandCentre } from "./CommandCentre";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 afterEach(cleanup);
 
@@ -12,6 +13,7 @@ function bootstrap(): BootstrapDto {
   return {
     clientId: 1,
     tabId: 10,
+    performanceProfile: false,
     protocolVersion: 28,
     endpoint: "test",
     generation: 1,
@@ -22,26 +24,48 @@ function bootstrap(): BootstrapDto {
       access: { editable: { leaseId: 1 } },
       workspaceRoot: "/tmp/ws",
     },
-    behaviorManifest: {
-      manifestId: "test",
-      behaviorVersion: 1,
-      commands: [],
-      keymaps: [],
+    behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
+    activeTheme: {
+      specifier: "",
+      tokens: {},
+      editorStyles: {},
+      densityScale: 1,
     },
-    activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
     activeTypography: {
       revision: 1,
       monospace: {
         families: ["m"],
         size: 13,
-        ligatures: { enableStandard: true },
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
       },
       proportional: {
         families: ["p"],
         size: 13,
-        ligatures: { enableStandard: true },
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
       },
-      ui: { families: ["u"], size: 13, ligatures: { enableStandard: true } },
+      ui: {
+        families: ["u"],
+        size: 13,
+        ligatures: {
+          enableStandard: true,
+          enableContextual: true,
+          discretionaryFeatures: [],
+          rawFeatures: null,
+          disableFeatures: [],
+        },
+      },
       hierarchy: {
         display: 1.5,
         title: 1.16,
@@ -308,7 +332,7 @@ describe("CommandCentre", () => {
       prompt: "Command Centre",
       status: { empty: { message: "No commands match this query" } },
     });
-    const empty = screen.getAllByRole("status")[0]!;
+    const empty = screen.getAllByRole("status")[0] as HTMLElement;
     expect(empty).toHaveTextContent("No commands match this query");
     expect(empty).toHaveTextContent("Esc");
     expect(screen.queryByRole("listbox")).toBeNull();

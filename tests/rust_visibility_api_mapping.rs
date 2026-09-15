@@ -347,6 +347,42 @@ fn phase22_8_per_tab_state_has_no_new_public_programmatic_surface() {
 /// helper family that already holds `contrast_ratio`/`relative_luminance` — and
 /// neither is reachable from a JS facade or a Deno op.
 #[test]
+fn plan119_session_relay_helper_is_not_a_public_programmatic_surface() {
+    let root = repository_root();
+    let server = read_src("src/server/agent_agui.rs");
+    let desktop = read_src("src-tauri/src/bridge/agent.rs");
+    assert!(
+        !server.contains("pub fn session_of("),
+        "session tagging must not become a public server or Clay JS API"
+    );
+    assert!(
+        desktop.contains("fn session_of("),
+        "desktop relay must keep session tagging local"
+    );
+    assert!(
+        !desktop.contains("pub fn session_of("),
+        "desktop session tagging must remain private"
+    );
+
+    let runtime_sources = fs::read_dir(root.join("runtime/js"))
+        .expect("read runtime/js")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            matches!(
+                entry.path().extension().and_then(|value| value.to_str()),
+                Some("js" | "ts")
+            )
+        })
+        .map(|entry| fs::read_to_string(entry.path()).expect("read facade"))
+        .collect::<Vec<_>>()
+        .join("\\n");
+    assert!(
+        !runtime_sources.contains("session_of"),
+        "session tagging is relay plumbing, not a Clay JS facade export"
+    );
+}
+
+#[test]
 fn plan118_new_runtime_machinery_stays_crate_private() {
     let root = repository_root();
     let crate_private_declarations: &[(&str, &str)] = &[

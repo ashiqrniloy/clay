@@ -68,7 +68,7 @@ describe("tab store", () => {
       agent: { type: "coding-agent", configRoot: "/tmp/a" },
     });
     expect(state.tabs[0]?.label).toBe("coding-agent");
-    expect(tabUncommitted(state.tabs[0]!)).toBe(false);
+    expect(tabUncommitted(state.tabs[0] as ShellTabState)).toBe(false);
   });
 
   it("applies a newer registry and ignores a stale revision", () => {
@@ -99,7 +99,7 @@ describe("tab store", () => {
         agent: { type: "coding-agent", configRoot: "" },
       }),
     );
-    seeded.tabs[0]!.view = "agent";
+    (seeded.tabs[0] as ShellTabState).view = "agent";
     const next = applyRegistry(seeded, {
       revision: 4,
       active: 10,

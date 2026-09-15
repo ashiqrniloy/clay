@@ -76,6 +76,8 @@ pub enum LanguageIntelligenceFeature {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct TextByteRange {
     pub byte_start: u64,
     pub byte_end: u64,

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { BootstrapDto } from "../../bridge/types";
 import { clayEditorTheme, createEditor } from "../create-editor";
 import { createDocumentSession } from "./session";
+import { behaviorManifestFixture } from "../../test/contract-fixtures";
 
 const bootstrap = {
   clientId: 1,
@@ -19,12 +20,7 @@ const bootstrap = {
     access: { editable: { leaseId: 9 } },
     workspaceRoot: "/tmp/ws",
   },
-  behaviorManifest: {
-    manifestId: "m",
-    behaviorVersion: 2,
-    commands: [],
-    keymaps: [],
-  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
 } as unknown as BootstrapDto;
 
 function viewWith(doc: string): EditorView {

@@ -20,6 +20,7 @@ import {
   replaceDecorations,
 } from "./decorations";
 import type { DecorationSet } from "./types";
+import { behaviorManifestFixture } from "../../test/contract-fixtures";
 
 const provenance = {
   packageName: "core",
@@ -130,6 +131,8 @@ describe("editor performance invariants (Plan 099)", () => {
     const session = createDocumentSession({ send: async () => undefined });
     const bootstrap: BootstrapDto = {
       clientId: 1,
+      performanceProfile: false,
+      tabId: null,
       protocolVersion: 29,
       endpoint: "perf",
       generation: 1,
@@ -140,29 +143,47 @@ describe("editor performance invariants (Plan 099)", () => {
         workspaceRoot: "/perf",
         head: { totalBytes: text.length, firstChunk: text },
       },
-      behaviorManifest: {
-        manifestId: "default.text",
-        behaviorVersion: 1,
-        commands: [],
-        keymaps: [],
+      behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
+      activeTheme: {
+        specifier: "",
+        tokens: {},
+        editorStyles: {},
+        densityScale: 1,
       },
-      activeTheme: { specifier: "", tokens: {}, densityScale: 1 },
       activeTypography: {
         revision: 1,
         monospace: {
           families: ["monospace"],
           size: 13,
-          ligatures: { enableStandard: true },
+          ligatures: {
+            enableStandard: true,
+            enableContextual: true,
+            discretionaryFeatures: [],
+            rawFeatures: null,
+            disableFeatures: [],
+          },
         },
         proportional: {
           families: ["serif"],
           size: 13,
-          ligatures: { enableStandard: true },
+          ligatures: {
+            enableStandard: true,
+            enableContextual: true,
+            discretionaryFeatures: [],
+            rawFeatures: null,
+            disableFeatures: [],
+          },
         },
         ui: {
           families: ["system-ui"],
           size: 13,
-          ligatures: { enableStandard: true },
+          ligatures: {
+            enableStandard: true,
+            enableContextual: true,
+            discretionaryFeatures: [],
+            rawFeatures: null,
+            disableFeatures: [],
+          },
         },
         hierarchy: {
           display: 1.5,

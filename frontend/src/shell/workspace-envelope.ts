@@ -9,9 +9,14 @@ import type {
   RuntimeDiagnosticDto,
   TransientMenuSnapshotDto,
 } from "../bridge/types";
-import { applySduiUpdate, installSduiTree } from "../sdui/state";
+import {
+  applySduiUpdate,
+  installPackageUi,
+  installSduiTree,
+} from "../sdui/state";
 import type { SduiTree, SduiTreeUpdate } from "../sdui/types";
 import { applyRegistry, type TabStore } from "./tab-store";
+import { detached } from "../lib/detached";
 import type {
   PaneRecord,
   TabRuntime,
@@ -53,7 +58,7 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
     runtime.ui = {
       runtimeGeneration: snapshot.runtimeGenerationId,
       sdui: installSduiTree(snapshot.sduiTree),
-      packageUi: snapshot.packageUi,
+      packageUi: installPackageUi(snapshot.packageUi),
     };
     runtime.diagnostic = snapshot.diagnostics.at(-1) ?? null;
     if (
@@ -99,15 +104,17 @@ export function handleEnvelope(ctx: EnvelopeContext, envelope: BridgeEnvelope) {
         });
       }
     }
-    void adapters.send(
-      JSON.stringify({
-        family: "runtimeGenerationInstalled",
-        payload: {
-          clientId: 0,
-          runtimeGenerationId: snapshot.runtimeGenerationId,
-        },
-      }),
-      runtime.tabId ?? undefined,
+    detached(
+      adapters.send(
+        JSON.stringify({
+          family: "runtimeGenerationInstalled",
+          payload: {
+            clientId: 0,
+            runtimeGenerationId: snapshot.runtimeGenerationId,
+          },
+        }),
+        runtime.tabId ?? undefined,
+      ),
     );
     notify();
     return;

@@ -29,7 +29,13 @@ describe("SDUI region sizing (plan 118 E1)", () => {
           kind: {
             list: {
               items: [
-                { id: "a.md", label: "a.md", detail: "src", action: null },
+                {
+                  id: "a.md",
+                  label: "a.md",
+                  detail: "src",
+                  icon: null,
+                  action: null,
+                },
               ],
               filter: { placeholder: "Filter files", shortcut: "/" },
             },
@@ -66,7 +72,15 @@ describe("SDUI region sizing (plan 118 E1)", () => {
           id: 2,
           kind: {
             list: {
-              items: [{ id: "a", label: "a", detail: "src", action: null }],
+              items: [
+                {
+                  id: "a",
+                  label: "a",
+                  detail: "src",
+                  icon: null,
+                  action: null,
+                },
+              ],
             },
           },
         },

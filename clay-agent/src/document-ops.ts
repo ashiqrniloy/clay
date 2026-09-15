@@ -35,6 +35,10 @@ interface DocumentReadResult {
   readonly version: number;
   readonly dirty: boolean;
   readonly open: boolean;
+  /** The server cut a resident buffer at the read cap (plan 119 P2-1). */
+  readonly truncated?: boolean;
+  /** Full document size in bytes, even when `truncated`. */
+  readonly totalBytes?: number;
 }
 
 interface DocumentWriteResult {
@@ -45,15 +49,29 @@ interface DocumentWriteResult {
 
 async function readDocument(
   request: ReverseRequest,
+  sessionId: string,
   absolutePath: string,
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<DocumentReadResult> {
   if (signal?.aborted) throw new Error("Operation aborted");
-  const result = (await request("document.read", { path: absolutePath, maxBytes })) as DocumentReadResult;
+  const result = (await request("document.read", {
+    path: absolutePath,
+    maxBytes,
+    sessionId,
+  })) as DocumentReadResult;
   if (signal?.aborted) throw new Error("Operation aborted");
   if (!result || typeof result.text !== "string") {
     throw new Error("document.read must return { text, version, dirty, open }");
+  }
+  // The server cap is the bound (a resident document is 256MB); the callers'
+  // byte ceilings are defense in depth behind it. Fail loudly rather than page
+  // or scan a prefix as if it were the whole file — that would read as EOF to
+  // the model.
+  if (result.truncated === true) {
+    throw new Error(
+      `Document is ${result.totalBytes ?? maxBytes} bytes, exceeds the ${maxBytes} byte read cap`,
+    );
   }
   return result;
 }
@@ -116,14 +134,29 @@ function readPage(text: string, options: ReadTextOptions): ReadTextResult {
   };
 }
 
-export function createClayDocumentOps(options: { request: ReverseRequest }): ClayDocumentOps {
+/**
+ * Build the document operations for one session. Every call names that
+ * session: the server resolves the file's workspace root from it (plan 119
+ * SC-6), so a tool call can only touch the folder its session owns.
+ */
+export function createClayDocumentOps(options: {
+  request: ReverseRequest;
+  sessionId: string;
+}): ClayDocumentOps {
   const request = options.request;
+  const sessionId = options.sessionId;
 
   const readFile = async (
     absolutePath: string,
     options: { maxBytes: number; signal?: AbortSignal },
   ): Promise<Buffer> => {
-    const doc = await readDocument(request, absolutePath, options.maxBytes, options.signal);
+    const doc = await readDocument(
+      request,
+      sessionId,
+      absolutePath,
+      options.maxBytes,
+      options.signal,
+    );
     const buffer = Buffer.from(doc.text, "utf8");
     if (buffer.byteLength > options.maxBytes) {
       throw new Error(`File is ${buffer.byteLength} bytes, exceeds ${options.maxBytes} byte limit`);
@@ -136,7 +169,10 @@ export function createClayDocumentOps(options: { request: ReverseRequest }): Cla
     options?: { signal?: AbortSignal },
   ): Promise<{ size: number }> => {
     if (options?.signal?.aborted) throw new Error("Operation aborted");
-    const result = (await request("document.stat", { path: absolutePath })) as { size: number };
+    const result = (await request("document.stat", {
+      path: absolutePath,
+      sessionId,
+    })) as { size: number };
     if (!result || typeof result.size !== "number") {
       throw new Error("document.stat must return { size }");
     }
@@ -157,7 +193,11 @@ export function createClayDocumentOps(options: { request: ReverseRequest }): Cla
     if (options?.maxBytes !== undefined && bytes > options.maxBytes) {
       throw new Error(`Write input is ${bytes} bytes, exceeds ${options.maxBytes} byte limit`);
     }
-    const result = (await request("document.write", { path: absolutePath, content })) as DocumentWriteResult;
+    const result = (await request("document.write", {
+      path: absolutePath,
+      content,
+      sessionId,
+    })) as DocumentWriteResult;
     if (!result || typeof result.version !== "number") {
       throw new Error("document.write must return { version }");
     }
@@ -165,7 +205,7 @@ export function createClayDocumentOps(options: { request: ReverseRequest }): Cla
 
   const mkdir = async (dir: string, options?: { signal?: AbortSignal }): Promise<void> => {
     if (options?.signal?.aborted) throw new Error("Operation aborted");
-    await request("document.mkdir", { path: dir });
+    await request("document.mkdir", { path: dir, sessionId });
   };
 
   return {
@@ -174,6 +214,7 @@ export function createClayDocumentOps(options: { request: ReverseRequest }): Cla
       readText: async (absolutePath, options) => {
         const doc = await readDocument(
           request,
+          sessionId,
           absolutePath,
           Math.max(options.maxBytes, options.maxScanBytes),
           options.signal,

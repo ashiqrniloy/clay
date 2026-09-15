@@ -1,71 +1,44 @@
-import type { IconPackSnapshot } from "../icons/types";
+// SDUI wire shapes are generated from the Rust DTO layer
+// (`src-tauri/src/bridge/dto.rs`) into `../bridge/generated/bridge.ts`
+// (plan 119 SC-1) — never restate them.
+//
+// What stays hand-written in this module:
+//  * `PackageComponentNode` and friends: the *authoring* component JSON inside
+//    a package surface, validated at render time (the wire carries it as a
+//    generated `JsonValue`).
+//  * `SduiTreeUpdate`/`SduiTreeOperation`: event-only payloads of the shell's
+//    narrowing of `ClientConnectionEvent`, which generation excludes.
+export type {
+  PackageInputRouteContent as PackageInputRoute,
+  PackageUiProvenance,
+  RuntimeSnapshotDto as RuntimeSnapshot,
+  SduiActionArgument,
+  SduiActionIntent,
+  SduiActionSource,
+  SduiActionValue,
+  SduiEditorBinding,
+  SduiFlexDirection,
+  SduiListFilter,
+  SduiListItem,
+  SduiNode,
+  SduiNodeId,
+  SduiNodeKind,
+  SduiTree,
+  UiChoiceOption,
+  UiChoicesSnapshot,
+} from "../bridge/types";
+
 import type {
-  ThemeSnapshot,
-  TypographySnapshot,
-  DesignSystemSnapshot,
-} from "../theme/types";
+  PackageInputRouteContent as PackageInputRoute,
+  SduiNode,
+  SduiNodeId,
+  PackageOverlayDto,
+  PackagePanelDto,
+  PackageSurfaceDto,
+  PackageUiSnapshotDto,
+} from "../bridge/types";
 
-export type SduiNodeId = number;
-
-export interface SduiActionIntent {
-  commandId: string;
-  source:
-    | { button: { nodeId: SduiNodeId } }
-    | { listItem: { nodeId: SduiNodeId; itemId: string } };
-  arguments: Array<{
-    name: string;
-    value:
-      | { string: string }
-      | { bool: boolean }
-      | { i64: number }
-      | { u64: number };
-  }>;
-}
-
-export interface SduiListItem {
-  id: string;
-  label: string;
-  detail: string | null;
-  /** Semantic icon reference resolved against the active icon pack. */
-  icon?: string | null;
-  action: SduiActionIntent | null;
-}
-
-export type SduiNodeKind =
-  | { panel: { title: string; children: SduiNodeId[] } }
-  | { label: { text: string; icon?: string | null } }
-  | {
-      button: { label: string; icon?: string | null; action: SduiActionIntent };
-    }
-  | {
-      list: {
-        items: SduiListItem[];
-        /** Filter affordance (plan 118 task E1); absent = a plain list. */
-        filter?: { placeholder: string; shortcut?: string | null } | null;
-      };
-    }
-  | {
-      editorView: {
-        binding: { documentId: number; expectedVersion: number | null };
-      };
-    }
-  | { flex: { direction: "row" | "column"; children: SduiNodeId[] } }
-  | { stack: { children: SduiNodeId[] } };
-
-export interface SduiNode {
-  id: SduiNodeId;
-  kind: SduiNodeKind;
-  /** Host-owned size token for a region node (`dimension.sidebar.default`):
-   *  the host sizes it from the typed token instead of a flex share. */
-  size?: string | null;
-}
-
-export interface SduiTree {
-  uiVersion: number;
-  rootId: SduiNodeId;
-  nodes: SduiNode[];
-}
-
+/** Event-only SDUI tree update (arrives inside `ClientConnectionEvent`). */
 export type SduiTreeOperation =
   | { replaceRoot: { rootId: SduiNodeId } }
   | { replaceNode: { node: SduiNode } }
@@ -147,81 +120,42 @@ export interface PackageComponentNode {
   };
 }
 
-export interface PackageUiProvenance {
-  packageName: string;
-  packageVersion: string;
-  apiPrefix: string;
-  trustDomain: "trusted" | "thirdParty";
-}
-
-export interface PackageSurface {
-  id: string;
+/**
+ * A resolved package surface: the generated DTO with its `component` JSON
+ * narrowed to the parsed authoring node the SDUI renderer consumes.
+ */
+export type PackageSurface = Omit<PackageSurfaceDto, "component"> & {
   component: PackageComponentNode;
-  actionTargets: string[];
-  provenance: PackageUiProvenance;
-}
+};
 
-export interface PackagePanel extends PackageSurface {
+export type PackagePanel = Omit<
+  PackagePanelDto,
+  "component" | "slot" | "visibility"
+> & {
+  component: PackageComponentNode;
   slot: "left" | "right" | "top" | "bottom";
   visibility: "visible" | "hidden" | "collapsed";
-  actionTargets: string[];
-}
+};
 
-export interface PackageOverlay extends PackageSurface {
+export type PackageOverlay = Omit<
+  PackageOverlayDto,
+  "component" | "anchor" | "focusPolicy" | "dismissalPolicy"
+> & {
+  component: PackageComponentNode;
   anchor: "working-area" | "active-pane" | "main" | "pointer";
   focusPolicy: "none" | "restore" | "trap";
   dismissalPolicy: "manual" | "escape" | "outside" | "escape-or-outside";
-  actionTargets: string[];
-}
+};
 
-export interface PackageInputRoute {
-  id: string;
-  scope: string;
-  componentId: string;
-  pointerClick: string;
-  pointerAction: string | null;
-  pointerDrag: string;
-  focusPolicy: string;
-  selectionPolicy: string;
-  contextModes: string[];
-  actionTargets: string[];
-  provenance: PackageUiProvenance;
-}
-
-export interface PackageUiSnapshot {
-  version: number;
+export type PackageUiSnapshot = Omit<
+  PackageUiSnapshotDto,
+  "emptyTab" | "surfaces" | "panels" | "overlays" | "components" | "inputRoutes"
+> & {
   emptyTab: PackageSurface | null;
   /** Named pane surfaces (`activation: "pane"`), e.g. the Coding Agent split. */
-  surfaces?: PackageSurface[];
+  surfaces: PackageSurface[];
   panels: PackagePanel[];
   overlays: PackageOverlay[];
   components: PackageSurface[];
   inputRoutes: PackageInputRoute[];
-}
-
-export interface RuntimeSnapshot {
-  runtimeGenerationId: number;
-  behaviorManifest: Record<string, unknown>;
-  activeTheme: ThemeSnapshot;
-  activeTypography: TypographySnapshot;
-  activeDesignSystem: DesignSystemSnapshot;
-  /** Resolved active icon pack; absent = host fallback subset active. */
-  activeIconPack?: IconPackSnapshot | null;
-  /** Server-enumerated Settings selections (plan 110 task 10). */
-  uiChoices?: UiChoicesSnapshot;
-  sduiTree: SduiTree;
-  packageUi: PackageUiSnapshot;
-  documents: Array<Record<string, unknown>>;
-  diagnostics: Array<{ severity: string; code: string; message: string }>;
-}
-
-export interface UiChoiceOption {
-  specifier: string;
-  displayName?: string;
-}
-
-export interface UiChoicesSnapshot {
-  themes: UiChoiceOption[];
-  designSystems: UiChoiceOption[];
-  appearance?: string;
-}
+};

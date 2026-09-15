@@ -309,7 +309,7 @@ describe("plan 112 task 10 cross-layer matrix", () => {
         packageName: "icons-phosphor-duotone",
         packageVersion: "0.1.0",
         apiPrefix: "icons-phosphor-duotone",
-        trustDomain: "Trusted",
+        trustDomain: "trusted",
       },
       icons: {
         "action.close": {
@@ -352,7 +352,7 @@ describe("plan 112 task 10 cross-layer matrix", () => {
           packageName: "icons-phosphor-regular",
           packageVersion: "0.1.0",
           apiPrefix: "icons-phosphor-regular",
-          trustDomain: "Trusted",
+          trustDomain: "trusted",
         },
         icons: {
           "document.save": {
@@ -369,7 +369,7 @@ describe("plan 112 task 10 cross-layer matrix", () => {
           packageName: "icons-phosphor-duotone",
           packageVersion: "0.1.0",
           apiPrefix: "icons-phosphor-duotone",
-          trustDomain: "Trusted",
+          trustDomain: "trusted",
         },
         icons: {
           "document.save": {

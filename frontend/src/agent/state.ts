@@ -11,6 +11,7 @@ import type { Message } from "@ag-ui/core";
 
 import { TauriClayAgent } from "./TauriClayAgent";
 import { agentStream, pipeRelay, type AgentStreamEvent } from "./events";
+import { sendRequest } from "../bridge/client";
 
 export interface AgentStatus {
   streaming: boolean;
@@ -18,7 +19,7 @@ export interface AgentStatus {
   status: string | null;
 }
 
-interface AgentSessionModule {
+export interface AgentSessionModule {
   readonly agent: TauriClayAgent;
   /** Subscribe to versioned notifications for useSyncExternalStore. */
   subscribe(listener: () => void): () => void;
@@ -26,10 +27,20 @@ interface AgentSessionModule {
   getSnapshot(): AgentSnapshot;
   /** Optimistic clear after the panel dispatches a resume decision. */
   clearPendingApproval(): void;
-  /** Test seam: clear the shared instance in place. */
-  resetForTests(): void;
-  /** Starts relay processing; call once per surface mount. */
+  /** Extra relay refcount for a mounted surface (the store is already
+   *  subscribed); the returned function releases it. */
   start(): () => void;
+  /** Releases the relay subscription and every listener (tab close). */
+  dispose(): void;
+  /** The session this tab owns: `null` until the server's answer lands,
+   *  `""` when the tab has no session yet, else the session id. */
+  sessionId(): string | null;
+  /** Ask the server for this tab's binding + STATE (mount, reconnect). */
+  requestBinding(): void;
+  /** Send one agent command through this tab's own connection. */
+  command(command: Record<string, unknown> | string): void;
+  /** Send a prepared payload through this tab's own connection. */
+  sendPayload(payload: string): Promise<void>;
   /** Runs one prompt turn: awaits the run pipeline, then flushes the
    *  deferred server snapshot so the server list wins at the boundary. */
   runTurn(): Promise<void>;
@@ -39,7 +50,40 @@ interface AgentSessionModule {
     state?: Record<string, unknown>;
     streaming?: boolean;
     statusText?: string | null;
+    /** A suspended durable run's tool approval (the Allow/Deny strip). */
+    pendingApproval?: AgentSnapshot["pendingApproval"];
   }): void;
+}
+
+export interface AgentSessionOptions {
+  /** The owning tab's own sender (plan 119 SC-6: construction-scoped — there is
+   *  no mutable process-wide sender). Absent: the process `sendRequest`. */
+  send?: (payload: string) => Promise<void>;
+  /** The owning connection's client id. Absent: no connection filter, which is
+   *  what a standalone store (fixtures, tests) wants. */
+  clientId?: number | null;
+}
+
+/** The agent-RPC code the server answers a tab's `TabState` (and every run
+ *  command) with: this connection's client id + the session the tab owns. */
+export const SESSION_BINDING_CODE = "session.bound";
+
+/** A tab binding refresh is at most this often: dropped traffic asks again,
+ *  which is how an agent switch or a resume is picked up, but a chatty relay
+ *  never becomes a request loop. */
+const BINDING_REFRESH_MS = 500;
+
+/** One agent-family client command through the validated bridge path (the
+ *  bridge stamps the real client id). Unit variants ride the bare-string form
+ *  — `{ listSessions: {} }` fails serde deserialization (map content where a
+ *  unit is expected). */
+export function agentCommandPayload(
+  command: Record<string, unknown> | string,
+): string {
+  return JSON.stringify({
+    family: "agent",
+    payload: { clientId: 0, command },
+  });
 }
 
 /** AgentRpc `result` is an object after the AG-UI adapter parse, or a JSON
@@ -64,6 +108,8 @@ function parseAgentRpcResult(value: unknown): Record<string, unknown> | null {
 export interface AgentSnapshot {
   messages: Message[];
   status: AgentStatus;
+  /** Session this tab owns (plan 119 SC-6); see `sessionId()`. */
+  sessionId: string | null;
   /** Agent/conversation state from STATE_SNAPSHOT events. */
   state: Record<string, unknown>;
   /** Pending tool approval from a suspended durable run; cleared when the
@@ -76,8 +122,40 @@ export interface AgentSnapshot {
   } | null;
 }
 
-function createAgentSession(): AgentSessionModule {
-  const agent = new TauriClayAgent({});
+/**
+ * Creates one tab's agent session store (plan 119 SC-6).
+ *
+ * The relay is a process-wide fan-out: every connection receives every
+ * session's messages, and the bridge stamps each copy with the *receiving*
+ * connection. So a store can only attribute traffic by the session the event
+ * carries, matched against the binding its own tab was answered with — never
+ * by the client-id stamp, which belongs to the delivery, not the owner.
+ *
+ * A store is born subscribed and released by `dispose()` (tab close), because
+ * the tab — not the surface that happens to be mounted — owns the transcript.
+ * An extra `start()` refcount lets a mounted surface keep the relay alive too.
+ */
+export function createAgentSession(
+  options: AgentSessionOptions = {},
+): AgentSessionModule {
+  const sendPayload = options.send ?? sendRequest;
+  const clientId = options.clientId ?? null;
+  /** `null` = not answered yet, `""` = the tab has no session yet. */
+  let binding: string | null = null;
+  let bindingRequestedAt = 0;
+  let disposed = false;
+  const releases = new Set<() => void>();
+  const agent = new TauriClayAgent(
+    {},
+    { sender: sendPayload, accept: accepts },
+  );
+  const releaseRelay = agentStream.retain();
+  const relaySubscription = pipeRelay({
+    next: (event) => applyOutOfRun(event),
+    error: () => {
+      // Relay errors surface through the connection store flow.
+    },
+  });
   let version = 0;
   const listeners = new Set<() => void>();
   let status: AgentStatus = { streaming: false, status: null };
@@ -89,6 +167,7 @@ function createAgentSession(): AgentSessionModule {
     state: {},
     status,
     pendingApproval,
+    sessionId: binding,
   };
 
   /** Rebuilds the immutable snapshot synchronously after any mutation. */
@@ -98,6 +177,7 @@ function createAgentSession(): AgentSessionModule {
       state: { ...agent.state },
       status,
       pendingApproval,
+      sessionId: binding,
     };
   };
 
@@ -108,6 +188,9 @@ function createAgentSession(): AgentSessionModule {
   });
 
   const notify = () => {
+    // A disposed store has no listeners left to tell; keeping the frame
+    // callback scheduled would only outlive the tab.
+    if (disposed) return;
     rebuild();
     notifyListeners();
   };
@@ -223,6 +306,36 @@ function createAgentSession(): AgentSessionModule {
     },
   });
 
+  /** This tab's traffic rule: process-wide messages are global, session-tagged
+   *  ones must be the session the server said this tab owns. */
+  function accepts(event: AgentStreamEvent): boolean {
+    if (clientId != null && event.clientId !== clientId) return false;
+    const session = event.sessionId;
+    if (!session) return true;
+    return binding !== null && session === binding;
+  }
+
+  /** Asks the server which session this tab owns. The answer carries this
+   *  connection's client id, so only this tab's store adopts it. */
+  function requestBinding(force = false) {
+    if (disposed) return;
+    const now = Date.now();
+    if (!force && now - bindingRequestedAt < BINDING_REFRESH_MS) return;
+    bindingRequestedAt = now;
+    void sendPayload(agentCommandPayload("tabState")).catch(() => {
+      // Connection down: the reconnect flow owns recovery.
+    });
+  }
+
+  /** Adopts the session named by this tab's own answer. */
+  function adoptBinding(claim: Record<string, unknown>) {
+    if (clientId != null && claim.clientId !== clientId) return;
+    if (typeof claim.sessionId !== "string" || claim.sessionId === binding)
+      return;
+    binding = claim.sessionId;
+    notify();
+  }
+
   function errorStatusFromMessages(): string | null {
     // Native parity: last Error entry wins; otherwise no sticky status.
     for (let index = agent.messages.length - 1; index >= 0; index -= 1) {
@@ -244,6 +357,15 @@ function createAgentSession(): AgentSessionModule {
    * a run pipeline is active (`runAgent`), which applies them itself.
    */
   function applyOutOfRun(event: AgentStreamEvent) {
+    if (disposed) return;
+    if (!accepts(event)) {
+      // Session-tagged traffic this tab cannot attribute means the binding
+      // moved under us (agent switch, resume, a sibling tab's action): ask
+      // again rather than guess. The dropped snapshot is re-sent with the
+      // binding answer, so nothing is lost.
+      if (event.sessionId) requestBinding();
+      return;
+    }
     switch (event.type) {
       case "MESSAGES_SNAPSHOT": {
         // Plan 109 I5: while a run pipeline is active, its async delta
@@ -339,6 +461,10 @@ function createAgentSession(): AgentSessionModule {
           const rpc = (event as { value?: { code?: string; result?: unknown } })
             .value;
           const result = parseAgentRpcResult(rpc?.result);
+          if (rpc?.code === SESSION_BINDING_CODE && result) {
+            adoptBinding(result);
+            break;
+          }
           if (rpc?.code === "session.context" && result) {
             const current = (agent.state ?? {}) as Record<string, unknown>;
             if (typeof result.itemId === "string") {
@@ -437,6 +563,29 @@ function createAgentSession(): AgentSessionModule {
     },
     getVersion: () => version,
     getSnapshot: () => snapshot,
+    sendPayload: (payload: string) => sendPayload(payload),
+    command(command: Record<string, unknown> | string) {
+      void sendPayload(agentCommandPayload(command)).catch(() => {
+        // Failures land as diagnostics; the surface keeps its last view.
+      });
+    },
+    requestBinding: () => requestBinding(true),
+    sessionId: () => binding,
+    /** Tab close: release the relay and every subscription. */
+    dispose() {
+      disposed = true;
+      relaySubscription.unsubscribe();
+      releaseRelay();
+      for (const stop of [...releases]) stop();
+      releases.clear();
+      listeners.clear();
+      binding = null;
+      pendingServerMessages = null;
+      pendingApproval = null;
+      status = { streaming: false, status: null };
+      // The agent instance goes with the store: no messages/state to clear.
+      rebuild();
+    },
     /** Optimistic clear after the panel dispatches a resume decision. */
     clearPendingApproval() {
       if (!pendingApproval) return;
@@ -449,8 +598,12 @@ function createAgentSession(): AgentSessionModule {
       state?: Record<string, unknown>;
       streaming?: boolean;
       statusText?: string | null;
+      pendingApproval?: AgentSnapshot["pendingApproval"];
     }) {
       if (!import.meta.env.DEV) return;
+      if (input.pendingApproval !== undefined) {
+        pendingApproval = structuredClone(input.pendingApproval);
+      }
       if (input.messages !== undefined) {
         agent.setMessages(structuredClone(input.messages));
       }
@@ -474,29 +627,21 @@ function createAgentSession(): AgentSessionModule {
         notify();
       }
     },
-    /** Test seam: clear the shared instance in place. The `agentSession` export
-     *  binding is a const, so deleting the global below never gave importers
-     *  a fresh object — every test in a file shared one agent. */
-    resetForTests(): void {
-      agent.setMessages([]);
-      agent.setState({});
-      pendingServerMessages = null;
-      pendingApproval = null;
-      status = { streaming: false, status: null };
-      rebuild();
-      notify();
-    },
     start: () => {
+      // An extra refcount for a mounted surface; the subscription itself lives
+      // with the store (see `createAgentSession`), so a view switch does not
+      // stop a running tab from streaming into its transcript.
       const release = agentStream.retain();
-      const subscription = pipeRelay({
-        next: (event) => applyOutOfRun(event),
-        error: () => {
-          // Relay errors surface through the connection store flow.
-        },
-      });
-      return () => {
-        subscription.unsubscribe();
+      let stopped = false;
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
         release();
+      };
+      releases.add(stop);
+      return () => {
+        releases.delete(stop);
+        stop();
       };
     },
   };
@@ -509,30 +654,28 @@ function cloneMessage(message: Message): Message {
 
 /**
  * Coalesces synchronous notification bursts into one animation frame so
- * per-token deltas never trigger more than one rerender per frame.
+ * per-token deltas never trigger more than one rerender per frame. Outside a
+ * browser (node tests, fixtures) the same coalescing is a macrotask.
  */
 function scheduled(notify: () => void): () => void {
   let queued = false;
   return () => {
     if (queued) return;
     queued = true;
-    requestAnimationFrame(() => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        queued = false;
+        notify();
+      });
+      return;
+    }
+    setTimeout(() => {
       queued = false;
       notify();
-    });
+    }, 0);
   };
 }
 
-const globalScope = globalThis as typeof globalThis & {
-  __clayAgentSession?: AgentSessionModule;
-};
-
-/** Process-wide agent session singleton (native parity: one stream per client). */
-export const agentSession: AgentSessionModule =
-  (globalScope.__clayAgentSession ??= createAgentSession());
-
-/** Test seam: reset the singleton in place (the const export binding keeps
- *  one instance per module — deleting the global never refreshed importers). */
-export function resetAgentSessionForTests(): void {
-  agentSession.resetForTests();
-}
+// Plan 119 SC-6: there is no process-global agent session. Each tab runtime
+// owns one store (`createWorkspace`), disposes it on tab close, and the panel
+// renders whichever store its tab owns — so two tabs can run two agents.

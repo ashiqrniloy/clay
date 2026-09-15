@@ -46,6 +46,7 @@ use crate::server::{IpcServer, RuntimeGenerationStore};
 use super::{
     documents::{document_for_message, write_document_open_response},
     menus::open_command_centre_session,
+    session_bound_message,
     workspace::workspace_command_result_message,
 };
 
@@ -727,6 +728,16 @@ where
                     _ => "other".to_string(),
                 }
             );
+            // Plan 119 SC-6: a prompt is what creates the tab's session, and
+            // the run's events are session-tagged. The binding is written on
+            // this connection *first* (before the answer's own snapshot and
+            // long before the daemon's first event), so the store has adopted
+            // its session by the time any of them arrive.
+            let session_id = host.tab_session_id(tab).await.unwrap_or_default();
+            let bound = session_bound_message(client_id, tab, &session_id);
+            codec
+                .write_server_message(stream, &ServerMessage::Agent(Box::new(bound)))
+                .await?;
             codec
                 .write_server_message(stream, &ServerMessage::Agent(Box::new(message)))
                 .await?;

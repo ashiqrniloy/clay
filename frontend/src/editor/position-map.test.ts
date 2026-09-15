@@ -11,8 +11,11 @@ import {
   utf8ToUtf16Indexed,
 } from "./position-map";
 import {
+  SEGMENT_UNITS,
   bytePositionField,
   buildPositionIndex,
+  lineScanText,
+  locateLine16,
   positionIndex,
   positionIndexStats,
 } from "./position-index";
@@ -205,9 +208,155 @@ describe("incremental position index", () => {
       utf8ToUtf16Indexed(index, (i * 5000) % line.length);
     }
     const perConversion = (performance.now() - started) / 400;
-    // ponytail: advisory ceiling; long-line intra-scan is O(line) by design
-    // (same as the previous index), reported so a future line-segment split
-    // has a measured baseline.
+    // Advisory ceiling, unchanged since the baseline: the line is now walked
+    // one 8 KiB block per conversion instead of end to end, so this margin is
+    // ~100x rather than ~1x. The structural guard lives in the segmentation
+    // test below; this one keeps the reported end-to-end cost honest.
     expect(perConversion).toBeLessThan(15);
   });
+
+  it("segments a long line so one conversion scans a single block", () => {
+    // Mixed 1/2/4-byte scalars: block starts must land on scalar boundaries.
+    const unit = "aé😀";
+    const text = unit.repeat(Math.ceil((SEGMENT_UNITS * 3) / 4));
+    const index = build(text);
+
+    for (const utf16 of [
+      0,
+      1,
+      SEGMENT_UNITS - 1,
+      SEGMENT_UNITS,
+      SEGMENT_UNITS + 1,
+      SEGMENT_UNITS * 2 + 7,
+      Math.floor(text.length / 2),
+      text.length - 1,
+    ]) {
+      const located = locateLine16(index, utf16);
+      expect(located.scan16).toBeLessThanOrEqual(utf16);
+      if (utf16 > SEGMENT_UNITS) expect(located.scan16).toBeGreaterThan(0);
+      // The scan reads one block, never the whole 24 KiB line (a block can
+      // overshoot by one unit when a two-unit scalar straddles the limit).
+      const window = lineScanText(index, located);
+      expect(window.length).toBeLessThanOrEqual(SEGMENT_UNITS + 1);
+      expect(window.length).toBeLessThan(text.length);
+      // The resume point is a real scalar boundary: both spaces agree there.
+      expect(utf16ToUtf8(text, located.scan16)).toBe(located.scan8);
+    }
+
+    for (let utf16 = 0; utf16 <= text.length; utf16 += 997) {
+      expect(utf16ToUtf8Indexed(index, utf16)).toBe(utf16ToUtf8(text, utf16));
+    }
+    const totalUtf8 = utf16ToUtf8(text, text.length);
+    for (let utf8 = 0; utf8 <= totalUtf8; utf8 += 991) {
+      expect(utf8ToUtf16Indexed(index, utf8)).toBe(utf8ToUtf16(text, utf8));
+    }
+    // Batch conversion across block boundaries agrees with per-offset math.
+    const offsets = Array.from({ length: 64 }, (_, i) =>
+      Math.floor((totalUtf8 * i) / 64),
+    );
+    expect(utf8ToUtf16Batch(index, offsets)).toEqual(
+      offsets.map((offset) => utf8ToUtf16Indexed(index, offset)),
+    );
+  });
+
+  it("never slices a surrogate pair in half at a block boundary", () => {
+    // The pair starts one unit before the block limit, so the block ends at
+    // 8193: slicing at a flat 8192 would charge the lone high surrogate 3
+    // bytes instead of the pair's 4 and shift every later offset by one.
+    const text = `${"x".repeat(SEGMENT_UNITS - 1)}😀${"y".repeat(16)}`;
+    const index = build(text);
+    const high = SEGMENT_UNITS - 1;
+    const low = SEGMENT_UNITS;
+    const after = low + 1;
+
+    const located = locateLine16(index, low);
+    expect(located.scan16).toBe(0);
+    expect(located.scanEnd16).toBe(after);
+    expect(lineScanText(index, located).length).toBe(after);
+
+    for (const utf16 of [
+      high - 1,
+      high,
+      low,
+      after,
+      after + 1,
+      text.length - 1,
+    ]) {
+      expect(utf16ToUtf8Indexed(index, utf16)).toBe(utf16ToUtf8(text, utf16));
+    }
+    const pairBytes = utf16ToUtf8(text, after);
+    for (const utf8 of [
+      high,
+      high + 1,
+      high + 2,
+      high + 3,
+      pairBytes,
+      pairBytes + 1,
+    ]) {
+      expect(utf8ToUtf16Indexed(index, utf8)).toBe(utf8ToUtf16(text, utf8));
+    }
+    expect(utf16ToUtf8Indexed(index, low)).toBe(high); // snaps to the pair
+  });
+
+  it("keeps long-line segmentation consistent across edits", () => {
+    const long = "ab😀é\n".repeat(Math.floor(SEGMENT_UNITS / 3));
+    let state = EditorState.create({
+      // `Text.of` takes lines, so every part must be split: an element with
+      // embedded newlines would be one line holding "\n" characters.
+      doc: Text.of([
+        ...`${long}tail`.split("\n"),
+        "short",
+        ...`${long}end`.split("\n"),
+      ]),
+      extensions: [bytePositionField],
+    });
+    const check = () => {
+      const text = state.doc.toString();
+      const incremental = positionIndex(state);
+      const fresh = buildPositionIndex(state.doc);
+      expect(incremental.totalUtf16).toBe(text.length);
+      expect(incremental.totalUtf8).toBe(utf16ToUtf8(text, text.length));
+      expect(fresh.totalUtf8).toBe(incremental.totalUtf8);
+      const utf16Offsets = Array.from({ length: 32 }, (_, i) =>
+        Math.floor((text.length * i) / 32),
+      );
+      for (const offset of utf16Offsets) {
+        expect(utf16ToUtf8Indexed(incremental, offset)).toBe(
+          utf16ToUtf8(text, offset),
+        );
+        expect(utf16ToUtf8Indexed(fresh, offset)).toBe(
+          utf16ToUtf8(text, offset),
+        );
+      }
+      // Reversed input order exercises the resumable cursor and its re-anchor.
+      const utf8Offsets = Array.from({ length: 32 }, (_, i) =>
+        Math.floor((incremental.totalUtf8 * i) / 32),
+      ).reverse();
+      expect(utf8ToUtf16Batch(incremental, utf8Offsets)).toEqual(
+        utf8Offsets.map((offset) => utf8ToUtf16Indexed(fresh, offset)),
+      );
+    };
+
+    const edits: [number, number, string][] = [
+      // Inside one block of the first long line.
+      [SEGMENT_UNITS + 5, SEGMENT_UNITS + 5, "😀x"],
+      // Split that long line mid-block, then rejoin across the newline.
+      [SEGMENT_UNITS * 2, SEGMENT_UNITS * 2, "\n"],
+      [SEGMENT_UNITS * 2 - 3, SEGMENT_UNITS * 2 + 4, ""],
+      // A brand-new long line at the front, then dropped again: the touched
+      // region has to produce the same block table as a fresh build.
+      [0, 0, `${"y".repeat(SEGMENT_UNITS + 10)}\n`],
+      [0, SEGMENT_UNITS + 11, ""],
+    ];
+    for (const [from, to, insert] of edits) {
+      state = state.update({ changes: { from, to, insert } }).state;
+      check();
+    }
+    // Astral insert near the end of the last long line.
+    const tail = state.doc.length - 3;
+    state = state.update({
+      changes: { from: tail, to: tail, insert: "😀" },
+    }).state;
+    check();
+  }, 60000);
 });

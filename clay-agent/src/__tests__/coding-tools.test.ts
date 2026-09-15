@@ -30,6 +30,9 @@ interface MockDoc {
   dirty: boolean;
   /** When false, writes are rejected like a foreign lease. */
   writable: boolean;
+  /** Server cut a resident buffer at its read cap (plan 119 P2-1). */
+  truncated?: boolean;
+  totalBytes?: number;
 }
 
 interface MockServerState {
@@ -43,7 +46,14 @@ function mockReverseServer(state: MockServerState) {
     if (method === "document.read") {
       const doc = state.docs.get(path);
       if (!doc) throw new Error(`file unavailable: ${path}`);
-      return { text: doc.text, version: doc.version, dirty: doc.dirty, open: true };
+      return {
+        text: doc.text,
+        version: doc.version,
+        dirty: doc.dirty,
+        open: true,
+        truncated: doc.truncated ?? false,
+        totalBytes: doc.totalBytes ?? Buffer.byteLength(doc.text, "utf8"),
+      };
     }
     if (method === "document.write") {
       const doc = state.docs.get(path);
@@ -87,6 +97,7 @@ const CODING_TOOLS = [
 
 test("buildCodingTools registers the nine tools plus ask_user_decision", () => {
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: "/tmp/ws",
     request: async () => {
       throw new Error("unused");
@@ -97,6 +108,7 @@ test("buildCodingTools registers the nine tools plus ask_user_decision", () => {
   for (const name of CODING_TOOLS) assert.ok(names.includes(name), `missing ${name}`);
   assert.ok(!names.includes("ask_user_decision"), "ask tool requires an ask callback");
   const withAsk = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: "/tmp/ws",
     request: async () => {
       throw new Error("unused");
@@ -116,6 +128,7 @@ test("tool caps from toolCaps flow into repo tools; truncation surfaces a remedy
   await writeFile(join(wsRoot, "b.txt"), "other\n");
   await writeFile(join(wsRoot, "c.txt"), "more\n");
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: wsRoot,
     request: async () => {
       throw new Error("unused");
@@ -143,6 +156,7 @@ test("repo_list per-call maxResults pagination is not a scan-cap error", async (
   await writeFile(join(wsRoot, "a.txt"), "a\n");
   await writeFile(join(wsRoot, "b.txt"), "b\n");
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: wsRoot,
     request: async () => {
       throw new Error("unused");
@@ -183,6 +197,7 @@ test("read findText advances offset past the first page", async () => {
   };
   const request = mockReverseServer(state);
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: root,
     request: async (method, params) => {
       if (method === "document.read") {
@@ -208,6 +223,7 @@ test("read returns the dirty buffer of an open document, not disk bytes", async 
     writes: [],
   };
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: "/tmp/ws",
     request: mockReverseServer(state),
     fullAutonomy: () => false,
@@ -218,6 +234,67 @@ test("read returns the dirty buffer of an open document, not disk bytes", async 
   assert.ok(JSON.stringify(result).includes("dirty buffer text"));
 });
 
+test("document calls name their session so the server picks the workspace", async () => {
+  // Plan 119 SC-6: without the session id the server cannot resolve a root
+  // and fails the call closed — the id must ride every document round-trip.
+  const seen: Array<{ method: string; sessionId: unknown }> = [];
+  const state: MockServerState = {
+    docs: new Map([["/tmp/ws/notes.md", { text: "x", version: 1, dirty: false, writable: true }]]),
+    writes: [],
+  };
+  const inner = mockReverseServer(state);
+  const tools = buildCodingTools({
+    sessionId: "session-42",
+    workspaceRoot: "/tmp/ws",
+    request: async (method, params) => {
+      seen.push({ method, sessionId: params.sessionId });
+      return inner(method, params);
+    },
+    fullAutonomy: () => false,
+  });
+  const read = tools.find((tool) => tool.name === "read");
+  assert.ok(read);
+  await read.execute({ path: "/tmp/ws/notes.md" }, context());
+  assert.ok(seen.length > 0, "the read tool must reach the server");
+  for (const call of seen) {
+    assert.equal(call.sessionId, "session-42", `${call.method} lost its session id`);
+  }
+});
+
+test("read fails loudly when the server cut the buffer at its read cap", async () => {
+  // Plan 119 P2-1: the server caps dirty-buffer reads and flags the cut. A cut
+  // prefix must never be paged or scanned as if it were the whole file — that
+  // would read as EOF to the model.
+  const state: MockServerState = {
+    docs: new Map([
+      [
+        "/tmp/ws/huge.md",
+        {
+          text: "head of a very large document",
+          version: 9,
+          dirty: true,
+          writable: true,
+          truncated: true,
+          totalBytes: 9_000_000,
+        },
+      ],
+    ]),
+    writes: [],
+  };
+  const tools = buildCodingTools({
+    sessionId: "session-1",
+    workspaceRoot: "/tmp/ws",
+    request: mockReverseServer(state),
+    fullAutonomy: () => false,
+  });
+  const read = tools.find((tool) => tool.name === "read");
+  assert.ok(read);
+  const result = await read.execute({ path: "/tmp/ws/huge.md" }, context());
+  assert.ok(result.error, "expected an error result, not a cut page");
+  assert.match(result.error?.message ?? "", /9000000 bytes, exceeds the .* byte read cap/);
+  assert.ok(!JSON.stringify(result).includes("head of a very large document"));
+});
+
 test("write goes through the server and bumps the version", async () => {
   const root = await tempDir();
   const target = join(root, "notes.md");
@@ -226,6 +303,7 @@ test("write goes through the server and bumps the version", async () => {
     writes: [],
   };
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: root,
     request: mockReverseServer(state),
     fullAutonomy: () => false,
@@ -246,6 +324,7 @@ test("edit on a user-held lease fails closed", async () => {
     writes: [],
   };
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: root,
     request: mockReverseServer(state),
     fullAutonomy: () => false,
@@ -307,6 +386,7 @@ test("real write through the tool reaches the mock server document", async () =>
   const target = join(dir, "scratch.txt");
   const state: MockServerState = { docs: new Map(), writes: [] };
   const tools = buildCodingTools({
+    sessionId: "session-1",
     workspaceRoot: dir,
     request: mockReverseServer(state),
     fullAutonomy: () => false,

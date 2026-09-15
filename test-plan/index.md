@@ -184,6 +184,28 @@ still mounting a zero-document outline rail (design finding carried to the
 visual review with a required disposition); and the `src-tauri` build-hygiene
 ceiling (rebuild `clay-desktop`). No step was weakened to pass.
 
+## Plan 119 manual-test-plan execution record (2026-09-15)
+
+Plan 119 adds manual coverage for its user-visible changes without silently
+relaxing existing steps: 03 F55 records the size-scaled large-document debug
+floor; 11 Q34 now uses the same floor; 17 gains C41–C44 and C-N14 for the MCP
+connection floor, per-workspace sessions, daemon restart/resume, fail-closed
+root loss, and the decomposed agent panel.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 03 F55; 11 Q34–Q37 | PASS real-server automated; UNRESOLVED loaded-editor interaction | Fresh `cargo test --test runtime large_document::`: 2 pass in 2.04 s. It holds the 25 MiB/s throughput floor with a 500 ms minimum, 5 s full-load guard, 256 KiB chunks, exact edit/save/reload bytes, and oversize/binary refusal. The review host cannot drive the native picker into a stable WebKit editor, so no GUI first-paint claim is made. |
+| 17 C41 | PASS automated | Fresh `clay-agent npm test`: 149 pass / 1 skip; slow boot connects under the host-owned 5 s floor while `timeoutMs: 200` remains a call ceiling. |
+| 17 C42/C43/C-N14 | PASS real server + daemon integration | Fresh `cargo test --test security agent_session_isolation`: 2 pass. Distinct roots only receive their own writes/listings; tab closure fails closed; real daemon mock mode restores each root after daemon restart. |
+| 17 C44 | PASS live rest state; PARTIAL state/a11y review | New real-app capture at `test-plan/artifacts/119-editor-agent-remediation/live-agent/` passed at 1280×1104 with AT-SPI Agent selection. Full wide/narrow fixture/keyboard state review is retained under `code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/`. Portal PNG was inspected then removed because the isolated root appeared in the status bar; root-redacted AT-SPI/drive/diagnostic evidence remains. The isolated harness logged unavailable optional `npm` package discovery, but registered 13 agent lines and had zero configuration-failure lines; this is not package-install coverage. Inspector-strip overflow (D2) and approval alertdialog focus semantics (F3) remain explicit follow-ups, not passes. |
+| 17 live two-tab visual run | UNRESOLVED | The live fixture has no configured provider, so it cannot create/multiplex daemon sessions. This is not claimed as a GUI pass; the real-server Layer A/B tests above cover isolation and resume. |
+| Frontend regression | ASSERTIONS PASS; suite exit 1 — existing blocker | Fresh `frontend npm test`: 49 files / 426 assertions passed; two known unhandled `invoke` rejections in `src/test/shell.test.tsx` made Vitest exit 1. Not waived or attributed to Plan 119. |
+
+No existing test-plan step was deleted or weakened. The former flat 500 ms
+large-document debug expectation is explicitly superseded by the documented
+size-scaled 25 MiB/s floor because the server must finish its full resident
+rope before it can send the bounded head.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -248,6 +270,7 @@ ceiling (rebuild `clay-desktop`). No step was weakened to pass.
 | Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16, 02 (C24 raw-op denial still applies) |
 | Plan 109 coding-agent defects/UX + Prism 0.5.0 (I2–I10, R1–R3) | 17 (C1–C20, C-N1–N4), 16 (host config), 10 (effort + file-browser bindings), 14 (per-tab workspace binding), 01 (launch gate) |
 | Plan 113 Prism 0.5.1 kernel request construction (host stopgap deleted, `RunOptions.thinkingLevel`) | 17 (C21–C23), 16 (0.5.1 pins via agent_protocol pin asserts) |
+| Plan 119 editor/agent remediation (large-document throughput, MCP connect floor, workspace-scoped sessions, Coding Agent decomposition/review) | 03 (F55), 11 (Q34–Q37), 17 (C41–C44, C-N14); existing two-tab shell coverage remains in 14 |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 

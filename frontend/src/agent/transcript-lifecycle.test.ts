@@ -66,16 +66,18 @@ vi.mock("../bridge/client", () => ({
   }),
 }));
 
-import { agentSession, resetAgentSessionForTests } from "./state";
+import { createAgentSession, type AgentSessionModule } from "./state";
 import { sessionFiles } from "./session-files";
 
 const emit = harness.emit as (event: AgentStreamEvent) => void;
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const frame = () => new Promise<void>((resolve) => setTimeout(resolve, 40));
 
+let tabStore: AgentSessionModule;
+
 beforeEach(() => {
   harness.sendRequestCalls.length = 0;
-  resetAgentSessionForTests();
+  tabStore = createAgentSession({});
 });
 
 function messagesSnapshot(
@@ -153,7 +155,7 @@ function textChunk(runId: string, delta: string): AgentStreamEvent {
 
 describe("transcript lifecycle (plan 109 I5)", () => {
   it("prompt → immediate snapshot ordering no longer drops history", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     try {
       // Turn 1 settled: the server list already has history.
@@ -222,7 +224,7 @@ describe("transcript lifecycle (plan 109 I5)", () => {
   });
 
   it("multi-turn with tools and a skill load renders every row in order", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     try {
       store.agent.sendPrompt("list files then load the skill");
@@ -380,7 +382,7 @@ describe("transcript lifecycle (plan 109 I5)", () => {
   });
 
   it("mid-run steer appears as a user-kind entry without losing in-flight text", async () => {
-    const store = agentSession;
+    const store = tabStore;
     const release = store.start();
     try {
       store.agent.sendPrompt("start");

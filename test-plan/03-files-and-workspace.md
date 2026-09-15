@@ -256,6 +256,12 @@ WebKitGTK target can be controlled.
 | F53 | Open each generated `perf-<size>mib-<kind>.<ext>` fixture through the workspace file browser | First text paints before ready; one pane session owns one current document and one request stream per chunk offset; ready clears loading without a blank editor; mode follows the extension. The 50 MiB ready target is ≤2 s on the reference host and ≤5 s on the designated device. |
 | F54 | While syntax is delayed, type, save, reload, and resync the active fixture | Local edits remain responsive; save/reload/resync preserves authoritative text and does not create partial-chunk undo history; edit acknowledgement target remains ≤40 ms p95. |
 
+## Plan 119 large-document loading check (P1-1)
+
+| # | Action | Expected |
+|---|--------|----------|
+| F55 | Fresh debug build: open the generated 50 MiB UTF-8 fixture, wait for ready, edit, save, and reload (`cargo test --test runtime large_document::` is the deterministic companion) | The head arrives within `max(500 ms, bytes / 25 MiB/s)` — 2 s at 50 MiB — then bounded chunks assemble before editing enables. The edit/save/reload round trip preserves exact bytes; every chunk stays ≤256 KiB. Oversize and binary inputs still refuse visibly without a stale loading state. This replaces the former flat 500 ms debug-only expectation, which flaked under ordinary CI contention; the 5 s full-load guard remains. |
+
 ## Plan 099 Linux execution record (2026-08-28)
 
 | Check | Result | Evidence |
@@ -265,6 +271,14 @@ WebKitGTK target can be controlled.
 
 Do not convert harness `editor.open`/`editor.ready` bootstrap values into F53
 latency evidence; the run recorded no `bridge.patch_delivery` or parser stage.
+
+## Plan 119 execution record (2026-09-15)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F55 (including F48–F52 refusal/round-trip coverage) | PASS real-server automated path; UNRESOLVED loaded-editor interaction | Fresh `cargo test --test runtime large_document::` passed both tests in 2.04 s. The 50 MiB head/chunk/edit/save/reload scenario enforces the current 25 MiB/s + 500 ms-floor debug budget, 256 KiB chunks, exact round-trip bytes, plus oversize/binary refusal. No manual loaded-document claim is made: this review host still cannot drive a file picker into a stable WebKit editor target. |
+
+No existing step was deleted. F55 records the size-scaled P1-1 budget explicitly rather than silently retaining the flaky flat debug ceiling.
 
 ## Plan 112 cross-reference (2026-09-07)
 

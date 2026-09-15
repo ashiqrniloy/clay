@@ -39,8 +39,6 @@ pub(crate) mod locks;
 mod ops;
 pub(crate) mod output_router;
 pub mod parse_coordinator;
-#[doc(hidden)]
-pub mod runtime_sandbox;
 mod sdui;
 pub mod syntax;
 pub mod syntax_session;
@@ -720,8 +718,16 @@ impl IpcServer {
                 .or_else(|| std::env::current_dir().ok())
                 .as_deref(),
         );
+        // Plan 119 SC-6: agent tool calls resolve their workspace from the
+        // session (its recorded root, in the tab state that has that folder
+        // open) — never from the bootstrap state's first root.
+        let tab_states = Arc::new(Mutex::new(HashMap::new()));
+        let session_workspaces = agent_documents::SessionWorkspaces::new(
+            Arc::clone(&tab_registry),
+            Arc::clone(&tab_states),
+        );
         agent.set_reverse_handler(agent_documents::document_reverse_handler(
-            Arc::clone(&bootstrap_state.workspace),
+            session_workspaces,
             Arc::new(Mutex::new(agent_checkpoints::AgentCheckpointStore::new())),
             agent.clone(),
         ));
@@ -730,19 +736,14 @@ impl IpcServer {
         // workspace (and rebind when it changes), never the launch cwd.
         agent.set_tab_registry(Arc::clone(&tab_registry));
         // Plan 118 task 35: per-agent config roots resolve from the Clay data
-        // root (`<root>/agents/<agent type>`) and each agent's MCP allow-list
-        // from its own `mcp.json` merged with the launch workspace's
-        // `.mcp.json`.
+        // root (`<root>/agents/<agent type>`); each session's MCP allow-list
+        // merges that agent's own `mcp.json` with the *session's* workspace
+        // `.mcp.json` (plan 119 SC-6).
         agent.set_agent_roots(
             config
                 .configuration_root
                 .clone()
                 .or_else(effective_agent_root),
-            config
-                .workspace_roots
-                .first()
-                .cloned()
-                .or_else(|| std::env::current_dir().ok()),
         );
         // Phase 1 `agent` domain: install the process-global RPC authority
         // for user-facing agent facades (`clay:agent`). Package JS cannot
@@ -757,7 +758,7 @@ impl IpcServer {
             #[cfg(test)]
             workspace: Arc::clone(&bootstrap_state.workspace),
             bootstrap_state,
-            tab_states: Arc::new(Mutex::new(HashMap::new())),
+            tab_states,
             document_id_allocator,
             bootstrap_consumed: Arc::new(AtomicBool::new(false)),
             behavior: Arc::new(Mutex::new(ActiveBehaviorManifest::default())),

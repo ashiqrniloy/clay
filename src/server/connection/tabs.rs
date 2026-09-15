@@ -465,7 +465,11 @@ where
                     .await?;
                 return Ok(TabDispatch::Continue);
             }
-            match server.agent.rebind_tab_agent(tab_id).await {
+            match server
+                .agent
+                .rebind_tab_agent(tab_id, previous.as_deref())
+                .await
+            {
                 Ok(snapshot) => {
                     if let Some(snapshot) = snapshot {
                         server

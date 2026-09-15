@@ -11,12 +11,16 @@ import { Observable, Subject, type Subscription } from "rxjs";
 
 import type { BaseEvent } from "@ag-ui/core";
 
-import { normalizeBridgeError } from "../bridge/errors";
-
-/** One relayed AG-UI event with its owning session tags. */
+/** One relayed AG-UI event with its owning-session tags. */
 export type AgentStreamEvent = BaseEvent & {
+  /** Connection that delivered the event (the receiving tab, not the owner:
+   *  the relay is a process-wide fan-out). */
   clientId: number;
   tabId?: number;
+  /** Session the event belongs to (plan 119 SC-6). Absent for process-wide
+   *  messages (diagnostics, agent-RPC replies) and for a tab's pre-session
+   *  STATE snapshot. This is what a per-tab store filters on. */
+  sessionId?: string;
 };
 
 interface AgentStreamModule {
@@ -40,11 +44,13 @@ function createAgentStream(): AgentStreamModule {
         try {
           const channel = new Channel<AgentStreamEvent>();
           channel.onmessage = (event) => subject.next(event);
-          void invoke("agent_subscribe", { onEvent: channel }).catch(
-            (error) => {
-              subject.error(normalizeBridgeError(error));
-            },
-          );
+          // Failing to register is not a stream failure: erroring the subject
+          // would kill the relay for every tab (and, with no subscribers yet,
+          // surface as an unhandled rejection). Stay subscribed but inert —
+          // the connection store owns the surfaced phase.
+          void invoke("agent_subscribe", { onEvent: channel }).catch(() => {
+            // No Tauri IPC: fixtures, tests, window teardown.
+          });
         } catch {
           // No Tauri IPC: stay subscribed but inert.
         }

@@ -92,13 +92,16 @@ export function WorkspaceRail({
   const spyLockUntil = useRef(0);
   const [locked, setLocked] = useState(false);
 
+  // The immutable CodeMirror Text is the cache key: its identity changes on
+  // every acknowledged edit, so the scan runs once per document version.
+  const snapshot = session?.snapshotDoc() ?? null;
   const [entries, words] = useMemo(() => {
-    if (!session || !meta?.path) return [[] as OutlineEntry[], 0];
+    if (!snapshot || !meta?.path) return [[] as OutlineEntry[], 0];
     // ponytail: one linear scan per acknowledged version. Fine at workspace
     // document sizes; cache per-line headings if a document ever gets huge.
-    const doc = session.snapshotDoc().toString();
+    const doc = snapshot.toString();
     return [outlineOf(doc), wordCount(doc)];
-  }, [session, meta?.documentId, meta?.version, meta?.path]);
+  }, [snapshot, meta?.path]);
 
   /** The outline entry the reader has reached: the last one at or above the
    *  viewport's reading inset (the approved prototype's rule). */

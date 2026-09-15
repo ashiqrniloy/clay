@@ -8,8 +8,8 @@ const tree: SduiTree = {
   rootId: 1,
   nodes: [
     { id: 1, kind: { stack: { children: [2, 3] } } },
-    { id: 2, kind: { label: { text: "old" } } },
-    { id: 3, kind: { label: { text: "stable" } } },
+    { id: 2, kind: { label: { text: "old", icon: null } } },
+    { id: 3, kind: { label: { text: "stable", icon: null } } },
   ],
 };
 
@@ -21,10 +21,16 @@ describe("SDUI stable-id state", () => {
       baseUiVersion: 3,
       newUiVersion: 4,
       operations: [
-        { replaceNode: { node: { id: 2, kind: { label: { text: "new" } } } } },
+        {
+          replaceNode: {
+            node: { id: 2, kind: { label: { text: "new", icon: null } } },
+          },
+        },
       ],
     });
-    expect(next?.nodes.get(2)?.kind).toEqual({ label: { text: "new" } });
+    expect(next?.nodes.get(2)?.kind).toEqual({
+      label: { text: "new", icon: null },
+    });
     expect(next?.nodes.get(3)).toBe(stable);
   });
 

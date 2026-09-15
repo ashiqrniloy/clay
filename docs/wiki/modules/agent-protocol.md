@@ -53,6 +53,19 @@ server-side registry (`PendingApprovals`); timeouts, dropped senders, and
 zero subscribers deny fail-closed, and stale resolves return a diagnostic
 without mutating anything.
 
+Plan 119 SC-6 additions: `TabState` and every run command
+(`agent.submit`/`agent.cancel`/`agent.steer`) answer with
+`AgentServerMessage::AgentRpc { code: "session.bound", result_json:
+{ clientId, tabId, sessionId } }`, written on the requesting connection
+(`session_bound_message`, `src/server/connection/mod.rs`; run commands in
+`src/server/connection/runtime.rs`). The agent relay is a process-wide
+broadcast, so this is the only way a tab can learn which session it owns: the
+claim names the requesting client id, and an empty `sessionId` means the tab
+has no session yet. The AG-UI relay additionally stamps every session-scoped
+frame with the session it came from (`agent_agui::session_of` →
+`AgentStreamEvent.session_id`, `src-tauri/src/bridge/agent.rs`); diagnostics,
+agent-RPC replies, and a tab's pre-session STATE snapshot stay untagged.
+
 Plan 117 additions: `AgentSessionSnapshot.mcp_servers` carries per-server
 connection outcomes (`AgentMcpServerInfo { server_id, connected, tools,
 error }` — camelCase serde, rkyv archived) instead of bare id strings;
@@ -102,6 +115,12 @@ let message = ClientMessage::Agent {
 - Truncated, invalid, and oversized frames fail closed (`CodecError`).
 - `message_requires_tab_state` does not include `ClientMessage::Agent`; chat
   works with no workspace open.
+- Agent sessions are keyed by `(agent type, workspace root)` (`SessionBook::
+  sessions_by_workspace`, plan 119 SC-6): a tab resolves through
+  `SessionBook::session_for_workspace`, so sibling tabs on one folder share one
+  session, and agent tool calls resolve their workspace from the session
+  (`AgentHost::session_workspace_root`) — the bootstrap/first-root fallback is
+  gone, unregistered roots fail closed with `agent.workspace_unresolved`.
 - A book-selection broadcast (provider/model/profile/OM worker) must carry the
   tab's own session. `AgentHost::publish_book_snapshot(tab)` publishes
   `snapshot_for(session)` whenever the tab already has one, falling back to the
@@ -112,6 +131,11 @@ let message = ClientMessage::Agent {
   tab it resolved with `tab_for_client(client_id).unwrap_or(client_id)` — the
   same resolution the panel's own mount (`TabState`) uses, so the selection
   lands on the tab whose STATE it belongs to.
+- A daemon exit clears the host's `Running` handle (identity-checked on the
+  channel the actor owns), so the next agent call spawns a fresh daemon rather
+  than addressing a dead channel; sessions survive it, because `session.prompt`
+  for an existing session resumes it on the root recorded at `session.new`
+  (`ensureLive`, plan 119 SC-6) — never the daemon's launch cwd.
 - No `clay:agent` facade in this task.
 
 ## Tests
@@ -123,9 +147,24 @@ let message = ClientMessage::Agent {
   establishes a session and a transcript row, an `Observation` worker selection
   must broadcast STATE carrying that `session_id`, its entries and its branch
   (fails with an empty session before the fix);
-  `tab_state_snapshot_starts_the_session_and_carries_branch_and_environment`.
+  `tab_state_snapshot_starts_the_session_and_carries_branch_and_environment`;
+  `sibling_tabs_on_one_workspace_share_one_session` /
+  `sibling_tabs_resolve_one_session_through_the_host` (one session per
+  `(agent, root)`, two tabs resolve it),
+  `session_workspace_root_is_the_recorded_root_only` (no launch-root
+  fallback), `mcp_allow_list_follows_the_session_workspace_root`,
+  `session_kept_while_workspace_root_matches` /
+  `workspace_change_resolves_a_new_key` (the key, not the tab, decides).
 - `cargo test --test protocol -- agent_protocol`
 - `cargo test --lib -- book_selection_broadcast_keeps_the_tab_session`
+- `cargo test --lib -- sessions_touch_only_their_own_workspace_root
+  unresolved_session_root_fails_closed_with_a_diagnostic` (tools stay inside
+  the session's root)
+- `cargo test --test security -- agent_session_isolation` — live two-workspace
+  pass over a real server socket: per-session writes land in the session's own
+  root, a closed tab's session fails closed with `agent.workspace_unresolved`,
+  and both a scripted daemon restart and the shipped daemon in `--mock` mode
+  keep each session on its recorded root.
 
 ## Related
 

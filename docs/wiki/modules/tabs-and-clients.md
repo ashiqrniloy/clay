@@ -110,11 +110,26 @@ registry the server owns** and the agent view's title is the picker.
 - Every later read starts from that stored name: the agent settings page
   (`agent_settings::agent_config_root_for`, contained to
   `<data root>/agents/<type>`), the tab's session (`AgentHost::ensure_tab_session`
-  passes `agent` + that agent's MCP allow-list to the daemon), and the switch
+  passes `agent` + that agent's MCP allow-list to the daemon — the allow-list
+  merges the agent's `mcp.json` with the *session's* workspace `.mcp.json`,
+  plan 119 SC-6), and the switch
   itself (`AgentHost::rebind_tab_agent` → the daemon's `session.setAgent`, which
   re-reads only that agent's config over the same session branch). A refused
   switch reverts the registry entry, so a tab never claims an agent its live
   session is not running.
+- Session ownership is the workspace, not the tab (plan 119 SC-6, decision
+  2026-09-14-1705): the book keys the live session by
+  `(agent type, workspace root)`, so a tab's lookup adopts the session its
+  folder+agent already has instead of owning one — two tabs on one workspace
+  share one session and transcript, and a tab whose root or agent changed
+  simply resolves a different key (its previous session stays resumable).
+- The client learns which session a tab owns from that tab's own answer, not
+  from the relay: `TabState` and the run commands reply with
+  `session.bound { clientId, tabId, sessionId }` on the requesting connection,
+  and each tab's agent store keeps its own relay subscription, its own
+  transcript, and its own TauriClayAgent — disposed with the tab
+  (`TabRuntime.agent`, `frontend/src/shell/workspace-controller.ts`). A tab the
+  user only edits never asks and therefore never starts an agent session.
 - The picker reuses the launcher's enumeration (one `launcherEntries` fetch),
   consumes the design system's `agentPicker.default.trigger.*` family, marks the
   current type, and names where more come from (`~/.clay/agents/`).

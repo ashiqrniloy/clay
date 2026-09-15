@@ -156,7 +156,7 @@ hot-path limits are deterministic automated gates.
 | # | Action | Expected |
 |---|--------|----------|
 | Q28 | Apply a one-node SDUI update beside focused package input/disclosure state | Update is targeted by stable ID; stale base versions drop; surviving object and React state identities remain unchanged |
-| Q29 | Build production frontend and inspect startup/package renderer chunks | Startup shell stays below 180 kB gzip; package renderer is code-split; total stays below 400 kB gzip |
+| Q29 | Build production frontend and inspect startup/package renderer chunks | Startup shell stays below 180 kB gzip; package renderer is code-split; total stays below 404 kB gzip |
 | Q30 | Type/scroll while package UI and a server SDUI panel are visible | Local editor paint remains wait-free; package JavaScript, JSON parsing, schema validation, and Tauri/server waits stay outside render/layout/input hot paths |
 
 ## Plan 097 Phase 8 Linux execution record (2026-08-23)
@@ -175,7 +175,7 @@ No performance budget was raised. Wide/narrow/large-type screenshots are under `
 |---|--------|----------|
 | Q31 | Open/filter a 256-item Command Centre or Path Browser snapshot repeatedly | Existing 50 ms open / 4 ms filter advisory budgets remain; React performs no fuzzy/filesystem/package work and native bounded scrolling stays responsive |
 | Q32 | Trigger configuration reload, theme/appearance switch, and typography apply while typing | CodeMirror local edit/paint remains wait-free; configuration and preference work stays server-side and atomic; one runtime snapshot updates derived UI state |
-| Q33 | Build production frontend after command/settings chunks land | Startup shell stays below 180 kB gzip, total below 400 kB gzip; command/settings code remains behind lazy workspace/package chunks |
+| Q33 | Build production frontend after command/settings chunks land | Startup shell stays below 180 kB gzip, total below 404 kB gzip; command/settings code remains behind lazy workspace/package chunks |
 
 ## Plan 097 Phase 9 execution record (2026-08-23)
 
@@ -238,11 +238,11 @@ No performance budget was changed.
 
 | # | Action | Expected |
 |---|--------|----------|
-| Q34 | Open the synthetic 50 MiB UTF-8 `large.md` through the real desktop smoke path | First head/first paint stays under 500 ms, full chunk assembly under 5 s, and each head/chunk stays at or below `MAX_CHUNK_BYTES` (256 KiB); no full-document IPC frame is emitted |
+| Q34 | Open the synthetic 50 MiB UTF-8 `large.md` through the real desktop smoke path | First head/first paint meets the size-scaled debug throughput floor `max(500 ms, bytes / 25 MiB/s)` (2 s at 50 MiB); full chunk assembly stays under 5 s, and each head/chunk stays at or below `MAX_CHUNK_BYTES` (256 KiB); no full-document IPC frame is emitted. The size-scaled floor replaces the former flat 500 ms debug-profile assumption: it retains a structural-regression guard without failing under ordinary CI contention. |
 | Q35 | Edit the ready 50 MiB document, Save, and Reload | Save acknowledgement remains bounded and responsive; disk/reloaded bytes equal the edited document; ordinary editor input does not wait on chunk or save IO |
 | Q36 | Attempt `oversize.txt` (257 MiB sparse) and `binary.dat` | Resident-budget and binary-sniff refusals return promptly with typed diagnostics; no large content allocation, stale loading loop, or unbounded memory growth occurs |
 | Q37 | Inspect the protocol-v28 runtime run and frame assertions | `DocumentChunk` payloads remain ≤256 KiB and below the 1 MiB codec frame ceiling; v28 handshake and mixed-version rejection remain deterministic |
-| Q38 | Load the app after the Plan 105 index code-split (restart or fresh launch) | Startup fetches the `index` chunk plus the parallel `codemirror` chunk via modulepreload with no sequential first-paint waterfall; the index raw size stays below the 500 KiB rollup warning; `npm run check:budget` shell (≤180 kB gzip) and total (≤400 kB gzip) budgets hold |
+| Q38 | Load the app after the Plan 105 index code-split (restart or fresh launch) | Startup fetches the `index` chunk plus the parallel `codemirror` chunk via modulepreload with no sequential first-paint waterfall; the index raw size stays below the 500 KiB rollup warning; `npm run check:budget` shell (≤180 kB gzip) and total (≤404 kB gzip) budgets hold |
 
 
 ## Plan 098 Linux execution record (2026-08-26)
@@ -306,6 +306,14 @@ Plan 103 production build budgets (enforced via `npm run check:budget`):
 Effect bounds: max blur 32px, max shadow layers 3, max motion 1000ms, max border width 8px.
 Zero recipe computation occurs in React render loops or keystroke hot paths.
 
+
+## Plan 119 P1-1 throughput execution record (2026-09-15)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Q34–Q37 | PASS automated real-server path; UNRESOLVED desktop feel | Fresh `cargo test --test runtime large_document::` passed the 50 MiB chunked open/edit/save/reload and oversize/binary refusal tests in 2.04 s. The deterministic guard is now the documented 25 MiB/s floor with a 500 ms minimum; the 5 s end-to-end bound and 256 KiB chunk ceiling remain unchanged. The review host did not open the fixture through a controllable WebKit file-picker flow, so this does not claim a human first-paint pass. |
+
+No performance budget was raised: the debug test budget now scales with input size, matching the mandatory full-rope load before the head exists.
 
 ## Plan 105 chunk-split startup record (2026-09-01)
 

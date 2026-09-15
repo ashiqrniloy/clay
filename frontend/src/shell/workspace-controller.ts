@@ -24,7 +24,6 @@ import {
 import {
   createDocumentSession,
   type DocumentSession,
-  type SendFn,
 } from "../editor/sync/session";
 import {
   addEqualPane,
@@ -49,6 +48,11 @@ import {
   type TabLayout,
 } from "./persist";
 import { agentInspector, workspaceRail } from "./layout-state";
+import { detached } from "../lib/detached";
+// Type-only on purpose: the store is created by the lazy agent view, so the
+// eager shell must never take a runtime dependency on the agent lane (it drags
+// the AG-UI stack into the startup preload).
+import type { AgentSessionModule } from "../agent/state";
 import {
   createTabStore,
   emptyTabs,
@@ -114,6 +118,12 @@ export interface TabRuntime {
    *  afterwards so switching views never restarts the session or loses the
    *  transcript's scroll position (plan 118 task 33, performance AC). */
   agentMounted: boolean;
+  /** This tab's agent session store (plan 119 SC-6), once its agent view has
+   *  mounted one. The tab — not the process — owns the session, its transcript,
+   *  and its relay subscription. */
+  agent: AgentSessionModule | null;
+  /** Tab-stamped sender: every agent intent rides this tab's own connection. */
+  send: (payload: string) => Promise<void>;
 }
 
 /** Identity a newly mounted tab starts with; absent fields default to
@@ -127,10 +137,6 @@ export interface TabIdentity {
 export interface PendingClose {
   clientId: number;
   dirtyPaths: string[];
-}
-
-function sendFor(adapters: WorkspaceAdapters, tabId: number | null): SendFn {
-  return (payload) => adapters.send(payload, tabId ?? undefined);
 }
 
 export function createWorkspace(adapters: WorkspaceAdapters) {
@@ -166,7 +172,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      void adapters.saveLayout?.(serialize());
+      detached(adapters.saveLayout?.(serialize()));
     }, 250);
   };
 
@@ -178,7 +184,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
 
   const bindSession = (runtime: TabRuntime): DocumentSession => {
     const session = createDocumentSession({
-      send: sendFor(adapters, runtime.tabId),
+      send: runtime.send,
     });
     let persistKey: string | null = null;
     let statusKey = "";
@@ -241,6 +247,11 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       clientId: bootstrap.clientId,
       tabId:
         bootstrap.tabId ?? registryTabsByClient.get(bootstrap.clientId) ?? null,
+      agent: null,
+      // Tab-stamped and lazy: the registry usually delivers the tab id after
+      // the runtime mounts, so the sender reads it per call (plan 119 SC-6:
+      // no mutable process-wide sender).
+      send: (payload) => adapters.send(payload, runtime.tabId ?? undefined),
       sessionRoot: bootstrap.initialDocument.workspaceRoot,
       workspaceRootId: null,
       tree,
@@ -285,6 +296,14 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
    *  session's own server-side facts). */
   const tabFor = (clientId: number): ShellTabState | null =>
     tabs.get().tabs.find((tab) => tab.clientId === clientId) ?? null;
+
+  /** Tab close / reconnect: the store's relay subscription goes with the tab.
+   *  The store itself is created by the tab's agent view (bundle boundary) and
+   *  adopted here, so a run that outlives a view switch keeps streaming. */
+  const disposeAgent = (runtime: TabRuntime) => {
+    runtime.agent?.dispose();
+    runtime.agent = null;
+  };
 
   const patchActive = (
     patch: Partial<Omit<ShellTabState, "clientId" | "label">>,
@@ -376,9 +395,19 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     },
     getSnapshot: (): TabSnapshot => tabs.get(),
     runtime: (clientId: number) => runtimes.get(clientId) ?? null,
+    /** Adopts the tab's agent store (plan 119 SC-6). Called by the agent view
+     *  when it mounts: the tab runtime owns the store from then on, and the
+     *  tab's close disposes it. Idempotent for a repeated mount. */
+    attachAgentStore(clientId: number, store: AgentSessionModule) {
+      const runtime = runtimes.get(clientId);
+      if (!runtime || runtime.agent === store) return;
+      disposeAgent(runtime);
+      runtime.agent = store;
+    },
     active: activeRuntime,
     pendingClose: () => pendingClose,
     reset() {
+      for (const runtime of runtimes.values()) disposeAgent(runtime);
       runtimes.clear();
       tabs.set(emptyTabs());
       pendingClose = null;
@@ -520,60 +549,68 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
-      void adapters.send(
-        JSON.stringify({
-          family: "menuQueryUpdate",
-          payload: {
-            clientId: runtime.clientId,
-            sessionId: menu.sessionId,
-            query,
-          },
-        }),
-        runtime.tabId ?? undefined,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "menuQueryUpdate",
+            payload: {
+              clientId: runtime.clientId,
+              sessionId: menu.sessionId,
+              query,
+            },
+          }),
+          runtime.tabId ?? undefined,
+        ),
       );
     },
     menuBackspace() {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
-      void adapters.send(
-        JSON.stringify({
-          family: "menuBackspace",
-          payload: { clientId: runtime.clientId, sessionId: menu.sessionId },
-        }),
-        runtime.tabId ?? undefined,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "menuBackspace",
+            payload: { clientId: runtime.clientId, sessionId: menu.sessionId },
+          }),
+          runtime.tabId ?? undefined,
+        ),
       );
     },
     menuMove(delta: number) {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
-      void adapters.send(
-        JSON.stringify({
-          family: "menuSelectionMove",
-          payload: {
-            clientId: runtime.clientId,
-            sessionId: menu.sessionId,
-            delta,
-          },
-        }),
-        runtime.tabId ?? undefined,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "menuSelectionMove",
+            payload: {
+              clientId: runtime.clientId,
+              sessionId: menu.sessionId,
+              delta,
+            },
+          }),
+          runtime.tabId ?? undefined,
+        ),
       );
     },
     menuActivate(secondary = false) {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
-      void adapters.send(
-        JSON.stringify({
-          family: "menuActivate",
-          payload: {
-            clientId: runtime.clientId,
-            sessionId: menu.sessionId,
-            kind: secondary ? "secondary" : "primary",
-          },
-        }),
-        runtime.tabId ?? undefined,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "menuActivate",
+            payload: {
+              clientId: runtime.clientId,
+              sessionId: menu.sessionId,
+              kind: secondary ? "secondary" : "primary",
+            },
+          }),
+          runtime.tabId ?? undefined,
+        ),
       );
     },
     menuCancel() {
@@ -584,12 +621,14 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       // trip (or its loss) to dismiss a modal the user asked to close.
       runtime.menu = null;
       notify();
-      void adapters.send(
-        JSON.stringify({
-          family: "menuCancel",
-          payload: { clientId: runtime.clientId, sessionId: menu.sessionId },
-        }),
-        runtime.tabId ?? undefined,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "menuCancel",
+            payload: { clientId: runtime.clientId, sessionId: menu.sessionId },
+          }),
+          runtime.tabId ?? undefined,
+        ),
       );
     },
     /** Show one of the active tab's two views (tab chrome, ⌘1/⌘2). The other
@@ -626,15 +665,17 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           : { agent: { type: agent, configRoot: "" } },
         runtime.clientId,
       );
-      void adapters.send(
-        JSON.stringify({
-          family: "tabCommand",
-          payload: {
-            clientId: runtime.clientId,
-            command: { setAgent: { tabId: runtime.tabId, agent } },
-          },
-        }),
-        runtime.tabId,
+      detached(
+        adapters.send(
+          JSON.stringify({
+            family: "tabCommand",
+            payload: {
+              clientId: runtime.clientId,
+              command: { setAgent: { tabId: runtime.tabId, agent } },
+            },
+          }),
+          runtime.tabId,
+        ),
       );
     },
     /** The agent view's picker: the active tab's agent changes in place. */
@@ -667,15 +708,17 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       const tab = tabFor(runtime.clientId);
       if (tab && tabUncommitted(tab) && runtime.tabId != null) {
         patchActive({ workspaceRoot: root, view: "workspace" });
-        void adapters.send(
-          JSON.stringify({
-            family: "tabCommand",
-            payload: {
-              clientId: runtime.clientId,
-              command: { openWorkspace: { tabId: runtime.tabId, root } },
-            },
-          }),
-          runtime.tabId,
+        detached(
+          adapters.send(
+            JSON.stringify({
+              family: "tabCommand",
+              payload: {
+                clientId: runtime.clientId,
+                command: { openWorkspace: { tabId: runtime.tabId, root } },
+              },
+            }),
+            runtime.tabId,
+          ),
         );
         return;
       }
@@ -709,6 +752,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         pane.session.close(true);
       }
       if (runtime.tabId != null) await adapters.closeTab?.(runtime.tabId);
+      disposeAgent(runtime);
       runtimes.delete(clientId);
       tabs.set(removeTab(tabs.get(), clientId));
       schedulePersist();

@@ -20,6 +20,8 @@ pub const TREE_SITTER_DIAGNOSTIC_SOURCE: &str = "tree-sitter";
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DiagnosticSpan {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -66,6 +68,8 @@ pub struct DiagnosticChunkKey {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DiagnosticSet {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,

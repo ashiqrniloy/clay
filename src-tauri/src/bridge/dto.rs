@@ -24,6 +24,8 @@ use std::collections::BTreeMap;
 /// (reconnect must never merge across sessions).
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct BootstrapDto {
     pub client_id: ClientId,
     /// Filled once the server registry binds this connection; `None` until then.
@@ -55,6 +57,8 @@ pub struct BootstrapDto {
 /// Resolved theme projection consumed by the frontend theme adapter.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct ThemeSnapshotDto {
     pub specifier: String,
     /// Core token name → resolved typed value (e.g. `surface.main` → color).
@@ -69,6 +73,8 @@ pub struct ThemeSnapshotDto {
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct EditorStyleDto {
     pub color: String,
     pub background: Option<String>,
@@ -166,6 +172,8 @@ impl ThemeSnapshotDto {
 /// scales; the adapter computes variant sizes once per install.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct TypographySnapshotDto {
     pub revision: u64,
     pub monospace: FontProfile,
@@ -188,6 +196,8 @@ impl From<&ActiveTypography> for TypographySnapshotDto {
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct InitialDocumentDto {
     pub document_id: DocumentId,
     pub version: DocumentVersion,
@@ -211,6 +221,8 @@ impl InitialDocumentDto {
 /// Resolved UI design system projection consumed by the frontend design-system adapter.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DesignSystemSnapshotDto {
     pub specifier: String,
     pub schema_version: u32,
@@ -222,6 +234,8 @@ pub struct DesignSystemSnapshotDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DesignSystemProvenanceDto {
     pub package_name: String,
     pub package_version: String,
@@ -231,6 +245,8 @@ pub struct DesignSystemProvenanceDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct ComponentRecipeDto {
     pub background_color: String,
     pub background_opacity: f64,
@@ -261,6 +277,8 @@ pub struct ComponentRecipeDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct ShadowLayerDto {
     pub x: f64,
     pub y: f64,
@@ -272,6 +290,8 @@ pub struct ShadowLayerDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct InnerHighlightDto {
     pub color: String,
     pub opacity: f64,
@@ -280,6 +300,8 @@ pub struct InnerHighlightDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DesignSystemVariableValueDto {
     ThemeColorRole(String),
     Dimension(f64),
@@ -524,6 +546,8 @@ impl DesignSystemSnapshotDto {
 /// shape; the webview never sees parsed command internals.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct IconPackSnapshotDto {
     pub specifier: String,
     pub schema_version: u32,
@@ -534,6 +558,8 @@ pub struct IconPackSnapshotDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct IconGeometryDto {
     pub view_box: [f64; 4],
     pub paths: Vec<IconPathDto>,
@@ -541,6 +567,8 @@ pub struct IconGeometryDto {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct IconPathDto {
     pub d: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -595,6 +623,8 @@ impl IconPackSnapshotDto {
 /// component strings are resolved/parsed in Rust before the webview observes it.
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct RuntimeSnapshotDto {
     pub runtime_generation_id: u64,
     pub behavior_manifest: BehaviorManifest,
@@ -615,6 +645,8 @@ pub struct RuntimeSnapshotDto {
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackageUiSnapshotDto {
     pub version: u64,
     pub empty_tab: Option<PackageSurfaceDto>,
@@ -630,6 +662,8 @@ pub struct PackageUiSnapshotDto {
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackageSurfaceDto {
     pub id: String,
     pub component: serde_json::Value,
@@ -639,6 +673,8 @@ pub struct PackageSurfaceDto {
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackagePanelDto {
     pub id: String,
     pub slot: String,
@@ -650,6 +686,8 @@ pub struct PackagePanelDto {
 
 #[derive(Clone, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PackageOverlayDto {
     pub id: String,
     pub anchor: String,
@@ -782,10 +820,21 @@ impl PackageUiSnapshotDto {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum BridgeEnvelope {
     /// Boxed: the client event union is large and this enum is moved often.
+    ///
+    /// `ts(skip)`: the client event union is *not* generated. Generating it
+    /// would pull the internal event graph — server messages, agent frames,
+    /// viewport patches, completion/diagnostic sets — into the webview
+    /// contract's type surface; the shell deliberately narrows it to the
+    /// families it consumes (`ShellEvent` in `frontend/src/bridge/types.ts`),
+    /// which is a narrowing, not a copy (plan 119 SC-1 decision log).
+    #[cfg_attr(feature = "ts-bindings", ts(skip))]
     Event(Box<ClientConnectionEvent>),
     /// Multi-tab event: same payload as `Event`, tagged with the owning client.
+    #[cfg_attr(feature = "ts-bindings", ts(skip))]
     Routed {
         client_id: ClientId,
         tab_id: Option<TabId>,
@@ -805,9 +854,14 @@ pub enum BridgeEnvelope {
     /// affordance; `session_reconnect` re-establishes everything.
     Disconnected {
         reason: String,
+        // ts-rs's serde-compat does not carry `skip_serializing_if` into struct
+        // variants, so the two optional keys are stated explicitly: the webview
+        // receives them *absent*, not as `null`.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts-bindings", ts(optional))]
         client_id: Option<ClientId>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts-bindings", ts(optional))]
         tab_id: Option<TabId>,
     },
 }
@@ -815,6 +869,48 @@ pub enum BridgeEnvelope {
 #[cfg(test)]
 mod runtime_projection_tests {
     use super::*;
+    #[cfg(feature = "ts-bindings")]
+    use ts_rs::TS;
+
+    /// Regenerates the webview contract's TypeScript from the DTO layer
+    /// (plan 119 SC-1). `scripts/check.sh` runs this and fails on a stale diff,
+    /// so the generated file can never drift from what `dto.rs` serializes.
+    ///
+    /// Run with `--features ts-bindings`; every contract type exports into the
+    /// one generated file so the frontend imports a single module.
+    #[cfg(feature = "ts-bindings")]
+    #[test]
+    fn export_webview_contract_bindings() {
+        // `number` for 64-bit integers: the wire JSON carries plain numbers and the
+        // hand contract already typed them as numbers; ids that can exceed the
+        // safe-integer range cross as strings by construction (menu session ids).
+        let cfg = ts_rs::Config::new()
+            .with_large_int("number")
+            .with_out_dir("../frontend/src/bridge/generated");
+        for (name, export) in [
+            (
+                "BootstrapDto",
+                BootstrapDto::export_all as fn(&ts_rs::Config) -> _,
+            ),
+            ("InitialDocumentDto", InitialDocumentDto::export_all),
+            ("ThemeSnapshotDto", ThemeSnapshotDto::export_all),
+            ("TypographySnapshotDto", TypographySnapshotDto::export_all),
+            (
+                "DesignSystemSnapshotDto",
+                DesignSystemSnapshotDto::export_all,
+            ),
+            ("IconPackSnapshotDto", IconPackSnapshotDto::export_all),
+            ("RuntimeSnapshotDto", RuntimeSnapshotDto::export_all),
+            ("BridgeEnvelope", BridgeEnvelope::export_all),
+            (
+                "BridgeError",
+                crate::bridge::errors::BridgeError::export_all,
+            ),
+        ] {
+            export(&cfg).unwrap_or_else(|error| panic!("exporting {name}: {error}"));
+        }
+    }
+
     use clay::protocol::{
         ActiveTheme, ActiveTypography, BehaviorManifest, EmptyTabContent, PackagePanelContent,
         PackageUiProvenance, PackageUiSnapshot, PackageUiTrustDomain, RuntimeStateSnapshot,

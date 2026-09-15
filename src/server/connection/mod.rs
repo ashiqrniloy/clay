@@ -37,6 +37,7 @@ use super::{
 // the single dispatch owner; each family module holds one coherent set of
 // responsibilities. Everything stays crate-private (pub(super)); no public
 // surface is created by the split.
+mod delivery;
 mod documents;
 mod menus;
 mod runtime;
@@ -253,6 +254,23 @@ fn message_requires_tab_state(message: &ClientMessage) -> bool {
             | ClientMessage::MenuActivate { .. }
             | ClientMessage::MenuCancel { .. }
     )
+}
+
+/// Plan 119 SC-6: the tab's own answer to `TabState`, naming the session the
+/// tab owns. The agent relay fans every session's messages out to every
+/// connection, so a client can only tell whose traffic it is looking at when
+/// the message says so — the requesting client id is what makes this answer
+/// attributable, and the session id is what the store then filters on.
+fn session_bound_message(client_id: u64, tab: u64, session_id: &str) -> AgentServerMessage {
+    AgentServerMessage::AgentRpc {
+        code: "session.bound".into(),
+        result_json: serde_json::json!({
+            "clientId": client_id,
+            "tabId": tab,
+            "sessionId": session_id,
+        })
+        .to_string(),
+    }
 }
 
 fn unbound_tab_state_error() -> ServerMessage {
@@ -681,152 +699,60 @@ where
     // path (no cross-connection leak). Sessions open only from the built-in
     // `controlCenter.open` / `controlCenter.openPath` command paths (task 6).
     let mut menu_sessions = ServerMenuSessions::new();
+    // Lane delivery: one family helper per lane, each returning `Flow::Close`
+    // when its sender is gone (the connection is over) and `Flow::Continue`
+    // otherwise. `Delivery` and the per-family policy live in `delivery`.
+    macro_rules! lane {
+        ($delivery:expr) => {
+            match $delivery.await? {
+                delivery::Flow::Continue => continue,
+                delivery::Flow::Close => return Ok(()),
+            }
+        };
+    }
     loop {
         let message = match tokio::select! {
-            typography = typography_updates.recv() => match typography {
-                Ok(typography) => {
-                    codec
-                        .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let typography = runtime_generation.active_typography().await;
-                    codec
-                        .write_server_message(&mut stream, &ServerMessage::ActiveTypography(typography))
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            editor_command = editor_command_updates.recv() => match editor_command {
-                Ok(request) => {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::EditorCommandRequest(Box::new(request)),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // Advisory execution requests never replay: drop and move on.
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            caret_style = caret_style_updates.recv() => match caret_style {
-                Ok(style) => {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::CaretStyleOverride(style),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // State, not advice: replay the current value.
-                    let style = runtime_generation.caret_style_override().await;
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::CaretStyleOverride(style),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            layout = editor_layout_updates.recv() => match layout {
-                Ok(wrap) => {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::EditorLayoutOverride(wrap),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // State, not advice: replay the current value.
-                    let wrap = runtime_generation.editor_layout_override().await;
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::EditorLayoutOverride(wrap),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            prefs = shell_preferences_updates.recv() => match prefs {
-                Ok(preferences) => {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::ShellPreferences(preferences),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let preferences = runtime_generation.shell_preferences().await;
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::ShellPreferences(preferences),
-                        )
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            tab_registry_update = tab_registry_updates.recv() => match tab_registry_update {
-                Ok(snapshot) => {
-                    codec
-                        .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    let snapshot = tab_registry.lock().await.snapshot();
-                    codec
-                        .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
-                        .await?;
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
-            runtime_generation_id = runtime_state_updates.recv() => match runtime_generation_id {
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    // A command catalogue is generation-bound. Close it before
-                    // replaying the replacement generation's state; activation
-                    // also checks the stamp if both events race.
-                    menus::write_active_menu_session_closed(
-                        codec,
-                        &mut stream,
-                        &mut menu_sessions,
-                    )
-                    .await?;
-                    // Always send the latest complete snapshot. Lagged receivers
-                    // must not replay intermediate generations.
-                    if let Some(snapshot) = runtime_generation
-                        .latest_runtime_snapshot_for(client_id)
-                        .await
-                    {
-                        codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::RuntimeStateSnapshot(Box::new(snapshot)),
-                            )
-                            .await?;
-                    }
-                    continue;
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
-            },
+            typography = typography_updates.recv() => lane!(delivery::typography(
+                codec,
+                &mut stream,
+                typography,
+                &runtime_generation
+            )),
+            editor_command = editor_command_updates.recv() => {
+                lane!(delivery::editor_command(codec, &mut stream, editor_command))
+            }
+            caret_style = caret_style_updates.recv() => lane!(delivery::caret_style(
+                codec,
+                &mut stream,
+                caret_style,
+                &runtime_generation
+            )),
+            layout = editor_layout_updates.recv() => lane!(delivery::editor_layout(
+                codec,
+                &mut stream,
+                layout,
+                &runtime_generation
+            )),
+            prefs = shell_preferences_updates.recv() => lane!(delivery::shell_preferences(
+                codec,
+                &mut stream,
+                prefs,
+                &runtime_generation
+            )),
+            tab_registry_update = tab_registry_updates.recv() => lane!(delivery::tab_registry(
+                codec,
+                &mut stream,
+                tab_registry_update,
+                &tab_registry
+            )),
+            runtime_generation_id = runtime_state_updates.recv() => lane!(delivery::runtime_generation(
+                codec,
+                &mut stream,
+                &mut menu_sessions,
+                &runtime_generation,
+                client_id,
+                runtime_generation_id
+            )),
             // Plan 060 T4 (P0-3): parse updates arrive only for documents this
             // connection opened, over this connection's bounded subscription.
             update = parse_updates_rx.recv() => {
@@ -844,49 +770,19 @@ where
                 continue;
             }
             diagnostic = parse_diagnostics_rx.recv() => {
-                if let Some(diagnostic) = diagnostic {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::RuntimeDiagnostic(diagnostic),
-                        )
-                        .await?;
-                }
-                continue;
+                lane!(delivery::result(codec, &mut stream, diagnostic, ServerMessage::RuntimeDiagnostic))
             }
             diagnostic = runtime_diagnostics_rx.recv() => {
-                if let Some(diagnostic) = diagnostic {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::RuntimeDiagnostic(diagnostic),
-                        )
-                        .await?;
-                }
-                continue;
+                lane!(delivery::result(codec, &mut stream, diagnostic, ServerMessage::RuntimeDiagnostic))
             }
             output = analysis_rx.recv() => {
-                if let Some(output) = output {
-                    let message = match output {
-                        crate::server::document_analysis::DocumentAnalysisOutput::Decorations(set) => ServerMessage::DecorationSet(set),
-                        crate::server::document_analysis::DocumentAnalysisOutput::Diagnostics(set) => ServerMessage::DiagnosticSet(set),
-                        crate::server::document_analysis::DocumentAnalysisOutput::Diagnostic(diagnostic) => ServerMessage::RuntimeDiagnostic(diagnostic),
-                    };
-                    codec.write_server_message(&mut stream, &message).await?;
-                }
-                continue;
+                lane!(delivery::analysis(codec, &mut stream, output))
             }
             message = completion_rx.recv() => {
-                if let Some(message) = message {
-                    codec.write_server_message(&mut stream, &message).await?;
-                }
-                continue;
+                lane!(delivery::result(codec, &mut stream, message, |message| message))
             }
             message = language_intelligence_rx.recv() => {
-                if let Some(message) = message {
-                    codec.write_server_message(&mut stream, &message).await?;
-                }
-                continue;
+                lane!(delivery::result(codec, &mut stream, message, |message| message))
             }
             agent_event = async {
                 match agent_rx.as_mut() {
@@ -896,30 +792,7 @@ where
                         None
                     }
                 }
-            } => {
-                if let Some(Ok(payload)) = agent_event {
-                    // An oversized agent event (e.g. a multi-megabyte tool
-                    // result) must not kill the webview connection with a
-                    // codec FrameTooLarge: skip the frame and surface a
-                    // diagnostic instead. The transcript recovers from the
-                    // next snapshot; the daemon already clamps at source.
-                    let agent_message = ServerMessage::Agent(Box::new((*payload).clone()));
-                    if codec.encode_server_message(&agent_message).is_err() {
-                        let _ = codec
-                            .write_server_message(
-                                &mut stream,
-                                &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::warning(
-                                    "agent.frame_too_large",
-                                    "Clay dropped an oversized agent event for this view; the run continued.",
-                                )),
-                            )
-                            .await;
-                        continue;
-                    }
-                    codec.write_server_message(&mut stream, &agent_message).await?;
-                }
-                continue;
-            }
+            } => lane!(delivery::agent(codec, &mut stream, agent_event)),
             message = incoming_rx.recv() => message,
         } {
             Some(Ok(message)) => message,
@@ -1661,6 +1534,17 @@ where
                                 .tab_for_client(client_id)
                                 .unwrap_or(client_id);
                             let snapshot = server.agent.tab_state_snapshot(tab).await;
+                            // Written on this connection before the broadcast
+                            // snapshot, so the tab's store has adopted its
+                            // session by the time the snapshot's STATE and
+                            // MESSAGES events arrive.
+                            let bound = session_bound_message(client_id, tab, &snapshot.session_id);
+                            codec
+                                .write_server_message(
+                                    &mut stream,
+                                    &ServerMessage::Agent(Box::new(bound)),
+                                )
+                                .await?;
                             server
                                 .agent
                                 .broadcast(AgentServerMessage::Snapshot(snapshot));

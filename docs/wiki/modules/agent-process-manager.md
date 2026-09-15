@@ -2,7 +2,11 @@
 
 ## Source
 
-- `src/server/agent.rs`
+- `src/server/agent.rs` (host, spawn, actor, RPC framing)
+- `src/server/agent/run.rs` (`run`/`run_inner` command dispatch, daemon event mapping)
+- `src/server/agent/book.rs` (session book the run pipeline reads and writes)
+- `src/server/agent/mcp.rs` (MCP inventory and allow-list state)
+- `src/server/connection/delivery.rs` (agent-lane restart/oversize delivery policy)
 - `src/server/mod.rs` (`IpcServer.agent`)
 - `src/server/connection/mod.rs` (`ClientMessage::Agent` + broadcast write-back)
 - `tests/agent_protocol.rs`
@@ -12,7 +16,9 @@
 
 One `AgentHost` per Clay server. First `AgentClientCommand` lazy-spawns one
 `clay-agent` child. Later commands reuse that child. Missing Node is a
-diagnostic, not a hang. Package runtimes never receive this type.
+diagnostic, not a hang. Package runtimes never receive this type. If the daemon
+actor exits, `forget_running` clears only its own stale channel so the next
+command respawns the daemon and can resume persisted sessions.
 
 ## Responsibilities
 
@@ -40,8 +46,11 @@ create `--data-dir`, load or create a 0600 `vault.passphrase`, spawn, send
 A single actor owns stdin, stdout, and pending oneshot map. `select!` writes
 requests and reads lines. `method == "event"` publishes on a broadcast channel.
 The connection loop has a dedicated `select!` arm that writes
-`ServerMessage::Agent` when a subscriber is live. Lagged subscribers drop
-events (same overflow policy as the daemon).
+`ServerMessage::Agent` when a subscriber is live. Its agent delivery helper
+ignores `Lagged` and `Closed` outcomes so a daemon restart does not close the
+view; an event that exceeds the frame budget becomes a bounded
+`agent.frame_too_large` diagnostic. Other connection lanes use their own
+State/Advice policy in `connection/delivery.rs`.
 
 `CLAY_AGENT_MOCK` adds `--mock` for tests against the real script. Unit tests
 in this task spawn a tiny Python NDJSON stand-in so they do not need Node.
@@ -71,6 +80,9 @@ server.agent.dispatch(AgentClientCommand::Prompt {
 - Missing Node: diagnostic in < 1s.
 - Mock daemon: `session.new` snapshot, prompt event, credential ack without secret.
 - Slow daemon: `dispatch` returns before the child replies.
+- `tests/agent_session_isolation.rs` — real-server scripted-daemon and shipped
+  mock-daemon checks for root isolation, fail-closed tab closure, and respawned
+  session-root recovery.
 - `cargo test --test protocol -- agent_protocol`
 - `cargo test --test editor -- agent_daemon_work_is_absent`
 

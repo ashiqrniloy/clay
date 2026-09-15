@@ -8,6 +8,7 @@ import {
 } from "@codemirror/view";
 
 import { positionIndex } from "../position-index";
+import { detached } from "../../lib/detached";
 import { utf16ToUtf8Indexed, utf8ToUtf16Indexed } from "../position-map";
 import type { LanguageFeature, LanguageResult, TextLocation } from "./types";
 
@@ -220,16 +221,18 @@ export class IntelligenceProjection {
   private sendCommand(commandId: string): void {
     const meta = this.options.current();
     if (!meta) return;
-    void this.options.send(
-      JSON.stringify({
-        family: "commandIntent",
-        payload: {
-          clientId: meta.clientId,
-          documentId: meta.documentId,
-          behaviorVersion: meta.behaviorVersion,
-          commandId,
-        },
-      }),
+    detached(
+      this.options.send(
+        JSON.stringify({
+          family: "commandIntent",
+          payload: {
+            clientId: meta.clientId,
+            documentId: meta.documentId,
+            behaviorVersion: meta.behaviorVersion,
+            commandId,
+          },
+        }),
+      ),
     );
   }
 }

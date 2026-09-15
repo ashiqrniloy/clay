@@ -340,3 +340,36 @@ change and re-executes the agent module's legs that touch it. Artifacts:
 
 No existing step was deleted or weakened. New steps were added rather than
 duplicating module 15's visual composition checks.
+
+## Plan 119 steps (workspace-scoped sessions, MCP connect floor, panel review)
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C41 | Configure a stdio MCP fixture that waits about 1 s before `initialize`, with `timeoutMs: 200` in the agent `mcp.json`; open a coding session, then invoke its intentionally slow tool | The server becomes visible/connected instead of being hidden during its bootstrap. Its tool call still returns a bounded 200 ms timeout result; run cancellation also wins over the local deadline. The fixed 5 s handshake floor is host policy, not a user setting. | `clay-agent/src/__tests__/mcp-v2.test.ts` slow-boot and cancellation cases |
+| C42 | With a configured provider (or the `CLAY_AGENT_MOCK=1` review daemon), open two tabs rooted at scratch folders A and B, each with a distinct marker file; prompt each to write in its own workspace | Tabs bind different session IDs. A can read/write only A and B only B; transcript events and files do not bleed between tabs. | `tests/agent_session_isolation.rs::two_workspaces_keep_their_agent_writes_in_their_own_root`; `frontend/src/shell/WorkspacePanes.test.tsx` |
+| C43 | Restart the daemon after C42, resume both tabs, then list workspace files or submit a follow-up prompt | Each resumed session recovers its recorded root, not the daemon launch directory; A lists A's marker and B lists B's marker. A dead daemon handle is cleared so the next RPC respawns it rather than hanging. | `tests/agent_session_isolation.rs::real_daemon_serves_one_session_per_workspace` |
+| C44 | Review the agent panel's empty, conversation, streaming, approval, error, and five-inspector-tab states at wide/narrow widths; run the real desktop fixture's Agent tab through AT-SPI | The panel keeps the approved Quiet Instrument composition: named Coding Agent landmark, polite Transcript log, Message entry, Send action, ARIA tab list, and keyboard-reachable approval actions. No state is silently dropped by the SC-4 component split or SC-6 tab-local store. | `CodingAgentPanel.test.tsx`, `TranscriptList.test.tsx`, `Composer.test.tsx`, `WorkspacePanes.test.tsx`, browser/AT-SPI evidence below |
+
+### Negative check (Plan 119)
+
+| # | Check | Expected |
+|---|-------|----------|
+| C-N14 | Close the only live tab for A while its session is still attempting a document/tool operation | The operation fails closed with `agent.workspace_unresolved`; it does not fall back to B, the first workspace, bootstrap root, launch directory, or active tab. Reopening A restores live-root authority through the session binding. |
+
+## Plan 119 execution record (Linux, 2026-09-15)
+
+Fresh build: `cargo build --bins`, `cargo build -p clay-desktop --bins`,
+`clay-agent npm run build`, and `frontend npm run build` all passed. Review
+artifacts: `test-plan/artifacts/119-editor-agent-remediation/live-agent/` and
+`code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| C41 | PASS automated | Fresh `clay-agent npm test`: 149 pass / 1 skip. The slow-boot MCP fixture connected with a 200 ms call timeout, then its slow call timed out at 200 ms; cancellation remained propagated. |
+| C42/C43/C-N14 | PASS real server + daemon integration | Fresh `cargo test --test security agent_session_isolation`: 2 pass. Layer A uses a real server plus scripted daemon for cross-root writes and fail-closed tab closure; Layer B uses the shipped daemon in `CLAY_AGENT_MOCK=1` mode to prove per-root listings and post-restart root recovery. |
+| C44, live rest state | PASS | Fresh `scripts/capture-ui-review.sh` capture passed at a 1280×1104 measured viewport after AT-SPI selected Agent. The tree exposes `Coding Agent`, `Transcript`, `Message`, `Send`, `Agent detail`, and all five inspector tabs. The inspected portal PNG was deleted because its status bar exposed the isolated temporary review-root path; retained AT-SPI/drive/diagnostic evidence is root-redacted. The isolated harness logged unavailable optional `npm` package discovery, but registered 13 agent lines and had zero configuration-failure lines; this capture does not claim package-install coverage. |
+| C44, state/keyboard matrix | PASS (D2 and F3 resolved 2026-09-15) | Browser fixture review captured wide/narrow landing, conversation, streaming, approval, error, agent settings, and every inspector tab; keyboard flow verified effort cycling, mentions, slash dispatch, approval activation, and ARIA tab roving. Follow-ups from `code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/review-log.md` are closed with evidence in `code-reviews/screenshots/2026-09-15-plan119-further-actions/review-log.md`: D2 keeps the approved artifact's scrolling strip and adds the missing thin-scrollbar affordance (measured 303/337 px at 1440/1280, `scrollbar-width: thin`), and F3 moves focus into the alertdialog and returns it on resolution (new panel test + live fixture check). F2/F4/F5/F6 stay recorded, unchanged. |
+| Live two-tab panel interaction | UNRESOLVED — host input limit, recipe retained | Re-run on 2026-09-15 with a configured mock provider (seeded vault + `book.json`), two tabs rooted at distinct scratch folders, real server + real daemon + real desktop client. Live: both tabs restore with their own root (AT-SPI shows `ws-a` selected, `ws-b`, and ws-a's `MARKER-A.txt`); prompting and per-tab agent binding need keyboard input, which this host cannot synthesize (`/dev/uinput` is root-only for ydotool; the portal grant is interactive), and one live `session.new` hit the server's 30 s ceiling while the same daemon creates it in 8 ms standalone. Full record + rerun recipe: `code-reviews/screenshots/2026-09-15-plan119-further-actions/review-log.md` §4. Isolation itself stays proven by C42/C43 above. |
+| Frontend regression | PASS | `frontend npm test`: 49 files / 426 tests passed with **exit 0** after the 2026-09-15 further-actions fix (fire-and-forget bridge calls now route through `frontend/src/lib/detached.ts`; the two `src/test/shell.test.tsx` unhandled `invoke` rejections are gone). `npm run lint` is clean (0 errors / 0 warnings) and `npm run check:budget` passes against the decision-logged 404 kB total ceiling. |
+
+No existing step was weakened. C41–C44 and C-N14 add the Plan 119 user-visible and negative paths; unresolved GUI/provider limits and the two existing review findings remain visible for a future input-capable/provider-configured pass.

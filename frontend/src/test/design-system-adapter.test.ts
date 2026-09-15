@@ -33,6 +33,8 @@ const sampleSnapshot: DesignSystemSnapshot = {
       borderWidth: 1,
       borderStyle: "solid",
       borderRadius: 8,
+      padding: null,
+      gap: null,
       shadow: [
         {
           x: 0,

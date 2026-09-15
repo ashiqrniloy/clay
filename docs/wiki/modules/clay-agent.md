@@ -22,11 +22,18 @@
 - `clay-agent/src/__tests__/skills-commands.test.ts`
 - `clay-agent/src/__tests__/session-search-tree.test.ts`
 - `clay-agent/src/__tests__/mcp-obscura.test.ts`
+- `src/server/agent/book.rs` (session book: selection, persistence, snapshots)
+- `src/server/agent/run.rs` (run pipeline, daemon event mapping, approvals)
+- `src/server/agent/mcp.rs` (MCP allow-list, daemon inventory)
 - `src/server/agent_documents.rs`
 - `src/server/agent_checkpoints.rs`
 - `src/server/agent_mcp_config.rs`
 - `src/server/agent_settings.rs`
-- `frontend/src/coding-agent/CodingAgentPanel.tsx`
+- `frontend/src/coding-agent/CodingAgentPanel.tsx` (composition root)
+- `frontend/src/coding-agent/TranscriptList.tsx`, `transcript-model.ts` (turns, agent labels)
+- `frontend/src/coding-agent/Composer.tsx` (input lane: slash/@-mentions, effort chord)
+- `frontend/src/coding-agent/InspectorTabs.tsx`, `FilesTab.tsx`, `MemoryTab.tsx`, `ContextTab.tsx`, `SessionInfoTab.tsx`, `SettingsTab.tsx`, `BoundedText.tsx`
+- `frontend/src/coding-agent/ApprovalStrip.tsx` (durable-run allow/deny)
 
 ## Overview
 
@@ -34,6 +41,16 @@
 **not** a Clay JS package and is not loaded by Deno. `AgentHost` in
 `src/server/agent.rs` lazy-spawns one daemon per server. Package JS cannot
 spawn or speak to it.
+
+The server half is a module tree (plan 119 SC-3): `agent.rs` owns the host
+itself — config, daemon spawn and the actor, RPC framing, tab/session
+resolution, credentials — while `agent/book.rs` owns the session book
+(selection, `book.json` persistence, STATE snapshots, session records loaded
+at resume), `agent/run.rs` owns the run pipeline (prompt/cancel/steer/resume,
+daemon event mapping, durable-run approvals) and `agent/mcp.rs` owns the MCP
+allow-list plus the cached daemon inventory (commands, extensions, skills, MCP
+connect outcomes, provider/model/profile/session catalogs). The split is
+mechanical: no behavior moved with the lines.
 
 ## Responsibilities
 
@@ -168,7 +185,13 @@ spawn or speak to it.
   only its own tools; per-server outcomes (`{serverId, connected,
   tools, error}`) ride `environment.list` → the panel's MCP card and
   composer section. Call timeout: `timeoutMs` (positive, ≤ 30 min hard
-  ceiling), default 60 s.
+  ceiling), default 60 s — it bounds tool calls only. Prism 0.5.5 exposes
+  one knob (`callTimeoutMs`) and applies it to the `initialize` handshake
+  and the first `tools/list` page too, so `mcp.ts` passes
+  `max(timeoutMs, CONNECT_FLOOR_MS = 5 s)` to the bridge and, below that
+  floor, enforces the exact call ceiling itself through the
+  execution-context `signal` (aborting cancels the SDK request, so nothing
+  keeps running after the call is reported as timed out; plan 119 P1-3).
 - Graft default-on (plan 117): the FIRST coding session for a workspace
   root attempts the graft pull-mode binding once per root per daemon
   (`graftBindAttempted`); CLI resolution is the plan 108 fail-closed
@@ -195,9 +218,21 @@ Pagination (`results`/`matches`, including
 per-call `maxResults`) stays a successful truncated result.
 `document-ops.ts` implements the tool side of a daemon-initiated reverse
 RPC: `document.read` (dirty buffer via server snapshot), `document.write`
-(`apply_edit` + CAS save), `document.edit` (same via Prism edit ops), and
-`document.stat`. The Rust server side lives in `src/server/agent_documents.rs`
-and always acts as the server runtime identity (client 0), acquiring the
+(`apply_edit` + CAS save for an existing file, `atomic_create_file` — temp +
+`fsync` + `rename` — for a new one), `document.edit` (same via Prism edit ops),
+and `document.stat`. Every call names its session (`sessionId`), and the server
+resolves that session's recorded workspace root to the tab state the folder is
+open in — a tool call can only touch the root its session owns, and an
+unresolvable session/root fails closed with an `agent.workspace_unresolved`
+diagnostic instead of falling back to a launch root (plan 119 SC-6, decision
+2026-09-14-1705). Both read paths are capped by the request's `maxBytes`
+(clamped to `MAX_READ_BYTES`, 8 MiB) — the dirty path slices the rope at the
+cap instead of materializing a 256 MiB resident buffer — and report
+`truncated`/`totalBytes`; `document-ops.ts` fails the read loudly on
+`truncated` rather than paging a prefix as if it were the whole file
+(plan 119 P2-1). The Rust server side lives in `src/server/agent_documents.rs`
+(`SessionWorkspaces` resolver + `session_workspace`) and always acts as the
+server runtime identity (client 0), acquiring the
 same lease (`open_existing_file_unlocked`) and going through `apply_edit`,
 the single mutation path — the agent can never bypass CAS/leases, and a
 user-held lease fails the tool closed.
@@ -226,7 +261,10 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 
 `frontend/src/coding-agent/CodingAgentPanel.tsx` renders the plan 117
 user-visible surfaces, all state-driven from snapshot state / AG-UI custom
-events (never invented client-side). Plan 118 composed them into the approved
+events (never invented client-side). Plan 119 SC-4 split the renderer into a
+composition root plus the transcript list, composer, approval strip and
+inspector tabs listed above; the panel keeps the store, the snapshot
+subscription, the prompt/steer/approval authority and the column layout. Plan 118 composed them into the approved
 agent view of a tab (`DESIGN.md` §12, §16): the column is header /
 72ch transcript / state strip / composer / environment foot, the inspector is
 the view's right column (340px, 312px ≤ 1240px, a drawer below 1000px), and
@@ -296,11 +334,13 @@ reference data lives in the inspector rather than in the transcript.
   call id, `tool_result` → the `"… -> output"` suffix on that same row (one row
   per call, never a second). Image/video/file blocks carry no transcript text,
   matching the live path.
-- **A resume binds the tab's root, not just its session** — `session_for_root`
-  *prunes* a tab whose recorded root does not match `current_root`, so
-  `resume_tab` recording `tab_session` without `tab_session_root` meant the
-  prompt after a resume started a brand-new session and silently abandoned the
-  one the user had just opened.
+- **A resume binds the workspace, not just the session** — the tab lookup
+  *prunes* a binding whose recorded root does not match the registry's, so a
+  resume that skipped the root meant the prompt after it started a brand-new
+  session and silently abandoned the one the user had just opened. The binding
+  is now keyed by `(agent type, workspace root)` and the resume records the
+  session's root with it (plan 119 SC-6), which is also what agent tool calls
+  resolve their file access against (`AgentHost::session_workspace_root`).
 
 ## How It Works
 
@@ -380,7 +420,11 @@ reference data lives in the inspector rather than in the transcript.
     recorded scope (mismatch = "Checkpoint ownership mismatch").
 11. `session.new` stamps `metadata.workspaceRoot`
     (`SESSION_SEARCH_WORKSPACE_METADATA_KEY`) so Prism's FTS search is
-    workspace-scoped. `session.search` wraps `persistence.searchSessions`
+    workspace-scoped, and a restored session reads that key back
+    (`ensureLive`) so its tool cwd, acceptance roots, and wiki/graft binding
+    follow its workspace rather than the daemon's launch cwd — a session with
+    no recorded root (pre-workspace records) alone falls back to the cwd
+    (plan 119 SC-6). `session.resume` echoes the bound `workspaceRoot`. `session.search` wraps `persistence.searchSessions`
     with `tenantId` + `workspaceRoot` (cross-workspace queries return empty,
     not an error); hits are transcript metadata (sessionId, leafId, label,
     summary, redacted snippet) and are never auto-injected into agent
@@ -433,7 +477,9 @@ reference data lives in the inspector rather than in the transcript.
     checkout/fork/clone/checkpoint to the daemon.
 14. MCP is allow-list-only (decision 1758, config surface added plan 117):
     the server builds `mcpAllowList` from the per-agent `mcp.json` + the
-    repo-root `.mcp.json` (see Responsibilities) and sends it in
+    **session's own** workspace `.mcp.json` (plan 119 SC-6: the repo file
+    follows the session's root, never the launch folder the daemon was
+    spawned in) and sends it in
     `initialize` (`AgentMcpAllowListEntry` on `AgentHostConfig`) — and,
     since plan 118 task 35, again per session (`session.new` /
     `session.setAgent` carry that agent's own list, so a switch swaps its
@@ -491,6 +537,22 @@ the session record carries it, so resume keeps both. The
 switch does **not** move runtime state between roots: `data/` (sessions
 DB, vault, book) stays the default agent's — one daemon is one data dir,
 and per-agent data dirs would need a per-agent daemon (recorded ceiling).
+**Daemon exit ends the handle, not the agent.** The daemon actor owns the
+child and its stdout pump; when the child exits (crash, `kill`, OOM) the actor
+drains, reaps, fails every in-flight reply, and drops the host's `Running`
+handle — identity-checked against the channel it owns, so a respawn that raced
+the exit keeps its own handle. The next agent call therefore **spawns a fresh
+daemon** and re-initializes it; without that clear the host kept sending into a
+channel nobody read, so every later call failed (or waited out `RPC_TIMEOUT`)
+until the server restarted and a session could never resume. Whatever the
+daemon was serving comes back from persistence: a prompt for an existing
+session re-creates its live entry through `ensureLive`, which resolves the
+session's **recorded workspace root** (`SESSION_SEARCH_WORKSPACE_METADATA_KEY`
+written at `session.new`), never `process.cwd()` — otherwise the restored tool
+cwd, acceptance roots, and wiki/graft binding would follow the daemon's launch
+directory. The plan 119 SC-6 verification pass found both halves
+(`tests/agent_session_isolation.rs`).
+
 Without
 `--agent-config-root` the daemon derives the default root from the home
 directory — the launch test
@@ -553,9 +615,20 @@ catalog is convenience, not authority; the provider rejects bad ids).
   parses `entry.message.{role,content}` and never a flat `{role,content}` — a
   mock that speaks the flat shape is lying about the contract (it hid an
   always-empty resume).
-- A resumed tab records both `tab_session` and `tab_session_root`; recording
-  only the session makes the next `ensure_tab_session` prune the binding and
-  start a fresh session.
+- A resumed tab records the session's workspace root with its
+  `(agent type, workspace root)` binding; recording only the session makes the
+  next `ensure_tab_session` miss the key and start a fresh session.
+- Agent sessions are owned by `(agent type, workspace root)`, not by a tab:
+  two tabs on one folder resolve one session, and a session's tool calls may
+  only address that session's recorded root — an unresolvable session/root
+  fails closed with `agent.workspace_unresolved` (never a launch or
+  first-configured root fallback).
+- A session's MCP allow-list is built from that session's workspace root
+  (per-agent `mcp.json` + `<session root>/.mcp.json`); the daemon's spawn-time
+  launch list is only the initialize-time default for direct callers.
+- A daemon exit clears the host's daemon handle (identity-checked), so the
+  next agent call respawns instead of addressing a dead channel; a prompt for
+  an existing session then resumes it on its recorded workspace root.
 - Only the session's first entry is labelled, so a session's `/resume`
   identity never drifts to its latest prompt.
 - No ACP, AG-UI, or Antigravity dependencies. Phase 1 pins coding-tools,
@@ -588,8 +661,9 @@ session's `fullAutonomy` flag (default false, host-set only).
 cd clay-agent && npm test
 ```
 
-Fourteen suites, 138 tests (2026-09-10): host (mock
-prompt/persist/resume, cancel, oversize frames, secret redaction, missing
+The Plan 119 verification run (`cd clay-agent && npm test`) reported 149
+passed and 1 skipped across the suite: host (mock prompt/persist/resume,
+cancel, oversize frames, secret redaction, missing
 tools, unreadable-vault process exit), rpc framing, coding tools
 dirty-buffer read, CAS write, lease fail-closed, acceptance policy, D1
 smoke), compaction (strategies, active-run fail-closed, OM round-trip,
@@ -600,7 +674,11 @@ discovery + skills.json gating), mentions (@skill/@file parsing,
 containment, unavailable-tool skips), session search/tree (workspace
 scoping, no-injection, fork/clone, checkpoint capture/restore), and
 MCP/Obscura (allow-list validation order, per-server fault isolation,
-missing-binary-hidden, no-vendor-imports). Rust side:
+missing-binary-hidden, connect floor vs call ceiling, no-vendor-imports),
+plus the SC-6 daemon checks: `coding-tools.test.ts` "document calls name
+their session so the server picks the workspace" and `host.test.ts`'s
+resume case asserting the restored session echoes its recorded
+`workspaceRoot`. Rust side:
 `tests/protocol.rs` `agent_protocol::*` (protocol round-trips, deny list,
 reverse-RPC, `resume_after_daemon_load_restores_bounded_history` against a
 mock daemon that speaks the real persisted entry shape),
@@ -608,11 +686,29 @@ mock daemon that speaks the real persisted entry shape),
 `agent_checkpoints.rs` / `agent_mcp_config.rs` / `agent_settings.rs` unit
 tests, `src/server/agent.rs` `tab_workspace_tests::*`
 (`book_selection_broadcast_keeps_the_tab_session`,
-`resumed_tab_keeps_its_session_on_the_next_prompt`),
+`resumed_tab_keeps_its_session_on_the_next_prompt`,
+`sibling_tabs_resolve_one_session_through_the_host`,
+`session_workspace_root_is_the_recorded_root_only`,
+`mcp_allow_list_follows_the_session_workspace_root`),
+`src/server/agent_documents.rs`
+`sessions_touch_only_their_own_workspace_root` /
+`unresolved_session_root_fails_closed_with_a_diagnostic` (plan 119 SC-6),
+`tests/agent_session_isolation.rs` (registered by
+`tests/suites/security.rs`) `agent_session_isolation::*` — the live
+two-workspace pass: a real `clay server` process, two real clients bound to two roots, and
+either a scripted daemon (each prompt attempts the same `document.write`
+against **both** roots, so only the server's containment check can pick the
+winner; a stale session's probe must fail closed with
+`agent.workspace_unresolved`; the session id survives a daemon restart and
+writes into the same root) or the **shipped daemon in `--mock` mode**
+(`workspace.files` reports each session's own root before and after the
+daemon is killed and restarted — the resumed-session-root check),
 `src/server/agent_picker.rs`
-`session_picker_rows_show_the_label_and_the_local_stamp`, and the frontend
-CodingAgentPanel suites (cards, mentions, token meter, effort/resume/branch —
-301 tests).
+`session_picker_rows_show_the_label_and_the_local_stamp`, and the frontend coding-agent suites (`CodingAgentPanel.test.tsx`,
+`Composer.test.tsx`, `TranscriptList.test.tsx`, and
+`transcript-model.test.ts` for cards, mentions, token meter, effort/resume,
+branch, and the linear previous-agent pass), plus
+`WorkspacePanes.test.tsx` for tab-scoped senders.
 
 ## Related
 

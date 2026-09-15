@@ -8,7 +8,10 @@ import { gzipSync } from "node:zlib";
 
 const dist = "dist/assets";
 const SHELL_BUDGET_GZIP_KB = 180;
-const TOTAL_BUDGET_GZIP_KB = 400;
+// 404 kB total: raised from 400 kB on 2026-09-15 after the plan-118 design-system
+// and plan-119 agent surfaces took the tree to 400.3 kB with no reclaimable dead
+// code left (decision-logs/2026-09-15-1153-frontend-total-bundle-ceiling-404-kb.md).
+const TOTAL_BUDGET_GZIP_KB = 404;
 
 if (!existsSync(dist)) {
   console.error("dist/assets missing — run `npm run build` first");

@@ -5,70 +5,94 @@ import { RouterProvider } from "react-router";
 import { workspace } from "../shell/workspace-singleton";
 
 import { createAppRouter } from "../app/router";
+import type { BootstrapDto } from "../bridge/types";
 import type { ConnectionState } from "../state/connection-store";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
+
+const readyBootstrap: BootstrapDto = {
+  clientId: 1,
+  tabId: 10,
+  performanceProfile: false,
+  protocolVersion: 28,
+  endpoint: "/tmp/x.sock",
+  generation: 1,
+  initialDocument: {
+    documentId: 1 as never,
+    version: 1,
+    head: { totalBytes: 0, firstChunk: "" },
+    access: "readOnly",
+    workspaceRoot: "/tmp/ws",
+  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
+  activeTheme: {
+    specifier: "",
+    tokens: {},
+    editorStyles: {},
+    densityScale: 1,
+  },
+  activeTypography: {
+    revision: 1,
+    monospace: {
+      families: ["m"],
+      size: 13,
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
+    },
+    proportional: {
+      families: ["p"],
+      size: 13,
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
+    },
+    ui: {
+      families: ["u"],
+      size: 13,
+      ligatures: {
+        enableStandard: true,
+        enableContextual: true,
+        discretionaryFeatures: [],
+        rawFeatures: null,
+        disableFeatures: [],
+      },
+    },
+    hierarchy: {
+      display: 1.5,
+      title: 1,
+      section: 1,
+      body: 1,
+      status: 1,
+      detail: 0.8,
+      caption: 0.75,
+    },
+  },
+  activeDesignSystem: {
+    specifier: "@clay/core",
+    schemaVersion: 1,
+    generation: 1,
+    provenance: {
+      packageName: "core",
+      packageVersion: "1.0.0",
+      apiPrefix: "clay",
+      trustDomain: "trusted",
+    },
+    recipes: {},
+    variables: {},
+  },
+};
 
 const ready: ConnectionState = {
   phase: "ready",
-  bootstrap: {
-    clientId: 1,
-    protocolVersion: 28,
-    endpoint: "/tmp/x.sock",
-    generation: 1,
-    initialDocument: {
-      documentId: 1 as never,
-      version: 1,
-      head: { totalBytes: 0, firstChunk: "" },
-      access: {},
-      workspaceRoot: "/tmp/ws",
-    },
-    behaviorManifest: {
-      manifestId: "m",
-      behaviorVersion: 1,
-      commands: [],
-      keymaps: [],
-    },
-    activeTheme: {
-      specifier: "",
-      tokens: {},
-      densityScale: 1,
-    },
-    activeTypography: {
-      revision: 1,
-      monospace: {
-        families: ["m"],
-        size: 13,
-        ligatures: { enableStandard: true },
-      },
-      proportional: {
-        families: ["p"],
-        size: 13,
-        ligatures: { enableStandard: true },
-      },
-      ui: { families: ["u"], size: 13, ligatures: { enableStandard: true } },
-      hierarchy: {
-        display: 1.5,
-        title: 1,
-        section: 1,
-        body: 1,
-        status: 1,
-        detail: 0.8,
-        caption: 0.75,
-      },
-    },
-    activeDesignSystem: {
-      specifier: "@clay/core",
-      schemaVersion: 1,
-      generation: 1,
-      provenance: {
-        packageName: "core",
-        packageVersion: "1.0.0",
-        apiPrefix: "clay",
-        trustDomain: "trusted",
-      },
-      recipes: {},
-      variables: {},
-    },
-  },
+  bootstrap: readyBootstrap,
 };
 
 afterEach(cleanup);
@@ -81,7 +105,7 @@ function renderAt(path: string, connection = ready) {
 describe("tab chrome: the two views (plan 118 task 33)", () => {
   it("disables the switcher until a half is picked, then switches and marks", () => {
     workspace.reset();
-    workspace.installBootstrap(ready.bootstrap!);
+    workspace.installBootstrap(readyBootstrap);
     const { container } = renderAt("/workspace");
     const switcher = container.querySelector(
       "[data-viewswitch]",

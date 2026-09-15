@@ -17,6 +17,8 @@ pub type SduiVersion = u64;
     serde::Deserialize,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiNodeId(pub u64);
 
 #[derive(
@@ -31,6 +33,8 @@ pub struct SduiNodeId(pub u64);
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiTree {
     pub ui_version: SduiVersion,
     pub root_id: SduiNodeId,
@@ -49,6 +53,8 @@ pub struct SduiTree {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiNode {
     pub id: SduiNodeId,
     pub kind: SduiNodeKind,
@@ -92,6 +98,8 @@ impl SduiNode {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiNodeKind {
     Panel {
         title: String,
@@ -142,6 +150,8 @@ pub enum SduiNodeKind {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiListFilter {
     pub placeholder: String,
     /// Single-key shortcut hint (`/`) that focuses the field.
@@ -163,6 +173,8 @@ pub struct SduiListFilter {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiListItem {
     pub id: String,
     pub label: String,
@@ -186,6 +198,8 @@ pub struct SduiListItem {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiEditorBinding {
     pub document_id: DocumentId,
     pub expected_version: Option<DocumentVersion>,
@@ -203,6 +217,8 @@ pub struct SduiEditorBinding {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiFlexDirection {
     Row,
     Column,
@@ -220,6 +236,8 @@ pub enum SduiFlexDirection {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiActionIntent {
     pub command_id: String,
     pub source: SduiActionSource,
@@ -248,6 +266,8 @@ impl SduiActionIntent {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiActionSource {
     Button {
         node_id: SduiNodeId,
@@ -270,6 +290,8 @@ pub enum SduiActionSource {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiActionArgument {
     pub name: String,
     pub value: SduiActionValue,
@@ -287,6 +309,8 @@ pub struct SduiActionArgument {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiActionValue {
     String(String),
     Bool(bool),

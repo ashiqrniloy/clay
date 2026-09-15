@@ -1,9 +1,8 @@
 // Metadata/session projection only. Document *text* lives in CodeMirror.
 
-export type DocumentAccess =
-  | { readOnly: null }
-  | { editable: { leaseId: number } }
-  | Record<string, unknown>;
+import type { DocumentAccess } from "../bridge/types";
+
+export type { DocumentAccess };
 
 export function accessIsEditable(access: DocumentAccess | undefined): boolean {
   if (!access || typeof access !== "object") return false;

@@ -8,6 +8,7 @@ import {
   recipeAttributes,
 } from "../components";
 import { sduiActionPayload, type IntentSender } from "./actions";
+import { detached } from "../lib/detached";
 import type { SduiActionIntent } from "./types";
 import type { SduiState } from "./state";
 
@@ -23,7 +24,7 @@ export function SduiRenderer({
   editorSlot: ReactNode;
 }) {
   const dispatch = (intent: SduiActionIntent) => {
-    void send(sduiActionPayload(state.version, intent));
+    detached(send(sduiActionPayload(state.version, intent)));
   };
   const render = (id: number, ancestors = new Set<number>()): ReactNode => {
     if (ancestors.has(id)) return null;

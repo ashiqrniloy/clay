@@ -1,0 +1,14 @@
+fixture=ui-review-coding-agent
+config_source=tests/fixtures/configuration/ui-review-coding-agent/init.js
+window_requested_size=1280x900
+theme=fixture-default
+appearance=fixture-default
+drive_steps=[{"find":{"role":"tab","name":"Agent"},"do":"click"},{"wait":600}]
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 1280x900, compositor kept 1280x1151
+window_viewport=1280x1104
+window_frame=1332x1203
+screenshot=1280x1151

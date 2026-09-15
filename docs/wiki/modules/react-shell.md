@@ -123,8 +123,10 @@ const router = createMemoryRouter(routes, {
 - Modal scrim alpha-multiplies `surface.scrim` × `opacity.scrim` on the fill,
   not the overlay element, so the dialog stays opaque.
 - Fixture routes exist only when `import.meta.env.DEV`.
-- Production gzip budgets: 180 kB shell / 400 kB total
-  (`frontend/scripts/bundle-budget.mjs`); plan 118 measured 169.8 / 390.9 kB.
+- Production gzip budgets: 180 kB shell / 404 kB total
+  (`frontend/scripts/bundle-budget.mjs`); plan 118 measured 169.8 / 390.9 kB. The
+  total ceiling moved 400 → 404 kB on 2026-09-15 with the plan-119 evidence
+  (`decision-logs/2026-09-15-1153-frontend-total-bundle-ceiling-404-kb.md`).
 
 ## Tests
 

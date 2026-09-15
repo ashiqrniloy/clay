@@ -17,6 +17,7 @@ import { createDocumentSession } from "../editor/sync/session";
 import { workspaceRail } from "../shell/layout-state";
 import { WorkspaceView } from "../routes/workspace";
 import type { BootstrapDto } from "../bridge/types";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
 
 afterEach(cleanup);
 beforeEach(() => workspaceRail.setVisible(true));
@@ -48,12 +49,7 @@ function session(doc = DOC) {
       access: { editable: { leaseId: 1 } },
       workspaceRoot: "/tmp/clay",
     },
-    behaviorManifest: {
-      manifestId: "m",
-      behaviorVersion: 1,
-      commands: [],
-      keymaps: [],
-    },
+    behaviorManifest: behaviorManifestFixture({ behaviorVersion: 1 }),
   } as unknown as BootstrapDto);
   created.store.update({
     workspaceRootId: 1,

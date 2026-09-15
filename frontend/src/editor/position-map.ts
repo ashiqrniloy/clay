@@ -3,6 +3,7 @@
 // snap to that scalar's start so the result is always a UTF-8 boundary.
 
 import {
+  lineScanText,
   locateLine16,
   locateLine8,
   type BytePositionIndex,
@@ -12,7 +13,7 @@ function utf16Width(codePoint: number): number {
   return codePoint > 0xffff ? 2 : 1;
 }
 
-function utf8Width(codePoint: number): number {
+export function utf8Width(codePoint: number): number {
   if (codePoint <= 0x7f) return 1;
   if (codePoint <= 0x7ff) return 2;
   if (codePoint <= 0xffff) return 3;
@@ -24,10 +25,11 @@ function utf8Width(codePoint: number): number {
 //
 // Conversions take the shared incremental `BytePositionIndex` (see
 // `position-index.ts`): one tree descent to the containing line, then a scan
-// of that single line's text, read straight from the immutable document —
-// no retained line-string copies.
+// of that line's text — starting at the nearest recorded block start on a
+// long line, and reading only that block — with no retained line-string
+// copies.
 
-/** UTF-16 → UTF-8 via the incremental index (O(log lines + line length)). */
+/** UTF-16 → UTF-8 via the incremental index (O(log lines + block)). */
 export function utf16ToUtf8Indexed(
   index: BytePositionIndex,
   utf16: number,
@@ -36,17 +38,18 @@ export function utf16ToUtf8Indexed(
   if (offset >= index.totalUtf16) return index.totalUtf8;
   const located = locateLine16(index, offset);
   if (located.intra16 === 0) return located.start8;
-  const text = index.doc.line(located.line + 1).text;
-  let seen8 = 0;
-  let seen16 = 0;
-  for (const character of text) {
-    const code = character.codePointAt(0) ?? 0;
+  const text = lineScanText(index, located);
+  let seen16 = located.scan16;
+  let seen8 = located.scan8;
+  for (let at = 0; at < text.length;) {
+    const code = text.codePointAt(at) ?? 0;
     const width = utf16Width(code);
     // Snap down to the containing scalar's start, mirroring the linear
     // reference: offsets inside a multi-unit scalar are boundary-unsafe.
     if (located.intra16 < seen16 + width) break;
     seen16 += width;
     seen8 += utf8Width(code);
+    at += width;
   }
   return located.start8 + seen8;
 }
@@ -61,11 +64,11 @@ export function utf8ToUtf16Indexed(
 
 /**
  * Batch UTF-8 → UTF-16 conversion for dense patches. Offsets are processed
- * in sorted order with a resumable per-line cursor, so a whole span list
- * costs one scan per line instead of one scan per span — the difference
- * between milliseconds and seconds on long lines. Results are identical to
- * `utf8ToUtf16Indexed` for every offset, including snap-down inside
- * multi-byte scalars.
+ * in sorted order with a resumable cursor, so a whole span list costs one
+ * scan per line (or per long-line block) instead of one scan per span — the
+ * difference between milliseconds and seconds on long lines. Results are
+ * identical to `utf8ToUtf16Indexed` for every offset, including snap-down
+ * inside multi-byte scalars.
  */
 export function utf8ToUtf16Batch(
   index: BytePositionIndex,
@@ -77,6 +80,7 @@ export function utf8ToUtf16Batch(
     .sort((left, right) => left.value - right.value);
   let line = -1;
   let text = "";
+  let windowBase16 = 0;
   let charIndex = 0;
   let seen8 = 0;
   let seen16 = 0;
@@ -87,12 +91,16 @@ export function utf8ToUtf16Batch(
       continue;
     }
     const located = locateLine8(index, offset);
-    if (located.line !== line) {
+    // New line, or the next block of a long line: re-anchor the cursor at the
+    // target's block instead of walking from the line start. Sorted offsets
+    // only move forward, so the cursor never has to rewind.
+    if (located.line !== line || located.scan16 > windowBase16) {
       line = located.line;
-      text = index.doc.line(line + 1).text;
+      text = lineScanText(index, located);
+      windowBase16 = located.scan16;
       charIndex = 0;
-      seen8 = 0;
-      seen16 = 0;
+      seen16 = located.scan16;
+      seen8 = located.scan8;
     }
     while (charIndex < text.length) {
       if (seen8 >= located.intra8) break;

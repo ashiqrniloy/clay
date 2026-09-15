@@ -156,6 +156,8 @@ pub enum FontRole {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DocumentFontRole {
     Inherit,
     Monospace,
@@ -204,6 +206,8 @@ impl FontRole {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DocumentTextHead {
     pub total_bytes: u64,
     pub first_chunk: String,
@@ -414,6 +418,8 @@ pub enum FileErrorCode {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DocumentAccess {
     ReadOnly,
     Editable { lease_id: LeaseId },
@@ -474,6 +480,8 @@ pub enum EditorIntent {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct BehaviorManifest {
     pub manifest_id: String,
     pub behavior_version: BehaviorVersion,
@@ -805,6 +813,8 @@ fn default_commands() -> Vec<CommandDeclaration> {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum BehaviorScope {
     GlobalDefault,
     Document { document_id: DocumentId },
@@ -823,6 +833,8 @@ pub enum BehaviorScope {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct KeyBindingRule {
     pub command_id: String,
     pub sequence: Vec<KeyStroke>,
@@ -912,6 +924,8 @@ impl KeyBindingRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct KeyStroke {
     pub key: KeyCode,
     pub modifiers: KeyModifiers,
@@ -938,6 +952,8 @@ impl KeyStroke {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum KeyCode {
     Character(String),
     Enter,
@@ -964,6 +980,8 @@ pub enum KeyCode {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct KeyModifiers {
     pub shift: bool,
     pub control: bool,
@@ -992,6 +1010,8 @@ impl KeyModifiers {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum KeyBindingContext {
     EditorTextFocus,
     CompletionMenu,
@@ -1010,6 +1030,8 @@ pub enum KeyBindingContext {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct CommandDeclaration {
     pub command_id: String,
     pub display_name: String,
@@ -1067,6 +1089,8 @@ impl CommandDeclaration {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum CommandAuthority {
     BuiltInClientEdit,
     ServerIntent,
@@ -1085,6 +1109,8 @@ pub enum CommandAuthority {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum RoutingPolicy {
     ClientFirstPredictable,
     ClientFirstRequiresAck,
@@ -1127,6 +1153,8 @@ impl RoutingPolicy {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum LockScope {
     Range,
     Document,
@@ -1150,6 +1178,8 @@ pub enum LockScope {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum WordSeparatorPolicy {
     /// Word characters are Unicode alphanumeric; underscore is a word
     /// character iff `treat_underscore_as_word` is true. Punctuation and
@@ -1194,6 +1224,8 @@ impl WordSeparatorPolicy {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum ParagraphStyle {
     /// Paragraphs are separated by a truly empty line.
     BlankLine,
@@ -1219,6 +1251,8 @@ pub enum ParagraphStyle {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum LineMovementStyle {
     Character,
     ScreenLine,
@@ -1238,6 +1272,8 @@ pub enum LineMovementStyle {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct MovementRules {
     pub word_separators: WordSeparatorPolicy,
     pub treat_underscore_as_word: bool,
@@ -1294,6 +1330,8 @@ impl Default for MovementRules {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum CaretShape {
     Bar,
     Line,
@@ -1319,6 +1357,8 @@ pub enum CaretShape {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum BlinkStyle {
     Solid,
     Blink {
@@ -1385,6 +1425,8 @@ impl BlinkStyle {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct CaretStyle {
     pub shape: CaretShape,
     /// Stroke thickness for Bar/Line/Underline, in pixels.
@@ -1477,6 +1519,8 @@ impl Default for CaretStyle {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct EditorBehaviorRules {
     pub text_edits: Vec<TextEditCapability>,
     pub enter: EnterRule,
@@ -1523,6 +1567,8 @@ pub struct EditorBehaviorRules {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct EditorLayoutRules {
     pub wrap: WrapPolicy,
 }
@@ -1541,6 +1587,8 @@ pub struct EditorLayoutRules {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum WrapPolicy {
     /// No wrap; horizontal scroll. Code default.
     None,
@@ -1582,6 +1630,8 @@ impl WrapPolicy {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct EditorChrome {
     pub gutter: bool,
     pub active_line: bool,
@@ -1689,6 +1739,8 @@ impl EditorBehaviorRules {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum TextEditCapability {
     Insert,
     Delete,
@@ -1707,6 +1759,8 @@ pub enum TextEditCapability {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum EnterRule {
     /// Copy the indentation of the previous line only.
     PreserveLeadingWhitespace,
@@ -1750,6 +1804,8 @@ pub enum EnterRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct TabRule {
     pub mode: TabMode,
     pub spaces_per_tab: u8,
@@ -1767,6 +1823,8 @@ pub struct TabRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum TabMode {
     InsertSpaces,
     InsertTabCharacter,
@@ -1784,6 +1842,8 @@ pub enum TabMode {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct PairRule {
     pub open: String,
     pub close: String,
@@ -1812,6 +1872,8 @@ impl PairRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum PairRuleContext {
     CaretOrSelection,
 }
@@ -1828,6 +1890,8 @@ pub enum PairRuleContext {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct CommentContinuationRule {
     pub line_prefix: String,
     pub continue_prefix: String,
@@ -1848,6 +1912,8 @@ pub struct CommentContinuationRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum ElectricEffect {
     /// Outdent the current line by one indentation unit when the trigger is
     /// typed as the first non-whitespace character on an over-indented line,
@@ -1871,6 +1937,8 @@ pub enum ElectricEffect {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct ElectricCharacterRule {
     pub trigger: String,
     pub effect: ElectricEffect,
@@ -1898,6 +1966,8 @@ impl ElectricCharacterRule {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct AutocompleteTrigger {
     pub trigger: String,
     pub routing_policy: RoutingPolicy,
@@ -2240,6 +2310,8 @@ pub enum ClientMessage {
     Eq,
 )]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum DiagnosticSeverity {
     Info,
     Warning,
@@ -2258,6 +2330,8 @@ pub enum DiagnosticSeverity {
     Eq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct RuntimeDiagnostic {
     pub severity: DiagnosticSeverity,
     pub code: String,
@@ -2345,6 +2419,8 @@ pub const MAX_FONT_SIZE: f32 = 96.0;
     Default,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct FontProfile {
     pub families: Vec<String>,
     pub size: f32,
@@ -2371,6 +2447,8 @@ pub struct FontProfile {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct LigaturePolicy {
     /// Enable standard ligatures (`liga`, `clig`). Default `true` keeps the
     /// historical ligature-on shaping Clay relied on implicitly.
@@ -2542,6 +2620,8 @@ pub struct ActiveTypography {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct UiTypographyHierarchy {
     pub display: f32,
     pub title: f32,

@@ -42,9 +42,13 @@ impl AgentCheckpointStore {
         Self::default()
     }
 
+    /// Snapshot the session's workspace: the open documents of the resolved
+    /// workspace state that live inside `root_id` (plan 119 SC-6 — a state can
+    /// hold several roots, and a session checkpoints only its own).
     pub(crate) async fn checkpoint(
         &mut self,
         workspace: &Arc<Mutex<WorkspaceState>>,
+        root_id: WorkspaceRootId,
         session_id: &str,
         entry_id: &str,
     ) -> Result<Value, String> {
@@ -54,8 +58,16 @@ impl AgentCheckpointStore {
             let Some(handle) = workspace.document_handle(document_id) else {
                 continue;
             };
-            let document = handle.lock().await;
             let path = canonical_path.to_string_lossy().into_owned();
+            // Containment first: the lease-free read below must not snapshot
+            // another root's document into this session's checkpoint.
+            if workspace
+                .contained_existing_path(root_id, &canonical_path)
+                .is_err()
+            {
+                continue;
+            }
+            let document = handle.lock().await;
             snapshots.insert(
                 path.clone(),
                 DocumentCheckpoint {
@@ -90,6 +102,7 @@ impl AgentCheckpointStore {
     pub(crate) async fn restore(
         &self,
         workspace: &Arc<Mutex<WorkspaceState>>,
+        root_id: WorkspaceRootId,
         session_id: &str,
         entry_id: &str,
     ) -> Result<Value, String> {
@@ -102,12 +115,6 @@ impl AgentCheckpointStore {
                 "entryId": entry_id,
                 "documents": 0,
             }));
-        };
-        let root_id = {
-            let workspace = workspace.lock().await;
-            workspace
-                .first_root_id()
-                .ok_or_else(|| "no workspace roots configured".to_string())?
         };
         for checkpoint in snapshots.values() {
             restore_document(workspace, root_id, checkpoint).await?;
@@ -201,6 +208,10 @@ mod tests {
         Arc::new(Mutex::new(workspace))
     }
 
+    async fn root_id(workspace: &Arc<Mutex<WorkspaceState>>) -> WorkspaceRootId {
+        workspace.lock().await.directory_roots()[0].workspace_root_id
+    }
+
     #[tokio::test]
     async fn checkpoint_captures_open_documents_and_restore_reverts_text() {
         let dir = std::env::temp_dir().join(format!(
@@ -211,10 +222,7 @@ mod tests {
                 .as_nanos()
         ));
         let workspace = workspace_with_file(&dir, "notes.txt", "before").await;
-        let root_id = {
-            let workspace = workspace.lock().await;
-            workspace.first_root_id().unwrap()
-        };
+        let root_id = root_id(&workspace).await;
         // Open the file so it has a registry entry with a real version.
         let lease = open_existing_file_unlocked(
             &workspace,
@@ -232,7 +240,7 @@ mod tests {
 
         let mut store = AgentCheckpointStore::new();
         let result = store
-            .checkpoint(&workspace, "session-1", "entry-1")
+            .checkpoint(&workspace, root_id, "session-1", "entry-1")
             .await
             .unwrap();
         assert_eq!(result["documents"], 1);
@@ -261,7 +269,7 @@ mod tests {
         }
 
         store
-            .restore(&workspace, "session-1", "entry-1")
+            .restore(&workspace, root_id, "session-1", "entry-1")
             .await
             .unwrap();
         {
@@ -285,8 +293,12 @@ mod tests {
                 .as_nanos()
         ));
         let workspace = workspace_with_file(&dir, "a.txt", "x").await;
+        let root_id = root_id(&workspace).await;
         let store = AgentCheckpointStore::new();
-        let result = store.restore(&workspace, "nope", "nope").await.unwrap();
+        let result = store
+            .restore(&workspace, root_id, "nope", "nope")
+            .await
+            .unwrap();
         assert_eq!(result["documents"], 0);
     }
 }

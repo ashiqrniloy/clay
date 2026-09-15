@@ -5,10 +5,19 @@
  * can assert the SDK v2 allow-list env policy: omitted env must not leak
  * ambient `process.env`; explicit env must be forwarded.
  *
- * Spawned by tests via the allow-list: `node <this file>`.
+ * Spawned by tests via the allow-list: `node <this file>`. Set
+ * `CLAY_MCP_BOOT_DELAY_MS` to make the process answer its first request only
+ * after that delay (slow-boot regression fixture for the connect floor).
  */
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+
+// Before the transport is attached, so the client's initialize request waits:
+// that is the boot window a call-shaped timeout must not swallow.
+const bootDelayMs = Number(process.env.CLAY_MCP_BOOT_DELAY_MS ?? 0);
+if (Number.isFinite(bootDelayMs) && bootDelayMs > 0) {
+  await new Promise((resolve) => setTimeout(resolve, bootDelayMs));
+}
 
 serveStdio(() => {
   const server = new McpServer(

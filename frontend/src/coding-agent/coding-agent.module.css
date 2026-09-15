@@ -578,6 +578,23 @@
   border-left-color: var(--clay-ds-divider-default-root-rest-border-color);
 }
 
+/* D2 (plan 119 review): the inspector column is 340px (the approved
+   artifact's `--inspector-w`) and its five section labels need ~337px once
+   the hide toggle takes its 37px, so the strip scrolls — exactly as the
+   approved artifact's `.inspector .tabs { overflow-x: auto }` intends. What
+   the artifact could not show is the affordance: the shared tab strip hides
+   its scrollbar app-wide, so a mouse user could not tell a fifth section
+   existed. Restore the host's standard thin scrollbar for this strip only;
+   the recipe padding/font values stay untouched. */
+.tabs [role="tablist"] {
+  scrollbar-width: thin;
+}
+
+/* Appearance stays the host's: the global scroll-chrome rule already colours
+   the thumb from the `scroll` recipe and the transcript's own scrollbar looks
+   the same. `::-webkit-scrollbar-*` cannot refine it further — setting
+   `scrollbar-width` makes browsers ignore those pseudo-elements. */
+
 .tabs {
   min-height: 0;
   height: 100%;
@@ -826,18 +843,6 @@
    — mark, basename over its muted directory, role — on the session row recipe.
    The filter is the approved quiet field: the well carries the boundary and the
    accent halo (one ring per surface), the input inside draws none. */
-.sessionEmpty {
-  display: grid;
-  gap: var(--clay-spacing-sm, 12px);
-  justify-items: start;
-}
-
-.sessionFileKeys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--clay-spacing-sm, 12px);
-}
-
 .sessionFilter {
   display: flex;
   align-items: center;

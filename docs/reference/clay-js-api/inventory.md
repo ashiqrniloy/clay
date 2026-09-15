@@ -52,7 +52,7 @@ The inventory also records implementation details that must not be included in p
 - `internal.editor.layoutPaint`: webview (React/CodeMirror) layout and paint internals.
 - `internal.protocol.dto`: protocol serialization DTOs and local IPC codec contracts.
 
-Plan 034 runtime hardening does not add a public Clay JS API. `runtime.timeout` and `runtime.heap_limit` are diagnostic codes, not facade IDs. `src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`, sandbox protocol frames, child-process lifecycle controls, payload budgets, timeout kill/restart policy, and `RuntimeSandboxSupervisor` are internal `#[doc(hidden)]` test/harness surfaces. They must not appear in `docs/index.md`, `docs/reference/clay-js-api/api-inventory.toml`, generated registry data, runtime JS facade modules, or user-facing `Deno.core.ops` calls.
+Plan 034 runtime hardening does not add a public Clay JS API. `runtime.timeout` and `runtime.heap_limit` are diagnostic codes, not facade IDs. The plan-034 sandbox harness (`src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`, `RuntimeSandboxSupervisor`, sandbox protocol frames, child-process lifecycle controls, payload budgets, timeout kill/restart policy) was removed in plan 119 (2026-09-14); what remains is the unbuilt design in `docs/design/persistent-runtime-sandbox.md`. No sandbox surface must appear in `docs/index.md`, `docs/reference/clay-js-api/api-inventory.toml`, generated registry data, runtime JS facade modules, or user-facing `Deno.core.ops` calls.
 
 These records exist so validation and future audits can distinguish intentional public API candidates from implementation details.
 

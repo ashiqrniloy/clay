@@ -12,11 +12,13 @@
 - `src-tauri/src/bridge/dto.rs` — typed bridge projection.
 - `src-tauri/src/bridge/forwarder.rs` — bounded delivery.
 - `src-tauri/src/bridge/session.rs` — identity stamping.
-- `frontend/src/bridge/types.ts` — head/chunk DTOs.
+- `frontend/src/bridge/types.ts` — head DTO (generated `DocumentTextHead`) and the hand-written chunk payloads that arrive inside client events.
 - `frontend/src/editor/sync/session.ts` — one-owner load state machine.
 - `frontend/src/editor/ClayEditor.tsx` — read-only/loading projection.
 - `frontend/src/editor/create-editor.ts` — CodeMirror view setup.
-- Tests: `src/server/workspace/mod.rs`, `src/server/document.rs`, `src/protocol/codec.rs`, `frontend/src/editor/sync/session.test.ts`, `tests/editor_performance.rs`.
+- `tests/large_document.rs` — real-server 50 MiB open/edit/save/reload and refusal scenarios.
+- `tests/performance_budgets.rs` — source-shape guard against per-chunk allocation regressions.
+- Tests: `src/server/workspace/mod.rs`, `src/server/document.rs`, `src/protocol/codec.rs`, `frontend/src/editor/sync/session.test.ts`, and `tests/editor_performance.rs`.
 
 ## Overview
 
@@ -30,6 +32,13 @@ The frontend does not build a second full string buffer. A pane's
 `DocumentSession` keeps one current CodeMirror `Text`: `view.state.doc` while a
 view is attached, or `detachedDoc` only while detached. Chunk writes are
 programmatic, no-history transactions.
+
+P1-1 keeps the mandatory full-rope server load but removes avoidable allocation
+churn: `read_file_streamed` reuses one scratch buffer and carries up to three
+incomplete UTF-8 bytes across read boundaries instead of allocating a combined
+vector for every 64 KiB read. The debug open-to-head guard is
+`max(500 ms, bytes / 25 MiB/s)`; full assembly retains a 5 s bound. These are
+regression guards for the resident-rope design, not new runtime configuration.
 
 ## Flow
 
@@ -118,6 +127,10 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
 
 - Every chunk is at most `MAX_CHUNK_BYTES` (256 KiB) and below the 1 MiB frame
   limit; offsets are UTF-8 byte boundaries.
+- The P1-1 debug head budget is `max(500 ms, bytes / 25 MiB/s)` and the full
+  50 MiB fixture load stays under 5 s; the budget catches allocation/throughput
+  regressions without pretending a fixed 500 ms is realistic for a full-rope
+  debug load.
 - One outstanding chunk request exists per pane/document. Request state is
   bounded and no server chunk queue is retained. The in-flight rule is:
 
@@ -148,12 +161,17 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
 - `frontend/src/editor/sync/session.test.ts` — one request per offset,
   duplicate-chunk dedupe, same-length reload, no-history assembly, and
   detach/remount restoration.
-- `tests/editor_performance.rs` — 50 MiB protocol open/edit/save/reload/resync
-  matrix and close retirement.
+- `tests/large_document.rs` — 50 MiB protocol open/edit/save/reload matrix,
+  chunk ceilings, UTF-8 preservation, and oversize/binary refusals.
+- `tests/editor_performance.rs` — protocol open/edit/save/reload/resync matrix
+  and close retirement.
+- `tests/performance_budgets.rs` — source guard for the hoisted read buffer and
+  absence of the old per-chunk `combined` allocation.
 
 Run focused coverage with:
 
 ```bash
+cargo test --test runtime large_document::
 cargo test --lib server::workspace::tests::open_existing_file_streams_large_utf8_text_and_bounds_head
 cd frontend && npm test -- --run src/editor/sync/session.test.ts
 ```

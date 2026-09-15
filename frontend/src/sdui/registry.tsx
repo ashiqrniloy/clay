@@ -13,6 +13,7 @@ import {
   recipeAttributes,
 } from "../components";
 import { packageIntent, sduiActionPayload, type IntentSender } from "./actions";
+import { detached } from "../lib/detached";
 import type {
   FontRole,
   PackageComponentNode,
@@ -63,7 +64,7 @@ function sendIntent(
   uiVersion: number,
   intent: SduiActionIntent,
 ) {
-  void send(sduiActionPayload(uiVersion, intent));
+  detached(send(sduiActionPayload(uiVersion, intent)));
 }
 
 export function PackageComponent({

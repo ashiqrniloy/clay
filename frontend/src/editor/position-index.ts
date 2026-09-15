@@ -6,23 +6,45 @@
 // duplicated text tables. Ordinary edits rebuild only the touched lines and
 // O(log lines) tree nodes; conversions are a tree descent plus one
 // intra-line scan.
+//
+// A line longer than one scan block records its block starts as well, so that
+// scan resumes inside the line instead of re-walking it: before this, a 1 MiB
+// single line cost a 1 MiB scan per conversion.
 
 import { EditorState, StateField, type Transaction } from "@codemirror/state";
 
-import { utf8Length } from "./position-map";
+import { utf8Length, utf8Width } from "./position-map";
 
 /** Minimal document surface the index needs (CodeMirror `Text` satisfies it). */
 export interface LineSource {
   readonly lines: number;
   readonly length: number;
   line(number: number): { from: number; text: string };
+  /** Optional: reads a UTF-16 range without materializing the whole line. */
+  sliceString?(from: number, to: number): string;
 }
 
 const CHUNK_LINES = 64;
 
+/** UTF-16 units per scan block of a long line.
+ *
+ * The intra-line scan is inherent to the conversion, its length is not:
+ * blocks bound one conversion's walk (and the text it reads) to 8 KiB units
+ * — ~25 µs on ASCII — while the tables cost ~0.1% of the line's text. */
+export const SEGMENT_UNITS = 8 * 1024;
+
+/** Block starts of one long line: `char[k]`/`byte[k]` are the line-relative
+ * UTF-16 and UTF-8 offsets of block `k`, both on a scalar boundary. */
+export interface LineSegments {
+  readonly char: Uint32Array;
+  readonly byte: Uint32Array;
+}
+
 interface ChunkData {
   readonly l16: Uint32Array;
   readonly l8: Uint32Array;
+  /** Per-entry scan blocks; `undefined` for a line within one block. */
+  readonly seg: (LineSegments | undefined)[];
 }
 
 interface LeafNode {
@@ -68,7 +90,11 @@ function nextPriority(): number {
   return x || 1;
 }
 
-function makeChunk(l16: Uint32Array, l8: Uint32Array): LeafNode {
+function makeChunk(
+  l16: Uint32Array,
+  l8: Uint32Array,
+  seg: (LineSegments | undefined)[],
+): LeafNode {
   let w16 = 0;
   let w8 = 0;
   for (let i = 0; i < l16.length; i += 1) {
@@ -81,7 +107,7 @@ function makeChunk(l16: Uint32Array, l8: Uint32Array): LeafNode {
     w16,
     w8,
     prio: nextPriority(),
-    chunk: { l16, l8 },
+    chunk: { l16, l8, seg },
   };
 }
 
@@ -125,7 +151,57 @@ function cartesian(
   return node;
 }
 
-function buildTree(l16: number[], l8: number[]): IndexNode | null {
+interface LineEntries {
+  readonly l16: number[];
+  readonly l8: number[];
+  readonly seg: (LineSegments | undefined)[];
+}
+
+/** Measures one line into `entries`, recording block starts once the line
+ * outgrows one scan block. Lines at or below one block stay table-free. */
+function pushLine(entries: LineEntries, text: string): void {
+  const units = text.length + 1;
+  entries.l16.push(units);
+  if (units <= SEGMENT_UNITS) {
+    entries.l8.push(utf8Length(text) + 1);
+    entries.seg.push(undefined);
+    return;
+  }
+  const char: number[] = [0];
+  const byte: number[] = [0];
+  let seen16 = 0;
+  let seen8 = 0;
+  let block16 = 0;
+  for (let at = 0; at < text.length;) {
+    const unit = text.charCodeAt(at);
+    // ASCII fast path (the common case inside a long line): ~3x faster than
+    // walking code points. Anything else re-reads the pair via codePointAt,
+    // which keeps lone surrogates byte-identical to the linear reference.
+    let width = 1;
+    let bytes = 1;
+    if (unit >= 0x80) {
+      const code = text.codePointAt(at) ?? unit;
+      width = code > 0xffff ? 2 : 1;
+      bytes = utf8Width(code);
+    }
+    seen16 += width;
+    seen8 += bytes;
+    at += width;
+    if (seen16 - block16 >= SEGMENT_UNITS) {
+      block16 = seen16;
+      char.push(seen16);
+      byte.push(seen8);
+    }
+  }
+  entries.l8.push(seen8 + 1);
+  entries.seg.push({
+    char: Uint32Array.from(char),
+    byte: Uint32Array.from(byte),
+  });
+}
+
+function buildTree(entries: LineEntries): IndexNode | null {
+  const { l16, l8, seg } = entries;
   if (l16.length === 0) return null;
   const leaves: IndexNode[] = [];
   for (let start = 0; start < l16.length; start += CHUNK_LINES) {
@@ -134,6 +210,7 @@ function buildTree(l16: number[], l8: number[]): IndexNode | null {
       makeChunk(
         Uint32Array.from(l16.slice(start, end)),
         Uint32Array.from(l8.slice(start, end)),
+        seg.slice(start, end),
       ),
     );
   }
@@ -151,8 +228,8 @@ function split(
     const c = node.chunk;
     // subarray shares the read-only buffer: persistence without copying.
     return [
-      makeChunk(c.l16.subarray(0, k), c.l8.subarray(0, k)),
-      makeChunk(c.l16.subarray(k), c.l8.subarray(k)),
+      makeChunk(c.l16.subarray(0, k), c.l8.subarray(0, k), c.seg.slice(0, k)),
+      makeChunk(c.l16.subarray(k), c.l8.subarray(k), c.seg.slice(k)),
     ];
   }
   if (k < node.left.lines) {
@@ -180,17 +257,16 @@ function join(a: IndexNode | null, b: IndexNode | null): IndexNode | null {
   return merged ? makeBranch(merged, b.right) : b.right;
 }
 
-/** Replaces tree lines `[start, start + count)` with `l16`/`l8` entries. */
+/** Replaces tree lines `[start, start + count)` with `entries`. */
 function replaceRange(
   root: IndexNode | null,
   start: number,
   count: number,
-  l16: number[],
-  l8: number[],
+  entries: LineEntries,
 ): IndexNode | null {
   const [head, rest] = split(root, start);
   const [, tail] = split(rest, count);
-  return join(join(head, buildTree(l16, l8)), tail);
+  return join(join(head, buildTree(entries)), tail);
 }
 
 export interface LineLocation {
@@ -200,6 +276,63 @@ export interface LineLocation {
   start16: number;
   /** UTF-8 start of the line. */
   start8: number;
+  /** Line length in UTF-16 units, including the phantom newline. */
+  lineUnits: number;
+  /** Line-relative UTF-16 offset the intra-line scan may start from: the
+   * containing block start on a long line, `0` otherwise. */
+  scan16: number;
+  /** Line-relative UTF-8 offset matching `scan16`, same scalar boundary. */
+  scan8: number;
+  /** Line-relative end of that block (next block start, or the line end):
+   * always a scalar boundary, so a slice never cuts a surrogate pair. */
+  scanEnd16: number;
+}
+
+/** Index of the last block starting at or before `target`. */
+function lastBlockStart(coords: Uint32Array, target: number): number {
+  let lo = 0;
+  let hi = coords.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if ((coords[mid] ?? 0) <= target) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** Block start at or before line-relative `intra16`, as
+ * `[scan16, scan8, scanEnd16]` — the block, both spaces agreeing on a scalar
+ * boundary at either end. */
+function segmentScan16(
+  seg: LineSegments | undefined,
+  intra16: number,
+  lineUnits: number,
+): [number, number, number] {
+  const lineEnd = lineUnits - 1;
+  if (!seg) return [0, 0, lineEnd];
+  const block = lastBlockStart(seg.char, intra16);
+  return [
+    seg.char[block] ?? 0,
+    seg.byte[block] ?? 0,
+    seg.char[block + 1] ?? lineEnd,
+  ];
+}
+
+/** Block start at or before line-relative `intra8`, as
+ * `[scan16, scan8, scanEnd16]`. */
+function segmentScan8(
+  seg: LineSegments | undefined,
+  intra8: number,
+  lineUnits: number,
+): [number, number, number] {
+  const lineEnd = lineUnits - 1;
+  if (!seg) return [0, 0, lineEnd];
+  const block = lastBlockStart(seg.byte, intra8);
+  return [
+    seg.char[block] ?? 0,
+    seg.byte[block] ?? 0,
+    seg.char[block + 1] ?? lineEnd,
+  ];
 }
 
 /** Finds the line containing UTF-16 `offset` (must be < totalUtf16). */
@@ -214,7 +347,16 @@ export function locateLine16(
   for (;;) {
     if (!node) {
       // Defensive: callers clamp below totalUtf16, so the root covers it.
-      return { line, start16: s16, start8: s8, intra16: 0 };
+      return {
+        line,
+        start16: s16,
+        start8: s8,
+        lineUnits: 1,
+        intra16: 0,
+        scan16: 0,
+        scan8: 0,
+        scanEnd16: 0,
+      };
     }
     if (node.kind === "branch") {
       const left = node.left;
@@ -232,19 +374,41 @@ export function locateLine16(
     const c = node.chunk;
     for (let i = 0; i < c.l16.length; i += 1) {
       const w = c.l16[i] ?? 0;
-      if (offset < w)
-        return { line: line + i, start16: s16, start8: s8, intra16: offset };
+      if (offset < w) {
+        const [scan16, scan8, scanEnd16] = segmentScan16(c.seg[i], offset, w);
+        return {
+          line: line + i,
+          start16: s16,
+          start8: s8,
+          lineUnits: w,
+          intra16: offset,
+          scan16,
+          scan8,
+          scanEnd16,
+        };
+      }
       offset -= w;
       s16 += w;
       s8 += c.l8[i] ?? 0;
     }
     // Defensive tail (offset === subtree width): clamp to last line end.
     const last = c.l16.length - 1;
+    const units = c.l16[last] ?? 1;
+    const intra16 = units - 1;
+    const [scan16, scan8, scanEnd16] = segmentScan16(
+      c.seg[last],
+      intra16,
+      units,
+    );
     return {
       line: line + last,
-      start16: s16 - (c.l16[last] ?? 0),
+      start16: s16 - units,
       start8: s8 - (c.l8[last] ?? 0),
-      intra16: (c.l16[last] ?? 1) - 1,
+      lineUnits: units,
+      intra16,
+      scan16,
+      scan8,
+      scanEnd16,
     };
   }
 }
@@ -260,7 +424,16 @@ export function locateLine8(
   let s8 = 0;
   for (;;) {
     if (!node) {
-      return { line, start16: s16, start8: s8, intra8: 0 };
+      return {
+        line,
+        start16: s16,
+        start8: s8,
+        lineUnits: 1,
+        intra8: 0,
+        scan16: 0,
+        scan8: 0,
+        scanEnd16: 0,
+      };
     }
     if (node.kind === "branch") {
       const left = node.left;
@@ -278,26 +451,68 @@ export function locateLine8(
     const c = node.chunk;
     for (let i = 0; i < c.l8.length; i += 1) {
       const w = c.l8[i] ?? 0;
-      if (offset < w)
-        return { line: line + i, start16: s16, start8: s8, intra8: offset };
+      if (offset < w) {
+        const units = c.l16[i] ?? 1;
+        const [scan16, scan8, scanEnd16] = segmentScan8(
+          c.seg[i],
+          offset,
+          units,
+        );
+        return {
+          line: line + i,
+          start16: s16,
+          start8: s8,
+          lineUnits: units,
+          intra8: offset,
+          scan16,
+          scan8,
+          scanEnd16,
+        };
+      }
       offset -= w;
       s16 += c.l16[i] ?? 0;
       s8 += w;
     }
     const last = c.l8.length - 1;
+    const units = c.l16[last] ?? 1;
+    const intra8 = (c.l8[last] ?? 1) - 1;
+    const [scan16, scan8, scanEnd16] = segmentScan8(c.seg[last], intra8, units);
     return {
       line: line + last,
-      start16: s16 - (c.l16[last] ?? 0),
+      start16: s16 - units,
       start8: s8 - (c.l8[last] ?? 0),
-      intra8: (c.l8[last] ?? 1) - 1,
+      lineUnits: units,
+      intra8,
+      scan16,
+      scan8,
+      scanEnd16,
     };
   }
 }
 
+/** The text one intra-line scan needs: the whole line when it fits in a
+ * single block, otherwise just that block — a long line is never
+ * materialized end to end per conversion. */
+export function lineScanText(
+  index: BytePositionIndex,
+  located: LineLocation,
+): string {
+  const doc = index.doc;
+  const from = located.start16 + located.scan16;
+  const to = located.start16 + located.scanEnd16;
+  if (located.scan16 === 0 && located.scanEnd16 === located.lineUnits - 1)
+    return doc.line(located.line + 1).text;
+  const sliceString = (
+    doc as LineSource & { sliceString?: (from: number, to: number) => string }
+  ).sliceString;
+  if (typeof sliceString === "function") return sliceString.call(doc, from, to);
+  const text = doc.line(located.line + 1).text;
+  return text.slice(located.scan16, located.scan16 + (to - from));
+}
+
 /** One bounded O(document) install pass. */
 export function buildPositionIndex(doc: LineSource): BytePositionIndex {
-  const l16: number[] = [];
-  const l8: number[] = [];
+  const entries: LineEntries = { l16: [], l8: [], seg: [] };
   const iterLines = (
     doc as LineSource & {
       iterLines?: (from?: number, to?: number) => Iterator<string>;
@@ -308,18 +523,14 @@ export function buildPositionIndex(doc: LineSource): BytePositionIndex {
     // rope descent.
     const cursor = iterLines.call(doc);
     for (let step = cursor.next(); !step.done; step = cursor.next()) {
-      const text = step.value;
-      l16.push(text.length + 1);
-      l8.push(utf8Length(text) + 1);
+      pushLine(entries, step.value);
     }
   } else {
     for (let n = 1; n <= doc.lines; n += 1) {
-      const text = doc.line(n).text;
-      l16.push(text.length + 1);
-      l8.push(utf8Length(text) + 1);
+      pushLine(entries, doc.line(n).text);
     }
   }
-  const root = buildTree(l16, l8);
+  const root = buildTree(entries);
   return {
     doc,
     root,
@@ -329,19 +540,10 @@ export function buildPositionIndex(doc: LineSource): BytePositionIndex {
 }
 
 /** Line entries for a region string (weights include phantom newlines). */
-function regionEntries(region: string): {
-  l16: number[];
-  l8: number[];
-} {
-  const lines = region.split("\n");
-  const l16: number[] = new Array(lines.length);
-  const l8: number[] = new Array(lines.length);
-  for (let i = 0; i < lines.length; i += 1) {
-    const text = lines[i] ?? "";
-    l16[i] = text.length + 1;
-    l8[i] = utf8Length(text) + 1;
-  }
-  return { l16, l8 };
+function regionEntries(region: string): LineEntries {
+  const entries: LineEntries = { l16: [], l8: [], seg: [] };
+  for (const text of region.split("\n")) pushLine(entries, text);
+  return entries;
 }
 
 /**
@@ -374,13 +576,7 @@ export function updatePositionIndex(
     const suffix = last.text.slice(toA - last.from);
     const region = prefix + newDoc.sliceString(fromB, toB) + suffix;
     const entries = regionEntries(region);
-    root = replaceRange(
-      root,
-      oldStart + shift,
-      oldCount,
-      entries.l16,
-      entries.l8,
-    );
+    root = replaceRange(root, oldStart + shift, oldCount, entries);
     shift += entries.l16.length - oldCount;
   });
   return {

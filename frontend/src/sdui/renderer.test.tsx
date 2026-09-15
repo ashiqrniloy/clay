@@ -19,6 +19,7 @@ it("renders a bounded SDUI tree with editor slot and typed actions", () => {
         kind: {
           button: {
             label: "Refresh",
+            icon: null,
             action: {
               commandId: "workspace.refresh",
               source: { button: { nodeId: 3 } },
@@ -81,7 +82,7 @@ it("projects semantic icon references on labels, buttons, and list rows (plan 11
         },
       },
       { id: 4, kind: { label: { text: "Branch: main", icon: "git.branch" } } },
-      { id: 5, kind: { label: { text: "No icon here" } } },
+      { id: 5, kind: { label: { text: "No icon here", icon: null } } },
     ],
   });
   const view = render(
