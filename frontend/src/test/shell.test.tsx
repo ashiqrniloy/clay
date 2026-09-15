@@ -171,6 +171,41 @@ describe("app shell landmarks", () => {
     expect(status).toHaveTextContent("Connected");
   });
 
+  it("owns no file-browser button in the titlebar chrome", () => {
+    const { container } = renderAt("/workspace");
+    // The toggle lives in the sidebar title row (an SDUI `>`/`<` indicator),
+    // so the top bar owns no Files control — the right-aligned actions hold
+    // the Control Center trigger and the view switcher only.
+    const actions = container.querySelector(
+      'nav[aria-label="Application controls"]',
+    );
+    expect(actions).not.toBeNull();
+    // Control Center trigger + the two view-switcher options.
+    expect(actions?.querySelectorAll("button")).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: "Control Center" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Palette" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Files" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Outline" })).toBeNull();
+  });
+
+  it("keeps the new-tab button with the strip and the right-aligned actions last", () => {
+    const { container } = renderAt("/workspace");
+    const header = container.querySelector("header");
+    expect(header).not.toBeNull();
+    // The strip hugs the tabs: tabs and the new-tab button share the row after
+    // the brand, and the right-aligned action group closes the bar.
+    const tabsRow = header?.children[1] ?? null;
+    expect(
+      tabsRow?.contains(screen.getByRole("tablist", { name: "Window tabs" })),
+    ).toBe(true);
+    expect(
+      tabsRow?.contains(screen.getByRole("button", { name: "New tab" })),
+    ).toBe(true);
+    expect([...(header?.children ?? [])].at(-1)?.tagName).toBe("NAV");
+  });
+
   it("carries mono status data and the keyboard hint row", () => {
     renderAt("/workspace");
     // Left: where the window is; middle: the connection; right: the real

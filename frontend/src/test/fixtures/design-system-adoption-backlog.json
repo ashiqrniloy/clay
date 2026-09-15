@@ -8,6 +8,7 @@
     "card.default.root.hover",
     "card.default.root.rest",
     "dropdown.default.root.rest",
+    "editor.default.gutter.rest",
     "editor.default.path.rest",
     "label.default.root.rest",
     "panel.fixed.root.rest",

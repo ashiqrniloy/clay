@@ -1,10 +1,116 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+
+afterEach(cleanup);
 
 import { SduiRenderer } from "./renderer";
 import { installSduiTree } from "./state";
+
+it("renders the file-browser hide indicator as an icon button beside the title", () => {
+  const send = vi.fn<(payload: string) => Promise<void>>(async () => undefined);
+  const state = installSduiTree({
+    uiVersion: 6,
+    rootId: 1,
+    nodes: [
+      { id: 1, kind: { flex: { direction: "row", children: [2, 4] } } },
+      { id: 2, kind: { stack: { children: [7, 5] } } },
+      { id: 3, kind: { label: { text: "Workspace · clay", icon: null } } },
+      {
+        id: 6,
+        kind: {
+          button: {
+            label: "Hide file browser",
+            icon: "disclosure.right",
+            action: {
+              commandId: "workspace.toggleFileBrowser",
+              source: { button: { nodeId: 6 } },
+              arguments: [],
+            },
+          },
+        },
+      },
+      {
+        id: 7,
+        kind: { flex: { direction: "row", children: [3, 6] } },
+      },
+      {
+        id: 5,
+        kind: {
+          list: {
+            items: [],
+            filter: { placeholder: "Filter files", shortcut: "/" },
+          },
+        },
+      },
+      {
+        id: 4,
+        kind: {
+          editorView: { binding: { documentId: 1, expectedVersion: 2 } },
+        },
+      },
+    ],
+  });
+  render(
+    <SduiRenderer
+      state={state}
+      send={send}
+      editorSlot={<div data-testid="editor-slot">editor</div>}
+    />,
+  );
+  const toggle = screen.getByRole("button", { name: "Hide file browser" });
+  expect(toggle.querySelector("svg")).toHaveAttribute(
+    "data-icon-name",
+    "disclosure.right",
+  );
+  expect(toggle.textContent).not.toContain("Hide file browser");
+  fireEvent.click(toggle);
+  expect(JSON.parse(String(send.mock.calls[0]?.[0]))).toMatchObject({
+    family: "sduiAction",
+    payload: {
+      uiVersion: 6,
+      intent: { commandId: "workspace.toggleFileBrowser" },
+    },
+  });
+});
+
+it("renders the hidden file-browser state as a show indicator", () => {
+  const send = vi.fn<(payload: string) => Promise<void>>(async () => undefined);
+  const state = installSduiTree({
+    uiVersion: 6,
+    rootId: 1,
+    nodes: [
+      { id: 1, kind: { flex: { direction: "row", children: [8, 2] } } },
+      {
+        id: 8,
+        kind: {
+          button: {
+            label: "Show file browser",
+            icon: "disclosure.right",
+            action: {
+              commandId: "workspace.toggleFileBrowser",
+              source: { button: { nodeId: 8 } },
+              arguments: [],
+            },
+          },
+        },
+      },
+      {
+        id: 2,
+        kind: {
+          editorView: { binding: { documentId: 1, expectedVersion: 2 } },
+        },
+      },
+    ],
+  });
+  render(
+    <SduiRenderer state={state} send={send} editorSlot={<div>editor</div>} />,
+  );
+  expect(
+    screen.getByRole("button", { name: "Show file browser" }),
+  ).toBeVisible();
+});
 
 it("renders a bounded SDUI tree with editor slot and typed actions", () => {
   const send = vi.fn<(payload: string) => Promise<void>>(async () => undefined);

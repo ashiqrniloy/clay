@@ -90,6 +90,7 @@ export function InspectorTabs({
         activeId={activeTab}
         onActivate={onActivate}
         ariaLabel="Agent detail"
+        overflowNavigation
         actions={
           <ClayIconButton
             icon="preview.toggle"

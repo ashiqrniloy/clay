@@ -54,7 +54,7 @@ Every key verified to exist in **both** regular and duotone assets at v2.0.8 (HT
 | `status.error` | `x-circle` | `x-circle-duotone` | git/status stale/error labels (T9) |
 | `preview.toggle` | `eye` | `eye-duotone` | markdown preview toggle (T9) |
 
-Package-specific meanings continue to use the declaring package's prefix (`<package>.<key>`); the 21 core keys are reserved to core.
+Package-specific meanings continue to use the declaring package's prefix (`<package>.<key>`); the 22 core keys are reserved to core.
 
 ## 4. Bounded vector schema (finalized)
 

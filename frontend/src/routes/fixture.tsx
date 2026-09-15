@@ -247,12 +247,30 @@ function WorkspaceSidebarFixture() {
               },
               {
                 id: 2,
-                kind: { stack: { children: [3, 5] } },
+                kind: { stack: { children: [7, 5] } },
                 size: "dimension.sidebar.default",
               },
               {
                 id: 3,
                 kind: { label: { text: "Workspace · clay", icon: null } },
+              },
+              {
+                id: 6,
+                kind: {
+                  button: {
+                    label: "Hide file browser",
+                    icon: "disclosure.right",
+                    action: {
+                      commandId: "workspace.toggleFileBrowser",
+                      source: { button: { nodeId: 6 } },
+                      arguments: [],
+                    },
+                  },
+                },
+              },
+              {
+                id: 7,
+                kind: { flex: { direction: "row", children: [3, 6] } },
               },
               {
                 id: 5,
@@ -717,8 +735,26 @@ function PackageUiFixture({
           { id: 1, kind: { flex: { direction: "row", children: [2, 4] } } },
           // The server's file-browser region is a flat stack, not a panel: the
           // host's left slot owns the region's paint (src/shell/file_browser.rs).
-          { id: 2, kind: { stack: { children: [3, 5] } } },
+          { id: 2, kind: { stack: { children: [7, 5] } } },
           { id: 3, kind: { label: { text: "Workspace · clay", icon: null } } },
+          {
+            id: 6,
+            kind: {
+              button: {
+                label: "Hide file browser",
+                icon: "disclosure.right",
+                action: {
+                  commandId: "workspace.toggleFileBrowser",
+                  source: { button: { nodeId: 6 } },
+                  arguments: [],
+                },
+              },
+            },
+          },
+          {
+            id: 7,
+            kind: { flex: { direction: "row", children: [3, 6] } },
+          },
           {
             id: 4,
             kind: {

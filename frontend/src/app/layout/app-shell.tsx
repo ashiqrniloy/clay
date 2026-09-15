@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router";
 
-import { ClayButton, ClayKbd } from "../../components";
+import { ClayIconButton, ClayKbd } from "../../components";
 import { workspace } from "../../shell/workspace-singleton";
 import { tabTitle } from "../../shell/tab-store";
 import { workspaceRail } from "../../shell/layout-state";
@@ -127,59 +127,44 @@ export function AppShell({
     <div className={styles.shell}>
       <header className={styles.header} data-clay-ds="shell.header">
         <span className={styles.brand}>Clay</span>
-        <TabBar
-          tabs={tabs}
-          activeId={activeTabId}
-          onActivate={(id) => {
-            if (onActivateTab) {
-              onActivateTab(id);
-              return;
-            }
-            const clientId = Number(id);
-            if (Number.isFinite(clientId)) void workspace.activate(clientId);
-          }}
-          onClose={(id) => {
-            const clientId = Number(id);
-            if (Number.isFinite(clientId)) workspace.requestClose(clientId);
-          }}
-          onNew={injectedTabs ? undefined : () => void workspace.newTab()}
-        />
-        {injectedTabs ? null : (
-          <ViewSwitcher
-            view={activeTab?.view ?? "workspace"}
-            hasWorkspace={Boolean(activeTab?.workspaceRoot)}
-            hasAgent={Boolean(activeTab?.agent)}
-            onSelect={(view) => workspace.setView(view)}
+        <div className={styles.tabs}>
+          <TabBar
+            tabs={tabs}
+            activeId={activeTabId}
+            onActivate={(id) => {
+              if (onActivateTab) {
+                onActivateTab(id);
+                return;
+              }
+              const clientId = Number(id);
+              if (Number.isFinite(clientId)) void workspace.activate(clientId);
+            }}
+            onClose={(id) => {
+              const clientId = Number(id);
+              if (Number.isFinite(clientId)) workspace.requestClose(clientId);
+            }}
+            onNew={injectedTabs ? undefined : () => void workspace.newTab()}
           />
-        )}
+        </div>
         <span className={styles.titlebarSpacer} />
         <nav className={styles.actions} aria-label="Application controls">
-          <ClayButton
+          <ClayIconButton
+            icon="control-center.open"
+            label="Control Center"
+            shortcut="Ctrl+X Ctrl+P"
             variant="muted"
-            aria-keyshortcuts="Control+X Control+P"
             onPress={() =>
               workspace.dispatchServerCommand("controlCenter.open")
             }
-          >
-            Palette
-          </ClayButton>
-          <ClayButton
-            variant="muted"
-            aria-keyshortcuts="Control+B"
-            onPress={() =>
-              workspace.dispatchServerCommand("workspace.toggleFileBrowser")
-            }
-          >
-            Files
-          </ClayButton>
-          <ClayButton
-            variant="muted"
-            aria-keyshortcuts="Control+I"
-            aria-pressed={railVisible}
-            onPress={() => workspaceRail.toggle()}
-          >
-            {railVisible ? "Hide outline" : "Outline"}
-          </ClayButton>
+          />
+          {injectedTabs ? null : (
+            <ViewSwitcher
+              view={activeTab?.view ?? "workspace"}
+              hasWorkspace={Boolean(activeTab?.workspaceRoot)}
+              hasAgent={Boolean(activeTab?.agent)}
+              onSelect={(view) => workspace.setView(view)}
+            />
+          )}
         </nav>
       </header>
       <main className={styles.workingArea} aria-label="Clay workspace">

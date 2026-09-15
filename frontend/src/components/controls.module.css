@@ -101,6 +101,14 @@
   min-height: 0;
 }
 
+/* The file browser's listing must scroll inside the fixed sidebar instead of
+ * pushing rows below the fold with no way to reach them. */
+.listFiltered > .listBox {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .listTools {
   display: flex;
   align-items: center;

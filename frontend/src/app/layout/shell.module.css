@@ -52,6 +52,16 @@
   background: var(--clay-accent-primary);
 }
 
+/* The window tabs hug their content — the strip and its new-tab button stay
+ * beside the brand instead of stretching into the middle of the bar; the
+ * spacer after them carries the remaining width. */
+.tabs {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .titlebarSpacer {
   flex: 1;
 }
@@ -123,10 +133,12 @@
   cursor: default;
 }
 
+/* Right-aligned window actions: the Control Center trigger, then the tab's
+ * view switcher at the bar's edge. */
 .actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--clay-spacing-xxs, 4px);
   flex: none;
 }
 

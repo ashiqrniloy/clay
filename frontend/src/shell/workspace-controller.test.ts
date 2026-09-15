@@ -782,11 +782,8 @@ describe("workspace controller", () => {
 
   it("executes only routed client workflow commands", async () => {
     const dialogs: string[] = [];
-    const sent: string[] = [];
     const ws = createWorkspace({
-      send: async (payload) => {
-        sent.push(payload);
-      },
+      send: async () => undefined,
       openFileDialog: async () => {
         dialogs.push("file");
         return true;
@@ -809,6 +806,26 @@ describe("workspace controller", () => {
     expect(dialogs).toEqual(["file"]);
     command("settings.close");
     expect(ws.active()?.settingsOpen).toBe(false);
+
+    // Shell commands must run before an active editor gets a chance to forward
+    // unknown client commands back to the server. Otherwise the Control Centre
+    // response for Coding Agent loops as a new command intent instead of
+    // switching this tab's view.
+    const runtime = ws.active();
+    const pane = runtime?.panes.get(runtime.tree.activePaneId);
+    if (!runtime || !pane) throw new Error("active pane missing");
+    let editorCommands = 0;
+    pane.session.setClientCommandHandler(() => {
+      editorCommands += 1;
+      return true;
+    });
+    command("coding-agent.profile");
+    expect(runtime.agentMounted).toBe(true);
+    expect(ws.getSnapshot().tabs[0]?.view).toBe("agent");
+    command("coding-agent.close");
+    expect(ws.getSnapshot().tabs[0]?.view).toBe("workspace");
+    expect(editorCommands).toBe(0);
+
     command("documents.clientOpenFileDialog.evil");
     await Promise.resolve();
     expect(dialogs).toEqual(["file"]);

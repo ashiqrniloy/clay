@@ -399,7 +399,7 @@ case — a host slot with no shipped recipe — is marked `†` in
   `surface.hover`, `text.primary`; `.item.selected` — `accent.primary` @0.15 fill,
   `textColor: accent.primary`; `.item.disabled` — `text.disabled`, no fill. One
   family: the switcher is a segmented control, so it declares no second name. In
-  tab chrome it sits in the titlebar, never inside a view (§12).
+  tab chrome it sits at the titlebar's trailing edge, never inside a view (§12).
 - `agentPicker.trigger.rest` — transparent, radius 8, `textColor: inherit` (it is
   the view's title); `.trigger.hover` — `surface.hover`; `.trigger.expanded` —
   `accent.primary` @0.15 fill, `textColor: accent.primary`; the chevron is
@@ -492,8 +492,10 @@ case — a host slot with no shipped recipe — is marked `†` in
 **The tab is the unit.** One tab is one workspace (a folder) plus one agent, and
 it holds exactly two views: the **workspace view** (the folder — editor today,
 other viewers as they exist) and the **agent view** (the agent attached to the
-tab). The switcher between them is tab chrome, in the titlebar next to the tab it
-belongs to — never inside a view it switches between. A tab with no agent yet
+tab). The switcher between them is tab chrome: it sits at the titlebar's trailing
+edge, right-aligned beside the tab strip, with the Control Center trigger
+immediately to its left — never inside a view it switches between. A tab with no
+agent yet
 shows the agent view's picker; a tab with no folder shows the workspace view's
 prompt. Tab titles are the folder's basename with the full path in the tooltip and
 a hairline marker when an agent is attached. `⌘T` opens a new tab on the launcher,
@@ -791,12 +793,15 @@ required**, and no schema extension was needed:
   and DOM-continuity behaviour.
 - **Shell and Workspace composition (shipped, plan 118's shell/Workspace task):**
   the window is three rows — a 40px titlebar (mono, tracked `Clay` mark with the
-  accent dot, pill tabs, action row), the working area, and a 28px status bar
+  accent dot, pill tabs with their new-tab button, and the right-aligned action
+  group: the Control Center icon trigger then the tab's view switcher), the
+  working area, and a 28px status bar
   (mono, tabular figures, `text.muted`, hairline top, workspace · document ·
   connection and one hint row whose items run the commands they name). The
   Workspace view is one grid: the flat file-browser region (the SDUI tree emits a
-  stack, not a panel — the host's left slot paints the region), the document
-  column at 92ch with its gutter, and the optional right rail (`⌘I`; document
+  stack, not a panel — the host's left slot paints the region), the full-bleed
+  document column (no centred measure, no line-number gutter), and the optional
+  right rail (`⌘I`; document
   facts + outline, or a right-hand drawer below 1000px). The document bar holds
   identity, state and every document action in one row; the relative-path field
   is an on-demand strip, not a permanent control. Consumed recipes:

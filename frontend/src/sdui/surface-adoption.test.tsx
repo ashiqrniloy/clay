@@ -245,14 +245,13 @@ describe("editor and package-surface invariants (plan 118 task 17)", () => {
     expect(editorCss).not.toMatch(/border-radius:\s*\d/);
   });
 
-  it("keeps the gutter divideless and the document bar borderless", () => {
-    // Both are white space in the approved composition: the gutter's recipe has
-    // no border, and the chrome recipe declares `borderStyle: none`.
+  it("keeps the document bar borderless with no line-number gutter", () => {
+    // Full-bleed text: no gutter is painted, so the gutter recipe stays
+    // declared but unconsumed while the chrome recipe declares
+    // `borderStyle: none`.
     expect(recipes["editor.default.gutter.rest"]?.borderWidth).toBe(0);
     expect(recipes["editor.default.chrome.rest"]?.borderWidth).toBe(0);
-    expect(editorCss).toContain(
-      "--clay-ds-editor-default-gutter-rest-border-width",
-    );
+    expect(editorCss).not.toContain("cm-gutters");
     expect(editorCss).not.toMatch(/\.chrome\s*{[^}]*border-bottom/);
   });
 

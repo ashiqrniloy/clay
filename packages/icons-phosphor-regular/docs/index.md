@@ -13,12 +13,13 @@ clay.setIconPack("@clay/icons-phosphor-regular");
 
 The bundled host fallback is generated from the Regular pack; this pack only takes effect through explicit selection, which never changes theme, design-system, or typography state.
 
-## Semantic keys (21)
+## Semantic keys (22)
 
 | Key | Paths |
 |-----|-------|
 | `action.close` | 1 |
 | `action.new` | 1 |
+| `control-center.open` | 1 |
 | `document.save` | 1 |
 | `document.reload` | 1 |
 | `document.open` | 1 |

@@ -1,7 +1,7 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Tabs, TabList, Tab, TabPanel } from "react-aria-components";
 
-import { ClayButton } from "./button";
+import { ClayButton, ClayIconButton } from "./button";
 import { ClayIcon } from "./icon";
 import { ClayText } from "./text";
 import { recipeAttributes } from "./recipe-attributes";
@@ -35,6 +35,8 @@ export interface ClayTabStripProps {
   className?: string;
   style?: CSSProperties;
   actions?: ReactNode;
+  /** Fixed chevron that pages hidden tab labels without exposing a scrollbar. */
+  overflowNavigation?: boolean;
   /** `panel` (default) is a standalone tab bar with its own inner hairline;
    *  `inline` sits inside chrome that already draws the boundary — the shell's
    *  titlebar — so the strip adds no second line (DESIGN.md §14.4). */
@@ -59,9 +61,39 @@ export function ClayTabStrip({
   className,
   style,
   actions,
+  overflowNavigation = false,
   variant = "panel",
 }: ClayTabStripProps) {
   const hasPanels = tabs.some((tab) => tab.content !== undefined);
+  const tabListRef = useRef<HTMLDivElement | null>(null);
+  const [showPreviousTabs, setShowPreviousTabs] = useState(false);
+  const pageTabs = () => {
+    const tabList = tabListRef.current;
+    if (!tabList) return;
+    if (showPreviousTabs) tabList.scrollTo({ left: 0, behavior: "smooth" });
+    else tabList.scrollBy({ left: tabList.clientWidth, behavior: "smooth" });
+    setShowPreviousTabs((current) => !current);
+  };
+  const endActions = (
+    <>
+      {overflowNavigation ? (
+        <span className={showPreviousTabs ? styles.overflowBack : undefined}>
+          <ClayIconButton
+            icon="disclosure.right"
+            label={`${showPreviousTabs ? "Show previous" : "Show more"} ${ariaLabel.toLowerCase()} tabs`}
+            variant="muted"
+            onPress={pageTabs}
+          />
+        </span>
+      ) : null}
+      {actions}
+      {onNew ? (
+        <ClayButton variant="muted" onPress={onNew} aria-label="New tab">
+          <ClayIcon name="action.new" />
+        </ClayButton>
+      ) : null}
+    </>
+  );
 
   if (tabs.length === 0) {
     return (
@@ -107,6 +139,7 @@ export function ClayTabStrip({
         }`}
       >
         <TabList
+          ref={tabListRef}
           aria-label={ariaLabel}
           className={styles.tabStrip}
           {...recipeAttributes("tabList", "strip")}
@@ -151,13 +184,11 @@ export function ClayTabStrip({
             </Tab>
           ))}
         </TabList>
-        {actions}
-        {onNew ? (
-          <ClayButton variant="muted" onPress={onNew} aria-label="New tab">
-            <ClayIcon name="action.new" />
-          </ClayButton>
-        ) : null}
+        {!hasPanels && endActions}
       </div>
+      {hasPanels && (overflowNavigation || actions || onNew) ? (
+        <div className={styles.actions}>{endActions}</div>
+      ) : null}
       {hasPanels &&
         tabs.map((tab) =>
           tab.content !== undefined ? (

@@ -55,9 +55,9 @@ Selection persists as the `iconPack` preference and is re-validated at every com
 
 ## Semantic keys (core set)
 
-`action.close`, `action.new`, `document.save`, `document.reload`, `document.open`, `message.send`, `generation.stop`, `navigation.back`, `navigation.up`, `disclosure.right`, `disclosure.down`, `file.folder`, `file.file`, `file.symlink`, `session.resume`, `session.search`, `git.branch`, `status.success`, `status.warning`, `status.error`, `preview.toggle`.
+`action.close`, `action.new`, `control-center.open`, `document.save`, `document.reload`, `document.open`, `message.send`, `generation.stop`, `navigation.back`, `navigation.up`, `disclosure.right`, `disclosure.down`, `file.folder`, `file.file`, `file.symlink`, `session.resume`, `session.search`, `git.branch`, `status.success`, `status.warning`, `status.error`, `preview.toggle`.
 
-First-party packs ship all 21 keys; third-party packs may ship any subset of their own namespace keys. Host UI requests semantic names, never upstream library names, so a pack swap never changes call sites.
+First-party packs ship all 22 keys; third-party packs may ship any subset of their own namespace keys. Host UI requests semantic names, never upstream library names, so a pack swap never changes call sites.
 
 ## Rendering and accessibility
 

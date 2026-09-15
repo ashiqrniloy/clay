@@ -54,7 +54,6 @@ export function dispatchClientCommand(
   commandId: string,
 ) {
   const activePane = runtime.panes.get(runtime.tree.activePaneId);
-  if (activePane?.session.runClientCommand(commandId)) return;
   const direct: Record<string, () => void> = {
     "shell.clientSplitPaneVertical": () =>
       ctx.setTree(runtime, splitPane(runtime.tree, "horizontal")),
@@ -147,6 +146,11 @@ export function dispatchClientCommand(
     direct[commandId]();
     return;
   }
+  // These requests have already made a server round trip. Let only commands
+  // outside the shell's fixed allow-list reach the active editor; otherwise
+  // `coding-agent.profile` is sent back as a fresh intent and never switches
+  // the tab view.
+  if (activePane?.session.runClientCommand(commandId)) return;
   const snapshot = ctx.tabs.get();
   const index = snapshot.tabs.findIndex(
     (tab) => tab.clientId === runtime.clientId,

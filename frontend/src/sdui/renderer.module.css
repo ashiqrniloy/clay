@@ -17,6 +17,12 @@
   flex-direction: row;
 }
 
+/* A flex nested inside another laid-out row (the sidebar title line) sizes to
+ * its own line; a nested `.row` must not re-claim the root's full height. */
+.row .row {
+  height: auto;
+}
+
 .row > .panel {
   flex: 0 0 var(--clay-dimension-sidebar-default, 244px);
 }
@@ -37,6 +43,48 @@
 .row > :not(.panel) {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Sidebar title line: workspace name left, `>` hide indicator right. The
+ * title row reuses the nested `.row` kind, so it must opt out of the root
+ * row's full-height claim and its children's flex share: its own children
+ * are set to no-grow inside the head, and the hidden-state `<` indicator
+ * opts out of the root `.row` rule the same way. */
+.sidebarHead {
+  height: auto;
+  flex: none;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.sidebarHead > * {
+  flex: none;
+}
+
+.sidebarHead > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Long `Workspace · name · nested/dir` titles share this line with the `>`
+   * indicator, so they truncate instead of wrapping the head onto many rows. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapseIndicator,
+.expandIndicator {
+  display: inline-flex;
+}
+
+.row > .collapseIndicator,
+.row > .expandIndicator {
+  flex: none;
+}
+
+/* `<` reads as pointing at the hidden region only with the shared glyph
+ * mirrored; the hide `>` keeps the catalogue orientation. */
+.expandIndicator svg {
+  transform: scaleX(-1);
 }
 
 .column,

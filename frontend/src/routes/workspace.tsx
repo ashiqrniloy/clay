@@ -30,14 +30,17 @@ export interface WorkspaceRouteProps {
 export function WorkspaceView({
   session,
   children,
+  showRail = true,
 }: {
   session: DocumentSession | null;
   children: ReactNode;
+  showRail?: boolean;
 }) {
-  const railVisible = useSyncExternalStore(
+  const railEnabled = useSyncExternalStore(
     workspaceRail.subscribe,
     workspaceRail.isVisible,
   );
+  const railVisible = showRail && railEnabled;
   return (
     <div
       className={styles.view}
@@ -58,13 +61,15 @@ export function WorkspaceRoute({
 }: WorkspaceRouteProps) {
   const live = useSessionConnection();
   const connection = injected ?? live;
-  // The rail describes the active pane's document, so it follows the tab and
-  // pane focus, not the route.
-  useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
+  // The rail describes the active workspace pane, never the agent view.
+  const tabs = useSyncExternalStore(workspace.subscribe, workspace.getSnapshot);
   useShellChords(workspace, connection.phase === "ready");
-  const activeTab = workspace.active();
+  const activeRuntime = workspace.active();
+  const activeTab = tabs.tabs.find(
+    (tab) => tab.clientId === activeRuntime?.clientId,
+  );
   const railSession =
-    activeTab?.panes.get(activeTab.tree.activePaneId)?.session ?? null;
+    activeRuntime?.panes.get(activeRuntime.tree.activePaneId)?.session ?? null;
 
   if (connection.phase === "disconnected") {
     return (
@@ -88,7 +93,10 @@ export function WorkspaceRoute({
   }
 
   return (
-    <WorkspaceView session={railSession}>
+    <WorkspaceView
+      session={railSession}
+      showRail={activeTab?.view !== "agent"}
+    >
       <Suspense
         fallback={
           <div className={`${styles.workspace} ${styles.stack}`} role="status">

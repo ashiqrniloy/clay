@@ -382,12 +382,6 @@
     --clay-accent-primary
   );
   --clay-ds-editor-default-find-match-rest-background-opacity: 0.15;
-  --clay-ds-editor-default-gutter-rest-background-color: transparent;
-  --clay-ds-editor-default-gutter-rest-border-color: transparent;
-  --clay-ds-editor-default-gutter-rest-border-style: none;
-  --clay-ds-editor-default-gutter-rest-border-width: 0px;
-  --clay-ds-editor-default-gutter-rest-padding: var(--clay-spacing-xxs);
-  --clay-ds-editor-default-gutter-rest-text-color: var(--clay-text-muted);
   --clay-ds-editor-default-matching-bracket-rest-background-color: transparent;
   --clay-ds-editor-default-matching-bracket-rest-border-color: var(
     --clay-accent-primary

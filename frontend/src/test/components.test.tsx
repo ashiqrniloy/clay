@@ -515,6 +515,39 @@ describe("ClayTabStrip catalog primitive and unification", () => {
     expect(screen.queryByText("General Options")).not.toBeInTheDocument();
   });
 
+  it("pages overflowing panel tabs through a fixed chevron", async () => {
+    const user = userEvent.setup();
+    render(
+      <ClayTabStrip
+        ariaLabel="Agent detail"
+        overflowNavigation
+        tabs={[
+          { id: "files", label: "Files", content: <div>Files</div> },
+          { id: "settings", label: "Settings", content: <div>Settings</div> },
+        ]}
+      />,
+    );
+
+    const tablist = screen.getByRole("tablist", { name: "Agent detail" });
+    const scrollBy = vi.fn();
+    const scrollTo = vi.fn();
+    Object.defineProperties(tablist, {
+      clientWidth: { configurable: true, value: 120 },
+      scrollBy: { configurable: true, value: scrollBy },
+      scrollTo: { configurable: true, value: scrollTo },
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Show more agent detail tabs" }),
+    );
+    expect(scrollBy).toHaveBeenCalledWith({ left: 120, behavior: "smooth" });
+
+    await user.click(
+      screen.getByRole("button", { name: "Show previous agent detail tabs" }),
+    );
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: "smooth" });
+  });
+
   it("proves shell TabBar delegates directly to the ClayTabStrip catalog primitive (single source)", () => {
     expect(TabBar).toBeDefined();
     expect(ClayTabBar).toBe(ClayTabStrip);

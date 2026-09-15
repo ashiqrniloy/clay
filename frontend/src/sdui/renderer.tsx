@@ -3,6 +3,7 @@ import { Fragment, type ReactNode } from "react";
 import {
   ClayButton,
   ClayIcon,
+  ClayIconButton,
   ClayList,
   ClayText,
   recipeAttributes,
@@ -13,6 +14,14 @@ import type { SduiActionIntent } from "./types";
 import type { SduiState } from "./state";
 
 import styles from "./renderer.module.css";
+
+// File-browser visibility affordance: the server's toggle buttons keep honest
+// labels ("Show/Hide file browser"), so the renderer recognizes the pair by
+// label and paints them as the `>`/`<` indicator instead of a text button.
+const FILE_BROWSER_TOGGLE_LABELS = new Set([
+  "Show file browser",
+  "Hide file browser",
+]);
 
 export function SduiRenderer({
   state,
@@ -64,6 +73,27 @@ export function SduiRenderer({
       );
     }
     if ("button" in kind) {
+      // A labeled icon action (the file browser's hide/show indicator) is
+      // an icon button: no text glyph, the `>`/`<` tells the direction.
+      if (FILE_BROWSER_TOGGLE_LABELS.has(kind.button.label)) {
+        return (
+          <span
+            className={
+              kind.button.label.startsWith("Show")
+                ? styles.expandIndicator
+                : styles.collapseIndicator
+            }
+          >
+            <ClayIconButton
+              icon="disclosure.right"
+              label={kind.button.label}
+              shortcut="Ctrl+B"
+              variant="muted"
+              onPress={() => dispatch(kind.button.action)}
+            />
+          </span>
+        );
+      }
       return (
         <ClayButton onPress={() => dispatch(kind.button.action)}>
           {kind.button.icon && <ClayIcon name={kind.button.icon} />}
@@ -107,8 +137,23 @@ export function SduiRenderer({
           : kind.flex.direction === "column"
             ? styles.column
             : styles.flexDefault;
+      // The sidebar title line keeps the workspace name and its hide
+      // indicator on one row instead of stacking them.
+      const isSidebarHead =
+        kind.flex.direction === "row" &&
+        kind.flex.children.some((child) => {
+          const node = state.nodes.get(child);
+          return (
+            node != null &&
+            "button" in node.kind &&
+            FILE_BROWSER_TOGGLE_LABELS.has(node.kind.button.label)
+          );
+        });
       return (
-        <div className={direction} {...recipeAttributes("flex", "root")}>
+        <div
+          className={`${direction} ${isSidebarHead ? styles.sidebarHead : ""}`.trim()}
+          {...recipeAttributes("flex", "root")}
+        >
           {children(kind.flex.children)}
         </div>
       );

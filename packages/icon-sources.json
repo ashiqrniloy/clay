@@ -10,6 +10,7 @@
   "semanticKeys": {
     "action.close": "x",
     "action.new": "plus",
+    "control-center.open": "command",
     "document.save": "floppy-disk",
     "document.reload": "arrows-clockwise",
     "document.open": "folder-open",
@@ -34,6 +35,8 @@
     "regular/x.svg": "7397b15e1fa66eaf6ff9b59fe91d483cb5c3bcf75b2fe052097ab6f0593b513a",
     "duotone/x-duotone.svg": "cd065788e0d130a75003663463fa980f9b3c8312ae7c655e4e7112b65d4d93ee",
     "regular/plus.svg": "d688feb9dd2e41c1721d6906a05a2a42e18cd774762fe706d72b2bdfd91cddc4",
+    "regular/command.svg": "50d8e0a378d091226285385d8e9f692a8238487273b9cc64e2ef28e2b34f2495",
+    "duotone/command-duotone.svg": "06b45d74f9ad9fa76f8d859ce7de762d01613676517cfaad251e5c01af8dee05",
     "duotone/plus-duotone.svg": "6260d0b5a21ffb6457adf51711546120a574a408a8ab3fc017513d6e31ca6c08",
     "regular/floppy-disk.svg": "23b8aaad26fc02886eecb58ef755eaefa7a1beb8c14d66a7d2e2bd11884fa59a",
     "duotone/floppy-disk-duotone.svg": "ac2e0c35a248123ba2ee2cafdd18dabd84cd792a9d348e967bf4ee286a2df148",

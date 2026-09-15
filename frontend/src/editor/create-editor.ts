@@ -63,7 +63,8 @@ export const clayEditorTheme = EditorView.theme({
     // Native WebKitGTK caret lags and leaves a ghost bar on backspace.
     // drawSelection paints .cm-cursor; keep the native caret invisible.
     caretColor: "transparent",
-    padding: "var(--clay-spacing-sm, 12px)",
+    // Full-bleed text: no inset padding on either side.
+    padding: "0",
   },
   ".cm-cursor, .cm-dropCursor": {
     borderLeftColor: "var(--clay-accent-primary)",

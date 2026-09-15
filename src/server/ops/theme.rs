@@ -908,7 +908,7 @@ mod tests {
         let regular = apply_icon_pack(&clay_state, "@clay/icons-phosphor-regular")
             .expect("bundled Regular selects");
         assert_eq!(regular.specifier, "@clay/icons-phosphor-regular");
-        assert_eq!(regular.icons.len(), 21);
+        assert_eq!(regular.icons.len(), 22);
         assert_eq!(regular.schema_version, 1);
         assert!(clay_state.explicit_icon_pack_active());
 
@@ -931,7 +931,7 @@ mod tests {
         // shade layer at opacity 0.2).
         let duotone = apply_icon_pack(&clay_state, "@clay/icons-phosphor-duotone")
             .expect("bundled Duotone selects");
-        assert_eq!(duotone.icons.len(), 21);
+        assert_eq!(duotone.icons.len(), 22);
         assert!(
             duotone.icons["action.close"].paths.len() > regular.icons["action.close"].paths.len()
         );

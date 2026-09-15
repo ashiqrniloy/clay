@@ -5,9 +5,7 @@ import {
   Decoration,
   EditorView,
   highlightActiveLine,
-  highlightActiveLineGutter,
   keymap,
-  lineNumbers,
   ViewPlugin,
 } from "@codemirror/view";
 
@@ -62,8 +60,8 @@ export function behaviorExtensions(
     manifestKeymaps(manifest, onCommand),
     fontAndWrap(manifest),
   ];
-  if (chrome.gutter)
-    extensions.push(lineNumbers(), highlightActiveLineGutter());
+  // No line-number gutter: document text is full-bleed from the pane edge.
+  // The manifest's gutter toggle is accepted and ignored.
   if (chrome.activeLine) extensions.push(highlightActiveLine());
   if (chrome.bracketMatch)
     extensions.push(bracketMatching(), keymap.of(foldKeymap));

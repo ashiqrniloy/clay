@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClayEditor } from "../editor/ClayEditor";
 import { createDocumentSession } from "../editor/sync/session";
+import { SduiRenderer } from "../sdui/renderer";
+import { installSduiTree } from "../sdui/state";
 import { workspaceRail } from "../shell/layout-state";
 import { WorkspaceView } from "../routes/workspace";
 import type { BootstrapDto } from "../bridge/types";
@@ -66,6 +68,86 @@ const readRepo = (relative: string) =>
   fs.readFileSync(path.join(repoRoot, relative), "utf8");
 
 describe("workspace composition (plan 118: shell and Workspace page)", () => {
+  it("keeps the file listing's rows in a scrolling box", () => {
+    const css = readRepo("frontend/src/components/controls.module.css");
+    expect(css).toMatch(
+      /\.listFiltered\s*>\s*\.listBox\s*\{[^}]*overflow-y:\s*auto/s,
+    );
+  });
+
+  // The path strip and the two alert rows above the canvas only exist in some
+  // states, so the canvas is pinned to the last row: auto-placement would drop
+  // it into an `auto` row and collapse the editor to its content height.
+  it("keeps the editor canvas filling the last host row", () => {
+    const css = readRepo("frontend/src/editor/editor.module.css");
+    expect(css).toMatch(
+      /\.host\s*\{[^}]*grid-template-rows:\s*auto auto auto minmax\(0,\s*1fr\)/s,
+    );
+    expect(css).toMatch(/\.column\s*\{[^}]*grid-row:\s*-2\s*\/\s*-1/s);
+  });
+
+  it("keeps the sidebar title row at one line, not a full-height row", () => {
+    const { container } = render(
+      <SduiRenderer
+        state={installSduiTree({
+          uiVersion: 6,
+          rootId: 1,
+          nodes: [
+            { id: 1, kind: { flex: { direction: "row", children: [2, 4] } } },
+            { id: 2, kind: { stack: { children: [7, 5] } } },
+            {
+              id: 3,
+              kind: { label: { text: "Workspace · clay", icon: null } },
+            },
+            {
+              id: 6,
+              kind: {
+                button: {
+                  label: "Hide file browser",
+                  icon: "disclosure.right",
+                  action: {
+                    commandId: "workspace.toggleFileBrowser",
+                    source: { button: { nodeId: 6 } },
+                    arguments: [],
+                  },
+                },
+              },
+            },
+            { id: 7, kind: { flex: { direction: "row", children: [3, 6] } } },
+            { id: 5, kind: { list: { items: [], filter: null } } },
+            {
+              id: 4,
+              kind: {
+                editorView: { binding: { documentId: 1, expectedVersion: 2 } },
+              },
+            },
+          ],
+        })}
+        send={async () => undefined}
+        editorSlot={<div>editor</div>}
+      />,
+    );
+    const head = container.querySelector("div[class*='sidebarHead']");
+    expect(head).not.toBeNull();
+    const css = readRepo("frontend/src/sdui/renderer.module.css");
+    // The head is a nested `.row`, so it must opt out of the root row's
+    // `height: 100%` claim — otherwise it takes ~a sidebar of rows.
+    expect(css).toMatch(/\.sidebarHead\s*\{[^}]*height:\s*auto/s);
+    expect(css).toMatch(/\.sidebarHead\s*\{[^}]*flex:\s*none/s);
+    // Its children must opt out of the generic row share the same way, so
+    // the label takes the line and the `>` keeps its fixed size.
+    expect(css).toMatch(/\.sidebarHead\s*>\s*\*\s*\{[^}]*flex:\s*none/s);
+    // Long `Workspace · name · nested/dir` titles truncate on the shared line
+    // instead of wrapping the head onto many rows (verified live: a long
+    // title keeps the head at one 32px line).
+    expect(css).toMatch(
+      /\.sidebarHead\s*>\s*:first-child\s*\{[^}]*white-space:\s*nowrap/s,
+    );
+    expect(css).toMatch(
+      /\.sidebarHead\s*>\s*:first-child\s*\{[^}]*text-overflow:\s*ellipsis/s,
+    );
+  });
+
   it("renders sidebar · editor · rail from real document metadata", () => {
     const active = session();
     render(
@@ -87,6 +169,21 @@ describe("workspace composition (plan 118: shell and Workspace page)", () => {
     expect(entries[1]?.textContent).toContain("01:15");
     expect(entries[1]?.textContent).toContain("outline-entry-one");
     expect(rail.querySelector("dl")).toHaveTextContent("3");
+  });
+
+  it("removes the workspace rail when the agent owns the right slot", () => {
+    const active = session();
+    render(
+      <WorkspaceView session={active} showRail={false}>
+        <ClayEditor session={active} />
+      </WorkspaceView>,
+    );
+
+    expect(screen.queryByTestId("workspace-rail")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-rail]")).toHaveAttribute(
+      "data-rail",
+      "collapsed",
+    );
   });
 
   it("toggles the rail without remounting the editor, from the rail and the shell", () => {
@@ -190,9 +287,17 @@ describe("workspace composition (plan 118: shell and Workspace page)", () => {
     const workspace = readRepo("frontend/src/routes/workspace.module.css");
     const editor = readRepo("frontend/src/editor/editor.module.css");
 
-    // Reading measure: the document column is 92ch and is centred.
-    expect(editor).toContain("max-width: calc(92ch + 4rem)");
-    expect(editor).toMatch(/\.column\s*{[^}]*justify-content: center/);
+    // Document canvas: full-bleed and left-aligned — no centred measure,
+    // no side gutters on the column or the CodeMirror content.
+    expect(editor).toMatch(/\.column\s*{[^}]*justify-content:\s*flex-start/s);
+    expect(editor).toMatch(/\.column\s*{[^}]*padding:\s*0/s);
+    expect(editor).not.toContain("92ch");
+    expect(
+      readRepo("frontend/src/editor/create-editor.ts").replace(
+        /caret-color[^,}]*,?/g,
+        "",
+      ),
+    ).not.toMatch(/\.cm-content[\s\S]{0,200}?padding/);
     // Rail width is host geometry with a token override, not a magic number.
     expect(workspace).toContain("--clay-dimension-rail-width, 340px");
     // Datum rows: micro-label tracking, mono values, list-family row geometry.

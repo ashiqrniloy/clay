@@ -10315,7 +10315,7 @@ async fn set_icon_pack_bundled_duotone_via_init_js() {
         .active_icon_pack
         .expect("active icon-pack snapshot emitted");
     assert_eq!(pack.specifier, "@clay/icons-phosphor-duotone");
-    assert_eq!(pack.icons.len(), 21);
+    assert_eq!(pack.icons.len(), 22);
     assert_eq!(pack.schema_version, 1);
     assert_eq!(
         pack.provenance.trust_domain,
@@ -10325,7 +10325,7 @@ async fn set_icon_pack_bundled_duotone_via_init_js() {
         result
             .op_records
             .iter()
-            .any(|record| record == "icons:@clay/icons-phosphor-duotone:21:v1"),
+            .any(|record| record == "icons:@clay/icons-phosphor-duotone:22:v1"),
         "setIconPack summary must reach init.js"
     );
 }
@@ -10830,12 +10830,12 @@ async fn plan112_load_then_select_recommended_path_activates_pack() {
         .active_icon_pack
         .expect("explicit selection emits an active icon-pack snapshot");
     assert_eq!(pack.specifier, "@clay/icons-phosphor-regular");
-    assert_eq!(pack.icons.len(), 21);
+    assert_eq!(pack.icons.len(), 22);
     assert!(
         result
             .op_records
             .iter()
-            .any(|record| record == "icons:@clay/icons-phosphor-regular:21:v1"),
+            .any(|record| record == "icons:@clay/icons-phosphor-regular:22:v1"),
         "load+select summary must reach configuration evaluation"
     );
 }
@@ -10881,7 +10881,7 @@ async fn plan112_both_packs_loaded_either_order_explicit_selection_wins() {
             format!("@clay/icons-phosphor-{selection}"),
             "load order must not influence the active pack"
         );
-        assert_eq!(pack.icons.len(), 21);
+        assert_eq!(pack.icons.len(), 22);
     }
 }
 
@@ -10903,7 +10903,7 @@ async fn plan112_modular_import_selection_and_unchanged_reload_behavior() {
         first
             .op_records
             .iter()
-            .any(|record| *record == "icons:@clay/icons-phosphor-duotone:21:v1"),
+            .any(|record| *record == "icons:@clay/icons-phosphor-duotone:22:v1"),
         "modular import summary must reach configuration evaluation"
     );
 

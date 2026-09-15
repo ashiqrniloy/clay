@@ -28,9 +28,10 @@ pub const MAX_ICON_REFERENCE_LEN: usize = 128;
 /// Core semantic keys reserved to first-party packs (Plan 112 task 2 review).
 /// Every key is verified to exist in both Phosphor Regular and Duotone assets
 /// at the pinned upstream release.
-pub const CORE_ICON_KEYS: [&str; 21] = [
+pub const CORE_ICON_KEYS: [&str; 22] = [
     "action.close",
     "action.new",
+    "control-center.open",
     "document.save",
     "document.reload",
     "document.open",

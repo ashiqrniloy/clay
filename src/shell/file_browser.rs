@@ -162,6 +162,8 @@ impl FileBrowserState {
         let root_id = SduiNodeId(1);
         let sidebar_id = SduiNodeId(2);
         let title_label_id = SduiNodeId(4);
+        let title_row_id = SduiNodeId(7);
+        let collapse_button_id = SduiNodeId(8);
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
 
@@ -180,6 +182,29 @@ impl FileBrowserState {
             SduiNodeKind::Label {
                 text: title,
                 icon: None,
+            },
+        );
+        // The sidebar's own hide control: a `>` indicator in the title row so
+        // the top bar owns no file-browser button. The row (not a plain
+        // label) is what the renderer paints as the title line.
+        let collapse_button = SduiNode::new(
+            collapse_button_id,
+            SduiNodeKind::Button {
+                label: "Hide file browser".to_string(),
+                icon: Some("disclosure.right".to_string()),
+                action: SduiActionIntent::command(
+                    TOGGLE_FILE_BROWSER_COMMAND_ID,
+                    SduiActionSource::Button {
+                        node_id: collapse_button_id,
+                    },
+                ),
+            },
+        );
+        let title_row = SduiNode::new(
+            title_row_id,
+            SduiNodeKind::Flex {
+                direction: SduiFlexDirection::Row,
+                children: vec![title_label_id, collapse_button_id],
             },
         );
 
@@ -212,7 +237,7 @@ impl FileBrowserState {
         let sidebar = SduiNode::sized(
             sidebar_id,
             SduiNodeKind::Stack {
-                children: vec![title_label_id, file_list_id],
+                children: vec![title_row_id, file_list_id],
             },
             "dimension.sidebar.default",
         );
@@ -238,19 +263,29 @@ impl FileBrowserState {
         SduiTree {
             ui_version: 1,
             root_id,
-            nodes: vec![root, sidebar, title_label, file_list, editor],
+            nodes: vec![
+                root,
+                sidebar,
+                title_label,
+                collapse_button,
+                title_row,
+                file_list,
+                editor,
+            ],
         }
     }
 
     /// Produce the inert editor-only tree used while the workspace pane is
     /// hidden. The editor binding keeps the existing document surface alive;
-    /// the absence of a panel lets the client reclaim the left slot.
+    /// a `<` show indicator at the row's leading edge re-opens the region,
+    /// since the top bar owns no file-browser button.
     pub(crate) fn hidden_sdui_tree(
         document_id: DocumentId,
         document_version: DocumentVersion,
     ) -> SduiTree {
         let root_id = SduiNodeId(1);
         let editor_id = SduiNodeId(2);
+        let expand_button_id = SduiNodeId(8);
         SduiTree {
             ui_version: 1,
             root_id,
@@ -259,7 +294,20 @@ impl FileBrowserState {
                     root_id,
                     SduiNodeKind::Flex {
                         direction: SduiFlexDirection::Row,
-                        children: vec![editor_id],
+                        children: vec![expand_button_id, editor_id],
+                    },
+                ),
+                SduiNode::new(
+                    expand_button_id,
+                    SduiNodeKind::Button {
+                        label: "Show file browser".to_string(),
+                        icon: Some("disclosure.right".to_string()),
+                        action: SduiActionIntent::command(
+                            TOGGLE_FILE_BROWSER_COMMAND_ID,
+                            SduiActionSource::Button {
+                                node_id: expand_button_id,
+                            },
+                        ),
                     },
                 ),
                 SduiNode::new(
@@ -512,8 +560,9 @@ mod tests {
         let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
 
         let tree = browser.to_sdui_tree(7u64, 3u64);
-        // The sidebar is one stack (label + listing) inside the row: no panel
-        // frames it, because the host's left slot owns the region's paint.
+        // The sidebar is one stack (title row + listing) inside the row: no
+        // panel frames it, because the host's left slot owns the region's
+        // paint.
         assert!(
             !tree
                 .nodes
@@ -544,7 +593,45 @@ mod tests {
                     .kind
             })
             .collect();
-        assert!(matches!(kinds.first(), Some(SduiNodeKind::Label { .. })));
+        // The title row keeps the workspace name and its `>` hide indicator
+        // on one line (a flex of label + toggle button); the listing follows.
+        let title_row = kinds
+            .first()
+            .and_then(|kind| match kind {
+                SduiNodeKind::Flex { children, .. } => Some(children.clone()),
+                _ => None,
+            })
+            .expect("sidebar title row");
+        assert_eq!(title_row.len(), 2);
+        let title_kinds: Vec<&SduiNodeKind> = title_row
+            .iter()
+            .map(|id| {
+                &tree
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == *id)
+                    .expect("title row child")
+                    .kind
+            })
+            .collect();
+        assert!(matches!(
+            title_kinds.first(),
+            Some(SduiNodeKind::Label { .. })
+        ));
+        let toggle = title_kinds
+            .get(1)
+            .and_then(|kind| match kind {
+                SduiNodeKind::Button {
+                    label,
+                    icon,
+                    action,
+                } => Some((label.as_str(), icon.as_deref(), action)),
+                _ => None,
+            })
+            .expect("sidebar hide indicator");
+        assert_eq!(toggle.0, "Hide file browser");
+        assert_eq!(toggle.1, Some("disclosure.right"));
+        assert_eq!(toggle.2.command_id, TOGGLE_FILE_BROWSER_COMMAND_ID);
         assert!(matches!(kinds.get(1), Some(SduiNodeKind::List { .. })));
         let filter = tree
             .nodes
@@ -601,13 +688,30 @@ mod tests {
     #[test]
     fn hidden_sdui_tree_keeps_editor_without_left_panel() {
         let tree = FileBrowserState::hidden_sdui_tree(7, 3);
-        assert_eq!(tree.nodes.len(), 2);
+        assert_eq!(tree.nodes.len(), 3);
         assert!(tree.nodes.iter().all(|node| {
             !matches!(
                 node.kind,
                 SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
             )
         }));
+        // The hidden state keeps a `<` show indicator at the row's leading
+        // edge (the top bar owns no file-browser button).
+        let expand = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Button {
+                    label,
+                    icon,
+                    action,
+                } => Some((label.as_str(), icon.as_deref(), action)),
+                _ => None,
+            })
+            .expect("sidebar show indicator");
+        assert_eq!(expand.0, "Show file browser");
+        assert_eq!(expand.1, Some("disclosure.right"));
+        assert_eq!(expand.2.command_id, TOGGLE_FILE_BROWSER_COMMAND_ID);
         assert!(tree.nodes.iter().any(|node| matches!(
             node.kind,
             SduiNodeKind::EditorView {

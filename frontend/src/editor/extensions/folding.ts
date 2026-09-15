@@ -4,8 +4,8 @@ import {
   type Extension,
   type StateEffect as StateEffectValue,
 } from "@codemirror/state";
-import { foldGutter, foldKeymap, foldService } from "@codemirror/language";
-import { keymap } from "@codemirror/view";
+import { foldKeymap, foldService } from "@codemirror/language";
+import { EditorView, keymap } from "@codemirror/view";
 
 import { positionIndex } from "../position-index";
 import { utf8ToUtf16Batch } from "../position-map";
@@ -47,7 +47,13 @@ const foldField = StateField.define<FoldItem[]>({
   },
 });
 
+// No fold gutter marker: document text is full-bleed from the pane edge.
+const noFoldGutter = EditorView.theme({
+  ".cm-gutters": { display: "none" },
+});
+
 export const foldingExtension: Extension = [
+  noFoldGutter,
   foldField,
   foldService.of((state, lineStart, lineEnd) => {
     const items = state.field(foldField);
@@ -74,7 +80,6 @@ export const foldingExtension: Extension = [
     }
     return candidate ? { from: lineEnd, to: candidate.to } : null;
   }),
-  foldGutter(),
   keymap.of(foldKeymap),
 ];
 

@@ -63,16 +63,19 @@ The design-system migration re-laid the host chrome instead of re-skinning it
 
 - **Shell** (`frontend/src/app/layout/shell.module.css`): a three-row grid —
   40px title bar, `1fr` working area, 28px status bar — with hairline zone
-  separators. The title bar hosts the brand, the tab strip and the
-  `Palette` / `Files` / `Outline` actions; `ClayTabStrip` gained an `inline`
+  separators. The title bar hosts the brand, the tab strip (tabs plus their
+  new-tab button, hugging the strip) and, right-aligned at the bar's edge, the
+  Control Center icon trigger and the tab's `Workspace | Agent` switcher;
+  `ClayTabStrip` gained an `inline`
   variant (no bottom border, centred items) so the strip does not double the
   title bar's own hairline. The status bar renders mono hints through `ClayKbd`
   and consumes the `statusItem` recipe.
 - **Workspace** (`frontend/src/routes/workspace.module.css`): a three-column
   grid — sidebar, editor, rail — where the sidebar is a **flush zone** (canvas
   fill, one leading hairline, no radius and no veil; the SDUI file browser no
-  longer wraps itself in a `Panel`), the editor column centres its text at a
-  92ch measure (`max-width: calc(92ch + 4rem)` on `.canvas`), and the rail is
+  longer wraps itself in a `Panel`), the editor column is **full-bleed and
+  left-aligned** (no centred measure, no line-number gutter, zero `.cm-content`
+  padding), and the rail is
   `340px` (`312px` at `≤1240px`, a fixed drawer at `≤1000px`).
   `WorkspaceRail.tsx` derives the outline from `## HH:MM — title` headings plus
   a facts list (file, revision, state, entries, words) and navigates through
