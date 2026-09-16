@@ -207,7 +207,7 @@ test("daemon process exits non-zero on unreadable vault", async () => {
   assert.equal(code, 1);
 });
 
-test("initialize reports prism 0.5.5", async () => {
+test("initialize reports prism 0.7.0", async () => {
   const dataDir = await tempDir();
   const main = join(dirname(fileURLToPath(import.meta.url)), "../main.js");
   const child = spawn(process.execPath, [main, "--data-dir", dataDir, "--mock"], { stdio: ["pipe", "pipe", "pipe"] });
@@ -224,7 +224,7 @@ test("initialize reports prism 0.5.5", async () => {
   const parsed = JSON.parse(firstLine) as { result: { ok: boolean; mock: boolean; prism: string } };
   assert.equal(parsed.result.ok, true);
   assert.equal(parsed.result.mock, true);
-  assert.equal(parsed.result.prism, "0.5.5");
+  assert.equal(parsed.result.prism, "0.7.0");
   child.kill("SIGTERM");
   await new Promise<void>((resolve) => child.on("exit", () => resolve()));
 });

@@ -77,7 +77,7 @@ impl std::fmt::Display for AgentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NodeMissing => {
-                f.write_str("Node >= 20 is required for clay-agent but was not found")
+                f.write_str("Node >= 22 is required for clay-agent but was not found")
             }
             Self::ScriptMissing => f.write_str("clay-agent script was not found"),
             Self::Spawn(error) => write!(f, "failed to spawn clay-agent: {error}"),
@@ -1873,6 +1873,14 @@ for line in sys.stdin:
             snapshot.session_id, "s1",
             "the pane mount starts the session"
         );
+        // The surface's own profile, not the daemon-level Chat default: a
+        // pane restored or reached through the view switcher never dispatched
+        // `coding-agent.profile`, and a Chat session would have neither the
+        // coding tools nor the MCP servers this snapshot carries.
+        assert_eq!(
+            snapshot.profile, "coding",
+            "the pane mount selects the coding surface profile"
+        );
         assert_eq!(snapshot.branch, "feature/pane-open");
         assert_eq!(
             snapshot.mcp_servers,
@@ -1887,6 +1895,14 @@ for line in sys.stdin:
         assert_eq!(snapshot.skills.len(), 1);
         assert_eq!(snapshot.skills[0].name, "repo-skill");
         assert_eq!(snapshot.commands.len(), 1);
+
+        // A deliberate profile choice is never overwritten by a later mount.
+        {
+            let mut book = host.inner.book.lock().await;
+            book.profile = "custom".into();
+        }
+        let again = host.tab_state_snapshot(1).await;
+        assert_eq!(again.profile, "custom");
     }
 
     #[cfg(unix)]
@@ -2467,19 +2483,115 @@ for line in sys.stdin:
         );
         assert_eq!(book.context_tokens.get("s1"), Some(&Some(12_300)));
 
-        // Unreported usage: no ContextTokens event (falls to the catch-all).
+        // Unreported usage: dropped (no occupancy to book, and unknown /
+        // unsupported event types never fabricate a Started).
         let mapped = map_event(
             &serde_json::json!({
                 "sessionId": "s1",
                 "event": { "type": "provider_turn_finished", "runId": "run-1" }
             }),
             &secrets,
+        );
+        assert!(mapped.is_none(), "unreported usage must be dropped");
+    }
+
+    #[test]
+    fn map_event_drops_unknown_event_types() {
+        // Prism 0.7 telemetry/lifecycle types and arbitrary unknowns must
+        // not reach the wire: a fabricated Started pins the run "streaming"
+        // forever (same class as the old agent_suspended bug). `subagent_*`
+        // events without a childId/delegationId stay dropped too (plan 122:
+        // only fully-identified subagent lifecycle maps, onto Tool).
+        let secrets = Vec::new();
+        for event_type in [
+            "attention_compiled",
+            "subagent_started",
+            "subagent_stopped",
+            "delegation_started",
+            "delegation_finished",
+            "delegation_child_event",
+            "not_a_real_event",
+        ] {
+            let mapped = map_event(
+                &serde_json::json!({
+                    "sessionId": "s1",
+                    "event": { "type": event_type, "runId": "run-1" }
+                }),
+                &secrets,
+            );
+            assert!(mapped.is_none(), "{event_type} must be dropped, not mapped");
+        }
+    }
+
+    #[test]
+    fn map_event_maps_subagent_lifecycle_onto_tool_rows() {
+        // Plan 122: `subagent_started`/`subagent_stopped` (the daemon's
+        // supervisor lifecycle bridge) reuse the Tool wire event — name is
+        // the child id, the delegation id pairs the rows, and the stopped
+        // status rides the output digest. No new AG-UI event type.
+        let secrets = vec!["s3cr3t".to_string()];
+        let started = map_event(
+            &serde_json::json!({
+                "sessionId": "s1",
+                "event": {
+                    "type": "subagent_started",
+                    "childId": "test",
+                    "delegationId": "supervisor-1",
+                    "depth": 1
+                }
+            }),
+            &secrets,
         )
-        .expect("turn event maps");
-        let AgentServerMessage::Event { event, .. } = mapped else {
-            panic!("event expected");
-        };
-        assert!(matches!(event, AgentWireEvent::Started { .. }));
+        .expect("identified subagent_started must map");
+        match started {
+            AgentServerMessage::Event {
+                event:
+                    AgentWireEvent::Tool {
+                        phase,
+                        name,
+                        tool_call_id,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(phase, AgentToolPhase::Started);
+                assert_eq!(name, "test");
+                assert_eq!(tool_call_id, "supervisor-1");
+            }
+            other => panic!("subagent_started must map to Tool, got {other:?}"),
+        }
+        let stopped = map_event(
+            &serde_json::json!({
+                "sessionId": "s1",
+                "event": {
+                    "type": "subagent_stopped",
+                    "childId": "validation",
+                    "delegationId": "supervisor-2",
+                    "status": "failed"
+                }
+            }),
+            &secrets,
+        )
+        .expect("identified subagent_stopped must map");
+        match stopped {
+            AgentServerMessage::Event {
+                event:
+                    AgentWireEvent::Tool {
+                        phase,
+                        name,
+                        tool_call_id,
+                        output_digest,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(phase, AgentToolPhase::Finished);
+                assert_eq!(name, "validation");
+                assert_eq!(tool_call_id, "supervisor-2");
+                assert_eq!(output_digest.as_deref(), Some("failed"));
+            }
+            other => panic!("subagent_stopped must map to Tool, got {other:?}"),
+        }
     }
 
     #[test]

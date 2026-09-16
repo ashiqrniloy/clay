@@ -1143,7 +1143,24 @@ impl AgentHost {
     /// Tab-resolved: this is the same session a prompt would create, so the
     /// daemon discovers the workspace's skills, connects its MCP servers, and
     /// the branch is read — all before the first message.
+    ///
+    /// Plan 108 task 8's surface rule also applies at this mount: showing the
+    /// coding surface makes its profile the book's active profile. A pane
+    /// restored by the layout, reached through the view switcher, or rendered
+    /// by the empty-tab landing never dispatched the launch command, so its
+    /// session used to run the daemon-level `Chat` default — no coding tools,
+    /// no MCP servers. Only an *empty* profile is filled: a deliberate
+    /// selection is never overwritten.
     pub(crate) async fn tab_state_snapshot(&self, tab: TabId) -> AgentSessionSnapshot {
+        let profile_empty = self.inner.book.lock().await.profile.is_empty();
+        if profile_empty {
+            self.select_picker(
+                crate::protocol::AgentPickerKind::Agent,
+                crate::server::command_execution::CODING_SURFACE_PROFILE_ID,
+                Some(tab),
+            )
+            .await;
+        }
         if let Some(session) = self.ensure_tab_session(tab).await {
             return self.snapshot_for(&session).await;
         }

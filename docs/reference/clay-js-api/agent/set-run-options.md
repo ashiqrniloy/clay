@@ -43,7 +43,7 @@ custom_properties:
   - name: compactAfterTokens
     type: number
     default: 800000
-    description: Auto-compact trigger in tokens. Stored; unused until auto-compact is wired. Distinct from agent.compact compactAfterTokens (OM threshold, decision 2158 default 80000).
+    description: Auto-compact ceiling in tokens for the next created coding sessions with a declared context window. Fires at or above this estimate in addition to the attention compiler's compactRatio gate. Distinct from agent.compact compactAfterTokens (OM threshold, decision 2158 default 80000).
   - name: compaction
     type: string
     default: llm
@@ -65,7 +65,7 @@ Set coding-run policy caps and the default compaction strategy for the clay-agen
 
 ## Description
 
-`setRunOptions` is the runtime-backed public API for **Set Agent Run Options**. It forwards a partial update to the clay-agent daemon's `run.setOptions`. Absent fields keep the current daemon values. `null` on a Prism policy axis disables that cap (Prism 0.5.5). Defaults when nothing has been set: all policy axes (`maxInputTokens`, `maxOutputTokens`, `maxTurns`, `maxToolRounds`, `maxToolCalls`, `maxWallTimeMs`) `null` (unbounded), `compactAfterTokens` 800000, `compaction` `llm`. The only hard caps left are Prism's per-frame request/response bytes (64 MiB). Token fields are cumulative billed `usage.inputTokens` / `outputTokens` for the run, not the model context window. `maxProviderAttempts` is omitted so Prism lifts it to at least `maxTurns`. `maxTotalTokens` is derived (`null` if either token axis is `null`, else the sum) and is not independently configurable. `compactAfterTokens` here is the future auto-compact trigger and is **not** applied yet; it is not the OM `agent.compact` threshold (decision 2158, default 80000). `compaction` is the strategy used when `agent.compact` or `/compact` omit `strategy`. While the daemon is unavailable the call queues server-side and applies after the daemon's initialize handshake. Authority: `user-intent-forwarding-to-daemon-rpc`. Runtime path: `server-first-rpc-forwarding`. One-shot configuration; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths. Trusted-only (`clay:agent`): call from `~/.clay/init.js` or first-party/trusted configuration modules, not third-party package JS.
+`setRunOptions` is the runtime-backed public API for **Set Agent Run Options**. It forwards a partial update to the clay-agent daemon's `run.setOptions`. Absent fields keep the current daemon values. `null` on a Prism policy axis disables that cap (Prism 0.7.0). Defaults when nothing has been set: all policy axes (`maxInputTokens`, `maxOutputTokens`, `maxTurns`, `maxToolRounds`, `maxToolCalls`, `maxWallTimeMs`) `null` (unbounded), `compactAfterTokens` 800000, `compaction` `llm`. The only hard caps left are Prism's per-frame request/response bytes (64 MiB). Token fields are cumulative billed `usage.inputTokens` / `outputTokens` for the run, not the model context window. `maxProviderAttempts` is omitted so Prism lifts it to at least `maxTurns`. `maxTotalTokens` is derived (`null` if either token axis is `null`, else the sum) and is not independently configurable. `compactAfterTokens` is the absolute ceiling of the automatic compaction gate: the daemon arms auto-compaction on coding sessions whose resolved model declares a context window, and the gate fires when the assembled input estimate reaches this ceiling, the attention compiler's compactRatio (0.9 of the resolved input cap), or after two consecutive `truncated` attention turns. Automatic compaction runs once per prompt, before provider turns, with Prism's local deterministic strategy (no provider call, so an outage cannot fail a run at assembly); explicit `session.compact` / `/compact` still use `compaction`. It is not the OM `agent.compact` threshold (decision 2158, default 80000). `compaction` is the strategy used when `agent.compact` or `/compact` omit `strategy`. While the daemon is unavailable the call queues server-side and applies after the daemon's initialize handshake. Authority: `user-intent-forwarding-to-daemon-rpc`. Runtime path: `server-first-rpc-forwarding`. One-shot configuration; never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths. Trusted-only (`clay:agent`): call from `~/.clay/init.js` or first-party/trusted configuration modules, not third-party package JS.
 
 New sessions pick up caps at `createAgent`. Live sessions keep the limits they were created with until rebuilt (model switch / resume recreate).
 
@@ -108,7 +108,7 @@ await setRunOptions({
 - `maxToolRounds` (number or null, optional): positive safe integer, or `null` to disable. Default `null`.
 - `maxToolCalls` (number or null, optional): positive safe integer, or `null` to disable. Default `null`.
 - `maxWallTimeMs` (number or null, optional): positive safe integer milliseconds, or `null` to disable. Default `null`.
-- `compactAfterTokens` (number, optional): positive safe integer. Default 800000. Stored; unused until auto-compact is wired.
+- `compactAfterTokens` (number, optional): positive safe integer. Default 800000. Absolute ceiling of the automatic compaction gate for coding sessions with a declared context window (the gate also fires at the attention compiler's compactRatio and after two truncated turns).
 - `compaction` (string, optional): `default`, `llm`, or `om`. Default `llm`.
 
 At least one field is required. `maxTotalTokens` is derived as above and is not independently configurable.
@@ -125,7 +125,7 @@ No default key binding is assigned. `agent.setRunOptions` runs as one-shot works
 - `maxToolRounds` (`number`, default `64`): Fork-bomb tool-round fence. Positive safe integer, or null to disable.
 - `maxToolCalls` (`number`, default `256`): Fork-bomb tool-call fence. Positive safe integer, or null to disable.
 - `maxWallTimeMs` (`number`, default `1800000`): Wall-clock fence in milliseconds. Positive safe integer, or null to disable.
-- `compactAfterTokens` (`number`, default `800000`): Auto-compact trigger in tokens. Stored; unused until auto-compact is wired. Distinct from `agent.compact` `compactAfterTokens` (OM threshold, decision 2158 default 80000).
+- `compactAfterTokens` (`number`, default `800000`): Auto-compact ceiling in tokens. Fires at or above this estimate for the next created coding sessions with a declared context window, in addition to the attention compiler's compactRatio (0.9) gate and the two-truncated-turns signal. Distinct from `agent.compact` `compactAfterTokens` (OM threshold, decision 2158 default 80000).
 - `compaction` (`string`, default `llm`): Default compaction when `agent.compact` or `/compact` omit strategy. One of `default`, `llm`, `om`.
 
 ## Return and async behavior

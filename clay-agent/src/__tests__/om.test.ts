@@ -22,7 +22,14 @@ import {
   providerToolCall,
   type AIProvider,
   type ProviderEvent,
+  type SessionEntry,
 } from "@arnilo/prism";
+import {
+  foldObservationalMemoryLedger,
+  foldWorkScopeMap,
+  projectWorkMemory,
+  recallObservationalMemory,
+} from "@arnilo/prism-memory/compaction/observational-memory";
 import { ClayAgentHost } from "../host.js";
 
 interface OmActivityRow {
@@ -48,7 +55,9 @@ interface OmActivityView {
  */
 function routingProvider(
   capture?: (request: { options?: { sessionId?: string } }) => void,
+  options: { spawn?: boolean } = {},
 ): AIProvider {
+  let spawnPending = options.spawn === true;
   return {
     id: "mock",
     async *generate(request: {
@@ -94,6 +103,19 @@ function routingProvider(
             },
           });
         }
+        yield providerDone();
+        return;
+      }
+      // Plan 123 task 2: one delegation on the first session turn; the child
+      // (coding tools, no spawn tools) falls through to a plain text turn.
+      if (spawnPending && toolNames.includes("spawn_agent")) {
+        spawnPending = false;
+        yield providerToolCall({
+          type: "tool_call",
+          id: "s1",
+          name: "spawn_agent",
+          arguments: { childId: "test", input: "child work" },
+        });
         yield providerDone();
         return;
       }
@@ -265,5 +287,224 @@ test("om fail-closed: unknown worker provider rejected; malformed shapes rejecte
     );
   } finally {
     await host.handle("session.delete", { sessionId });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Plan 123: per-prompt work scopes on OM coding runs. Chat / OM-off sessions
+// never build a controller; the run scope is host-generated, redacted by the
+// controller's secrets, and exact-id recall stays branch-wide.
+
+const CODING_TOOLS = [
+  "shell",
+  "read",
+  "write",
+  "edit",
+  "repo_list",
+  "repo_search",
+  "glob",
+  "delete",
+  "move",
+];
+
+interface ScopeData {
+  type?: string;
+  id?: string;
+  scopeId?: string;
+  kind?: string;
+  parentId?: string;
+  label?: string;
+}
+
+function scopeData(entry: { data?: unknown }): ScopeData | undefined {
+  return entry.data as ScopeData | undefined;
+}
+
+/** Coding profile + OM workers: the only shape that scopes a prompt.
+ *  `spawn` makes the first session turn delegate to a `test` child. */
+async function codingOmHost(options: { spawn?: boolean } = {}): Promise<ClayAgentHost> {
+  const host = await ClayAgentHost.create({
+    dataDir: await mkdtemp(join(tmpdir(), "clay-agent-om-scope-")),
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    mockProvider: routingProvider(undefined, options),
+    emit: () => {},
+    // Hermetic agent config: no ambient MCP/capability tools or skills.
+    agentConfigRoot: await mkdtemp(join(tmpdir(), "clay-agent-om-scope-cfg-")),
+    observationalMemory: {
+      observation: { provider: routingProvider(), messageTokens: 1 },
+      reflection: { provider: routingProvider(), observationTokens: 1 },
+    },
+  });
+  await host.handle("agentProfile.register", {
+    name: "OmCoding",
+    description: "OM coding fixture",
+    tools: CODING_TOOLS,
+    observationalMemory: true,
+  });
+  return host;
+}
+
+async function codingOmSession(
+  host: ClayAgentHost,
+  options: { id?: string; observationalMemory?: boolean } = {},
+): Promise<string> {
+  const created = (await host.handle("session.new", {
+    profile: "OmCoding",
+    provider: "mock",
+    model: "demo",
+    workspaceRoot: "/ws",
+    ...(options.id ? { id: options.id } : {}),
+    ...(options.observationalMemory === false ? { observationalMemory: false } : {}),
+  })) as { sessionId: string };
+  if (options.observationalMemory !== false) {
+    await host.handle("session.om.set", {
+      sessionId: created.sessionId,
+      workers: {
+        observation: { provider: "mock", model: "demo" },
+        reflection: { provider: "mock", model: "demo" },
+      },
+    });
+  }
+  return created.sessionId;
+}
+
+async function loadLedger(host: ClayAgentHost, sessionId: string): Promise<SessionEntry[]> {
+  const loaded = (await host.handle("session.load", { sessionId })) as { entries: SessionEntry[] };
+  return loaded.entries;
+}
+
+function scopeTypes(entries: readonly SessionEntry[]): string[] {
+  return entries
+    .map((entry) => scopeData(entry)?.type)
+    .filter((type): type is string => typeof type === "string" && type.startsWith("om.scope."));
+}
+
+test("om work scope: OM-on coding prompt opens, enters, and leaves one run scope", async () => {
+  const host = await codingOmHost();
+  const sessionId = await codingOmSession(host);
+  try {
+    await host.handle("session.prompt", { sessionId, text: "hello" });
+    const entries = await loadLedger(host, sessionId);
+    const types = scopeTypes(entries);
+    assert.equal(types[0], "om.scope.opened", `scope entries: ${types.join(",")}`);
+    assert.ok(types.includes("om.scope.entered"), `entered missing: ${types.join(",")}`);
+    // withWorkScope always leaves in finally and never closes.
+    assert.equal(types.at(-1), "om.scope.left");
+    assert.ok(!types.includes("om.scope.closed"), "scopes stay open for projection");
+    const opened = entries.find((entry) => scopeData(entry)?.type === "om.scope.opened");
+    assert.equal(opened && scopeData(opened)?.id, `run:${sessionId}:1`);
+    assert.equal(opened && scopeData(opened)?.kind, "run");
+    // The run's own observation auto-binds to the run scope, not the session
+    // root — the per-run projection owns it.
+    const bound = entries.find((entry) => scopeData(entry)?.type === "om.scope.bound");
+    assert.equal(bound && scopeData(bound)?.scopeId, `run:${sessionId}:1`);
+  } finally {
+    await host.handle("session.delete", { sessionId });
+    host.close();
+  }
+});
+
+test("om work scope: OM-off coding prompt writes zero scope entries", async () => {
+  const host = await codingOmHost();
+  const sessionId = await codingOmSession(host, { observationalMemory: false });
+  try {
+    await host.handle("session.prompt", { sessionId, text: "hello" });
+    const entries = await loadLedger(host, sessionId);
+    assert.deepEqual(scopeTypes(entries), []);
+    assert.ok(entries.some((entry) => entry.kind === "message"), "the run itself must still happen");
+  } finally {
+    await host.handle("session.delete", { sessionId });
+    host.close();
+  }
+});
+
+test("om work scope: an invalid scope id fails closed before the prompt starts", async () => {
+  const host = await codingOmHost();
+  const sessionId = await codingOmSession(host, { id: "a..b" });
+  try {
+    await assert.rejects(
+      host.handle("session.prompt", { sessionId, text: "hello" }),
+      /Invalid work scope/,
+    );
+    const entries = await loadLedger(host, sessionId);
+    assert.deepEqual(scopeTypes(entries), []);
+    assert.ok(!entries.some((entry) => entry.kind === "message"), "the run must not start");
+  } finally {
+    await host.handle("session.delete", { sessionId });
+    host.close();
+  }
+});
+
+test("om work scope: per-run projection stays separate while exact-id recall sees the whole branch", async () => {
+  const host = await codingOmHost();
+  const sessionId = await codingOmSession(host);
+  try {
+    await host.handle("session.prompt", { sessionId, text: "one" });
+    await host.handle("session.prompt", { sessionId, text: "two" });
+    const entries = await loadLedger(host, sessionId);
+    const ledger = foldObservationalMemoryLedger(entries);
+    const scopes = foldWorkScopeMap(entries);
+    const runIds = [...scopes.scopes.keys()].filter((id) => id.startsWith(`run:${sessionId}:`));
+    assert.deepEqual(runIds, [`run:${sessionId}:1`, `run:${sessionId}:2`]);
+    const first = projectWorkMemory(ledger, scopes, { from: runIds[0]!, include: "self" });
+    const second = projectWorkMemory(ledger, scopes, { from: runIds[1]!, include: "self+ancestors" });
+    assert.equal(first.observations.length, 1, "run 1 owns its observation");
+    assert.equal(second.observations.length, 1, "run 2 owns its observation");
+    const earlierId = first.observations[0]!.id;
+    assert.notEqual(earlierId, second.observations[0]!.id);
+    assert.ok(
+      !second.observations.some((observation) => observation.id === earlierId),
+      "run 1's observation is not in run 2's working set",
+    );
+    // Exact-id recall is unfiltered: the full branch still serves run 1's id.
+    const recalled = recallObservationalMemory(entries, earlierId);
+    assert.equal(recalled.found, true);
+    assert.match(recalled.text, /dark mode/);
+  } finally {
+    await host.handle("session.delete", { sessionId });
+    host.close();
+  }
+});
+
+// Plan 123 task 2: a `test`/`validation` delegation nests as a `child` scope
+// under the run scope that owns it — one open/close ledger pair, never
+// entered (the ledger's enter/leave stack is session-global, so a child
+// holding it would capture the parent run's own flush), and closed so the
+// default leaf+ancestors projection stays the run's own working set.
+test("om work scope: a delegation nests a closed child scope under the run scope", async () => {
+  const host = await codingOmHost({ spawn: true });
+  const sessionId = await codingOmSession(host);
+  try {
+    await host.handle("session.prompt", { sessionId, text: "spawn a child" });
+    const entries = await loadLedger(host, sessionId);
+    const opened = entries.filter((entry) => scopeData(entry)?.type === "om.scope.opened");
+    assert.equal(scopeData(opened[0]!)?.id, `run:${sessionId}:1`, "the prompt scopes the run first");
+    const child = opened.find((entry) => scopeData(entry)?.kind === "child");
+    assert.ok(child, `child scope missing: ${JSON.stringify(opened.map(scopeData))}`);
+    const childScopeId = scopeData(child)?.id;
+    assert.equal(childScopeId, `child:${sessionId}:1`);
+    assert.equal(scopeData(child)?.parentId, `run:${sessionId}:1`, "the run scope owns the delegation");
+    assert.equal(scopeData(child)?.label, "test", "the child id labels the scope");
+    // Closed on settle: one pair per spawn, and never a projection leaf.
+    const closes = entries.filter(
+      (entry) => scopeData(entry)?.type === "om.scope.closed" && scopeData(entry)?.scopeId === childScopeId,
+    );
+    assert.equal(closes.length, 1, "exactly one close for the child scope");
+    const entered = entries
+      .filter((entry) => scopeData(entry)?.type === "om.scope.entered")
+      .map((entry) => scopeData(entry)?.scopeId);
+    assert.deepEqual(entered, [`run:${sessionId}:1`], "only the run scope is ever entered");
+    // Depth from the session root: session → run → child (Prism caps at 8).
+    const scopes = foldWorkScopeMap(entries);
+    assert.equal(scopes.scopes.get(childScopeId!)?.status, "closed");
+    let depth = 0;
+    for (let cursor = childScopeId; cursor && cursor !== "session"; depth += 1) {
+      cursor = scopes.scopes.get(cursor)?.parentId ?? "session";
+    }
+    assert.equal(depth, 2, "child depth is run scope + 1");
+  } finally {
+    await host.handle("session.delete", { sessionId });
+    host.close();
   }
 });

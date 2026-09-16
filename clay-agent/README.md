@@ -1,6 +1,6 @@
 # clay-agent
 
-Clay-owned Node >= 20 child that hosts Prism **0.5.5**. Not a Clay JS package.
+Clay-owned Node >= 22 child that hosts Prism **0.7.0**. Not a Clay JS package.
 Packages never spawn or speak to this process; the Clay server does.
 
 ## Spawn
@@ -9,7 +9,7 @@ Packages never spawn or speak to this process; the Clay server does.
 node dist/main.js --data-dir DIR [--mock]
 ```
 
-- Requires Node >= 20. Exits non-zero with a clear message otherwise.
+- Requires Node >= 22 (Prism 0.6 raised the floor; Node 20 is unsupported). Exits non-zero with a clear message otherwise.
 - `--data-dir` is required. Creates `sessions.sqlite` and `credentials.vault` (mode 0600).
 - `--mock` registers Prism `createMockProvider` for offline smoke tests. Production Clay must omit it.
 - Stdio is newline-delimited JSON-RPC 2.0. Frames over 1 MiB are rejected.
@@ -37,6 +37,8 @@ Live runs emit notifications `{ "method": "event", "params": { "sessionId", "eve
 
 `SubscribeOptions.maxQueuedEvents` is 256 with `overflow: "drop_oldest"`.
 
+`session.prompt` accepts an optional `toolNames: string[]` (Prism 0.7 `RunOptions.toolNames`): omitted = full registry, `[]` = no tools for that run, a list = that subset. Non-array / non-string entries fail closed with `-32602`; unknown names fail closed before any provider turn, and a resumed durable run intersects with its recorded grant so it cannot widen it. The Rust server omits the field (full registry) until a caller needs the narrowing.
+
 ## Profiles
 
 The daemon does not hard-code Chat. Clay (`@clay/chat`) registers profiles through `agentProfile.register`. Omitted `tools`/`skills` stay fail-closed (none). Named missing tools throw before any provider turn.
@@ -63,8 +65,11 @@ Acceptance policy (decision 2026-08-30-2157): inside-workspace mutations run fre
 
 Coding sessions prompt with `runState: { checkpoints, definitionRevision: "clay-agent.1", interruptBeforeTool: true }` against the SQLite checkpoint store — every tool call suspends before its side effect. Chat sessions stay non-durable. A suspended `session.prompt` reply carries `status: "suspended"`, `runId`, `version`, and redacted `pendingDecisions` (scope + `argumentsHash` only, never raw arguments). `run.resume { sessionId, runId, expectedVersion, decision | decisions[] }` maps to Prism `resumeAgentRun`; batch outcomes are `allow_once` / `allow_for_run` / `reject_once` / `reject_for_run`. Decision shape is validated before any checkpoint I/O; stale `expectedVersion` or revision/fingerprint mismatch fails closed with no side effect, and a dispatched tool is never auto-replayed.
 
-## Skills and commands
+## Supervisor children (spawn_agent / wait_agent / cancel_agent)
 
+Coding sessions (plan 122) additionally carry Prism 0.7's host-owned supervisor tools. The catalog is exactly two child ids — `test` and `validation` — and the closed spawn schema (`childId`, `input`, optional `threadId`, `mode: "sync" | "async"`) cannot extend it, supply child tools, or widen identity. Children are isolated Prism sessions on the parent's provider/model, rebuilt with the parent's coding tools bound to the **parent** `sessionId` + workspace root, so document ops stay on the daemon→server registry; they never receive spawn tools (no recursion) and their identity narrows from the host run identity. Sync spawn blocks the parent tool call; async returns `{ delegationId, status: "running" }` for `wait_agent`/`cancel_agent`. Parent-run abort (including `session.cancel`) propagates to running children. Handles are **in-process**: a daemon restart forgets them, and a stale `delegationId` is a plain tool error (`wait_agent`/`cancel_agent` fail closed), never a cross-session resume. No git worktrees yet — children share the parent workspace, so parallel children can collide on files.
+
+## Skills and commands
 `skill.register { name, description?, instructions?, toolNames?, metadata? }` stores inert skill data on the kernel skill registry; duplicate names fail closed. `skill.list` returns the progressive catalog (name + description only — full `instructions` never leak over the wire). A profile that lists skills gets the Prism `load_skill` tool so the model can pull full instructions on demand; a skill whose `toolNames` includes an inactive tool throws before any provider turn.
 
 `command.register { name, handler?, description?, parameters?, metadata? }` stores a `CommandDefinition` whose `execute` routes to a host-side handler: `startRun`, `startWorkflow`, or `steer`. `command.dispatch { name, args?, sessionId? }` runs it with `CommandDrivers` injected at dispatch time — never accepted over RPC. Drivers appear only when a live session is present (otherwise the context key is omitted). `startWorkflow` returns the Phase 5 "not in this phase" error. Unknown command names and unknown handlers fail closed.
@@ -73,13 +78,21 @@ Coding sessions prompt with `runState: { checkpoints, definitionRevision: "clay-
 
 Named strategies on the kernel: `default` (local), `llm` (provider summary), `om` (folded observational memory). `session.compact` `{ sessionId, strategy?, compactAfterTokens? }` runs a manual compact; an in-flight run fails closed. `session.prompt` may pass `compaction` as a strategy name for that run. OM attaches only when the profile or `session.new` sets `observationalMemory: true` — Chat stays tool-free. Worker models come from host config, never the session model (`requireExplicitModel`). `compactAfterTokens` default **80000** (decision 2158; Prism package default 81000); a positive-integer `compactAfterTokens` on `session.compact` overrides the OM auto-compaction threshold for that session (runtime settings provider). Recall is exact-id only and is not auto-injected into the current run.
 
+Auto-compaction (plan 121 follow-up) is armed on exactly the sessions that run the attention compiler: coding profiles whose resolved model declares a context window. Prism runs `autoCompact` once per prompt, before provider turns, only when `AgentConfig.compaction` carries a trigger, so the daemon arms one composed custom trigger that fires when the compiler reports `truncated` on two consecutive turns (stubs can no longer hold the request), when the assembled input reaches the compiler's `compactRatio` (Prism default 0.9 of the resolved input cap), or when it reaches the absolute `run.setOptions.compactAfterTokens` ceiling (default 800000 — the only gate that can fire first on very large windows). The automatic pass uses Prism's local deterministic strategy and the host secret list: no provider call, so a provider outage can never fail a run at assembly. `run.setOptions.compaction` keeps governing explicit `session.compact` / `/compact` and per-run `compaction`. Limit-less models (Ollama discovery, pass-through ids) and Chat keep no implicit branch rewrite; a prompt that is itself over the cap still fails closed with Prism's `AttentionBudgetError`.
+
+
+## Knowledge bases (wiki, graft)
+
+`knowledge.setOptions { workspaceRoot, wiki?, graft?, graftMode?, graftCliPath?, graftDeepModel?, qmdPath? }` opts a workspace in or out of the knowledge extensions (decision 2156). `wiki: true` loads `@arnilo/prism-memory/wiki`: the `/wiki-init`, `/wiki-refresh`, `/wiki-lint`, `/wiki-ingest` commands, the `wiki_search`/`wiki_read_page`/`wiki_record_insight`/`wiki_ingest` tools, and the two wiki skills. Ingested sources are untrusted: they stage into the raw layer (`raw/ingest/<id>`, workspace-relative) labeled `untrusted_external`, path escapes fail closed, and URL ingest runs the host-owned Obscura CLI only when it resolves (`--dump markdown`, staged as `source.md`) — a missing hook fails closed by name.
+
+`graft: true` loads the `@arnilo/prism-memory/graft` extension: the six pull tools, the `/graft`-family commands, and the graft skill. CLI resolution fails closed before load (absent CLI ⇒ option off, tools hidden). `/graft-init` is non-interactive by design (`initYes: true`; Prism passes `--yes` plus `--no-global --no-mcp --no-hooks --no-statusline`, never user-level state), and `/graft-build-deep` refuses before spawning unless a deep model is configured. `graftDeepModel { provider, model, apiKey?, baseUrl? }` supplies it: `provider` is graft's own id (`openai`/`anthropic`/`litellm`/`orcarouter`), an omitted `apiKey` reads the stored credential for that provider (the key never has to appear in `init.js`), an inline key joins the redactor set, and the key reaches the child only as `GRAFT_API_KEY` in its environment — never argv. A changed deep model rebinds the extension in place; a malformed shape, a deep model without `graft: true`, or a key that resolves nowhere fails closed with `-32602`.
 
 ## Pins
 
-Exact `0.5.5` for `@arnilo/prism`, `@arnilo/prism-core`,
+Exact `0.7.0` for `@arnilo/prism`, `@arnilo/prism-core`,
 `@arnilo/prism-providers`, `@arnilo/prism-coding-tools`,
 `@arnilo/prism-web-tools`, `@arnilo/prism-memory`, and `@arnilo/prism-mcp`,
-plus exact `better-sqlite3@13.0.3` and `playwright-core@1.61.0` (CDP
+plus exact `better-sqlite3@13.0.3` and `playwright-core@1.63.0` (CDP
 composition for Obscura only; never browser launch). Imports use family
 subpaths only
 (`@arnilo/prism-core/credentials/node`, `@arnilo/prism-core/sessions/sqlite`,
@@ -114,9 +127,9 @@ providers are rejected for Phase 1. Antigravity lands in Phase 6.
 
 ## Upgrade Prism
 
-1. Read `docs/migrate-to-0.5.md` (0.5.x: lockstep cut, MCP SDK v2 module
-   move, model-aware thinking effort, 27 removed exports) and the changelog
-   for the target line.
+1. Read `docs/migrate-to-0.6.md` (Node >= 22 floor, third-party floors, MCP
+   SDK v2 module move) and `docs/migrate-to-0.7.md` (lockstep bump, ACP/router
+   refusals, opt-ins) plus the changelog for the target line.
 2. Bump the family pins in `package.json` together. Do not mix versions or
    reintroduce retired `@arnilo/prism-provider-*` / `-credentials-node` /
    `-session-store-sqlite` / `-tool-validator-json-schema` names or the 27

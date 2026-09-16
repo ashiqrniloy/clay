@@ -184,3 +184,15 @@ Three frictions from closing the plan-119 further actions:
 ## 26-09-15 18:38 — impeccable-surface-brief
 
 `impeccable context` directed `surface-brief read <path>`, but that invocation returned only candidates and exit 2. `surface-brief <path>` and `--help` also exited nonzero without a usable invocation. Document the actual syntax or accept candidate paths so UI work can load a surface brief without repeated failed calls.
+## 26-09-16 15:32 — manual-GUI-input
+
+Plan 121 manual slash-command checks hit same host ceiling as prior runs: AT-SPI/window discovery works, but native development input is unavailable because /dev/uinput is root-only, ydotoold has no usable socket, wtype is incompatible with this Wayland compositor, and portal consent needs a human. Repeated window focus/move retries did not make WebKit/Tauri input reliable. Prevent backtracking by making the test-plan runner preflight `computer-use-linux doctor` and record these legs UNRESOLVED before attempting UI actions.
+## 26-09-16 17:09 — cargo test --lib flake (global pending-registration queue)
+
+`cargo test --lib` fails deterministically on this branch in `server::js_runtime::tests::coding_agent_clean_init_one_line_activates_working_defaults` (\"coding profile declaration queues without a skills field\") when the full suite runs, while passing in isolation. The cause is the process-global `PENDING_PACKAGE_REGISTRATIONS` queue being drained by concurrent document-flow tests. Verifying it was pre-existing cost a `git stash` cycle plus two full lib runs (I cannot trust the suite result otherwise). Suggest either serializing the drain-dependent tests (`serial_test` or a shared lock) or making `drain_all_pending_registrations` per-runtime so `cargo test --lib` is a trustworthy gate.
+## 26-09-16 18:54 — flaky js_runtime global-queue test
+
+`cargo test --lib` on the current plan-121 working tree intermittently fails `server::js_runtime::tests::coding_agent_clean_init_one_line_activates_working_defaults` (global registration queue race — passes isolated, flakes ~1 in 3 full runs, with unrelated changes stashed). Diagnosing attribution required 6+ full stash/run cycles. A serialized or per-test-isolated registration queue (or marking the test `#[ignore]` under parallel) would save this.
+## 26-09-16 20:08 — wrong-tool-routing
+
+MCP scripting friction: attempted three graft CLI queries through mcpScript as `graft/ask`; all failed because graft is a local CLI, not an MCP tool. Workaround was rerun queries through bash. Prevent with a tool catalog hint or mcpScript rejecting unknown `graft/*` paths and directing local graft commands to bash.

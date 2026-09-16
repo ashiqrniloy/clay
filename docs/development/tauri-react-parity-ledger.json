@@ -1110,7 +1110,7 @@
         "ViewportRenderPatch"
       ],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build \u2014 boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build — boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
     },
     {
       "capability_id": "platform.windows",
@@ -1502,7 +1502,7 @@
     },
     {
       "capability_id": "agent.host.phase1",
-      "title": "Phase 1 agent host: clay:agent facades, autonomy/compaction config, workspace-scoped search and session tree, first-party profile/skill registration, MCP allow-list + Obscura fail-closed",
+      "title": "Phase 1 agent host: clay:agent facades, autonomy/compaction config, workspace-scoped search and session tree, first-party profile/skill registration, MCP allow-list + Obscura fail-closed, per-run tool grants, and coding attention compiler",
       "area": "agent",
       "status": "verified",
       "migration_phase": 2,
@@ -1538,7 +1538,8 @@
             "A16",
             "A17",
             "A18",
-            "A19"
+            "A19",
+            "A20"
           ]
         }
       ],
@@ -1567,12 +1568,12 @@
       },
       "target_owner": "unchanged server authority; daemon-owned session runtime; Phase 2 Coding Agent package registers its profile through the facades",
       "target_tests": "clay-agent node suites + Rust protocol/inventory gates (incl. coding-agent manifest + load-entry contract) + test-plan/16",
-      "verified_automated": "clay-agent suites 49/49; protocol 203/203 incl. agent_protocol gates; inventory coverage gate pins decision 2157/2158 defaults",
-      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans)"
+      "verified_automated": "clay-agent suites 49/49; protocol 203/203 incl. agent_protocol gates; inventory coverage gate pins decision 2157/2158 defaults; plan 121 toolNames and attention compiler suites covered omitted/empty/subset/unknown/malformed grants, coding-only valid-window enablement, limit-less-model skip, and over-budget fail-closed behavior",
+      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans); plan 121 A20 is daemon-only and verified through automated RPC/provider evidence"
     },
     {
       "capability_id": "agent.codingAgent.parity",
-      "title": "Phase 2 coding agent: pi-parity conformance (prompt/stream ordering, steering, cancel, compaction, session lifecycle, tree/fork/clone, plan files, composer/status/strip surface) with negative checks",
+      "title": "Phase 2 coding agent: pi-parity conformance (prompt/stream ordering, steering, cancel, compaction, session lifecycle, tree/fork/clone, plan files, composer/status/strip surface) with negative checks, wiki ingest, and graft commands",
       "area": "agent",
       "status": "verified",
       "migration_phase": 2,
@@ -1656,7 +1657,19 @@
             "C41",
             "C42",
             "C43",
-            "C44"
+            "C44",
+            "C45",
+            "C46",
+            "C47",
+            "C48",
+            "C49",
+            "C50",
+            "C51",
+            "C52",
+            "C53",
+            "C54",
+            "C55",
+            "C56"
           ]
         }
       ],
@@ -1673,8 +1686,8 @@
       },
       "target_owner": "unchanged server authority; daemon-owned session runtime; package surface is client-local presentation",
       "target_tests": "clay-agent node suites + CodingAgentPanel suites + Rust protocol/inventory gates + test-plan/17",
-      "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03; plan 117 legs C24-C37 + C-N5-C-N11 recorded 2026-09-10 (clay-agent 138: 137 pass/0 fail/1 skip; frontend 294/294; lib 1307/protocol 210/security 152; scratch-config launch gate + MCP fixture connect {connected: true, tools: 2} through the real daemon)",
-      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings); plan 117 live launch gate 2026-09-10 (isolated scratch config, window-cropped captures in test-plan/artifacts/117-coding-agent/, interactive surface legs per the standing input-injection ceiling)"
+      "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03; plan 117 legs C24-C37 + C-N5-C-N11 recorded 2026-09-10 (clay-agent 138: 137 pass/0 fail/1 skip; frontend 294/294; lib 1307/protocol 210/security 152; scratch-config launch gate + MCP fixture connect {connected: true, tools: 2} through the real daemon); plan 121 toolNames/attention/wiki-ingest/graft tests 163 pass/1 skip; plan 121 follow-up auto-compaction + graft deep model 169 pass/1 skip (170) + protocol 216/216: auto-compaction armed only on coding sessions with a declared context window, compact-ratio gate compacts locally with zero provider calls, attention_compiled feeds the truncation streak, two truncated turns fire at the next prompt, compactAfterTokens ceiling fires under the gate, over-budget prompts still fail closed, deep model resolves from the vault and reaches the child env only as GRAFT_API_KEY (argv carries no key), rebinds on change, fails closed for missing keys/malformed shapes with Rust pre-queue shape validation",
+      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings); plan 117 live launch gate 2026-09-10 (isolated scratch config, window-cropped captures in test-plan/artifacts/117-coding-agent/, interactive surface legs per the standing input-injection ceiling); plan 121 Linux launch gate passed, while C45-C49 remain unresolved under the documented input-backend ceiling; plan 121 follow-up steps C50-C52 are automated-pass and live-unresolved under the same input-backend ceiling"
     }
   ]
 }

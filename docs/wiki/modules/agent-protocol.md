@@ -36,7 +36,21 @@ learn the current book selection from `listSessions`. The pin test
 `CredentialAck { provider, name, stored }` with no secret field.
 
 `AgentWireEvent` maps Prism events to a small Rust enum. Chat ignores tool and
-permission variants; they exist so Phase 29 does not rewrite the wire.
+permission variants; they exist so Phase 29 does not rewrite the wire. The
+mapper (`server/agent/run.rs::map_event`, invoked from `agent.rs`'s
+`route_daemon_line`) **drops** an event type it has no arm for: `None` becomes
+`DaemonLine::Ignore`, so nothing reaches the wire. The removed catch-all used
+to synthesize `Started`, which pinned the client's run "streaming" forever
+when a non-lifecycle event arrived without one (the `agent_suspended`
+incident); Prism 0.7's `attention_compiled` and `delegation_*` telemetry
+exercises exactly that path. A lifecycle type Clay has to render gets an
+explicit arm instead of a default. Plan 122 added the one such arm:
+`subagent_started`/`subagent_stopped` (the daemon's supervisor lifecycle
+bridge) map onto the existing Tool wire event — phase Started/Finished, `name`
+= the stable `childId` (fallback `spawn_agent`), the `delegationId` pairing
+the rows, and the stopped `status` riding the redacted output digest. No new
+AG-UI event type or panel; events without a `childId`/`delegationId` stay
+dropped, and everything else keeps the unknown-drop contract.
 
 Payload ceilings live next to the types: `AGENT_MAX_PROMPT_BYTES` (32 KiB),
 `AGENT_MAX_SNAPSHOT_ENTRIES` (200), `AGENT_DAEMON_MAX_LINE_BYTES` (1 MiB).
@@ -131,6 +145,16 @@ let message = ClientMessage::Agent {
   tab it resolved with `tab_for_client(client_id).unwrap_or(client_id)` — the
   same resolution the panel's own mount (`TabState`) uses, so the selection
   lands on the tab whose STATE it belongs to.
+- The pane's mount STATE (`AgentHost::tab_state_snapshot`) also applies the
+  coding surface's own profile rule (plan 108 task 8): an *empty* book profile
+  is filled with `CODING_SURFACE_PROFILE_ID` (`agent:coding`, the profile the
+  `@clay/coding-agent` package registers) before the tab's session is ensured.
+  A pane restored by `layout.json`, entered through the view switcher, or
+  rendered by the empty-tab landing never dispatched `coding-agent.profile`, so
+  its session used to be created with the daemon-level `Chat` default — no
+  coding tools and no MCP servers (`mcpServers: []`), which read in the panel
+  as `MCP none`. A non-empty profile is never overwritten, so a deliberate
+  selection survives the mount.
 - A daemon exit clears the host's `Running` handle (identity-checked on the
   channel the actor owns), so the next agent call spawns a fresh daemon rather
   than addressing a dead channel; sessions survive it, because `session.prompt`
@@ -143,11 +167,21 @@ let message = ClientMessage::Agent {
 - `tests/agent_protocol.rs`: version pin, every command/message codec
   round-trip, secret omitted from Debug/ack, malformed frames, reserved domain.
 - `src/server/agent.rs` (`tab_workspace_tests`):
+  `map_event_drops_unknown_event_types` — `attention_compiled`,
+  `subagent_started`/`subagent_stopped` **without identifying ids**,
+  `delegation_started`/`delegation_finished`/`delegation_child_event`, and
+  an arbitrary unknown type all map to `None` (never a fabricated
+  `Started`); the unreported-usage case is dropped too, not mapped;
+  `map_event_maps_subagent_lifecycle_onto_tool_rows` — identified
+  `subagent_*` events map onto Tool Started/Finished with child-id name,
+  delegation-id pairing, and status digest (plan 122);
   `book_selection_broadcast_keeps_the_tab_session` — after the pane mount
   establishes a session and a transcript row, an `Observation` worker selection
   must broadcast STATE carrying that `session_id`, its entries and its branch
   (fails with an empty session before the fix);
-  `tab_state_snapshot_starts_the_session_and_carries_branch_and_environment`;
+  `tab_state_snapshot_starts_the_session_and_carries_branch_and_environment`
+  (also pins the mount's profile fill: `coding`, and a deliberate `custom`
+  profile survives a later mount);
   `sibling_tabs_on_one_workspace_share_one_session` /
   `sibling_tabs_resolve_one_session_through_the_host` (one session per
   `(agent, root)`, two tabs resolve it),

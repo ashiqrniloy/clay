@@ -154,6 +154,21 @@ export interface KnowledgeSetOptionsOptions {
     /** Explicit path to a `graft` CLI entry (host-owned). Without a resolvable
      *  CLI (path, package root, or @nanonets/graft peer) graft stays off. */
     graftCliPath?: string;
+    /** Explicit model for `/graft-build-deep` (graft's own LLM pass). Requires
+     *  `graft: true`. `provider` is graft's provider id, not a Clay provider:
+     *  `openai`, `anthropic`, `litellm`, or `orcarouter`. Omit `apiKey` to use
+     *  the stored credential for that provider (the same one the agent picker
+     *  writes), so `init.js` never carries the secret; pass it only for
+     *  providers with no stored credential. The key reaches the child as
+     *  `GRAFT_API_KEY` in the environment, never on argv. Without this option
+     *  `/graft-build-deep` refuses before spawning. Changing it rebinds the
+     *  extension in place. */
+    graftDeepModel?: {
+        provider: "openai" | "anthropic" | "litellm" | "orcarouter";
+        model: string;
+        apiKey?: string;
+        baseUrl?: string;
+    };
 }
 export interface KnowledgeSetOptionsResult {
     workspaceRoot: string;
@@ -161,6 +176,8 @@ export interface KnowledgeSetOptionsResult {
     /** Present when `graft` was requested: true when bound, false when the
      *  CLI did not resolve (fail closed — tools hidden, nothing loaded). */
     graft?: boolean;
+    /** Echo of the configured deep model identity (never the key). */
+    graftDeepModel?: { provider: string; model: string };
     queued?: boolean;
 }
 /** Per-workspace knowledge options, forwarded to the daemon (queued while
@@ -179,8 +196,10 @@ export interface SetRunOptionsOptions {
     maxToolCalls?: number | null;
     /** Wall-clock fence in ms. Positive safe integer, or `null` to disable. Default 1_800_000 (30 min). */
     maxWallTimeMs?: number | null;
-    /** Auto-compact trigger in tokens. Default 800_000. Stored; unused until
-     *  auto-compact is wired. Distinct from agent.compact compactAfterTokens
+    /** Auto-compaction ceiling in tokens for the next created coding sessions
+     *  with a declared context window. Default 800_000. The automatic gate
+     *  also fires at the attention compiler's compactRatio (0.9) and after two
+     *  truncated turns. Distinct from agent.compact compactAfterTokens
      *  (OM threshold, decision 2158 default 80000). */
     compactAfterTokens?: number;
     /** Default compaction when agent.compact / /compact omit strategy.

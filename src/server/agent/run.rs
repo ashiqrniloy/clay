@@ -166,6 +166,46 @@ pub(super) fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServe
             allowed: event.get("allowed").and_then(Value::as_bool),
         },
         "event_subscriber_overflow" => AgentWireEvent::Overflow,
+        // Plan 122: supervisor subagent lifecycle (the daemon's
+        // `observeSupervisorLifecycle` bridge) maps onto the existing Tool
+        // wire event so children render as ordinary tool rows — no new AG-UI
+        // event type or panel. `name` is the stable `childId` (fallback
+        // `spawn_agent`); the delegation id pairs Started/Finished rows.
+        // Events without any identifying id stay dropped (plan 120's
+        // unknown-drop contract still governs `delegation_*` and the rest).
+        "subagent_started" | "subagent_stopped" => {
+            let child_id = json_string(event, &["childId"]);
+            let delegation_id = json_string(event, &["delegationId"]);
+            if child_id.is_empty() && delegation_id.is_empty() {
+                return None;
+            }
+            let name = if child_id.is_empty() {
+                "spawn_agent".to_string()
+            } else {
+                child_id
+            };
+            let status = json_string(event, &["status"]);
+            AgentWireEvent::Tool {
+                session_id: session_id.clone(),
+                run_id,
+                phase: if event_type == "subagent_started" {
+                    AgentToolPhase::Started
+                } else {
+                    AgentToolPhase::Finished
+                },
+                name,
+                tool_call_id: delegation_id,
+                args_digest: None,
+                output_digest: (!status.is_empty()).then(|| {
+                    truncate_transcript_text(
+                        &redact_text(&status, secrets),
+                        AGENT_MAX_ENTRY_TEXT_BYTES,
+                    )
+                }),
+                skill_name: None,
+                file: None,
+            }
+        }
         // Durable-run suspension (tool approval): surface the pending
         // approval as Permission (request_id = first pending approvalId)
         // so the panel can render Allow/Deny and resume the run. Without
@@ -220,10 +260,14 @@ pub(super) fn map_event(params: &Value, secrets: &[String]) -> Option<AgentServe
                 message: redact_text(detail, secrets),
             }
         }
-        _ => AgentWireEvent::Started {
-            session_id: session_id.clone(),
-            run_id,
-        },
+        // Unknown event types are dropped, never forwarded. The catch-all
+        // used to synthesize `Started`, which left the client believing a
+        // run was streaming forever (`agent_suspended` incident); Prism 0.7
+        // adds `attention_compiled`, `subagent_*`, and `delegation_*`
+        // telemetry that must not reopen a run. A lifecycle type Clay has to
+        // render gets an explicit arm instead (subagent lifecycle maps onto
+        // the existing Tool events).
+        _ => return None,
     };
     Some(AgentServerMessage::Event {
         session_id,

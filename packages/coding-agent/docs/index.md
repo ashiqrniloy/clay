@@ -150,15 +150,18 @@ await setRunOptions({
   maxToolRounds: null,
   maxToolCalls: null,
   maxWallTimeMs: null,           // default; set e.g. 1_800_000 for a 30-min fence
-  compactAfterTokens: 800_000,   // stored; unused until auto-compact
+  compactAfterTokens: 800_000,   // auto-compaction ceiling (windowed coding sessions)
   compaction: "llm",             // default for /compact when strategy omitted
 });
 ```
 
 Omit the call to keep those defaults: every policy axis (tokens, turns,
 tool rounds, tool calls, wall) is unbounded (`null`); the only hard caps
-are Prism's per-frame request/response bytes (64 MiB). `compactAfterTokens` here is **not** the
-OM `agent.compact` threshold (decision 2158, 80_000).
+are Prism's per-frame request/response bytes (64 MiB). `compactAfterTokens` here is the absolute
+ceiling of the automatic compaction gate for coding sessions on windowed models
+(the gate also fires at the attention compiler's 0.9 ratio and after two
+truncated turns) — **not** the OM `agent.compact` threshold (decision 2158,
+80_000).
 
 ## Knowledge options (opt-in wiki)
 

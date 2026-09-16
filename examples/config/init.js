@@ -664,7 +664,7 @@ await loadConfigurationModule({
 // Clay's agent capability is server-owned end to end; this file configures
 // NO provider credentials, profiles, or models:
 //
-//   - The Clay server manages its own Node >= 20 child process (`clay-agent`)
+//   - The Clay server manages its own Node >= 22 child process (`clay-agent`)
 //     that hosts Prism sessions (one daemon per server). Package JavaScript
 //     can never spawn or speak to it.
 //   - Provider/profile/model selection stays server-owned in the agent
@@ -678,22 +678,25 @@ await loadConfigurationModule({
 //     launcher surface, loaded in the same file; a config that loads no
 //     landing package gets the core Open File/Folder empty tab.
 //   - Agent host controls ship as the trusted-only `clay:agent` facade
-//     (`agent.compact`, `agent.searchSessions`, `agent.setFullAutonomy`,
-//     `agent.resumeRun`, `agent.sessionTree`). They forward to the agent
-//     daemon's validated RPC and grant no filesystem/network/shell authority
-//     by existing. Provider credentials still live only in the vault; there
-//     is no `agent*`/`provider*` credential or model option in init.js.
+//     (`agent.compact`, `agent.knowledgeSetOptions`, `agent.searchSessions`,
+//     `agent.setFullAutonomy`, `agent.resumeRun`, `agent.sessionTree`). They
+//     forward to the agent daemon's validated RPC and grant no
+//     filesystem/network/shell authority by existing. Provider credentials
+//     still live only in the vault; there is no `agent*`/`provider*`
+//     credential or model option in init.js.
 //
 // Commented safe examples (uncomment deliberately; the active part of this
 // file stays copy-safe):
 //
-// import { compact, searchSessions, setFullAutonomy, setRunOptions } from "clay:agent";
+// import { compact, knowledgeSetOptions, searchSessions, setFullAutonomy, setRunOptions } from "clay:agent";
 //
-// // Coding-run policy caps (Prism 0.5.5: number or null; null disables).
+// // Coding-run policy caps (Prism 0.7.0: number or null; null disables).
 // // Defaults: everything unbounded (tokens, turns, tool rounds, tool calls,
-// // wall). compactAfterTokens here is the future auto-compact
-// // trigger (default 800000, unused until wired) — not the OM
-// // agent.compact threshold (decision 2158, 80000):
+// // wall). compactAfterTokens is the absolute ceiling of the automatic
+// // compaction gate for coding sessions on windowed models (default 800000;
+// // the gate also fires at the attention compiler's compactRatio and after
+// // two truncated turns) — not the OM agent.compact threshold (decision
+// // 2158, 80000):
 // await setRunOptions({
 //   maxInputTokens: null,
 //   maxOutputTokens: null,
@@ -702,6 +705,25 @@ await loadConfigurationModule({
 //   maxWallTimeMs: 1_800_000,
 //   compactAfterTokens: 800_000,
 //   compaction: "llm",
+// });
+//
+// // Knowledge bases are workspace-scoped: opt the workspace root in per
+// // workspace. wiki: true adds /wiki-init, /wiki-refresh, /wiki-lint,
+// // /wiki-ingest and the wiki_search/wiki_read_page/wiki_record_insight/
+// // wiki_ingest tools; graft: true adds the six graft pull tools,
+// // /graft-family commands, and the graft skill (the CLI must resolve:
+// // CLAY_GRAFT_BIN/graftCliPath/package peer, otherwise it fails closed).
+// // graftDeepModel turns /graft-build-deep on: provider is graft's own id,
+// // and the apiKey comes from the stored credential for that provider —
+// // never paste a key here:
+// await knowledgeSetOptions({
+//   workspaceRoot: "/home/me/projects/clay",
+//   wiki: true,
+//   graft: true,
+//   graftMode: "pull", // "pull" | "push" | "both"
+//   // graftCliPath: "/usr/local/bin/graft",
+//   // graftDeepModel: { provider: "anthropic", model: "claude-sonnet-4-5" },
+//   // qmdPath: "/usr/local/bin/qmd",
 // });
 //
 // // Full autonomy (decision 2157) defaults to false: gated tool calls

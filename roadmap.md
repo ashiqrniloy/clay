@@ -18,7 +18,11 @@ Governing decisions already made:
   `0.5.3` (content-only tool results on the provider wire), to
   `0.5.4` (run-limit HARD split: process-safety bytes only; policy axes
   `number | null`), and to `0.5.5` (byte caps per-frame, not run-lifetime
-  sums).
+  sums), then jumped to exact `0.7.0` in plan 120
+  (`decision-logs/2026-09-16-0026-prism-0.7.0-clay-agent-family-pins.md`;
+  absorbs the never-shipped 0.5.6/0.6.0 cuts: Node ≥ 22 floor,
+  `playwright-core@1.63.0`, unknown agent events dropped by the Rust
+  mapper).
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
@@ -33,8 +37,8 @@ Governing decisions already made:
 
 Three layers, strict separation:
 
-1. **`clay-agent` daemon (Clay core, Node ≥ 20).** Hosts `@arnilo/prism`
-   0.5.5 plus explicitly selected 0.5 family packages/subpaths. Owns native
+1. **`clay-agent` daemon (Clay core, Node ≥ 22).** Hosts `@arnilo/prism`
+   0.7.0 plus explicitly selected family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
    supervision, and external-runtime lifecycle/policy projection. It does
@@ -56,7 +60,7 @@ The base agent stays minimal by design (pi-like). All autonomy policy
 agent delegation, memory cadence) lives in `st` or in host-free orchestration
 helpers the daemon exposes generically.
 
-## Prism Capability Review (0.4.0 historical; live pins are 0.5.5)
+## Prism Capability Review (0.4.0 historical; live pins are 0.7.0)
 
 Review method for the 0.4 cut: read the 0.4 migration guide,
 package-consolidation plan, all then-11 published package manifests and
@@ -69,9 +73,14 @@ migration. Phase 0 owned the Clay consumer smoke for that cut.
 bumped to exact **0.5.2** (stream-token coalesce, 2026-09-08);
 bumped to exact **0.5.3** (content-only tool results, 2026-09-08);
 bumped to exact **0.5.4** (run-limit host policy, 2026-09-08);
-bumped to exact **0.5.5** (per-frame byte caps, 2026-09-08).
+bumped to exact **0.5.5** (per-frame byte caps, 2026-09-08);
+jumped to exact **0.7.0** (0.5.5 → 0.7.0 in one cut, plan 120,
+2026-09-16 — absorbs the never-published 0.5.6/0.6.0 content: Node ≥ 22,
+`playwright-core@1.63.0`, graft peer `^0.16 || ^0.18`, unknown agent events
+dropped by the Rust mapper).
 Authoritative sources: `/home/arn/Projects/prism/docs/migrate-to-0.5.md`
-(§8 covers 0.5.1), `CHANGELOG.md` `[0.5.0]`/`[0.5.1]`/`[0.5.2]`/`[0.5.3]`/`[0.5.4]`/`[0.5.5]`,
+(§8 covers 0.5.1), `docs/migrate-to-0.6.md`, `docs/migrate-to-0.7.md`,
+`CHANGELOG.md` `[0.5.0]`…`[0.5.5]`/`[0.6.0]`/`[0.7.0]`,
 `docs/thinking-and-reasoning.md`, `docs/mcp-tools.md`,
 `docs/provider-request-policies.md`.
 Package names and 0.4 subpaths stay valid. Breaking host surface: 27 dead
@@ -83,7 +92,8 @@ workspace removed in 0.5 — Clay already did not adopt it). Context7 has no
 `@arnilo/prism` library.
 
 0.4 table below remains the capability map. 0.5 deltas that Clay must honor
-are in the following rows and in **Prism 0.5.0 lockstep (live)** after the
+are in the following rows and in **Prism 0.5.0 lockstep (0.5 pin
+history; live pins are 0.7.0)** after the
 0.4 adoption map.
 
 | Requirement | Prism primitive | 0.4 package/import | Verdict |
@@ -247,7 +257,7 @@ coding/persona, browser/Obscura, RAG/compaction/Graft/Wiki package names are
 migration references only after Phase 0. New code and roadmap phase plans use
 family subpaths exclusively.
 
-## Prism 0.5.0 lockstep (live pins, Phase 2.1)
+## Prism 0.5.0 lockstep (0.5 pin history; live pins are 0.7.0)
 
 Prism 0.5.0 is a lockstep cut: all publishable manifests move `0.4.x` →
 `0.5.0`, internal ranges `^0.4.0` → `^0.5.0`. Clay live-pins the seven
@@ -277,7 +287,7 @@ join sibling `type:text` blocks when `value` is missing, so content-only
 coding tools (`repo_list`/`glob`/`shell`/`read`) stop sending JSON `"null"`
 on the provider wire. No Clay host-API or persisted-schema change.
 
-**Prism 0.5.4 increment (live in 0.5.4, superseded by 0.5.5):** exact
+**Prism 0.5.4 increment (live in 0.5.4, superseded by 0.5.5 and 0.7.0):** exact
 `0.5.4` seven-family pins. Upstream
 splits process-safety HARD (`maxRequestBytes`/`maxResponseBytes` 64 MiB)
 from host policy: turns/attempts/tools/wall/tokens accept `number | null`
@@ -285,7 +295,7 @@ from host policy: turns/attempts/tools/wall/tokens accept `number | null`
 Omitted `maxProviderAttempts` lifts to at least `maxTurns`. Clay coding
 envelope: tokens `null`, turns/tool-rounds 64, tool-calls 256, wall 30 min.
 
-**Prism 0.5.5 increment (live):** exact `0.5.5` seven-family pins. Upstream
+**Prism 0.5.5 increment (superseded by 0.7.0; plan 120):** exact `0.5.5` seven-family pins. Upstream
 fixes the byte axes to
 per-frame charging: `maxRequestBytes`/`maxResponseBytes` compare each
 individual provider frame against the cap instead of a run-lifetime sum,
@@ -322,6 +332,41 @@ mapping one-to-one to D1/E1–E6 plus docs constraints); Prism 0.3.2 landed
 the intake. Prism 0.4.0 changes package/import locations, not those contracts.
 Phase 0 therefore verifies moved exports and behavior instead of reopening the
 upstream feature work.
+
+## Prism 0.7.0 lockstep (live pins)
+
+Prism 0.7.0 is a lockstep cut. Plan 120 moves the seven adopted families
+from exact `0.5.5` straight to exact `0.7.0` plus `better-sqlite3@13.0.3`
+and `playwright-core@1.63.0`. The jump absorbs the cuts Clay never ran
+(`0.5.6` was never published; `0.6.0` unused). Decision log:
+`2026-09-16-0026-prism-0.7.0-clay-agent-family-pins.md`.
+
+Host-visible deltas and Clay stance:
+
+- **Node ≥ 22 floor (0.6.0).** `MIN_NODE`, `engines.node`, README, and wiki
+  move to 22; CI already runs Node 24. No code migration.
+- **Third-party floors (folded 0.5.6/0.6.0).** `playwright-core` exact peer
+  `1.63.0` moves with the pin; graft peer becomes `^0.16.0 || ^0.18.0`.
+  `pg` and office floors do not apply (no Postgres session store, no
+  office package).
+- **Event mapper.** `map_event` drops unknown `AgentEvent.type`
+  (`None`) instead of synthesizing `AgentWireEvent::Started`; the
+  `provider_turn_finished`-without-usage test now expects drop. New 0.7
+  types (`attention_compiled`, `subagent_started`/`subagent_stopped`,
+  `delegation_*`) stay unrendered until a plan maps them
+  (subagent lifecycle → existing `Tool` events).
+- **0.7 hard refusals do not apply.** ACP `mcp.allow` strict
+  origin/path matching and router `providerSource()` async refusals touch
+  no clay-agent path (no ACP, no router facade).
+- **Opt-ins adopt by plan, not by pin:** plan 121 attention compiler +
+  wiki ingest + graft `initYes` + `RunOptions.toolNames` seam; plan 122
+  host-owned `spawn_agent` (`test`/`validation`); plan 123 OM work scopes.
+  Memory fabric, office/OCR, E2B, realtime voice, Bedrock Converse, and
+  `activateKernel` stay out.
+- **Rollback** = exact `0.5.5` pins + `npm ci` (not 0.6.0 — Clay never
+  ran it). No persisted-data migration in either direction; 0.7
+  additions write through existing stores and stores fail closed on
+  unknown newer schemas.
 
 ## Phase 0: Prism 0.4.0 Family Migration and Verification
 
@@ -1298,6 +1343,10 @@ Historical record — `st` below means the now-native built-in workflows
 - Prism 0.5.5 increment: exact `0.5.5` seven-family pins. Byte caps are
   per-frame, not run-lifetime sums; long autonomous runs no longer die on
   cumulative request bytes.
+- Prism 0.7.0 lockstep (plan 120, log `2026-09-16-0026`): exact `0.7.0`
+  seven-family pins + `playwright-core@1.63.0`; Node ≥ 22 floor; unknown
+  `AgentEvent` types dropped by the Rust mapper; 0.7 opt-ins adopt by
+  plans 121–123.
 
 ## Open Decisions (need `decision-logs/` before implementation)
 

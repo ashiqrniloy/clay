@@ -4,7 +4,7 @@ import { ClayAgentHost } from "./host.js";
 import { redactText } from "./redact.js";
 import { encodeFrame, FrameTooLargeError, parseFrame, readNdjsonConcurrent } from "./rpc.js";
 
-const MIN_NODE = 20;
+const MIN_NODE = 22;
 
 function nodeMajor(): number {
   const major = Number(process.versions.node.split(".")[0]);
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
           });
           process.exit(1);
         }
-        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.5.5", mcpServers: mcpAllowList.length } });
+        write({ jsonrpc: "2.0", id, result: { ok: true, mock: args.mock, prism: "0.7.0", mcpServers: mcpAllowList.length } });
         return;
       }
       if (method === "shutdown") {

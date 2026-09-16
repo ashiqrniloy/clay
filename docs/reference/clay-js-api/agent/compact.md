@@ -64,7 +64,7 @@ console.log(result.entryId, result.strategy);
 
 - `sessionId` (string, required): the live agent session to compact.
 - `strategy` (string, optional): `default`, `llm`, or `om`. Defaults to `agent.setRunOptions` `compaction` (default `llm`).
-- `compactAfterTokens` (number, optional): observational-memory auto-compaction threshold override in tokens. Positive integer; default 80000 (decision 2158). Persisted for the session and also applied by post-run auto-compaction; ignored for non-OM sessions.
+- `compactAfterTokens` (number, optional): observational-memory auto-compaction threshold override in tokens. Positive integer; default 80000 (decision 2158). Persisted for the session and also applied by post-run auto-compaction; ignored for non-OM sessions. This is the OM threshold, not `agent.setRunOptions` `compactAfterTokens` (the coding-session auto-compaction ceiling, default 800000).
 
 ## Key bindings
 
@@ -72,7 +72,7 @@ No default key binding is assigned. Users may bind a key to `agent.compact` in `
 
 ## Custom properties
 
-- `compactAfterTokens` (`number`, default `80000`): Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction.
+- `compactAfterTokens` (`number`, default `80000`): Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction. Distinct from `agent.setRunOptions` `compactAfterTokens` (coding-session auto-compaction ceiling, default 800000).
 
 ## Return and async behavior
 

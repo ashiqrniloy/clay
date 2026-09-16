@@ -12,7 +12,7 @@ import type { ToolDefinition } from "@arnilo/prism";
 export const MAX_MCP_SERVERS = 32;
 
 /**
- * Connect/handshake floor (plan 119 P1-3). Prism 0.5.5 exposes one timeout
+ * Connect/handshake floor (plan 119 P1-3). Prism 0.7.0 exposes one timeout
  * knob, `callTimeoutMs`, and applies it to the `initialize` handshake and the
  * first `tools/list` page as well as to every call — so a call-shaped
  * `timeoutMs` ("this tool must answer in 200 ms") used to hide any server whose

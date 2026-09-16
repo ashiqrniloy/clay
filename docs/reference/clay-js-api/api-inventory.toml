@@ -3754,7 +3754,7 @@ documentation_path = "docs/reference/clay-js-api/agent/knowledge-set-options.md"
 key_bindings = []
 custom_properties = []
 permissions = ["agent-host"]
-security_notes = "Forwards a workspace-scoped configuration intent (opt-in wiki and graft knowledge bases, decision 2156) to the daemon, which owns activation via kernel.load; wiki writes stay inside the workspace .wiki/ tree, the optional qmd binary is never spawned unless explicitly configured, and the graft CLI runs as a host-owned bounded child process (fail-closed resolution, never spawned by package JavaScript). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Forwards a workspace-scoped configuration intent (opt-in wiki and graft knowledge bases, decision 2156; optional graft deep-build model identity) to the daemon, which owns activation via kernel.load; wiki writes stay inside the workspace .wiki/ tree, ingested sources are labeled untrusted_external, the optional qmd binary is never spawned unless explicitly configured, and the graft CLI runs as a host-owned bounded child process (fail-closed resolution, never spawned by package JavaScript). A graft deep-build key is read from the credential vault unless the trusted caller passes one inline (it joins the redactor and reaches the child only in its environment, never argv). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions"
 registry_public = true
 
@@ -3777,6 +3777,6 @@ documentation_path = "docs/reference/clay-js-api/agent/set-run-options.md"
 key_bindings = []
 custom_properties = ["maxInputTokens:number=null", "maxOutputTokens:number=null", "maxTurns:number=null", "maxToolRounds:number=null", "maxToolCalls:number=null", "maxWallTimeMs:number=null", "compactAfterTokens:number=800000", "compaction:string=llm"]
 permissions = ["agent-host"]
-security_notes = "Forwards a configuration intent (policy caps and a named compaction strategy) to the daemon. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript."
+security_notes = "Forwards a configuration intent (policy caps, a named compaction strategy, and the automatic-compaction token ceiling) to the daemon. Automatic compaction runs locally with no provider call and only on coding sessions whose model declares a context window. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript."
 current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::runSetOptions"
 registry_public = true

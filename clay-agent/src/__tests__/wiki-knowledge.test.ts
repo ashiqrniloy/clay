@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { test } from "node:test";
 import { providerDone, providerTextDelta } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
@@ -20,7 +21,11 @@ function textProvider(): Parameters<typeof ClayAgentHost.create>[0]["mockProvide
   };
 }
 
-async function codingHost(workspaceRoot: string, agentConfigRoot?: string): Promise<ClayAgentHost> {
+async function codingHost(
+  workspaceRoot: string,
+  agentConfigRoot?: string,
+  resolveObscura?: () => string | undefined,
+): Promise<ClayAgentHost> {
   const host = await ClayAgentHost.create({
     dataDir: await tempDir(),
     passphrase: "pass-phrase-ok",
@@ -30,6 +35,7 @@ async function codingHost(workspaceRoot: string, agentConfigRoot?: string): Prom
     // Hermetic agent config: the wiki/graft gates must not depend on the
     // developer's real ~/.clay/agents/coding-agent/skills.json.
     agentConfigRoot: agentConfigRoot ?? (await tempDir()),
+    ...(resolveObscura ? { resolveObscuraBinary: resolveObscura } : {}),
   });
   await host.handle("agentProfile.register", {
     name: "coding",
@@ -45,7 +51,40 @@ async function codingHost(workspaceRoot: string, agentConfigRoot?: string): Prom
   return host;
 }
 
-const WIKI_TOOLS = ["wiki_search", "wiki_read_page", "wiki_record_insight"];
+const WIKI_TOOLS = ["wiki_search", "wiki_read_page", "wiki_record_insight", "wiki_ingest"];
+
+interface WikiToolResult {
+  value?: {
+    id?: string;
+    rawDir?: string;
+    sourcePath?: string;
+    extractPath?: string;
+    url?: string;
+    runStarted?: boolean;
+  };
+  metadata?: Record<string, unknown>;
+}
+
+function wikiTool(host: ClayAgentHost, name: string): { execute(args: unknown, context: unknown): Promise<WikiToolResult> } {
+  return (
+    host as unknown as {
+      kernel: { registries: { tools: { resolve(name: string): { execute(args: unknown, context: unknown): Promise<WikiToolResult> } } } };
+    }
+  ).kernel.registries.tools.resolve(name);
+}
+
+/** Fake Obscura CLI: marks only `fetch` runs, then dumps markdown. */
+async function fakeObscura(dir: string): Promise<{ path: string; marker: string }> {
+  const path = join(dir, "obscura");
+  const marker = join(dir, "obscura-ran");
+  await writeFile(
+    path,
+    `#!/bin/sh\nif [ "$1" = "fetch" ]; then : > "${marker}"; printf '# Fetched RFC body\\n\\nExternal widgets claim.\\n'; exit 0; fi\nexit 1\n`,
+    "utf8",
+  );
+  await chmod(path, 0o755);
+  return { path, marker };
+}
 
 test("wiki-init is the sole initiator: gate on enables + dispatches; gate off stays chat-safe", async () => {
   const root = await tempDir();
@@ -63,7 +102,7 @@ test("wiki-init is the sole initiator: gate on enables + dispatches; gate off st
     value?: { status?: string; wikiRoot?: string };
   };
   assert.equal(init.value?.status, "initialized");
-  assert.equal(init.value?.wikiRoot, ".wiki");
+  assert.equal(init.value?.wikiRoot, join(root, ".wiki"));
   // Writes stay inside .wiki/: no skill files deployed into the workspace.
   await access(join(root, ".wiki", "index.md"));
   const workspaceFiles = await readdir(root);
@@ -192,7 +231,7 @@ test("wiki init/refresh/lint commands build an OKF bundle the search tool answer
     value?: { status?: string; wikiRoot?: string };
   };
   assert.equal(init.value?.status, "initialized");
-  assert.equal(init.value?.wikiRoot, ".wiki");
+  assert.equal(init.value?.wikiRoot, join(root, ".wiki"));
   // Writes stay inside .wiki/: no skill files deployed into the workspace.
   await access(join(root, ".wiki", "index.md"));
   const workspaceFiles = await readdir(root);
@@ -257,5 +296,103 @@ test("wiki re-enable is idempotent and rebinding switches workspaces", async () 
   assert(!skills.skills.some((skill) => skill.name.startsWith("wiki-")));
   await rm(rootA, { recursive: true, force: true });
   await rm(rootB, { recursive: true, force: true });
+  host.close();
+});
+
+// --- Ingest (plan 121): staged raw layer, untrusted labeling, no fetch of its own ---
+
+test("wiki ingest stages text under the raw layer and /wiki-ingest files it via drivers", async () => {
+  const root = await tempDir();
+  await writeFile(join(root, "README.md"), "# Widget\n\nbuildWidget exists.\n");
+  // No Obscura: text/path ingest must work regardless (url is covered below).
+  const host = await codingHost(root, undefined, () => undefined);
+  const sessionId = (host as unknown as { live: Map<string, unknown> }).live.keys().next().value as string;
+  await host.handle("knowledge.setOptions", { workspaceRoot: root, wiki: true });
+  const ingest = wikiTool(host, "wiki_ingest");
+
+  // Staging works before the wiki is scaffolded; log.md gets an entry only
+  // when the wiki root exists, so no .wiki/ is created as a side effect.
+  const before = await ingest.execute({ text: "External: widgets are assembled from panels.", title: "Widget Notes" }, {});
+  assert.equal(before.metadata?.trust, "untrusted_external", "staged sources are labeled untrusted");
+  // Prism 0.7 reports workspace-relative posix paths for the raw layer.
+  assert.ok(
+    before.value?.rawDir?.startsWith("raw/ingest/"),
+    `raw layer under the workspace (${before.value?.rawDir})`,
+  );
+  assert.match(await readFile(resolve(root, before.value!.extractPath!), "utf8"), /widgets are assembled from panels/);
+  assert.ok((await readdir(resolve(root, before.value!.rawDir!))).includes("extract.md"), "extract staged next to the immutable original");
+  assert.equal(existsSync(join(root, ".wiki")), false, "ingest alone never scaffolds the wiki");
+
+  // With the wiki root present, the Ingested log entry lands.
+  await host.handle("session.prompt", { sessionId, text: "/wiki-init" });
+  await ingest.execute({ text: "External: panels render widget state.", title: "Panel Notes" }, {});
+  assert.match(await readFile(join(root, ".wiki", "log.md"), "utf8"), /Ingested/);
+
+  // /wiki-ingest is an extension-registered command; dispatching it through
+  // a live session's drivers hands the brief to the wiki-maintainer skill.
+  const dispatched = (await host.handle("command.dispatch", {
+    name: "wiki-ingest",
+    sessionId,
+    args: { text: "External: the panel registry is keyed by widget id.", title: "Registry Notes" },
+  })) as WikiToolResult;
+  assert.equal(dispatched.value?.runStarted, true, "filing run started via drivers");
+  await access(resolve(root, dispatched.value!.rawDir!, "extract.md"));
+
+  // No live session ⇒ no drivers ⇒ the command stays stage-only.
+  const stagedOnly = (await host.handle("command.dispatch", {
+    name: "wiki-ingest",
+    args: { text: "External: stage-only source." },
+  })) as WikiToolResult;
+  assert.equal(stagedOnly.value?.runStarted, false);
+
+  await rm(root, { recursive: true, force: true });
+  host.close();
+});
+
+test("wiki ingest fails closed: path escapes and private hosts never spawn the CLI", async () => {
+  const root = await tempDir();
+  const outside = await tempDir();
+  await writeFile(join(outside, "secret.md"), "private\n");
+  const obscura = await fakeObscura(await tempDir());
+  const host = await codingHost(root, undefined, () => obscura.path);
+  const sessionId = (host as unknown as { live: Map<string, unknown> }).live.keys().next().value as string;
+  await host.handle("knowledge.setOptions", { workspaceRoot: root, wiki: true });
+  const ingest = wikiTool(host, "wiki_ingest");
+
+  // `path` containment: realpath must stay inside the workspace root.
+  await assert.rejects(
+    () => ingest.execute({ path: join("..", basename(outside), "secret.md") }, {}),
+    /escapes the workspace/,
+  );
+
+  // Private host: Prism's SSRF gate rejects before the host hook, so the
+  // Obscura CLI never spawns (no marker).
+  await assert.rejects(() => ingest.execute({ url: "http://127.0.0.1/private.md" }, {}), /ingest url rejected/);
+  assert.equal(existsSync(obscura.marker), false, "no CLI spawn for a blocked host");
+
+  // Allowed URL: the hook runs Obscura and stages its markdown dump as source.md.
+  const fetched = await ingest.execute({ url: "https://example.com/rfc", title: "RFC" }, {});
+  assert.equal(fetched.value?.url, "https://example.com/rfc");
+  assert.equal(basename(fetched.value?.sourcePath ?? ""), "source.md", "markdown dump, not a binary source");
+  assert.match(await readFile(resolve(root, fetched.value!.extractPath!), "utf8"), /Fetched RFC body/);
+  assert.equal(existsSync(obscura.marker), true, "CLI spawned exactly on the allowed URL");
+
+  await rm(root, { recursive: true, force: true });
+  await rm(outside, { recursive: true, force: true });
+  host.close();
+});
+
+test("wiki ingest url without Obscura fails closed while text still stages", async () => {
+  const root = await tempDir();
+  const host = await codingHost(root, undefined, () => undefined);
+  await host.handle("knowledge.setOptions", { workspaceRoot: root, wiki: true });
+  const ingest = wikiTool(host, "wiki_ingest");
+  await assert.rejects(
+    () => ingest.execute({ url: "https://example.com/nohook" }, {}),
+    /requires a fetchUrl host hook/,
+  );
+  const staged = await ingest.execute({ text: "No hook needed for inline text." }, {});
+  assert.ok(staged.value?.extractPath, "text ingest is unaffected by an absent Obscura");
+  await rm(root, { recursive: true, force: true });
   host.close();
 });

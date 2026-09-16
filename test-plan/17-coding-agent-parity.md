@@ -69,6 +69,19 @@ route and the agent-specific facts.
 | C39 | Open the inspector's `Settings` tab in the agent view | The tab lists the session's delivered agent files (name, mono size, provenance badge) with its `.agents/skills/*/SKILL.md` + `SYSTEM.md` caption and a designed empty state — the Agent Settings surface lives here, not on a separate page (module [15](15-ui-design-systems.md) UI-DS-36) |
 | C40 | Open the inspector's `Files` tab after reading and editing files in the session | The tab lists **every file the session has touched** (basename + directory, status marker: `M` modified, `R` read, `A` added, `D` deleted) and opens the selected file's editor view — not a second workspace tree and not a single hard-coded document |
 
+## Plan 121 steps (Prism 0.7 cheap wins, 2026-09-16)
+
+| # | Action | Expected |
+|---|--------|----------|
+| C45 | In a scratch coding workspace with wiki enabled, submit `/wiki-init`, then inspect the registered commands and skill card | Wiki binding activates once; existing wiki skills appear and `/wiki-ingest` is available; repeating `/wiki-init` is idempotent |
+| C46 | After C45, submit `/wiki-ingest {"text":"External manual source.","title":"Manual text"}` and `/wiki-ingest {"path":"notes.md","title":"Manual path"}` | Each source stages under workspace `raw/ingest/<timestamp>-<slug>/` with `extract.md` and `metadata.trust: "untrusted_external"`; with `.wiki/` present, `.wiki/log.md` records `Ingested`; an active session starts the maintainer filing run |
+| C47 | With Obscura unavailable, submit `/wiki-ingest {"url":"https://example.com/nohook"}` | URL ingest returns the missing-`fetchUrl` error before any fetch/CLI spawn; inline text ingest remains available |
+| C48 | With the graft CLI resolvable, open the graft skill in the agent Settings/Skills view (or its command help) | The delivered skill/help names `/graft-init` and `/graft-build-deep`; graft appears as an active extension |
+| C49 | Submit `/graft-init`, then `/graft-build-deep` without configuring a deep model | Init completes non-interactively with no user-level/MCP/hook/statusline wiring; deep build returns a fail-closed configuration error before spawning and does not expose a key |
+| C50 | In a coding session on a windowed model (e.g. 200k window), grow a branch past the compiler's compact ratio (≈0.9 of the input cap) and submit the next prompt; then check the transcript and the agent foot | Auto-compaction fires once at that prompt boundary before the provider turn (`compaction_started` → `compaction_finished`, a local summary entry appears, no extra provider call); the session stays usable and the context meter drops. A prompt that is itself over the cap still fails closed with the attention-budget error instead of silently evicting |
+| C51 | On the same windowed coding session, send two consecutive turns that end `truncated` (the compiler mutated what it could and the request still sat over the trigger ratio), then submit the next prompt; repeat with the chat profile | Two truncated turns arm compaction: the next prompt compacts even when small. Chat and limit-less models (Ollama discovery, pass-through ids) never auto-compact — no compaction entry appears |
+| C52 | Call `agent.setRunOptions({ compactAfterTokens: 2000 })` and start a fresh coding session on a windowed model; send a prompt whose estimate is over that ceiling but under the compact ratio; then configure the graft deep model and run `/graft-build-deep` | The ceiling fires (live knob, not stored-and-unused). `/graft-build-deep` refuses before the deep model exists; after `knowledgeSetOptions({ graft: true, graftDeepModel: { provider, model } })` it spawns with `GRAFT_API_KEY` in the child environment only (visible in the child's env, never in argv or logs), and a key that resolves nowhere fails closed with `-32602` |
+
 ### Negative checks (plan 118)
 
 | # | Check | Expected |
@@ -373,3 +386,100 @@ artifacts: `test-plan/artifacts/119-editor-agent-remediation/live-agent/` and
 | Frontend regression | PASS | `frontend npm test`: 49 files / 426 tests passed with **exit 0** after the 2026-09-15 further-actions fix (fire-and-forget bridge calls now route through `frontend/src/lib/detached.ts`; the two `src/test/shell.test.tsx` unhandled `invoke` rejections are gone). `npm run lint` is clean (0 errors / 0 warnings) and `npm run check:budget` passes against the decision-logged 404 kB total ceiling. |
 
 No existing step was weakened. C41–C44 and C-N14 add the Plan 119 user-visible and negative paths; unresolved GUI/provider limits and the two existing review findings remain visible for a future input-capable/provider-configured pass.
+
+## Plan 121 execution record (Linux, 2026-09-16)
+
+Build: `cargo build --bin clay` and `cargo build -p clay-desktop --bins` passed; `cd clay-agent && npm test` passed with 163/163 tests, 1 pre-existing skip. An isolated `CLAY_AGENT_MOCK=1` server plus real Clay desktop was launched from `/tmp/clay-manual-121` with the canonical example config, scratch workspace, and graft available; Obscura was intentionally absent for C47.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| C45–C46 | UNRESOLVED live / PASS automated | The real server and coding profile reached the launch state, but `/wiki-init` and `/wiki-ingest` could not be entered. `clay-agent/src/__tests__/wiki-knowledge.test.ts` covers binding, text/path staging, raw-layer paths, trust metadata, `.wiki/log.md`, and live-driver dispatch. |
+| C47 | UNRESOLVED live / PASS automated | Live URL input was blocked. The wiki suite verifies missing Obscura/fetchUrl fails closed while text ingest remains available. |
+| C48–C49 | UNRESOLVED live / PASS automated | Graft CLI availability and the seeded skill text were present in the isolated config; interactive command/help inspection was blocked. `graft-knowledge.test.ts` verifies both skill instructions, non-interactive `init`, no secret on argv, and pre-spawn deep-build refusal. |
+| Real-build launch gate | PASS | Server listened on `/run/user/1000/clay.sock`; the desktop connected and the daemon registered the `coding` profile in `artifacts/clay-x11.log`; scratch config/workspace remained isolated. |
+| Interactive GUI legs | BLOCKED | `computer-use-linux doctor`: AT-SPI/window discovery passed, but `can_send_development_input=false`; `/dev/uinput` is root-only (`Permission denied`), no connectable `ydotoold` socket exists, `wtype` is incompatible with this compositor, and XDG RemoteDesktop input consent requires a human. No live pass is claimed for C45–C49. |
+
+The new steps and this exact blocker are recorded without weakening modules 16/17 or converting automated coverage into a manual pass.
+
+## Plan 121 follow-up record (auto-compaction + graft deep model, Linux, 2026-09-16)
+
+Build: `cargo check --all-targets` and `cargo clippy --all-targets -- -D warnings` clean; `cargo fmt --check` clean; `cargo test --test protocol` 216/216; `cd clay-agent && npm test` 169 passed / 1 skip (170 total). The isolated `CLAY_AGENT_MOCK=1` launch from the earlier record was reused; interactive input remained blocked by the same host ceiling.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| C50–C51 | UNRESOLVED live / PASS automated | No live transcript could be driven. `clay-agent/src/__tests__/auto-compaction.test.ts` covers the arming predicate (coding + windowed only; chat and limit-less models unarmed), the compact-ratio gate compacting locally at the prompt boundary with zero provider calls, `attention_compiled` events feeding the truncation streak through `session.prompt`, and the two-truncated-turns fire; `attention-compiler.test.ts` keeps the over-budget fail-closed case. |
+| C52 | UNRESOLVED live / PASS automated | `auto-compaction.test.ts` proves the `compactAfterTokens` ceiling fires under the ratio gate (the knob is live). `graft-knowledge.test.ts` proves `/graft-build-deep` refuses before a deep model exists, then spawns with the vault-resolved key only in `GRAFT_API_KEY` (argv carries provider/model/base-url, never the key), rebinds on a changed model, and fails closed (`-32602`) for a missing key, a deep model without `graft: true`, and malformed shapes; `src/server/ops/agent.rs` unit tests pin the pre-queue shape validation. |
+| Interactive GUI legs | BLOCKED | Same host ceiling as the Plan 121 record above (root-only `/dev/uinput`, no connectable `ydotoold` socket, `wtype` incompatible, portal consent interactive). No live pass is claimed for C50–C52. |
+
+## Plan 122 steps (host-owned spawn agents, 2026-09-17)
+
+Steps C53–C55 + C-N15 cover the Prism 0.7 supervisor primitive on coding
+profiles. Git-worktree isolation for children is explicitly **out of
+coverage** — children share the parent workspace by design this cut.
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C53 | Open a coding session, then a Chat session; inspect each session's tool set (environment/context or a provider-captured registry) | The coding session lists `spawn_agent`, `wait_agent`, `cancel_agent` alongside the coding tools; Chat lists none of the three | `clay-agent/src/__tests__/spawn-agent.test.ts` (coding vs Chat tool lists) |
+| C54 | In a mock-provider coding session, prompt a sync spawn of the `test` child (e.g. via `spawn_agent {"childId":"test", ...}`) | The transcript renders the `spawn_agent` tool row plus a child lifecycle row pair (`test` started → stopped with status) from the `subagent_*` → Tool mapping; the child result text returns through the parent tool call | `spawn-agent.test.ts` (sync spawn: lifecycle rows, child result, child registry without spawn tools); `src/server/agent.rs` mapper test (`map_event_maps_subagent_lifecycle_onto_tool_rows`) |
+| C55 | Spawn async, then `cancel_agent`/`session.cancel` while the child runs | The parent run abort/`session.cancel` stops the running child (a stopped lifecycle row arrives); handles are in-process only — after a daemon restart a stale `delegationId` is a plain tool error from `wait_agent`, never a cross-session resume | `spawn-agent.test.ts` (parent abort stops async child; foreign `delegationId` wait error); `clay-agent/README.md` non-durability note |
+
+| # | Check | Expected |
+|---|-------|----------|
+| C-N15 | Model-supplied `childId` outside the catalog (e.g. `"evil"`), and a `wait_agent` on a fabricated `delegationId` | Both fail closed before delegation: the closed spawn schema (enum = host catalog `test`/`validation`) blocks the call at validation with no child provider turn; the foreign handle is a tool error. Model arguments can never name a child id, tool set, or identity the host did not install |
+
+## Plan 122 execution record (Linux, 2026-09-17)
+
+Build: `cd clay-agent && npm test` 175 passed / 1 pre-existing skip (176
+total, includes the six new `spawn-agent.test.ts` cases); `cargo fmt
+--check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D
+warnings` clean; `cargo test --lib server::agent` 100/100 (includes the
+new subagent-lifecycle mapper test and the updated unknown-drop contract).
+
+| Steps | Result | Evidence |
+|-------|--------|----------|
+| C53–C55, C-N15 | PASS (automated) | `clay-agent/src/__tests__/spawn-agent.test.ts` × 6; `map_event_maps_subagent_lifecycle_onto_tool_rows`; updated `map_event_drops_unknown_event_types` (identified-id rule) |
+| Live GUI legs | UNRESOLVED | Standing host input ceiling (root-only `/dev/uinput`, no `ydotoold`, interactive portal consent — same blocker as the plan 121 record). No live spawn against a real model was run; the mock-provider automated suites pin the same code paths |
+| Worktree isolation | Out of coverage | Deferred by plan 122: children reuse the parent workspace root and the parent document `sessionId` |
+
+## Plan 123 note (per-prompt OM work-scopes, 2026-09-16)
+
+Automated-only cut; no C-step changed or weakened. Plan 123 attaches an
+internal work-scope to each OM-attached coding prompt and nests a closed child
+scope per delegated child run, so the C53–C55 spawn expectations above still
+hold (the tool catalog, lifecycle rows, cancel path, and fail-closed handles
+are untouched). Scopes live only in the daemon OM ledger — nothing new renders
+in the transcript, Memory tab, or Session Info. Recall stays exact-id only.
+
+## Manual-test remediation: the pane mount selects the coding profile (2026-09-16)
+
+Manual test finding (the C38 route, Linux): a tab restored by `layout.json`
+into the agent view — or entered through the `Ctrl+2` switcher or the
+empty-tab landing — never dispatched `coding-agent.profile`, so the book's
+profile stayed empty and the pane's session was created with the daemon-level
+`Chat` default. The agent then ran **without the coding tools and without
+MCP**: a repo `.mcp.json` declaring `graft` produced `mcpServers: []` and the
+foot read `MCP none`.
+
+Root cause proved end to end against a real server + the shipped daemon + the
+repo's own `.mcp.json`: the persisted session record carried
+`agent_definition_id = "Chat"`. With the profile set, the same run created a
+`coding` session and its mount snapshot carried the `graft` outcome
+(`connected: true`).
+
+Fix: `AgentHost::tab_state_snapshot` (the pane's mount STATE) now fills an
+*empty* book profile with `CODING_SURFACE_PROFILE_ID` (`agent:coding`) before
+ensuring the tab's session; a non-empty (deliberate) profile is never
+overwritten, and the launch command path is unchanged.
+
+Known ceiling: a tab whose workspace *already* adopted a `Chat` session before
+this fix keeps that live session (the book profile is per workspace, the live
+session is per `(agent, root)`); the next session for that workspace — after a
+daemon/pane restart or a workspace change — runs the coding profile.
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C56 | Open a workspace whose stored book profile is empty, then enter the agent view (restore, switcher, or launch); inspect the session's profile and the MCP card/foot | The pane's session runs `coding`; a repo `.mcp.json` server connects and the foot lists it (`<id> · n tools`); a profile the user picked deliberately survives a later mount | `tab_state_snapshot_starts_the_session_and_carries_branch_and_environment` (profile `coding`; `custom` survives a second mount) |
+
+| Steps | Result | Evidence |
+|-------|--------|----------|
+| C56 | PASS (automated) | `cargo test --lib -- server::agent::` 41/41 (mount test extended with the profile assertions); `cargo test --lib -- server::connection::` 89/89; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean. The live leg is blocked by the standing host input ceiling; the end-to-end evidence is the real server + shipped daemon reproduction above |

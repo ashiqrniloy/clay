@@ -22,6 +22,13 @@
 - `clay-agent/src/__tests__/skills-commands.test.ts`
 - `clay-agent/src/__tests__/session-search-tree.test.ts`
 - `clay-agent/src/__tests__/mcp-obscura.test.ts`
+- `clay-agent/src/__tests__/attention-compiler.test.ts`
+- `clay-agent/src/__tests__/auto-compaction.test.ts`
+- `clay-agent/src/__tests__/om.test.ts`
+- `clay-agent/src/__tests__/tool-names.test.ts`
+- `clay-agent/src/__tests__/wiki-knowledge.test.ts`
+- `clay-agent/src/__tests__/graft-knowledge.test.ts`
+- `src/server/ops/agent.rs` (graft deep-model shape validation + unit test)
 - `src/server/agent/book.rs` (session book: selection, persistence, snapshots)
 - `src/server/agent/run.rs` (run pipeline, daemon event mapping, approvals)
 - `src/server/agent/mcp.rs` (MCP allow-list, daemon inventory)
@@ -37,7 +44,7 @@
 
 ## Overview
 
-`clay-agent` is Clay’s Node >= 20 child process that hosts Prism 0.5.5. It is
+`clay-agent` is Clay’s Node >= 22 child process that hosts Prism 0.7.0. It is
 **not** a Clay JS package and is not loaded by Deno. `AgentHost` in
 `src/server/agent.rs` lazy-spawns one daemon per server. Package JS cannot
 spawn or speak to it.
@@ -52,45 +59,242 @@ allow-list plus the cached daemon inventory (commands, extensions, skills, MCP
 connect outcomes, provider/model/profile/session catalogs). The split is
 mechanical: no behavior moved with the lines.
 
+Node floor and event-mapping rule (plan 120): the daemon requires Node >= 22
+(`MIN_NODE` in `main.ts` — a private startup guard, not an `init.js` option),
+and the server's event mapper **drops** Prism `AgentEvent` types it has no arm
+for instead of forwarding them (see [Agent Protocol](agent-protocol.md) and
+[Agent Process Manager](agent-process-manager.md)). The old catch-all
+translated an unmapped event into a run start, which left the client
+"streaming" forever; Prism 0.7 telemetry (`attention_compiled`,
+`subagent_*`, `delegation_*`) relies on the drop.
+
+## Plan 121 additions
+
+Plan 121 keeps new controls behind the existing daemon and knowledge-extension
+boundaries; it adds no Clay JS or `init.js` option.
+
+- **Attention compiler.** `createSession` uses `hasCodingTools`, shared with
+  `durableRunState`, to identify coding sessions. It passes
+  `attentionCompiler: true` only when the resolved model's
+  `limits.contextWindow` is a positive safe integer. Prism's default per-turn
+  compiler then compiles eligible old thinking/tool rows at its 75% gate;
+  `contextBudget` is not set. Chat, tool-free, and limit-less models omit the
+  option, avoiding Prism's missing-cap failure. An over-budget turn raises
+  `AttentionBudgetError` before provider generation rather than silently
+  evicting history.
+- **Per-run tool grants.** `sessionPrompt` validates optional `toolNames` as
+  an array of non-empty strings and forwards it only when present to
+  `session.stream`. Omitted means the full registry; `[]` means no tools; a
+  list is that subset. Prism resolves unknown names during assembly before a
+  provider turn, while resumed runs cannot widen the recorded grant. This is
+  host RPC input, not model-controlled JSON and not a public `clay:agent`
+  setting.
+- **Wiki ingest.** The existing wiki binding registers `wiki_ingest` and
+  `/wiki-ingest`. Text/path/URL sources stage an immutable original plus
+  `extract.md` under workspace `raw/ingest/<utc>-<slug>/`; tool results carry
+  `trust: "untrusted_external"` and filing briefs label their extract preview. `.wiki/log.md` is appended only
+  when `.wiki` already exists. The package never fetches URLs: `enableWiki`
+  injects a host `fetchUrl` only when Obscura resolves, revalidates public
+  HTTP(S) URLs, and runs `obscura fetch <url> --dump markdown`, returned as
+  `source.md`. Missing Obscura leaves text/path ingest available but rejects
+  URL ingest.
+- **Graft commands.** `enableGraft` resolves the CLI before loading the
+  extension and sets `initYes: true`. `/graft-init` therefore uses `--yes`,
+  `--no-global`, `--no-mcp`, `--no-hooks`, and `--no-statusline`;
+  `/graft-build-deep` refuses before spawning until a host `deepModel` or
+  filtered provider environment exists. Deep credentials are passed in the
+  child environment, never argv.
+- **Auto-compaction (follow-up).** `createSession` arms
+  `AgentConfig.compaction` on exactly the compiler sessions (coding +
+  declared context window): a composed custom trigger combining Prism's
+  `DEFAULT_ATTENTION_COMPACT_RATIO` (0.9 of the resolved input cap),
+  `createAttentionTruncationTrigger` (two consecutive `truncated` reports),
+  and the absolute `run.setOptions.compactAfterTokens` ceiling. Prism runs
+  `autoCompact` once per prompt before provider turns; the strategy stays
+  Prism's local deterministic default with the host secret list, so no
+  provider call sits in the automatic path. `session.prompt` feeds every
+  `attention_compiled` event to the per-agent `AttentionTruncationTrigger`
+  (carried on `LiveSession`, rebuilt on model switch). Chat / limit-less
+  models keep no implicit branch rewrite, and an oversized single prompt
+  still fails closed with `AttentionBudgetError`. `run.setOptions.compaction`
+  keeps governing explicit `session.compact` / `/compact`.
+- **Graft deep model (follow-up).** `knowledge.setOptions` accepts
+  `graftDeepModel { provider, model, apiKey?, baseUrl? }` (requires
+  `graft: true`). The provider id is graft's own
+  (`openai`/`anthropic`/`litellm`/`orcarouter`); an omitted `apiKey` reads
+  the stored credential for that provider, an inline key joins the redactor,
+  and the key reaches the child only as `GRAFT_API_KEY` in its environment
+  (Prism adds provider/model/base-url on argv, never the key). A changed
+  deep model rebinds the extension in place; a malformed shape, a missing
+  key, or `graftDeepModel` without `graft: true` fails closed with `-32602`,
+  pre-validated in Rust before the registration queue.
+
+For a daemon caller, a tool grant is an optional run field rather than a
+profile mutation:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"session.prompt","params":{"sessionId":"session-id","text":"Inspect this workspace","toolNames":["read","repo_search"]}}
+```
+
+## Plan 122 additions (host-owned spawn agents)
+
+Coding sessions carry Prism 0.7's supervisor tools — `spawn_agent`,
+`wait_agent`, `cancel_agent` (from `@arnilo/prism-core/runtime/supervisor`, no
+Clay wrapper class, no workflows). This is the Phase 6 delegation primitive,
+not the build/fix loop.
+
+- **Catalog.** One supervisor per live coding session
+  (`createSession` → `sessionSupervisor`), rebuilt on model switch; the child
+catalog is exactly `test` and `validation`, chosen for the Phase 6
+test/validation loop shapes. Chat and tool-free profiles never see the tools.
+The spawn schema is closed (`childId`, `input`, optional `threadId`,
+`mode: "sync" | "async"`) and built from the frozen catalog — model arguments
+cannot extend it, supply child tools, or touch identity; an unknown `childId`
+fails closed at schema validation before the tool body runs.
+- **Children.** `createChildAgent` returns an isolated Prism `Agent` (the
+supervisor derives a `${delegationId}-session` id and own history) on the
+parent's provider/model with the parent's coding tools rebuilt via the shared
+`sessionCodingTools` — bound to the **parent** `sessionId` + workspace root so
+document read/write/edit still round-trip through daemon→server reverse RPC
+and the Rust document registry stays authoritative (a child id would fail
+closed with `agent.workspace_unresolved`). Children never receive
+spawn/wait/cancel (no recursion). Child model = parent model this cut.
+- **Identity.** The supervisor is constructed with the host `runIdentity()` /
+`runOwnership()` (now anchored with `userId: "clay-agent"` — Prism supervisor
+ownership requires an account/user anchor). Children narrow from it via
+Prism's `narrowIdentity` + `assertIdentityPropagation`; `"workspace"` scope is
+preserved so mediated writes keep working.
+- **Transcript.** `observeSupervisorLifecycle` (`prism-coding-tools`) bridges
+supervisor `delegation_*` milestones onto `subagent_started` /
+`subagent_stopped`, which the Rust mapper renders as ordinary Tool wire rows
+(name = childId, delegation id pairs them) — no new AG-UI event type or
+panel. The pump stops on session delete, model rebuild, and daemon
+shutdown.
+- **Durability.** Sync spawn blocks the parent tool call; async returns
+`{ delegationId, status: "running" }`. Parent-run abort (including
+`session.cancel`) propagates to running children through the tool-call abort
+signal. Handles are in-process: a daemon restart forgets them and a stale
+`delegationId` is a plain tool error, never a cross-session resume.
+- **Worktrees deferred.** No `createWorktreeChildFactory` import: Clay's
+document RPC is session-workspace-keyed, so a child cwd in a git worktree
+would starve document ops. Children share the parent workspace (parallel
+children can collide on files); the upgrade path is worktree factories once a
+child can own a registered workspace root (Phase 6 follow-up).
+
+## Plan 123 additions (per-prompt OM work-scopes)
+
+Prism 0.7's work-scope index rides the existing OM ledger: Clay adds no second
+store, no RPC, no Clay JS or `init.js` surface, and no new chrome.
+
+- **Per-prompt run scope.** `sessionPrompt` builds a `WorkScopeSpec`
+  (`run:<sessionId>:<n>`, kind `run`) only for OM-attached coding sessions
+  (`live.observationalMemory && hasCodingTools(live.tools)` — the same
+  predicate that arms durable runs and the attention compiler), then runs the
+  whole prompt inside `withWorkScope(controller, spec, runStream)`. The stream
+  is constructed *inside* the scope closure: a rejected scope id fails the
+  prompt before Prism's run-depth proxy is entered (a stream built outside
+  would strand run depth on a throw), and `withWorkScope`'s `finally` leaves
+  the scope on success, abort, or throw. Run scopes are left, never closed —
+  no close entry is written, so the default `closed: "hide"` filter never
+  hides a run's own records.
+- **Controller and ids.** `omScopes(live)` memoizes one
+  `createWorkScopeController` per live session, keyed on the session object
+  (a model switch swaps in a fresh OM proxy), shared by the run scope and its
+  spawn children, with the host secret list passed as the controller's
+  `secrets` so labels/kinds are redacted like other OM text. `omRunCount` /
+  `omChildCount` are not durable, so the first allocation counts this branch's
+  already-opened `om.scope.opened` entries with the same prefix
+  (`countOpenedScopes`); ids stay monotonic across daemon restarts and a
+  resumed session continues from its ledger. Allocation is lazy and
+  unserialized — a collision needs two allocations before the first ledger
+  read resolves, which needs parallel dispatch; Prism's loop default
+  `toolConcurrency` is 1 and a session takes one prompt at a time, so it is
+  not reachable today (`ponytail:` note on `omRunCount` names the
+  promise-chain upgrade path).
+- **Observation binding and projection.** Prism's flush binds each run's new
+  observation/reflection refs to the controller's current leaf scope, so a
+  run's memory lands in its own scope. The injected
+  `observational-memory` context block projects `from = current leaf`,
+  `include: "self+ancestors"`, `closed: "hide"`: sibling run scopes never leak
+  into a later prompt, and once any host scope exists the session-wide early
+  return no longer applies, so the injected block is scope-ref-based rather
+  than the whole session pool. Exact-id `recall` is unchanged and still reads
+  the full branch; the Memory tab (`session.om.activity`) reads ledger entries
+  directly, so recorded observations stay visible there.
+- **Child scopes (spawn).** `sessionSupervisor` installs `omSpawnScopes` as
+  the supervisor `hooks`. `before` opens `child:<sessionId>:<n>` with
+  `parentId = scopes.leaf()` (skipped when the leaf is the session root —
+  Chat, OM-off, or a resumed run outside a prompt), kind `child`, label
+  `childId`; a per-supervisor `Map<delegationId, scopeId>` keeps the hook
+  idempotent for resumed children. `after` closes it once and swallows a lost
+  scope (advisory bookkeeping must not surface as a `delegation_error`). Child
+  scopes are opened/closed but **never entered**: the ledger's enter/leave
+  stack is session-global, so a child entering while an async parent run is
+  open would make the parent's own flush bind to the child.
+- **Caps and tradeoffs.** Prism fails closed on its limits (256 host scopes
+  per session, depth 8, stack 8, 4096 binds). Because run scopes are kept
+  open, a long-lived OM coding session reaches the 256-scope ceiling after 256
+  prompts and later prompts fail closed — accepted by plan 123. Prism also
+  skips the observation dropper while any host scope exists
+  (`hasHostScopes`), so dropped-observation pruning is off for these sessions;
+  the folded-payload byte cap remains the storage bound. Fabric is **not**
+  attached: there are no typed `fact`/`procedure` notes.
+
+One OM coding prompt writes one small ledger triple (ids host-generated, kinds
+and labels redacted):
+
+```text
+om.scope.opened  { id: "run:<sessionId>:1", kind: "run" }
+om.scope.entered { scopeId: "run:<sessionId>:1" }
+om.scope.left                          # after the run settles, success/abort/throw
+```
+
+A session id that cannot form a valid Prism scope id (charset
+`[A-Za-z0-9._:/-]{1,128}`, no `..`) fails the prompt closed before any
+provider turn; no scope entry is written.
+
 ## Responsibilities
 
 - Stdio JSON-RPC wrapping `createAgent` / `createAgentSession` / `AgentEvent`.
 - SQLite session store under `--data-dir/sessions.sqlite`.
 - Encrypted credential vault under `--data-dir/credentials.vault`; OS keychain
   when the secret service answers. No plaintext fallback.
-- Load first-party Prism 0.5.5 provider packages through the extension kernel
+- Load first-party Prism 0.7.0 provider packages through the extension kernel
   with a stored credential resolver (never `process.env`). Imports use family
   subpaths only: `@arnilo/prism` (agent/kernel API),
   `@arnilo/prism-core/{credentials/node,sessions/sqlite,validation/json-schema}`,
   `@arnilo/prism-memory/compaction/{observational-memory,llm}`, and
-  `@arnilo/prism-providers/<adapter>`. All seven 0.5.5 family pins are exact
+  `@arnilo/prism-providers/<adapter>`. All seven 0.7.0 family pins are exact
   (`prism`, `prism-core`, `prism-providers`, `coding-tools`, `web-tools`,
   `memory`, `mcp`) plus direct `better-sqlite3@13.0.3` for the SQLite subpath
-  and `playwright-core@1.61.0` for CDP composition. The unused 0.3
+  and `playwright-core@1.63.0` for CDP composition. The unused 0.3
   `prism-model-router` dependency was dropped with the consolidation; retired
   0.3 package names are denied by `agent_protocol::phase25_dependencies_deny_acp_agui_mcp`.
 - Host-registered `AgentDefinition`s. `Chat` is the built-in tool-free profile the server falls back to when a tab's book has no profile (its UI surface was removed with plan 118; the name survives as the daemon-level default); coding profiles get the Phase 1
   tool surface described below.
 - Coding-run options (`run.setOptions`, Clay JS `agent.setRunOptions`): Prism
-  0.5.5 policy caps, all defaulting to `null` (unbounded) — tokens, turns,
+  0.7.0 policy caps, all defaulting to `null` (unbounded) — tokens, turns,
   tool rounds, tool calls, wall time. A host that wants a fence sets finite
   values via `run.setOptions`. Provider
   request/response bytes are Prism HARD 64 MiB (null not allowed; omitting
   them used to leave DEFAULT 8 MiB). `compaction` defaults
   to `llm`. Call from `init.js` or a trusted config module; queued while the
-  daemon is down. `compactAfterTokens` default 800_000 is stored and unused
-  until auto-compact is wired (OM still uses decision 2158 / 80_000 via
-  `agent.compact`).
+  daemon is down. `compactAfterTokens` default 800_000 is the absolute ceiling
+  of the automatic compaction gate for coding sessions on windowed models
+  (fires at the ceiling, at the attention compiler's `compactRatio`, or after
+  two `truncated` turns); the OM threshold stays decision 2158 / 80_000 via
+  `agent.compact`.
 - Opt-in wiki knowledge base (plan 108 task 12, decision 2156): off by
   default. `knowledge.setOptions { workspaceRoot, wiki }` — forwarded by the
   trusted `op_clay_agent_knowledge_set_options` (queued while the daemon is
   down, applied at initialize) — loads `@arnilo/prism-memory/wiki` via
-  `kernel.load` with `autoDeploySkills: false` (wiki writes stay inside the
-  workspace `.wiki/` tree; skills come from the kernel registry with
-  progressive disclosure via `load_skill`). The loaded extension registers
-  `/wiki-init`, `/wiki-refresh`, `/wiki-lint` commands (bare kernel names —
+  `kernel.load` with `autoDeploySkills: false` (authored pages and logs stay inside the
+  workspace `.wiki/` tree; `wiki_ingest` owns an immutable `raw/ingest/` layer
+  outside it; skills come from the kernel registry with progressive disclosure
+  via `load_skill`). The loaded extension registers `/wiki-init`,
+  `/wiki-refresh`, `/wiki-lint`, and `/wiki-ingest` commands (bare kernel names —
   the prompt intercept and `commandDispatch` both fall back from `/name` to
-  the bare form), `wiki_search`/`wiki_read_page`/`wiki_record_insight`
+  the bare form), `wiki_search`/`wiki_read_page`/`wiki_record_insight`/`wiki_ingest`
   tools (appended to coding sessions whose workspaceRoot matches the
   binding), and the `wiki-searcher`/`wiki-maintainer` skills (resolved
   after the base skills; `skillList` filters them out while disabled).
@@ -104,8 +308,9 @@ mechanical: no behavior moved with the lines.
   `knowledge.setOptions` loads `@arnilo/prism-memory/graft` via
   `kernel.load`, registering the `graft_ask`/`graft_grep`/`graft_callers`/
   `graft_skeleton`/`graft_map`/`graft_blast` pull tools (mode `pull`,
-  default), the `graft`/`graft-build`/`graft-check`/`graft-viz` commands
-  (bare names, reachable through the `/name` slash fallback), and a
+  default), the `graft`/`graft-build`/`graft-check`/`graft-viz`/`graft-init`/
+  `graft-build-deep` commands (bare names, reachable through the `/name`
+  slash fallback), and a
   host-side `graft` skill copy (the package's skill body is not exported).
   `graftMode: "push"` additionally wires the retrieval pack, first-turn
   orientation injector, and edit-watch (`graft:dirty` on mutating-tool
@@ -185,7 +390,7 @@ mechanical: no behavior moved with the lines.
   only its own tools; per-server outcomes (`{serverId, connected,
   tools, error}`) ride `environment.list` → the panel's MCP card and
   composer section. Call timeout: `timeoutMs` (positive, ≤ 30 min hard
-  ceiling), default 60 s — it bounds tool calls only. Prism 0.5.5 exposes
+  ceiling), default 60 s — it bounds tool calls only. Prism 0.7.0 exposes
   one knob (`callTimeoutMs`) and applies it to the `initialize` handshake
   and the first `tools/list` page too, so `mcp.ts` passes
   `max(timeoutMs, CONNECT_FLOOR_MS = 5 s)` to the bridge and, below that
@@ -344,7 +549,7 @@ reference data lives in the inspector rather than in the transcript.
 
 ## How It Works
 
-1. `main.ts` refuses Node < 20, requires `--data-dir`, reads NDJSON JSON-RPC
+1. `main.ts` refuses Node < 22, requires `--data-dir`, reads NDJSON JSON-RPC
    concurrently (`readNdjsonConcurrent`). Reverse-RPC replies share stdin with
    long `session.prompt` calls; awaiting each line handler before the next
    line deadlocks `document.stat` / `document.read` until the 30s reverse timeout.
@@ -499,7 +704,7 @@ reference data lives in the inspector rather than in the transcript.
     never an error. Present: the daemon owns the `obscura serve` (CDP on
     127.0.0.1 only) and `obscura mcp` children, registers the complete
     advertised tool surface with the `obscura_` prefix plus Prism browser
-    tools (`playwright-core@1.61.0` is the exact CDP-composition peer —
+    tools (`playwright-core@1.63.0` is the exact CDP-composition peer —
     never `connect`/`launch`), and kills both children on shutdown.
     Capabilities activate lazily on the first coding session; nothing is
     called sandboxed. `/brave` `/exa` `/firecrawl` subpaths are not imported.
@@ -593,6 +798,13 @@ catalog is convenience, not authority; the provider rejects bad ids).
   lease/CAS path (`apply_edit`) regardless of caller.
 - Search hits are redacted metadata and never auto-injected into agent
   context.
+- Wiki ingest keeps external content in the workspace raw layer with
+  `untrusted_external` metadata. Path sources require realpath containment;
+  URL sources pass Prism's SSRF check and the host's public HTTP(S) check
+  before Obscura is invoked. The wiki package never performs network I/O.
+- Graft init is fixed to `--no-global`, `--no-mcp`, `--no-hooks`, and
+  `--no-statusline`; deep builds require explicit host configuration. Graft
+  API keys are child-environment data and never appear in argv or logs.
 - MCP servers connect with no approval gate (plan 117 amendment to
   decision 1758): the config surface is user-owned (`mcp.json`) or
   repo-owned (`.mcp.json`) and both are trusted sources by decision —
@@ -610,7 +822,21 @@ catalog is convenience, not authority; the provider rejects bad ids).
 
 - Frames > 1 MiB fail closed.
 - Secrets never appear in RPC results, events, or logs.
-- Omitted tools/skills activate none; unknown names throw before a provider turn.
+- Omitted `toolNames` preserves the full tool registry; explicit `[]` grants
+  no tools; unknown names fail before a provider turn; malformed shapes return
+  RPC `-32602`.
+- The attention compiler is present only for coding tools with a positive safe
+  model context window; Chat and limit-less models omit it.
+- OM work-scopes are host-owned and daemon-side: `run:<sessionId>:<n>` per
+  OM-attached coding prompt, `child:<sessionId>:<n>` per delegation under the
+  current run scope. Ids are host-generated and redacted; no Clay JS,
+  configuration, or package surface can open, bind, close, or name a scope.
+- Scope projection only narrows the auto-injected memory block; exact-id
+  `recall` ignores scopes and reads the whole branch. Fabric is not attached.
+- `wiki_ingest` stages raw originals/extracts outside `.wiki/`, labels them as
+  untrusted external content, and never fetches a URL without the host hook.
+- Graft CLI resolution happens before extension load; deep build refuses before
+  spawning without a configured deep model.
 - `session.load` payloads are persisted `SessionEntry` records; the server
   parses `entry.message.{role,content}` and never a flat `{role,content}` — a
   mock that speaks the flat shape is lying about the contract (it hid an
@@ -653,7 +879,10 @@ load entries never fail or block for a missing host or daemon. The package (thir
 these ops and cannot import `clay:agent`. Rust protocol additions:
 `AgentClientCommand::{SetAutonomy, SearchSessions, RunResume}` and
 `AgentServerMessage::AgentRpc`; `session.setAutonomy` toggles the live
-session's `fullAutonomy` flag (default false, host-set only).
+session's `fullAutonomy` flag (default false, host-set only). Plan 121 adds no
+public facade or configuration key: `session.prompt.toolNames` is a daemon RPC
+run option, while `wiki_ingest` and the graft commands are capabilities of the
+existing knowledge binding.
 
 ## Tests
 
@@ -710,6 +939,46 @@ daemon is killed and restarted — the resumed-session-root check),
 branch, and the linear previous-agent pass), plus
 `WorkspacePanes.test.tsx` for tab-scoped senders.
 
+The Plan 123 run reports 181 tests (180 passed, 1 skipped); the same fresh run
+keeps the Plan 121/122 suites green. `cargo test --test protocol` is green
+with the new Rust shape test.
+
+- `om.test.ts` (plan 123) pins the five work-scope behaviors: an OM-on coding
+  prompt opens/enters/leaves one `run:<sid>:1` scope with the run's
+  observations bound to it; an OM-off coding prompt writes zero scope entries;
+  an invalid scope id fails closed before the prompt starts; a second run's
+  projection excludes the first run's observations while exact-id recall still
+  resolves them; and a delegation nests one closed `child:<sid>:1` scope under
+  the run scope (`parentId` matches, depth 2, never entered).
+
+- `attention-compiler.test.ts` proves coding-only enablement, the valid-window
+  guard, under-ratio pass-through, and `AttentionBudgetError` before provider
+  generation when history remains over budget.
+- `auto-compaction.test.ts` (follow-up) proves the arming predicate
+  (coding + windowed only), the compactRatio gate compacting locally at the
+  prompt boundary with zero provider calls, the `compactAfterTokens` ceiling
+  firing under that gate, `attention_compiled` events reaching the truncation
+  streak through `session.prompt`, and the two-truncated-turns fire.
+- `tool-names.test.ts` captures provider-visible tools for omitted, empty,
+  subset, unknown, and malformed `session.prompt.toolNames` values.
+- `spawn-agent.test.ts` (plan 122) covers the supervisor primitive end to end
+  on the mock provider: coding-vs-Chat tool lists, a sync `test` spawn
+  (isolated child turns, child registry without spawn tools, document ops on
+  the parent `sessionId`, `subagent_*` lifecycle rows), unknown-`childId`
+  fail-closed with zero child turns, foreign-`delegationId` wait errors,
+  parent-abort cancellation of an async child, and the no-worktree-import
+  check.
+- `wiki-knowledge.test.ts` covers `wiki_ingest` raw-layer staging, trust
+  metadata, `.wiki/log.md`, command-driver filing, path containment, SSRF
+  rejection, Obscura markdown fetching, and missing-hook failure.
+- `graft-knowledge.test.ts` covers default binding, CLI fail-closed behavior,
+  command/help registration, non-interactive init flags, secret-free argv,
+  pre-spawn refusal of unconfigured deep builds, and (follow-up) the vault-
+  and inline-key deep-model paths with `GRAFT_API_KEY` in the child environment
+  only, rebinding on a changed model, and `-32602` fail-closed shapes.
+- `server::ops::agent::tests::graft_deep_model_shape_fails_closed_before_queueing`
+  (Rust) pins the pre-queue shape validation.
+
 ## Related
 
 - [Phase 25 Agent Host and Pane Content Primitive Review](../archive/phase25-agent-host-primitive-review.md)
@@ -723,3 +992,4 @@ branch, and the linear previous-agent pass), plus
 - `decision-logs/2026-09-10-1526-clay-root-home-datadir-per-agent.md` (root at
   `~/.clay`, per-agent data dir, tool-caps.json as agent config)
 - `plans/117-Phase2.2-Skill-Discovery-Wiki-Graft-Prompt-MCP-Context-Inspector.md`
+- `plans/123-Prism-0.7-Work-Scope-Observational-Memory.md`

@@ -422,6 +422,14 @@ pub(crate) fn is_agent_surface_command(command_id: &str) -> bool {
     )
 }
 
+/// The daemon profile the coding surface selects — registered by the
+/// `@clay/coding-agent` package at load, and applied by the surface's launch
+/// command *and* by the pane's mount STATE: a pane shown without a launch (a
+/// restored layout, the view switcher, the empty-tab landing) must still run
+/// the coding profile, or its session falls back to the daemon-level `Chat`
+/// default with no coding tools and no MCP servers.
+pub(crate) const CODING_SURFACE_PROFILE_ID: &str = "agent:coding";
+
 /// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 

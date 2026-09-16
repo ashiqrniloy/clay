@@ -2,7 +2,7 @@ import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promi
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type Agent,
   type AgentDefinition,
@@ -12,11 +12,14 @@ import {
   type AgentRunStateOptions,
   type AgentSession,
   type AIProvider,
+  type AttentionTruncationTrigger,
   type AuthMethod,
   type CommandDefinition,
   type CommandDrivers,
   type CommandExecutionContext,
   type CommandResult,
+  type CompactionOptions,
+  type CompactionTrigger,
   type ExtensionKernel,
   type JsonObject,
   type LoadedExtension,
@@ -32,6 +35,7 @@ import {
   type Skill,
   type ToolDefinition,
   createAgent,
+  createAttentionTruncationTrigger,
   createExplicitCredentialResolver,
   createExtensionKernel,
   createLoadSkillTool,
@@ -41,6 +45,8 @@ import {
   createSecretRedactor,
   createSessionEntry,
   createSkillRegistry,
+  DEFAULT_ATTENTION_COMPACT_RATIO,
+  DEFAULT_ATTENTION_TRUNCATION_THRESHOLD,
   DEFAULT_SESSION_SEARCH_LIMIT,
   HARD_RUN_LIMITS,
   listSessionBranches,
@@ -65,10 +71,23 @@ import { discoverContributions } from "@arnilo/prism/node/contribution-discovery
 import { parseSkillFile } from "@arnilo/prism";
 import { createSqlitePersistence, type SqlitePersistence } from "@arnilo/prism-core/sessions/sqlite";
 import { createJsonSchemaToolArgumentValidator } from "@arnilo/prism-core/validation/json-schema";
-import type { AskUserDecisionAnswer } from "@arnilo/prism-coding-tools/agent";
+import { observeSupervisorLifecycle, type AskUserDecisionAnswer } from "@arnilo/prism-coding-tools/agent";
+import {
+  createCancelAgentTool,
+  createSpawnAgentTool,
+  createSupervisor,
+  createWaitAgentTool,
+  type SupervisorHooks,
+} from "@arnilo/prism-core/runtime/supervisor";
 import {
   createObservationalMemory,
   createRecallMemoryTool,
+  createWorkScopeController,
+  isWorkScopeOpenedData,
+  SESSION_WORK_SCOPE_ID,
+  withWorkScope,
+  type WorkScopeController,
+  type WorkScopeSpec,
 } from "@arnilo/prism-memory/compaction/observational-memory";
 import type { SettingsProvider, SystemPromptConfig } from "@arnilo/prism";
 import type { AgentIdentity } from "@arnilo/prism";
@@ -81,6 +100,7 @@ import {
   type McpServerOutcome,
 } from "./mcp.js";
 import { resolveObscuraBinary, spawnObscuraHarness, type ObscuraHarness } from "./obscura.js";
+import { runObscuraCli, validateObscuraWebUrl } from "@arnilo/prism-web-tools/obscura";
 import {
   DEFAULT_COMPACT_AFTER_TOKENS,
   createNamedCompactionStrategy,
@@ -89,6 +109,7 @@ import {
   type CompactionStrategyName,
 } from "./compaction.js";
 import {
+  WIKI_INGEST_TOOL_NAME,
   WIKI_READ_PAGE_TOOL_NAME,
   WIKI_RECORD_INSIGHT_TOOL_NAME,
   WIKI_SEARCH_TOOL_NAME,
@@ -100,14 +121,16 @@ import {
 import {
   createGraftExtension,
   resolveGraftCli,
+  type GraftDeepModel,
   type GraftExtensionOptions,
   type GraftMode,
 } from "@arnilo/prism-memory/graft";
 
-/** Auto-compact trigger. Stored by run.setOptions; unused until wired. */
+/** Auto-compaction ceiling (`run.setOptions.compactAfterTokens`): one of the
+ *  three gates of the trigger `autoCompaction()` arms on compiler sessions. */
 const DEFAULT_COMPACT_TRIGGER_TOKENS = 800_000;
 
-/** Policy cap: finite positive integer or `null` (Prism 0.5.5: disable that axis). */
+/** Policy cap: finite positive integer or `null` (Prism 0.7.0: disable that axis). */
 type PolicyCap = number | null;
 
 interface RunConfig {
@@ -121,7 +144,7 @@ interface RunConfig {
   compaction: CompactionStrategyName;
 }
 
-/** Coding envelope (Prism 0.5.5): fence axes disabled (`null`); the only
+/** Coding envelope (Prism 0.7.0): fence axes disabled (`null`); the only
  *  hard caps left are Prism's per-frame request/response bytes. A host that
  *  wants a fence sets finite values via `run.setOptions`. */
 const DEFAULT_RUN_CONFIG: RunConfig = {
@@ -151,6 +174,20 @@ interface OmWorkerModels {
 }
 const omWorkerModels = new Map<string, OmWorkerModels>();
 
+/** Graft's own `build --deep` provider ids (the package's `GraftDeepProvider`,
+ *  not Prism's provider registry). Kept as a literal list so the host
+ *  validates before the extension does. */
+const GRAFT_DEEP_PROVIDERS = ["openai", "anthropic", "litellm", "orcarouter"] as const;
+
+/** In-memory identity of a bound deep model, used only to decide whether a
+ *  repeat `knowledge.setOptions` needs to rebind. The key contributes as a
+ *  digest, so this string can never leak it into a log or dump. */
+function deepModelIdentity(deep: GraftDeepModel | undefined): string {
+  if (!deep) return "";
+  const key = createHash("sha256").update(deep.apiKey).digest("hex").slice(0, 16);
+  return `${deep.provider}\u0000${deep.model}\u0000${deep.baseUrl ?? ""}\u0000${key}`;
+}
+
 /** Graft pull-tool names registered by the @arnilo/prism-memory/graft
  *  extension (tools.js); the package does not export the list. */
 const GRAFT_TOOL_NAMES = [
@@ -177,6 +214,8 @@ const graftSkill = {
     "- `graft_skeleton <file>` skims a file's API surface ~10x cheaper than reading it.",
     "- `graft_blast <path>` after an edit lists dependents worth re-checking.",
     "Graph output is agent-aid, not authority: verify against the source at the cited file:line before editing. Run `graft build` (or /graft-build) after big changes to refresh the graph.",
+    "- `/graft-init` scaffolds the graph in a repo that has none: non-interactive (--yes), never user-level state (--no-global), MCP/hook/statusline wiring off.",
+    "- `/graft-build-deep` runs graft's own LLM deep pass. It refuses to spawn unless the host configured a deep model (deepModel / GRAFT_PROVIDER+GRAFT_MODEL+GRAFT_API_KEY) — do not invent one.",
   ].join("\n"),
 };
 
@@ -541,6 +580,28 @@ interface LiveSession {
   /** Last durable-run suspension: expectedVersion source for run.resume
    *  when the client omits it, plus the pending approval ids. */
   suspension?: { runId: string; version: number };
+  /** Plan 121 follow-up: armed only when the attention compiler is on;
+   *  `session.prompt` feeds it every `attention_compiled` event so the next
+   *  prompt-boundary auto-compact can act on a truncated streak. */
+  attentionTruncation?: AttentionTruncationTrigger;
+  /** Plan 122: stops this session's supervisor lifecycle pump (subagent
+   *  Started/Finished rows). Stopped on delete, model rebuild, shutdown. */
+  stopSubagentLifecycle?: () => void;
+  /** Plan 123: prompts already scoped on this branch (seeded lazily from
+   *  the branch's `om.scope.opened` entries so a resume never reuses an id).
+   *  ponytail: the lazy seed races only if two callers allocate before the
+   *  first seed resolves — unreachable while Clay keeps Prism's default
+   *  `toolConcurrency` of 1 and one prompt per session; chain allocations if
+   *  parallel dispatch ever lands. */
+  omRunCount?: number;
+  /** Plan 123: spawn-child scopes already opened on this branch. Seeded like
+   *  `omRunCount` — Prism's own delegation ids restart with the supervisor
+   *  (every model switch rebuilds it), so they cannot key the ledger. */
+  omChildCount?: number;
+  /** Plan 123: one work-scope controller per OM-attached session, shared by
+   *  the run scope and its spawn children. Keyed on the session object it
+   *  appends through: a model switch swaps in a fresh OM proxy. */
+  omScopes?: { session: AgentSession; controller: WorkScopeController };
 }
 
 /** In-flight LLM branch-summary refinements: sessionId → branch point id. */
@@ -743,6 +804,13 @@ function rpcError(code: number, message: string, data?: unknown): Error & { rpcC
   return Object.assign(new Error(message), { rpcCode: code, data });
 }
 
+/** Plan 121: a coding session is one whose active tools include any Prism
+ *  coding tool — the same predicate that arms durable runs and the attention
+ *  compiler. */
+function hasCodingTools(tools: readonly ToolDefinition[]): boolean {
+  return tools.some((tool) => (CODING_TOOL_NAMES as readonly string[]).includes(tool.name));
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw rpcError(-32602, "params must be an object");
@@ -934,7 +1002,9 @@ export class ClayAgentHost {
   /** Opt-in graft knowledge base (decision 2156, plan 108 task 13): same
    *  binding discipline as the wiki — one workspace, fail-closed CLI
    *  resolution, zero residue when disabled. */
-  private graft: { workspaceRoot: string; loaded: LoadedExtension; mode: GraftMode } | undefined;
+  private graft:
+    | { workspaceRoot: string; loaded: LoadedExtension; mode: GraftMode; deepModelIdentity: string }
+    | undefined;
   /** Workspace roots whose default graft bind was attempted (plan 117):
    *  one attempt per root per daemon, success or fail-closed. */
   private readonly graftBindAttempted = new Set<string>();
@@ -1073,7 +1143,10 @@ export class ClayAgentHost {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const live of this.live.values()) live.session.abort("shutdown");
+    for (const live of this.live.values()) {
+      live.session.abort("shutdown");
+      live.stopSubagentLifecycle?.();
+    }
     this.live.clear();
     for (const pending of this.reversePending.values()) {
       pending.reject(new Error("host closed"));
@@ -1494,6 +1567,8 @@ export class ClayAgentHost {
       observationalMemory,
       tools: created.tools,
       mentionSkills: [],
+      ...(created.attentionTruncation ? { attentionTruncation: created.attentionTruncation } : {}),
+      ...(created.stopSubagentLifecycle ? { stopSubagentLifecycle: created.stopSubagentLifecycle } : {}),
     });
     return {
       sessionId: id,
@@ -1529,6 +1604,8 @@ export class ClayAgentHost {
     agent: Agent;
     tools: ToolDefinition[];
     systemPrompt?: SystemPromptConfig;
+    attentionTruncation?: AttentionTruncationTrigger;
+    stopSubagentLifecycle?: () => void;
   } {
     const def = this.kernel.registries.agents.resolve(profile);
     if (!this.kernel.registries.providers.get(provider)) throw rpcError(-32000, `Unknown provider: ${provider}`);
@@ -1558,7 +1635,50 @@ export class ClayAgentHost {
     // Progressive disclosure: with active skills, host the `load_skill` tool so
     // the model can pull full instructions on demand (catalog-only by default).
     const runTools = skills && skills.length > 0 ? [...tools, createLoadSkillTool({ registry: this.skills, tools })] : tools;
+    // Plan 122: coding sessions additionally get host-owned
+    // spawn/wait/cancel over a supervisor whose catalog is exactly
+    // `test` + `validation`; Chat/tool-free profiles stay without.
+    const supervisor = hasCodingTools(tools)
+      ? this.sessionSupervisor(id, profile, provider, modelId, {
+          workspaceRoot: options.workspaceRoot,
+          fullAutonomy: options.fullAutonomy,
+        })
+      : undefined;
+    const sessionTools = [...runTools, ...(supervisor?.tools ?? [])];
     const model: ModelConfig = this.kernel.registries.models.get(provider, modelId) ?? { provider, model: modelId };
+    // Plan 121: coding sessions run Prism's attention compiler at its
+    // defaults — a per-turn, clone-only gate that stubs old thinking blocks
+    // then old tool results once the assembled input crosses 75% of the
+    // model's input cap, and raises `AttentionBudgetError` instead of
+    // silently evicting. Prism resolves the gate from the model's declared
+    // window at run start and fails closed when neither `maxInputTokens` nor
+    // `limits.contextWindow` exists, so enable it only when the resolved
+    // model declares a usable window: a limit-less discovery model (Ollama)
+    // or a pass-through model id would otherwise fail every run instead of
+    // simply skipping the optimization. `contextBudget` is never set beside
+    // the compiler (mutually exclusive); Chat/tool-free profiles and the
+    // branch-summary worker stay off.
+    const window = model.limits?.contextWindow;
+    const attentionCompiler =
+      hasCodingTools(tools) && typeof window === "number" && Number.isSafeInteger(window) && window > 0;
+    // Plan 121 follow-up: auto-compaction on the same sessions as the
+    // compiler — the two are Prism's designed pair (shrink at
+    // triggerRatio, compact at compactRatio). Prism runs `autoCompact`
+    // only when `AgentConfig.compaction` carries a trigger, so the host
+    // arms one composed custom trigger that fires when:
+    //   - the compiler reported `truncated` on enough consecutive turns
+    //     (stubs can no longer hold the request — rebuild the prefix),
+    //   - the assembled input already sits at the compiler's compactRatio
+    //     (default 0.9 of the resolved input cap), or
+    //   - the absolute `run.setOptions.compactAfterTokens` ceiling is hit
+    //     (the only gate that can fire before the ratio on very large
+    //     windows; the knob is live here, not stored-and-unused).
+    // The gate is evaluated once per run, before provider turns, and a
+    // throwing trigger decides `false` (Prism), so a missing window can
+    // never compact on a guess. `compactAfterTokens` stays inert for
+    // non-coding/limit-less sessions: they keep the previous fail-closed
+    // behavior with no implicit branch rewrite.
+    const autoCompaction = attentionCompiler ? this.autoCompaction() : undefined;
     const agent = createAgent({
       id: profile,
       model,
@@ -1567,25 +1687,8 @@ export class ClayAgentHost {
       runLedger: this.persistence,
       redactor: this.redactor,
       validator: createJsonSchemaToolArgumentValidator(),
-      // Coding-run ceilings from run.setOptions. Prism 0.5.5: omit
-      // maxProviderAttempts (lifts to maxTurns); pass null tokens so
-      // DEFAULT 40k/10k/50k cannot apply. Bytes are per-frame HARD
-      // (null rejected); 64 MiB is the ceiling on any single provider
-      // frame, never a run-lifetime sum (0.5.5 fixed cumulative charging).
-      limits: {
-        maxTurns: this.runConfig.maxTurns,
-        maxToolRounds: this.runConfig.maxToolRounds,
-        maxToolCalls: this.runConfig.maxToolCalls,
-        maxWallTimeMs: this.runConfig.maxWallTimeMs,
-        maxInputTokens: this.runConfig.maxInputTokens,
-        maxOutputTokens: this.runConfig.maxOutputTokens,
-        maxTotalTokens: derivedTotalTokens(
-          this.runConfig.maxInputTokens,
-          this.runConfig.maxOutputTokens,
-        ),
-        maxRequestBytes: HARD_RUN_LIMITS.maxRequestBytes,
-        maxResponseBytes: HARD_RUN_LIMITS.maxResponseBytes,
-      },
+      // Coding-run ceilings from run.setOptions (see runLimits()).
+      limits: this.runLimits(),
       // Host-verified identity default for every session and resumed run: the
       // daemon is the trust boundary that owns the workspace root and
       // acceptance policy, so it vouches for its own runs. Durable tool
@@ -1595,14 +1698,78 @@ export class ClayAgentHost {
       identity: this.runIdentity(),
       // No providerRequestPolicies — Prism 0.5.1 kernel fills session/cache
       // keys (decision 2026-09-07-2149).
+      ...(attentionCompiler ? { attentionCompiler: true } : {}),
+      ...(autoCompaction ? { compaction: autoCompaction.options } : {}),
       ...(def.instructions !== undefined ? { instructions: def.instructions } : {}),
       ...(systemPrompt.length > 0 ? { systemPrompt } : {}),
-      ...(runTools.length > 0 ? { tools: runTools } : {}),
+      ...(sessionTools.length > 0 ? { tools: sessionTools } : {}),
       ...(skills !== undefined ? { skills } : {}),
     });
     let session = agent.createSession({ id });
     if (options.observationalMemory) session = this.attachOm(session, model);
-    return { session, agent, tools: runTools, systemPrompt: systemPrompt.length > 0 ? systemPrompt : undefined };
+    return {
+      session,
+      agent,
+      tools: sessionTools,
+      systemPrompt: systemPrompt.length > 0 ? systemPrompt : undefined,
+      attentionTruncation: autoCompaction?.truncation,
+      stopSubagentLifecycle: supervisor?.stop,
+    };
+  }
+
+  /** Coding-run ceilings shared by parent sessions and their supervisor
+   *  children (plan 122): Prism 0.7.0 — omit maxProviderAttempts (lifts to
+   * maxTurns); pass null tokens so DEFAULT 40k/10k/50k cannot apply. Bytes
+   *  are per-frame HARD (null rejected); 64 MiB is the ceiling on any single
+   *  provider frame, never a run-lifetime sum (0.5.5 fixed cumulative
+   *  charging). Children additionally AND-compose the supervisor's own
+   *  delegation limits (steps/tools/tokens/timeout), which can only lower. */
+  private runLimits() {
+    return {
+      maxTurns: this.runConfig.maxTurns,
+      maxToolRounds: this.runConfig.maxToolRounds,
+      maxToolCalls: this.runConfig.maxToolCalls,
+      maxWallTimeMs: this.runConfig.maxWallTimeMs,
+      maxInputTokens: this.runConfig.maxInputTokens,
+      maxOutputTokens: this.runConfig.maxOutputTokens,
+      maxTotalTokens: derivedTotalTokens(
+        this.runConfig.maxInputTokens,
+        this.runConfig.maxOutputTokens,
+      ),
+      maxRequestBytes: HARD_RUN_LIMITS.maxRequestBytes,
+      maxResponseBytes: HARD_RUN_LIMITS.maxResponseBytes,
+    };
+  }
+
+  /** Plan 121 follow-up: the attention compiler's auto-compact pair. The
+   *  trigger ORs the truncation streak, the compiler's compactRatio, and the
+   *  absolute token ceiling; the strategy stays Prism's local deterministic
+   *  default (the same auto-compact shape Prism's own CLI host uses): an
+   *  unattended gate must never turn a provider outage into a failed run at
+   *  prompt assembly. `run.setOptions.compaction` keeps governing explicit
+   *  `session.compact` / `/compact` and per-run `compaction`. One
+   *  `AttentionTruncationTrigger` per agent — the event loop feeds it every
+   *  `attention_compiled` event. */
+  private autoCompaction(): { options: CompactionOptions; truncation: AttentionTruncationTrigger } {
+    const truncation = createAttentionTruncationTrigger();
+    const compactAfterTokens = this.runConfig.compactAfterTokens;
+    const trigger: CompactionTrigger = {
+      type: "custom",
+      // Prism memoizes both getters; `inputCapTokens` resolves exactly like
+      // the compiler's own cap (same `resolveInputCap` helper).
+      shouldCompact: (context) => {
+        const armed = truncation.streak() >= DEFAULT_ATTENTION_TRUNCATION_THRESHOLD;
+        const ratio = context.estimatedInputTokens >= context.inputCapTokens * DEFAULT_ATTENTION_COMPACT_RATIO;
+        const ceiling = context.estimatedInputTokens >= compactAfterTokens;
+        if (!armed && !ratio && !ceiling) return false;
+        // One fire per armed streak, and the branch is fresh whichever gate
+        // decided — Prism asks hosts to reset after compacting for their own
+        // reasons (attention-compiler docs).
+        truncation.reset();
+        return true;
+      },
+    };
+    return { options: { secrets: [...this.secrets], trigger }, truncation };
   }
 
   /** Rebuild the live session's agent with a new provider/model config
@@ -1625,6 +1792,9 @@ export class ClayAgentHost {
       agent: agent ?? this.defaultAgentConfig(),
       mcpAllowList: live.mcpAllowList,
     });
+    // A model switch rebuilds the agent and with it the auto-compact trigger;
+    // the truncation streak is per-agent state and starts empty (the ratio
+    // and ceiling gates are re-derived from the new model's window).
     // The created session is already bound to the branch's current leaf
     // (the leaf this recreate carries over), and it is the OM-attached
     // proxy when Observational Memory is on — the Observer's post-run
@@ -1632,10 +1802,17 @@ export class ClayAgentHost {
     // raw `agent.createSession` here silently detached OM after any
     // mid-session model switch (plan 109 I8 fix).
     const session = recreated.session;
+    // A model switch rebuilds the agent and its supervisor (plan 122): stop
+    // the old lifecycle pump so orphaned delegations cannot keep emitting
+    // rows for the same session id.
+    live.stopSubagentLifecycle?.();
+    if (recreated.stopSubagentLifecycle) live.stopSubagentLifecycle = recreated.stopSubagentLifecycle;
+    else delete live.stopSubagentLifecycle;
     live.session = session;
     live.agent = recreated.agent;
     live.provider = provider;
     live.model = modelId;
+    live.attentionTruncation = recreated.attentionTruncation;
     return live;
   }
 
@@ -1806,7 +1983,20 @@ export class ClayAgentHost {
     if (coding.length === 0) {
       return rest.length > 0 ? rest.map((name) => this.kernel.registries.tools.resolve(name)) : undefined;
     }
-    const tools = buildCodingTools({
+    const tools = this.sessionCodingTools(sessionId, options);
+    return [...rest.map((name) => this.kernel.registries.tools.resolve(name)), ...tools];
+  }
+
+  /** The session's coding tool set over Clay document reverse-RPC (plan 122
+   *  extraction): shared verbatim by supervisor children, which reuse the
+   *  PARENT sessionId + workspaceRoot so document ops stay on the daemon→
+   *  server registry — the server resolves the workspace from the parent
+   *  session id and a child id would fail closed (agent_documents). */
+  private sessionCodingTools(
+    sessionId: string,
+    options: { workspaceRoot: string; fullAutonomy: boolean },
+  ): ToolDefinition[] {
+    return buildCodingTools({
       sessionId,
       workspaceRoot: options.workspaceRoot,
       request: (method, params) => this.request(method, params),
@@ -1833,7 +2023,80 @@ export class ClayAgentHost {
         return answer;
       },
     });
-    return [...rest.map((name) => this.kernel.registries.tools.resolve(name)), ...tools];
+  }
+
+  /** Plan 122: host-owned spawn/wait/cancel over one Prism supervisor whose
+   *  catalog is exactly `test` and `validation` (the Phase 6 loop shapes —
+   * this is the primitive, not the orchestrator). The supervisor is
+   *  in-process and per live coding session; async handles die on daemon
+   *  restart (Prism contract — documented, never faked durable). Children
+   *  narrow from the host run identity (Prism narrowIdentity +
+   *  assertIdentityPropagation — the closed spawn schema cannot widen
+   *  tenant/scopes/expiry) and their results pass the parent redactor. */
+  private sessionSupervisor(
+    sessionId: string,
+    profile: string,
+    provider: string,
+    modelId: string,
+    options: { workspaceRoot: string; fullAutonomy: boolean },
+  ): { tools: ToolDefinition[]; stop: () => void } {
+    const child = () => this.createChildAgent(profile, provider, modelId, sessionId, options);
+    const supervisor = createSupervisor({
+      ownership: this.runOwnership(),
+      identity: this.runIdentity(),
+      redactor: this.redactor,
+      children: {
+        test: { createAgent: child },
+        validation: { createAgent: child },
+      },
+      // Plan 123: each delegation nests as a `child` scope under the run
+      // scope that owns it (no-op without an active scoped run).
+      hooks: this.omSpawnScopes(sessionId),
+    });
+    // Supervisor milestones bridge onto the coding lifecycle the Rust
+    // mapper already renders as ordinary Tool rows (`subagent_started` /
+    // `subagent_stopped`) — no new panel or AG-UI event type.
+    const stop = observeSupervisorLifecycle(supervisor, {
+      onEvent: (event) => this.emit("event", { sessionId, event }),
+    });
+    return {
+      tools: [
+        createSpawnAgentTool({ supervisor }),
+        createWaitAgentTool({ supervisor }),
+        createCancelAgentTool({ supervisor }),
+      ],
+      stop,
+    };
+  }
+
+  /** Plan 122 child factory: an isolated Prism agent (own history — the
+   *  supervisor derives the `${delegationId}-session` id) on the parent's
+   *  provider/model, with the parent's coding tools rebuilt against the
+   *  PARENT sessionId + workspaceRoot. No spawn/wait/cancel → children
+   *  cannot recurse. No git worktrees: a child `cwd` outside the registered
+   *  session workspace would starve document RPC (plan 122 compromise —
+   *  upgrade via createWorktreeChildFactory only once a child can own a
+   *  registered workspace root). Identity is supplied by the supervisor
+   *  (narrowed run identity), never here. */
+  private createChildAgent(
+    profile: string,
+    provider: string,
+    modelId: string,
+    sessionId: string,
+    options: { workspaceRoot: string; fullAutonomy: boolean },
+  ): Agent {
+    const model = this.kernel.registries.models.get(provider, modelId) ?? { provider, model: modelId };
+    return createAgent({
+      id: `${profile}:child`,
+      model,
+      providerSource: createProviderResolver(this.kernel.registries.providers),
+      store: this.labeledStore,
+      runLedger: this.persistence,
+      redactor: this.redactor,
+      validator: createJsonSchemaToolArgumentValidator(),
+      limits: this.runLimits(),
+      tools: this.sessionCodingTools(sessionId, options),
+    });
   }
 
   /** Resolve a profile's skill names against the kernel registry, validating
@@ -2571,6 +2834,8 @@ export class ClayAgentHost {
       observationalMemory,
       tools: created.tools,
       mentionSkills: [],
+      ...(created.attentionTruncation ? { attentionTruncation: created.attentionTruncation } : {}),
+      ...(created.stopSubagentLifecycle ? { stopSubagentLifecycle: created.stopSubagentLifecycle } : {}),
     };
     this.live.set(sessionId, live);
     return live;
@@ -2581,6 +2846,7 @@ export class ClayAgentHost {
     const live = this.live.get(sessionId);
     if (live) {
       live.session.abort("deleted");
+      live.stopSubagentLifecycle?.();
       this.live.delete(sessionId);
     }
     const result = await this.persistence.lifecycle.applyRetention({
@@ -2688,6 +2954,24 @@ export class ClayAgentHost {
       // provider fields; known levels carry as the portable union.
       thinkingLevel = typeof level === "string" ? level : level.opaque;
     }
+    // Plan 121: per-run tool allow-list (Prism 0.7 `RunOptions.toolNames`).
+    // Omitted → full registry; `[]` → no tools this run (a real grant, not
+    // "all"); a name list is forwarded as-is. Shape only is validated here
+    // (-32602): unknown names fail closed in Prism's `selectRunTools`
+    // during run assembly, before any provider turn or tool dispatch, and
+    // a resumed run intersects with its recorded grant so it cannot widen.
+    // Names come from this RPC (host-trusted), never model JSON.
+    const rawToolNames = params.toolNames;
+    let toolNames: string[] | undefined;
+    if (rawToolNames !== undefined) {
+      if (
+        !Array.isArray(rawToolNames)
+        || rawToolNames.some((name) => typeof name !== "string" || name.length === 0)
+      ) {
+        throw rpcError(-32602, "toolNames must be an array of non-empty strings");
+      }
+      toolNames = rawToolNames as string[];
+    }
     const runState = this.durableRunState(live);
     // Plan 117 @-mentions: `@skill:<name>` is a manual skill trigger — the
     // named skill joins the session's loaded set (the same state the
@@ -2715,28 +2999,41 @@ export class ClayAgentHost {
       );
       runSkills = [...(base ?? []), ...live.mentionSkills];
     }
-    // stream() (not subscribe()+run()) — durable runs keep the subscription
-    // open past settlement, so only stream() both drains and resolves.
-    const stream = live.session.stream(promptInput, {
-      maxQueuedEvents: MAX_QUEUED_EVENTS,
-      overflow: "drop_oldest",
-      // Host-verified identity: the daemon is the trust boundary that owns the
-      // workspace root and acceptance policy, so it vouches for its own runs.
-      // Durable tool effects (write/edit/delete/move) require this — without
-      // it every mediated write fails closed with ERR_PRISM_TOOL_EFFECT_CONFLICT.
-      identity: this.runIdentity(),
-      ...(compaction ? { compaction } : {}),
-      ...(runState ? { runState } : {}),
-      ...(thinkingLevel ? { thinkingLevel } : {}),
-      ...(runSkills ? { skills: runSkills } : {}),
-    });
+    // Plan 123: OM-on coding prompts run inside a host-owned work scope
+    // (Prism 0.7 scope index) so this run's observations fold into a
+    // per-run working set; exact-id recall still reads the whole branch.
+    // Chat / OM-off prompts never build a controller.
+    const runScope = await this.omRunScope(sessionId, live);
     let lastType: string | undefined;
     let suspended:
       | { runId: string; interruption: AgentRunInterruption; version: number }
       | undefined;
-    try {
+    // stream() (not subscribe()+run()) — durable runs keep the subscription
+    // open past settlement, so only stream() both drains and resolves.
+    // Created inside the scope (and only then called) so a rejected scope
+    // id fails the prompt before Prism's run-depth proxy is entered — a
+    // stream built outside the scope would strand run depth on a throw.
+    const runStream = async (): Promise<void> => {
+      const stream = live.session.stream(promptInput, {
+        maxQueuedEvents: MAX_QUEUED_EVENTS,
+        overflow: "drop_oldest",
+        // Host-verified identity: the daemon is the trust boundary that owns the
+        // workspace root and acceptance policy, so it vouches for its own runs.
+        // Durable tool effects (write/edit/delete/move) require this — without
+        // it every mediated write fails closed with ERR_PRISM_TOOL_EFFECT_CONFLICT.
+        identity: this.runIdentity(),
+        ...(compaction ? { compaction } : {}),
+        ...(runState ? { runState } : {}),
+        ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(toolNames !== undefined ? { toolNames } : {}),
+        ...(runSkills ? { skills: runSkills } : {}),
+      });
       for await (const event of stream) {
         lastType = event.type;
+        // Plan 121 follow-up: the truncation streak is the only auto-compact
+        // signal that lives in run events (the ratio/ceiling gates re-measure
+        // at the next prompt boundary).
+        if (event.type === "attention_compiled") live.attentionTruncation?.observe(event);
         if (event.type === "agent_suspended") {
           suspended = {
             runId: event.runId,
@@ -2745,6 +3042,13 @@ export class ClayAgentHost {
           };
         }
         this.emit("event", { sessionId, event: redactAgentEvent(event, this.redactor) satisfies AgentEvent });
+      }
+    };
+    try {
+      if (runScope) {
+        await withWorkScope(this.omScopes(live), runScope, runStream);
+      } else {
+        await runStream();
       }
     } catch (error) {
       throw rpcError(-32000, error instanceof Error ? error.message : String(error));
@@ -2769,10 +3073,89 @@ export class ClayAgentHost {
     };
   }
 
+  /** Plan 123: the per-prompt work-scope spec for an OM coding run, or
+   *  undefined for Chat / OM-off sessions (no controller is ever built).
+   *  Ids are `run:<sessionId>:<n>`, host-generated and monotonic per branch;
+   *  labels/kinds are redacted by the controller's `secrets`. `hasCodingTools`
+   *  is the same coding predicate that arms durable runs and the attention
+   *  compiler. */
+  private async omRunScope(sessionId: string, live: LiveSession): Promise<WorkScopeSpec | undefined> {
+    if (!live.observationalMemory || !hasCodingTools(live.tools)) return undefined;
+    live.omRunCount ??= await this.countOpenedScopes(live, `run:${sessionId}:`);
+    live.omRunCount += 1;
+    return { id: `run:${sessionId}:${live.omRunCount}`, kind: "run" };
+  }
+
+  /** Count this branch's already-opened host scopes with `prefix` (plan 123).
+   *  Prism rejects a duplicate `open`, and `LiveSession` state is not durable,
+   *  so a resumed session must derive the next id from the ledger. */
+  private async countOpenedScopes(live: LiveSession, prefix: string): Promise<number> {
+    return (await live.session.entries()).reduce(
+      (count, entry) =>
+        isWorkScopeOpenedData(entry.data) && entry.data.id.startsWith(prefix) ? count + 1 : count,
+      0,
+    );
+  }
+
+  /** One work-scope controller per OM-attached live session (plan 123): the
+   *  run scope and its spawn children share the instance. The cache keys on
+   *  the session object because a model switch swaps in a fresh OM proxy. */
+  private omScopes(live: LiveSession): WorkScopeController {
+    const cached = live.omScopes;
+    if (cached?.session === live.session) return cached.controller;
+    const controller = createWorkScopeController({
+      session: live.session,
+      appendEntry: (entry, options) => this.persistence.append(entry, options),
+      secrets: [...this.secrets],
+    });
+    live.omScopes = { session: live.session, controller };
+    return controller;
+  }
+
+  /** Plan 123 task 2: nest every `test`/`validation` delegation as a `child`
+   *  scope under the run scope that owns it. Hooks, not a wrapped child run:
+   *  the ledger's enter/leave stack is session-global, so a child entering a
+   *  scope while the async parent is still open would make the parent's own
+   *  flush bind to the child. Open/close only — one ledger pair per spawn,
+   *  closed child scopes stay out of the default (leaf + ancestors)
+   *  projection, and Prism enforces the depth cap and that `parentId` exists
+   *  and is open. Without an active scoped run (Chat / OM off / a resumed
+   *  run outside a prompt) there is no parent: no scope is written. */
+  private omSpawnScopes(sessionId: string): SupervisorHooks {
+    const opened = new Map<string, string>();
+    return {
+      before: async ({ childId, delegationId }) => {
+        const live = this.live.get(sessionId);
+        // `before` re-runs when a suspended child is resumed (Prism contract:
+        // hooks are idempotent) — the existing scope keeps serving it.
+        if (!live?.observationalMemory || opened.has(delegationId)) return {};
+        const scopes = this.omScopes(live);
+        const parentId = await scopes.leaf();
+        if (parentId === SESSION_WORK_SCOPE_ID) return {};
+        live.omChildCount ??= await this.countOpenedScopes(live, `child:${sessionId}:`);
+        live.omChildCount += 1;
+        const id = `child:${sessionId}:${live.omChildCount}`;
+        await scopes.open({ id, parentId, kind: "child", label: childId });
+        opened.set(delegationId, id);
+        return {};
+      },
+      after: async ({ delegationId }) => {
+        const id = opened.get(delegationId);
+        if (!id) return;
+        opened.delete(delegationId);
+        const live = this.live.get(sessionId);
+        if (!live?.observationalMemory) return;
+        // Advisory bookkeeping: a scope lost to a concurrent delete must not
+        // fail the delegation's terminal hook (Prism reports hook errors as
+        // `delegation_error` events).
+        await this.omScopes(live).close(id).catch(() => undefined);
+      },
+    };
+  }
+
   /** Durable + tool-interrupt for coding sessions only; Chat stays non-durable. */
   private durableRunState(live: LiveSession): AgentRunStateOptions | undefined {
-    const coding = live.tools.some((tool) => (CODING_TOOL_NAMES as readonly string[]).includes(tool.name));
-    if (!coding) return undefined;
+    if (!hasCodingTools(live.tools)) return undefined;
     // Tool-approval interrupts are opt-in via autonomy: full autonomy
     // (the default) auto-approves every tool call and streams through;
     // turning autonomy off (session.setAutonomy / NewSession param)
@@ -3676,8 +4059,9 @@ ${prompt}`;
   }
 
   /** Coding-run policy caps + default compact strategy. Partial update;
-   *  `null` disables that Prism axis. compactAfterTokens is stored and
-   *  unused until auto-compact is wired. */
+   *  `null` disables that Prism axis. compactAfterTokens is the absolute
+   *  ceiling of the auto-compaction trigger armed at `createSession` (see
+   *  `autoCompaction`); new sessions pick it up, live ones keep their gate. */
   private runSetOptions(params: Record<string, unknown>): unknown {
     const maxTurns = optPolicyCap(params, "maxTurns");
     const maxToolRounds = optPolicyCap(params, "maxToolRounds");
@@ -3735,6 +4119,13 @@ ${prompt}`;
     const workspaceRoot = reqString(params, "workspaceRoot");
     const wiki = typeof params.wiki === "boolean" ? params.wiki : undefined;
     const graft = typeof params.graft === "boolean" ? params.graft : undefined;
+    const rawDeepModel = params.graftDeepModel;
+    if (rawDeepModel !== undefined && graft !== true) {
+      throw rpcError(
+        -32602,
+        "knowledge.setOptions `graftDeepModel` requires `graft: true` (it configures the graft extension)",
+      );
+    }
     if (wiki === undefined && graft === undefined) {
       throw rpcError(-32602, "knowledge.setOptions requires a boolean `wiki` and/or `graft` flag");
     }
@@ -3742,6 +4133,10 @@ ${prompt}`;
     if (graftMode !== undefined && graftMode !== "pull" && graftMode !== "push" && graftMode !== "both") {
       throw rpcError(-32602, "knowledge.setOptions `graftMode` must be one of pull|push|both");
     }
+    // Plan 121 follow-up: the explicit `/graft-build-deep` model. Resolved
+    // before any activation so a malformed shape or a missing key fails the
+    // whole call (-32602) instead of half-binding graft without the knob.
+    const graftDeepModel = rawDeepModel === undefined ? undefined : await this.resolveGraftDeepModel(rawDeepModel);
     if (wiki === false) this.disableWiki();
     else if (wiki === true) await this.enableWiki(workspaceRoot, optString(params, "qmdPath"));
     let graftResolved: boolean | undefined;
@@ -3750,12 +4145,50 @@ ${prompt}`;
       graftResolved = await this.enableGraft(workspaceRoot, {
         ...(graftMode ? { mode: graftMode } : {}),
         ...(optString(params, "graftCliPath") ? { cliPath: optString(params, "graftCliPath") } : {}),
+        ...(graftDeepModel ? { deepModel: graftDeepModel } : {}),
       });
     }
     return {
       workspaceRoot,
       ...(wiki !== undefined ? { wiki } : {}),
       ...(graft !== undefined ? { graft: graftResolved ?? graft } : {}),
+      ...(graftDeepModel
+        ? { graftDeepModel: { provider: graftDeepModel.provider, model: graftDeepModel.model } }
+        : {}),
+    };
+  }
+
+  /** Resolve the explicit graft deep model (plan 121 follow-up): the model
+   *  identity arrives over the trusted RPC, the API key does not have to — an
+   *  omitted `apiKey` reads the provider credential the agent picker already
+   *  stores, so `init.js` never carries the secret. Inline keys are accepted
+   *  for providers with no stored credential (litellm/orcarouter) and join the
+   *  redactor set. Unknown or incomplete shapes fail closed (-32602). */
+  private async resolveGraftDeepModel(raw: unknown): Promise<GraftDeepModel> {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw rpcError(-32602, "graftDeepModel must be an object");
+    }
+    const record = raw as Record<string, unknown>;
+    const provider = reqString(record, "provider");
+    if (!(GRAFT_DEEP_PROVIDERS as readonly string[]).includes(provider)) {
+      throw rpcError(-32602, `graftDeepModel.provider must be one of ${GRAFT_DEEP_PROVIDERS.join("|")}`);
+    }
+    const model = reqString(record, "model");
+    const baseUrl = optString(record, "baseUrl");
+    const inlineKey = optString(record, "apiKey");
+    if (inlineKey !== undefined && inlineKey.length === 0) {
+      throw rpcError(-32602, "graftDeepModel.apiKey must be a non-empty string when present");
+    }
+    const stored = inlineKey ?? (await this.vault.get({ name: this.defaultCredentialName(provider), provider }))?.value;
+    if (stored === undefined || stored.length === 0) {
+      throw rpcError(-32602, `graftDeepModel requires an apiKey or a stored \`${provider}\` credential`);
+    }
+    if (inlineKey !== undefined) this.rememberSecret(inlineKey);
+    return {
+      provider: provider as GraftDeepModel["provider"],
+      model,
+      apiKey: stored,
+      ...(baseUrl ? { baseUrl } : {}),
     };
   }
 
@@ -3775,11 +4208,33 @@ ${prompt}`;
     const previous = this.wiki;
     this.wiki = undefined;
     previous?.loaded.dispose();
+    // URL ingest is host-fetched (the wiki package ships no HTTP client and
+    // never fetches itself): wire Obscura only when its binary resolves, so
+    // text/path ingest always works and `url` fails closed with a named
+    // error when Obscura is absent. The hook re-validates the URL
+    // (`validateObscuraWebUrl`: public http(s), no credentials — Prism ran
+    // `assertSsrfAllowedUrl` before calling it) and runs the CLI under its
+    // own owned path/flags; the child runs per ingest, never on the editor
+    // hot path. The output is staged as markdown (`source.md`), so an
+    // Obscura fetch of a PDF URL lands as its markdown dump, not as a
+    // binary the wiki would try to parse.
+    const obscuraPath = this.resolveObscura();
+    const fetchUrl: WikiExtensionOptions["fetchUrl"] = obscuraPath
+      ? async ({ url }) => {
+          validateObscuraWebUrl(url);
+          const run = await runObscuraCli({
+            command: obscuraPath,
+            args: ["fetch", url, "--dump", "markdown"],
+          });
+          return run.stdout.length > 0 ? { text: run.stdout, filename: "source.md" } : null;
+        }
+      : undefined;
     const options: WikiExtensionOptions = {
       workspaceRoot,
-      // Relative default: ".wiki" in the workspace root. The workspace
-      // option carries the binding — an absolute wikiRoot here breaks the
-      // tool-side path resolution.
+      // Relative default: ".wiki" in the workspace root. Prism 0.7
+      // resolves it against `workspaceRoot` (`path.resolve`) for every
+      // tool/command and reports the absolute path from `/wiki-init`;
+      // an absolute value here also resolves to itself.
       wikiRoot: ".wiki",
       // Skill files deploy into the workspace on init by default; skills
       // load from the kernel registry instead (wiki writes stay inside
@@ -3788,6 +4243,7 @@ ${prompt}`;
       // qmd hybrid search is strictly opt-in (host-owned binary, deny by
       // default): without an explicit path the catalog fallback serves.
       ...(qmdPath ? { qmdPath } : {}),
+      ...(fetchUrl ? { fetchUrl } : {}),
     };
     let loaded: LoadedExtension;
     try {
@@ -3815,8 +4271,8 @@ ${prompt}`;
  *  disabled or the session's workspace is not the bound one. */
   private wikiTools(workspaceRoot: string): ToolDefinition[] {
     if (this.wiki?.workspaceRoot !== workspaceRoot) return [];
-    return [WIKI_SEARCH_TOOL_NAME, WIKI_READ_PAGE_TOOL_NAME, WIKI_RECORD_INSIGHT_TOOL_NAME].map((name) =>
-      this.kernel.registries.tools.resolve(name),
+    return [WIKI_SEARCH_TOOL_NAME, WIKI_READ_PAGE_TOOL_NAME, WIKI_RECORD_INSIGHT_TOOL_NAME, WIKI_INGEST_TOOL_NAME].map(
+      (name) => this.kernel.registries.tools.resolve(name),
     );
   }
 
@@ -3835,16 +4291,20 @@ ${prompt}`;
    *  Enabling resolves the graft CLI fail-closed BEFORE load: an absent CLI
    *  (no cliPath, no host packageRoot, no @nanonets/graft peer) leaves the
    *  option off and the agent unperturbed — tools hidden, never a half
-   *  binding. One binding per daemon; re-enabling rebinds. */
+   *  binding. One binding per daemon; re-enabling rebinds. A changed
+   *  `deepModel` also rebinds (the extension resolves its child env once at
+   *  load), so the explicit `/graft-build-deep` opt-in can be added after a
+   *  default-on bind without a restart. */
   private async enableGraft(
     workspaceRoot: string,
-    options: { mode?: GraftMode; cliPath?: string },
+    options: { mode?: GraftMode; cliPath?: string; deepModel?: GraftDeepModel },
   ): Promise<boolean> {
     // agentSkills.graft=false ⇒ no binding attempt ever, on any path
     // (default or explicit RPC) — the gate is authoritative (decision
     // 2026-09-09-1420).
     if (!this.agentSkillEnabled("graft")) return false;
-    if (this.graft?.workspaceRoot === workspaceRoot) return true;
+    const deepIdentity = deepModelIdentity(options.deepModel);
+    if (this.graft?.workspaceRoot === workspaceRoot && this.graft.deepModelIdentity === deepIdentity) return true;
     const previous = this.graft;
     this.graft = undefined;
     previous?.loaded.dispose();
@@ -3861,6 +4321,18 @@ ${prompt}`;
       projectDir: workspaceRoot,
       mode: options.mode ?? "pull",
       ...(options.cliPath ? { cliPath: options.cliPath } : {}),
+      // `/graft-init` is non-interactive by design (the child has no TTY):
+      // Prism then passes `--yes` plus fixed `--no-global --no-mcp
+      // --no-hooks --no-statusline` — never user-level state, and Clay keeps
+      // Prism's own graft surfaces instead of MCP/hook wiring. `initWireMcp`
+      // stays unset. Without a `deepModel` (below),
+      // `/graft-build-deep` refuses before spawning (no hidden paid call).
+      initYes: true,
+      // Plan 121 follow-up: explicit deep-build model. Prism merges it into
+      // the child env as GRAFT_PROVIDER/GRAFT_MODEL/GRAFT_API_KEY
+      // (+GRAFT_BASE_URL), never argv; the key came from the vault unless the
+      // trusted caller passed one inline.
+      ...(options.deepModel ? { deepModel: options.deepModel } : {}),
       // Push-surface persistence (OM attach pattern). State patches route
       // by the entry's own sessionId; getEntries rides the active run.
       appendEntry: (entry, appendOptions) => this.persistence.append(entry, appendOptions),
@@ -3873,7 +4345,7 @@ ${prompt}`;
     } catch (error) {
       throw rpcError(-32000, `graft activation failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    this.graft = { workspaceRoot, loaded, mode: extensionOptions.mode ?? "pull" };
+    this.graft = { workspaceRoot, loaded, mode: extensionOptions.mode ?? "pull", deepModelIdentity: deepIdentity };
     const graftDelivered = this.agentSkillFiles.get("graft") ?? graftSkill;
     if (!this.skills.get(graftDelivered.name)) this.skills.register(graftDelivered);
     return true;
@@ -3917,6 +4389,9 @@ ${prompt}`;
   private runIdentity(): AgentIdentity {
     return {
       tenantId: TENANT,
+      // Plan 122: supervisor ownership requires an account/user anchor;
+      // the service principal's id doubles as the userId it vouches for.
+      userId: "clay-agent",
       principal: { kind: "service", id: "clay-agent" },
       scopes: ["workspace"],
       issuedAt: new Date().toISOString(),

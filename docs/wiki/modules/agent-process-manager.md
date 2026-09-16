@@ -30,6 +30,8 @@ command respawns the daemon and can resume persisted sessions.
   server-side). Never a shell string.
 - NDJSON JSON-RPC over stdin/stdout. 1 MiB line cap.
 - Map RPC results and `method: "event"` lines to `AgentServerMessage`.
+  Event types with no `AgentWireEvent` arm are dropped, never forwarded (a
+  synthesized `Started` would pin the client run "streaming" forever).
 - Redact known secrets (vault passphrase, put secrets) from diagnostics.
 - Fire-and-forget `dispatch` so the connection loop never awaits the child.
 

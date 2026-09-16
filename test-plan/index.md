@@ -206,6 +206,68 @@ large-document debug expectation is explicitly superseded by the documented
 size-scaled 25 MiB/s floor because the server must finish its full resident
 rope before it can send the bounded head.
 
+## Plan 120 manual-test-plan execution record (2026-09-16)
+
+Plan 120 (Prism 0.7.0 family pins, Node >= 22 runtime floor, unknown Prism
+`AgentEvent` types dropped instead of mapping to `Started`) adds **no
+user-visible chrome and no new interactive step**. It is recorded here as
+automated-only. No module 16/17 step was deleted, weakened, or re-scoped, and
+no GUI launch was claimed: the pin and the event-mapper default arm are not
+observable in the agent surface, so there is no live step to run.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 16 (pin/event automated coverage) | PASS automated | Fresh `cargo test --test protocol phase25_dependencies_deny_acp_agui_mcp`: 1 pass / 215 filtered. Asserts the exact 0.7.0 pins for all seven `@arnilo/prism*` packages plus `better-sqlite3@13.0.3` and `playwright-core@1.63.0`, README `0.7.0` + `Node >= 22`, and the ACP/AG-UI/MCP dependency deny list. Fresh `cargo test --lib map_event`: 2 pass, including `map_event_drops_unknown_event_types` (`attention_compiled`, `subagent_started`/`subagent_stopped`, `delegation_*`, arbitrary unknown → dropped, never a fabricated `Started`). |
+| 17 (existing agent steps) | PASS automated baseline unchanged | Fresh `clay-agent npm test`: 149 pass / 0 fail / 1 skip (the documented skip). Parsed from `npm test`'s TAP summary. No 17 step changed; this cut did not touch agent-surface behavior. |
+| Live GUI | NOT RUN — not user-visible | Host ceiling unchanged (no safe window/keyboard targeting; same as the plan 119 record). Pin, Node floor, and event drop add no panel, prompt, or control. |
+
+Verified on Node v24.19.0, which satisfies the new floor; the floor is a
+private daemon startup guard, not an `init.js` option. Existing module 16
+procedure text still names the historical `examples/init.js` path — the
+canonical example file that the automated doc-registry gates read is
+`examples/config/init.js` (a stale-reference cleanup, not a plan-120
+behavior change).
+
+## Plan 121 manual-test-plan execution record (2026-09-16)
+
+Plan 121 adds module 17 C45–C49 for wiki ingest and graft command/help
+surfaces, plus module 16 A20 for the daemon-only `session.prompt.toolNames`
+seam. No existing step was deleted or weakened.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 16 A20; 17 C45–C49 automated legs | PASS | `cd clay-agent && npm test`: 163 pass / 1 skip; toolNames, attention, wiki-ingest, and graft suites are green. |
+| Real Linux build + isolated launch gate | PASS | `cargo build --bin clay`, `cargo build -p clay-desktop --bins`, isolated mock server/desktop launch under `/tmp/clay-manual-121`, coding profile registration, scratch roots only. |
+| 17 C45–C49 interactive legs | UNRESOLVED — host input blocker | AT-SPI and window discovery work, but `computer-use-linux doctor` reports `can_send_development_input=false`: `/dev/uinput` is root-only, no connectable `ydotoold` socket, `wtype` is incompatible with this compositor, and portal input consent requires a human. No GUI pass is claimed. |
+
+### Plan 121 follow-up (auto-compaction + graft deep model, 2026-09-16)
+
+Module 17 gains C50–C52: the automatic compaction gate (compact ratio,
+two-truncated-turns signal, `compactAfterTokens` ceiling), its arming
+predicate, and the explicit `graftDeepModel` option with vault-resolved keys.
+No existing step was deleted or weakened.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 17 C50–C52 automated legs | PASS | `cd clay-agent && npm test`: 169 pass / 1 skip (170); `cargo test --test protocol`: 216/216; `cargo fmt --check` + `clippy -D warnings` clean. `auto-compaction.test.ts` and the extended `graft-knowledge.test.ts` cover each expected result. |
+| 17 C50–C52 interactive legs | UNRESOLVED — same host input blocker | No new blocker; the `can_send_development_input=false` ceiling above still applies, so no GUI pass is claimed. |
+
+## Plan 123 manual-test-plan execution record (2026-09-16)
+
+Plan 123 (Prism 0.7 per-prompt work-scopes on OM coding runs) is an
+**automated-only** cut with no new user-visible chrome: scopes are daemon-side
+`om.scope.*` ledger entries, so there is no live step to run. No module 16/17
+step was deleted, weakened, or re-scoped — in particular the A11 recall rule
+(exact-id only, no auto-injection) and the C53–C55 spawn expectations are
+unchanged, and the Memory tab keeps showing the existing OM activity without
+being required to draw a scope outline.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 16 (work-scope record; existing A-steps unchanged) | PASS automated | Fresh `clay-agent npm test`: 180 pass / 0 fail / 1 pre-existing skip (181 total). `clay-agent/src/__tests__/om.test.ts` pins the OM-on run scope (`opened`/`entered`/`left`), the OM-off zero-entry case, invalid-id fail-closed before any provider turn, scoped per-run projection with exact-id recall still resolving sibling observations, and the delegation child scope (`parentId` = run scope, never entered). |
+| 17 (existing agent steps unchanged) | PASS automated baseline unchanged | Same fresh `clay-agent npm test` run; C53–C55 spawn steps and their suites are untouched by this cut (see the Plan 123 note in module 17). Git-worktree isolation remains out of coverage per plan 122. |
+| Live GUI | NOT RUN — not user-visible | Standing host ceiling (no safe window/keyboard targeting; same as the plan 119/120 records). Work-scopes add no panel, prompt, or control, and no Memory-tab scope outline is required, so no GUI pass is claimed. |
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -226,7 +288,7 @@ rope before it can send the bounded head.
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
 | 15 | [UI design systems](15-ui-design-systems.md) | built-in fallback startup, `@clay/core` baseline versus the shipped `@clay/design-instrument` default (the former Neobrutal/Glass packages were removed by plan 118 task 9), watcher reload switching, Settings-panel + command-surface design-system selection with server-enumerated theme/DS choices and appearance persistence (plan 110), invalid/removed selection recovery with sanitized diagnostics and previous-generation retention, no-adoption security checks, color-authority conformance, the composited content-theme contrast gate (UI-DS-31), catalog currency (UI-DS-32), component-level conformance against the approved specimen (UI-DS-33), shell/Workspace composition adoption (UI-DS-34), Coding Agent composition adoption (UI-DS-35), Settings panel and Agent Settings composition adoption (UI-DS-36), command centre and overlay-family composition adoption (UI-DS-37), the launcher landing composition (UI-DS-38), hairline zoning (UI-DS-39), composited boundary/state contrast (UI-DS-40), the removed-specifier fallback and choice set (UI-DS-41), the tab's two views (UI-DS-42), agent types and the per-tab picker (UI-DS-43), the agent Files tab as the session's file history (UI-DS-44), the workspace sidebar's filter head (UI-DS-45), the 2026-09-13 visual and accessibility review of the migrated app (42 captured states, deviation dispositions, defect log, live AT-SPI walk and hairline contrast probe), restart persistence through `init.js`, full recipe migration, DOM/state continuity, forced-colors/reduced-motion/transparency accessibility fallbacks, cross-theme recoloring consistency, and Quiet Instrument conformance (hairline zoning, radius ladder, transient-only elevation, mono-for-data, measure, state/keyboard/typography checks) (Plans 102, 103, 104 & 118; `DESIGN.md`) | `docs/reference/clay-js-api/theme/set-design-system.md`, `docs/reference/clay-js-api/settings/set-design-system.md`, `docs/reference/ui-design-systems.md`, `docs/development/ui-design-system-conformance.md`, `DESIGN.md`, `.impeccable/review/plan-104/` |
 | 16 | [Agent host (clay-agent)](16-agent-host.md) | (agent surface, no chat) `clay:agent` facade configuration (autonomy default-off 2157, compaction strategies + OM `compactAfterTokens` 2158, workspace-scoped search metadata-only, session tree/checkout/fork/clone/checkpoint), init.js section 12 documentation cross-check, no-credential/no-hidden-key checks, MCP allow-list fail-closed validation, Obscura hidden-when-missing; the removed Chat surface is named nowhere as shipped (plan 118); coding-tool dirty-buffer/approval/durable-run behavior pinned by automated suites | `clay-agent/README.md`, `docs/wiki/modules/clay-agent.md`, `docs/reference/clay-js-api/agent/`, `examples/init.js` (section 12) |
-| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort); plan 117 C24–C37 + C-N5–C-N11 (plus plan 118 C38–C40 + C-N12/C-N13: the landing→agent-view launch route, the Settings tab as the Agent Settings surface, the Files tab session history, chat-surface absence, landing ownership): skills card from three discovery roots + skills.json gating, MCP card + composer connections (user/repo config, per-server isolation), agent settings page with provenance, @ mentions, token meter with threshold tones + heuristic fallback, /wiki-init flow, graft default-on, labeled /resume with rich restore, branch at creation, effort from session start, and composed system-prompt layers (SYSTEM.md/AGENTS.md/base) in the context inspector | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108, plans/117 |
+| 17 | [Coding agent pi-parity (@clay/coding-agent)](17-coding-agent-parity.md) | Phase 2 pi-parity conformance: prompt→stream→tool ordering, steering, cancel, /compact manual+auto, /new, session list/resume/delete, provider/model switch, /tree+/fork+/clone, session-picker/open-as-fork equivalents, plan-file round-trip, composer growth, Shift+Tab effort cycle, status-row truth, extension strip; negative checks (cross-workspace search invisibility, disabled knowledge bases, secrets, unknown slash command, search-hit context) and stream-latency/UI-responsiveness budgets (plan 108 task 15); plan 109 C1–C20 + C-N1–N4: per-tab workspace binding + per-workspace model auto-load, /model + dropdown, effort control + rebinding, full chronological transcript (tools/skills/thinking/steer), Files-tab editor view + Ctrl+B tree toggle, context inspector drawer + compaction reflection, OM activity + worker-model retention, /resume restore, Session Info auto-select, real git branch + truthful extension strip + daemon-sourced slash completion, and negative checks (cross-workspace session leakage, unconfigured-provider filtering, redaction, fail-closed effort); plan 117 C24–C37 + C-N5–C-N11 (plus plan 118 C38–C40 + C-N12/C-N13: the landing→agent-view launch route, the Settings tab as the Agent Settings surface, the Files tab session history, chat-surface absence, landing ownership): skills card from three discovery roots + skills.json gating, MCP card + composer connections (user/repo config, per-server isolation), agent settings page with provenance, @ mentions, token meter with threshold tones + heuristic fallback, /wiki-init flow, graft default-on, labeled /resume with rich restore, branch at creation, effort from session start, and composed system-prompt layers (SYSTEM.md/AGENTS.md/base) in the context inspector; plan 121 C45–C49: wiki-ingest text/path + missing-Obscura failure, graft skill/help, non-interactive init, and deep-build fail-closed behavior; plan 122 C53–C55 + C-N15: coding sessions list spawn/wait/cancel supervisor tools (catalog exactly `test`/`validation`), sync spawn renders child lifecycle rows via the `subagent_*` → Tool mapping, parent abort stops async children, and unknown childId / foreign delegationId fail closed | `packages/coding-agent/docs/parity-checklist.md`, `packages/coding-agent/docs/index.md`, `docs/wiki/modules/clay-agent.md`, plan 108, plans/117, plans/121, plans/122 |
 | 18 | [Icon packs (Plan 112)](18-icon-packs.md) | zero-config bundled Regular fallback, `setIconPack` Regular/Duotone selection (load ≠ select), watcher swap/fail-closed break + restore recovery, unloaded/unknown selection bounded diagnostics, third-party own-prefix + hostile-fixture rejection (live adoption blocked: no pnpm), file-browser/git/markdown semantic icons, icon-only control contract (names, tooltips, hit targets, retained text labels), AT-SPI a11y pass, no-network inlined-geometry rendering, responsive/large-typography scaling and pack-swap feel | `docs/reference/clay-js-api/theme/set-icon-pack.md`, `docs/reference/icon-packs.md`, `test-plan/artifacts/112-icons/` |
 
 ## Coverage matrix (what to run when)
@@ -271,6 +333,10 @@ rope before it can send the bounded head.
 | Plan 109 coding-agent defects/UX + Prism 0.5.0 (I2–I10, R1–R3) | 17 (C1–C20, C-N1–N4), 16 (host config), 10 (effort + file-browser bindings), 14 (per-tab workspace binding), 01 (launch gate) |
 | Plan 113 Prism 0.5.1 kernel request construction (host stopgap deleted, `RunOptions.thinkingLevel`) | 17 (C21–C23), 16 (0.5.1 pins via agent_protocol pin asserts) |
 | Plan 119 editor/agent remediation (large-document throughput, MCP connect floor, workspace-scoped sessions, Coding Agent decomposition/review) | 03 (F55), 11 (Q34–Q37), 17 (C41–C44, C-N14); existing two-tab shell coverage remains in 14 |
+| Plan 120 Prism 0.7.0 pins + Node >= 22 floor + unknown `AgentEvent` drop (automated-only, no new chrome) | 16 (pin/event record; existing A-steps unchanged), 17 (existing agent steps apply unchanged) |
+| Plan 121 Prism 0.7 toolNames, attention, wiki ingest, and graft command surfaces | 16 (A20 daemon RPC note), 17 (C45–C49), 01 (isolated Linux launch gate) |
+| Plan 121 follow-up auto-compaction + graft deep model | 17 (C50–C52) |
+| Plan 123 Prism 0.7 per-prompt work-scopes on OM coding runs (automated-only, no new chrome) | 16 (work-scope record; existing A-steps unchanged), 17 (Plan 123 note; existing agent steps unchanged) |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 

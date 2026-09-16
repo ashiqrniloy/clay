@@ -45,6 +45,47 @@ fn validate_registration_shape(method: &str, params: &Value) -> Result<(), JsErr
         if wiki.is_none() && graft.is_none() {
             return Err(invalid("requires a boolean `wiki` and/or `graft` flag"));
         }
+        // Plan 121 follow-up: `graftDeepModel` configures the graft extension,
+        // so it only exists beside `graft: true`. Shape only — the daemon owns
+        // provider-id and credential resolution.
+        if let Some(deep) = params.get("graftDeepModel") {
+            if graft != Some(&Value::Bool(true)) {
+                return Err(invalid("`graftDeepModel` requires `graft: true`"));
+            }
+            let Some(deep) = deep.as_object() else {
+                return Err(invalid("`graftDeepModel` must be an object"));
+            };
+            for name in ["provider", "model"] {
+                let ok = deep
+                    .get(name)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty());
+                if !ok {
+                    return Err(invalid(&format!(
+                        "`graftDeepModel.{name}` must be a non-empty string"
+                    )));
+                }
+            }
+            for name in ["apiKey", "baseUrl"] {
+                let Some(value) = deep.get(name) else {
+                    continue;
+                };
+                let ok = value
+                    .as_str()
+                    .is_some_and(|value| name == "baseUrl" || !value.is_empty());
+                if !ok {
+                    return Err(invalid(&format!(
+                        "`graftDeepModel.{name}` must be a string{}",
+                        if name == "baseUrl" {
+                            ""
+                        } else {
+                            " (non-empty)"
+                        }
+                    )));
+                }
+            }
+            return Ok(());
+        }
         return Ok(());
     }
     if method == "run.setOptions" {
@@ -409,4 +450,84 @@ pub(super) async fn op_clay_agent_command_dispatch(
     // op never queues — an unavailable daemon is a typed failure, not a
     // deferred execution (unlike inert registrations).
     agent_rpc("command.dispatch", params).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_registration_shape;
+    use serde_json::json;
+
+    fn rejects(params: serde_json::Value, needle: &str) {
+        let error = validate_registration_shape("knowledge.setOptions", &params)
+            .expect_err("must fail closed");
+        let message = error.to_string();
+        assert!(
+            message.contains(needle),
+            "expected `{needle}` in `{message}` for {params}"
+        );
+    }
+
+    #[test]
+    fn graft_deep_model_shape_fails_closed_before_queueing() {
+        // Plan 121 follow-up: the deep model is graft-extension configuration,
+        // and the key/model identity must never enter the registration queue
+        // half-formed (the daemon still owns provider and credential checks).
+        rejects(
+            json!({
+                "workspaceRoot": "/tmp/ws",
+                "wiki": true,
+                "graftDeepModel": { "provider": "anthropic", "model": "m" }
+            }),
+            "requires `graft: true`",
+        );
+        rejects(
+            json!({
+                "workspaceRoot": "/tmp/ws",
+                "graft": true,
+                "graftDeepModel": "anthropic"
+            }),
+            "must be an object",
+        );
+        rejects(
+            json!({
+                "workspaceRoot": "/tmp/ws",
+                "graft": true,
+                "graftDeepModel": { "provider": " ", "model": "m" }
+            }),
+            "`graftDeepModel.provider` must be a non-empty string",
+        );
+        rejects(
+            json!({
+                "workspaceRoot": "/tmp/ws",
+                "graft": true,
+                "graftDeepModel": { "provider": "openai", "model": "" }
+            }),
+            "`graftDeepModel.model` must be a non-empty string",
+        );
+        rejects(
+            json!({
+                "workspaceRoot": "/tmp/ws",
+                "graft": true,
+                "graftDeepModel": { "provider": "openai", "model": "m", "apiKey": 7 }
+            }),
+            "`graftDeepModel.apiKey` must be a string (non-empty)",
+        );
+        // A well-formed shape (with or without the optional key) still passes:
+        // an omitted key is the vault path, not a malformed one.
+        for extra in [json!({}), json!({ "apiKey": "k" })] {
+            let mut deep = json!({ "provider": "anthropic", "model": "m" });
+            deep.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            validate_registration_shape(
+                "knowledge.setOptions",
+                &json!({
+                    "workspaceRoot": "/tmp/ws",
+                    "graft": true,
+                    "graftDeepModel": deep
+                }),
+            )
+            .expect("well-formed deep model passes shape validation");
+        }
+    }
 }

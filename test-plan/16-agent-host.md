@@ -37,6 +37,12 @@ Most checks below are configuration-level and server-log observations.
 | A3 | Cross-check the option names/enums/defaults in section 12 against `docs/reference/clay-js-api/agent/compact.md` and `set-full-autonomy.md` | `strategy` enum is `default`/`llm`/`om`; autonomy default `false` (decision 2157); `compactAfterTokens` default `80000` (decision 2158). Names match the inventory (`docs/reference/clay-js-api/api-inventory.toml`); no hidden-key alternative exists |
 | A4 | Confirm no `agent*`/`provider*` credential option exists in `clay:configuration` and no API key appears in `examples/` | Provider credentials remain vault/keychain-only (set on first use of the agent surface); grep of the example tree shows no secret-shaped strings |
 
+## Plan 121 RPC note (toolNames)
+
+| # | Action | Expected |
+|---|--------|----------|
+| A20 | In a protocol/client harness call `session.prompt` with `toolNames` omitted, `[]`, a known subset, an unknown name, and malformed values | Omitted keeps the full registry; `[]` grants no tools; a known subset is forwarded; unknown names fail closed before a provider turn; malformed shapes return `-32602`; `run.resume` cannot widen the original grant. This is daemon RPC behavior, not a `clay:agent` or `init.js` surface (automated: `clay-agent/src/__tests__/tool-names.test.ts`) |
+
 ## Autonomy (decision 2157)
 
 | # | Action | Expected |
@@ -51,7 +57,7 @@ Most checks below are configuration-level and server-log observations.
 |---|--------|----------|
 | A8 | In a coding session, request manual compaction (`agent.compact({ sessionId })`) with no strategy | Uses the session default (`om` for OM-attached sessions, otherwise `default`); a compaction entry appears in the persisted session; an active run fails closed instead of queueing (Automated: `manual compact on a mock session appends a compaction entry`, `session.compact while a run is active fails closed`) |
 | A9 | Request `strategy: "llm"` with a provider configured, then with none configured | With provider: `llm` compaction entry. Without: fail-closed typed error, no partial entry |
-| A10 | Override the OM threshold (`agent.compact({ sessionId, compactAfterTokens: 40000 })`); verify later auto-compaction triggers near the lower threshold | Override accepted (positive integer); negative/zero/non-numeric values rejected fail-closed (`-32602`); non-OM sessions ignore the value (Automated: `compactAfterTokens override validates and reaches the OM settings provider`) |
+| A10 | Override the OM threshold (`agent.compact({ sessionId, compactAfterTokens: 40000 })`); verify later auto-compaction triggers near the lower threshold | Override accepted (positive integer); negative/zero/non-numeric values rejected fail-closed (`-32602`); non-OM sessions ignore the value (Automated: `compactAfterTokens override validates and reaches the OM settings provider`). This is the OM threshold; the coding-session auto-compaction ceiling is `agent.setRunOptions` `compactAfterTokens` (module 17 C50–C52) — the two are distinct knobs |
 | A11 | OM-attached session: check `recall` behavior | Observations are recorded during runs; recall is exact-id only and never auto-injects memory text into context (Automated: `OM attach records an observation; recall round-trips a known id; invalid id fails closed`) |
 
 ## Session search / tree / checkpoints
@@ -95,3 +101,50 @@ No existing module step was deleted or weakened by Phase 1. Plan 118 removed
 the `@clay/chat` package and the chat landing this module originally drove, so
 the rows above name the agent surface instead; the agent host session's
 automated coverage (tool-free profile) is unchanged.
+
+## Plan 120 pin record (2026-09-16, Prism 0.7.0 / Node >= 22)
+
+Automated-only cut: the clay-agent family moved 0.5.5 → 0.7.0 in one jump,
+the daemon process floor rose to Node >= 22, and unknown Prism `AgentEvent`
+types are now dropped by the Rust mapper instead of being mapped to
+`AgentEvent::Started`. None of this is observable in the agent surface, so no
+step above changed and no live pass is claimed. The standing A-steps remain
+the procedure for an input-capable host.
+
+| # | Result | Evidence |
+|---|--------|----------|
+| Pin lockstep | PASS automated | `cargo test --test protocol phase25_dependencies_deny_acp_agui_mcp`: exact `0.7.0` for `@arnilo/prism`, `prism-core`, `prism-providers`, `prism-coding-tools`, `prism-web-tools`, `prism-memory`, `prism-mcp`, plus `better-sqlite3@13.0.3` and `playwright-core@1.63.0`; README carries `0.7.0` and `Node >= 22`; ACP/AG-UI/MCP deny list intact |
+| Node floor | PASS automated + host | Daemon guard is `MIN_NODE = 22` (private, not an `init.js` option); initialize reports `prism: "0.7.0"`; host runs Node v24.19.0; server diagnostic string is `Node >= 22 is required for clay-agent but was not found` |
+| Unknown-event drop | PASS automated | `cargo test --lib map_event`: `map_event_drops_unknown_event_types` covers `attention_compiled`, `subagent_started`/`subagent_stopped`, `delegation_started`/`delegation_finished`, and a non-existent type; each maps to `None`, and the Rust router turns `None` into `DaemonLine::Ignore` |
+| Daemon suite | PASS automated | Fresh `clay-agent npm test`: 149 pass / 0 fail / 1 skip |
+| Live GUI steps | NOT RUN | Same host ceiling as the Phase 1 record and the plan 119 record; this cut adds no user-visible chrome, so no manual step is weakenable by it |
+
+Note for a future runner: the A-step text above still says `examples/init.js`;
+the canonical example file gate-read by the suites is
+`examples/config/init.js` (`node --check` passes there). That path staleness
+predates plan 120 and is recorded here rather than reused as a pass claim.
+
+## Plan 123 work-scope record (2026-09-16, Prism 0.7 per-prompt scopes)
+
+Automated-only cut. Plan 123 attaches an internal Prism work-scope per coding
+prompt on OM-attached sessions and nests a closed child scope per delegated
+subagent run. Scopes are daemon-side `om.scope.*` ledger entries: no panel,
+control, transcript row, or Memory-tab chrome was added, so no A-step above
+changed and no live pass is claimed. The Memory tab keeps rendering the
+existing OM activity (`session.om.activity` worker state and observation /
+reflection feed) exactly as before and is **not** required to show a scope
+outline. A11 recall semantics are unchanged: recall stays exact-id only, with
+no scope-filtered or widened identifier lookup, and no memory text is
+auto-injected into context. The standing A-steps remain the procedure for an
+input-capable host.
+
+| # | Result | Evidence |
+|---|--------|----------|
+| Work-scope attach | PASS automated | `om work scope: OM-on coding prompt opens, enters, and leaves one run scope` — `om.scope.opened` / `entered` / `left` for `run:<sessionId>:1`, observations bound to the run scope |
+| Work-scope gate | PASS automated | `om work scope: OM-off coding prompt writes zero scope entries` — no scope ledger entries on non-OM coding sessions |
+| Fail-closed ids | PASS automated | `om work scope: an invalid scope id fails closed before the prompt starts` |
+| Scoped projection vs recall | PASS automated | `om work scope: per-run projection stays separate while exact-id recall sees the whole branch` — a second run's projection excludes the first run's observations while exact-id recall still resolves them |
+| Child scope nesting | PASS automated | `om work scope: a delegation nests a closed child scope under the run scope` — `child:<sessionId>:1` with `parentId` = the run scope, depth 2, never entered |
+| Recall rules unchanged | PASS automated | `OM attach records an observation; recall round-trips a known id; invalid id fails closed`; `chat session without OM attach has no recall tool` (unchanged suites) |
+| Daemon suite | PASS automated | Fresh `clay-agent npm test`: 180 pass / 0 fail / 1 pre-existing skip (181 total; `spawn-agent` supervisor steps apply unchanged) |
+| Live GUI steps | NOT RUN | Same host ceiling as the plan 120 record; this cut adds no user-visible chrome, so no manual step is weakenable by it |

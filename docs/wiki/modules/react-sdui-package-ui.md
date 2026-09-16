@@ -81,9 +81,13 @@ removal (Phase 12).
     dispatcher answers with one `ShellClientCommandRequest` the client
     re-parses deny-by-default (same projection as `settings.open`);
     launching (`coding-agent.profile`) also sets the book's active
-    profile to `coding` server-side (`select_picker(Agent)`) so prompts
-    from the surface run with the coding tools instead of the profile-less
-    "Chat" default; the
+    profile to `coding` server-side (`select_picker(Agent)`), and the pane's
+    mount STATE applies the same rule (`tab_state_snapshot` fills an *empty*
+    profile with the coding surface profile) — a pane restored by the layout,
+    reached through the view switcher, or rendered by the empty-tab landing
+    never dispatched the launch command, and its session would otherwise run
+    the daemon-level `Chat` default: no coding tools, no MCP servers. A
+    deliberate profile selection is never overwritten; the
     per-tab runtime pins the surface to its hosting pane (`agentSurfaceOpen`
     + `agentSurfacePaneId`) and auto-closes when the contribution disappears.
     The bundled `@clay/coding-agent` surface is provenance-exact host

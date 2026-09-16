@@ -373,7 +373,7 @@ fn every_server_message() -> Vec<AgentServerMessage> {
         },
         AgentServerMessage::Diagnostic {
             code: "agent.node_missing".into(),
-            message: "Node >= 20 is required".into(),
+            message: "Node >= 22 is required".into(),
         },
     ]
 }
@@ -715,21 +715,23 @@ fn phase25_dependencies_deny_acp_agui_mcp() {
             "clay-agent/package.json must not depend directly on {needle}"
         );
     }
-    assert!(agent_readme.contains("0.5.5"));
+    assert!(agent_readme.contains("0.7.0"));
+    assert!(agent_readme.contains("Node >= 22"));
     assert!(agent_readme.contains("Upgrade Prism"));
     assert!(agent_readme.contains("no tools and no sandbox"));
     assert!(agent_docs.contains("grants no execution authority"));
-    // Phase 0 + Phase 1 (Prism 0.5.x, live pins 0.5.5): exact family pins,
+    // Phase 0 + Phase 1 (Prism 0.7.0, live pins 0.7.0): exact family pins,
     // no retired 0.3 package names.
     for pin in [
-        "\"@arnilo/prism\": \"0.5.5\"",
-        "\"@arnilo/prism-core\": \"0.5.5\"",
-        "\"@arnilo/prism-providers\": \"0.5.5\"",
-        "\"@arnilo/prism-coding-tools\": \"0.5.5\"",
-        "\"@arnilo/prism-web-tools\": \"0.5.5\"",
-        "\"@arnilo/prism-memory\": \"0.5.5\"",
-        "\"@arnilo/prism-mcp\": \"0.5.5\"",
+        "\"@arnilo/prism\": \"0.7.0\"",
+        "\"@arnilo/prism-core\": \"0.7.0\"",
+        "\"@arnilo/prism-providers\": \"0.7.0\"",
+        "\"@arnilo/prism-coding-tools\": \"0.7.0\"",
+        "\"@arnilo/prism-web-tools\": \"0.7.0\"",
+        "\"@arnilo/prism-memory\": \"0.7.0\"",
+        "\"@arnilo/prism-mcp\": \"0.7.0\"",
         "\"better-sqlite3\": \"13.0.3\"",
+        "\"playwright-core\": \"1.63.0\"",
     ] {
         assert!(
             agent_pkg.contains(pin),

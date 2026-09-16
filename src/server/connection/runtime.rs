@@ -137,7 +137,7 @@ pub(super) async fn execute_command_intent(
                 .agent
                 .select_picker(
                     crate::protocol::AgentPickerKind::Agent,
-                    "agent:coding",
+                    crate::server::command_execution::CODING_SURFACE_PROFILE_ID,
                     Some(tab),
                 )
                 .await;
