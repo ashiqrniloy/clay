@@ -263,6 +263,16 @@ pub const TRANSIENT_MENU_MAX_QUERY_CHARS: usize = 256;
 pub const TRANSIENT_MENU_MAX_LABEL_CHARS: usize = 128;
 pub const TRANSIENT_MENU_MAX_DETAIL_CHARS: usize = 256;
 pub const TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS: usize = 256;
+/// Plan 124: one item's scope tag (the palette's `All · Session · Shell ·
+/// Files` chips) — a short, closed, server-owned word, never free text.
+pub const TRANSIENT_MENU_MAX_SCOPE_CHARS: usize = 16;
+/// Plan 124: how many of a command's chords one item states
+/// (`TRANSIENT_MENU_MAX_BINDINGS` × `TRANSIENT_MENU_MAX_BINDING_CHARS` is the
+/// per-item chip budget; the catalogue's own detail line already lists them
+/// all up to `_DETAIL_CHARS`).
+pub const TRANSIENT_MENU_MAX_BINDINGS: usize = 4;
+/// `Ctrl+Shift+Alt+ArrowUp` is 22; 32 leaves room for a future modifier key.
+pub const TRANSIENT_MENU_MAX_BINDING_CHARS: usize = 32;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;

@@ -17,7 +17,8 @@ export interface TabItem {
   closable?: boolean;
   disabled?: boolean;
   /** Agent marker (plan 118 task 33): shown as the approved mono word, and
-   *  `busy` pulses it while the agent works. */
+   *  `busy` marks it in the accent colour while the agent works (the pulse
+   *  itself lives in the window mark — plan 124, DESIGN.md §7). */
   agent?: { busy: boolean } | null;
   content?: ReactNode;
 }

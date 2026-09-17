@@ -150,6 +150,7 @@ pub(super) async fn handle_menu_query_update<S>(
     client_id: ClientId,
     session_id: u64,
     query: String,
+    scope: Option<String>,
     agent: Option<&AgentHost>,
     bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
@@ -199,6 +200,17 @@ where
     .await
     {
         Some(snapshot) => snapshot,
+        None => snapshot,
+    };
+    // Plan 124: the palette's scope chip rides the same update, because it is
+    // the same filter — the session scopes its item set and re-selects inside
+    // it, so the client renders (and the selection moves over) exactly the rows
+    // the chip asks for. Kinds without scopes keep the query's snapshot.
+    let snapshot = match menu_sessions
+        .get_mut(session_id)
+        .and_then(|session| session.set_scope(scope.as_deref()))
+    {
+        Some(scoped) => scoped,
         None => snapshot,
     };
     codec

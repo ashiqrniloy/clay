@@ -1,0 +1,18 @@
+# Counts and geometry measured from the live accessibility tree (screen coordinates)
+01-rest: agent_lane_nodes=1 dialog_nodes=0 result_status=
+02-lane-hidden: agent_lane_nodes=0 dialog_nodes=0 result_status=
+06-lane-hidden-palette: agent_lane_nodes=0 dialog_nodes=0 result_status=
+07-palette-back: agent_lane_nodes=1 dialog_nodes=1 result_status=14 results
+12-newtab-lane-visible: agent_lane_nodes=1 dialog_nodes=0 result_status=
+
+extents (atspi_action.py find):
+  frame Clay              = 0,0 1332x1203
+  footer Agent lane       = 26,946 1280x200   (full content width; top edge y=946)
+  landmark Document outline = 966,110 340x836  (rail bottom 110+836 = 946 = lane top)
+  entry Filter files      = 26,150 220x36
+  button Hide file browser= 238,110 32x32
+
+veil pixel means (window-cropped captures, same boxes/geometry):
+  pane (300,300)-(700,450):  rest 40.0  palette 35.3 (0.88)  lane-hidden 40.0 (1.00)
+  rail (1100,250)-(1270,400): rest 40.3  palette 35.6 (0.88)  lane-hidden 40.0 (0.99)
+  lane band (200,930)-(1000,1010): rest 36.1  palette 48.0 (sheet drawn)  lane-hidden 40.0

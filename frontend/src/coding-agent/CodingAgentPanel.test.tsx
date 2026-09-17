@@ -120,14 +120,8 @@ const surface = {
 };
 
 describe("CodingAgentPanel", () => {
-  it("renders the approved composition: transcript, inspector tabs, state strip, and environment foot", async () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+  it("renders the approved composition: transcript, state strip, and inspector — and no composer", async () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} />);
     expect(
       screen.getByRole("region", { name: "Coding Agent" }),
     ).toBeInTheDocument();
@@ -135,26 +129,66 @@ describe("CodingAgentPanel", () => {
     for (const tab of ["Files", "Memory", "Context"]) {
       expect(screen.getByRole("tab", { name: tab })).toBeInTheDocument();
     }
-    // Environment foot: workspace path, branch, and the MCP summary (the
-    // per-server detail lives in the Context tab).
-    expect(screen.getByText("/tmp/ws")).toBeInTheDocument();
-    expect(screen.getByText("git —")).toBeInTheDocument();
-    expect(await screen.findByText("MCP none")).toBeInTheDocument();
-    // The composer owns the single focus boundary; the strip reports state.
-    expect(screen.getByLabelText(/Message/)).toBeInTheDocument();
-    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
+    // Plan 124: the composer, the agent controls, and the session-environment
+    // foot belong to the shell's lane — the view draws none of them, and the
+    // state strip is its last row (directly above the lane).
+    expect(screen.queryByLabelText(/Message/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByText("git —")).not.toBeInTheDocument();
+    const strip = screen.getByText("Ready").closest("[role='status']");
+    expect(strip?.parentElement?.lastElementChild).toBe(strip);
+  });
+
+  it("state strip: the working bars replace the tone dot exactly while a turn is in flight", async () => {
+    const store = createAgentSession({});
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
+    const release = store.start();
+    try {
+      // At rest: the steady tone dot, no motion in the strip.
+      await screen.findByText("Ready");
+      expect(
+        document.querySelector("[data-clay-component='statusDot']"),
+      ).not.toBeNull();
+      expect(
+        document.querySelectorAll("[data-working-bars] span"),
+      ).toHaveLength(0);
+
+      harness.emit({
+        type: "STATE_SNAPSHOT",
+        snapshot: { provider: "mock", model: "mini" },
+        clientId: 1,
+      } as never);
+      harness.emit({ type: "RUN_STARTED", threadId: "s", runId: "r" } as never);
+      expect(await screen.findByText("Working")).toBeInTheDocument();
+      // Three bars, decoration over the strip's own role="status" text, and no
+      // dot: the run's motion is the bars and the window mark, nothing else.
+      const bars = document.querySelector("[data-working-bars]");
+      expect(bars).not.toBeNull();
+      expect(bars?.getAttribute("aria-hidden")).toBe("true");
+      expect(bars?.querySelectorAll("span")).toHaveLength(3);
+      expect(
+        document.querySelector("[data-clay-component='statusDot']"),
+      ).toBeNull();
+
+      harness.emit({
+        type: "RUN_FINISHED",
+        threadId: "s",
+        runId: "r",
+      } as never);
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-clay-component='statusDot']"),
+        ).not.toBeNull(),
+      );
+      expect(document.querySelector("[data-working-bars]")).toBeNull();
+    } finally {
+      release();
+    }
   });
 
   it("renders transcript boxes from the AG-UI stream and colors them by type", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     // Seed via the shared relay seam (same flow the transport tests use): the
     // out-of-run snapshot path applies messages + state and notifies.
     const release = store.start();
@@ -180,10 +214,10 @@ describe("CodingAgentPanel", () => {
       } as never);
       expect(await screen.findByText("plan this phase")).toBeInTheDocument();
       expect(screen.getByText("I read the plan.")).toBeInTheDocument();
-      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(
-        0,
-      );
-      expect(screen.getByText("MCP files · 2 tools")).toBeInTheDocument();
+      // The Context tab is where the per-server detail lives (the lane's foot
+      // carries the one-line summary, plan 124).
+      fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+      expect(await screen.findByText("2 tools")).toBeInTheDocument();
     } finally {
       release();
     }
@@ -191,14 +225,7 @@ describe("CodingAgentPanel", () => {
 
   it("shows the full content of a selected card in Session Info (plan 109 I10)", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -246,14 +273,7 @@ describe("CodingAgentPanel", () => {
 
   it("Back from Session Info restores the tab the selection came from (plan 109 I10)", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -282,346 +302,13 @@ describe("CodingAgentPanel", () => {
 
   it("Session Info with no selection shows guidance (plan 109 I10)", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Session Info" }));
       expect(
         await screen.findByText(/Select a transcript card/i),
       ).toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("completes daemon-registered commands from session state (plan 109 R1)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      // The daemon registry rides STATE (plan-108 registry is the single
-      // source); no hand-synced frontend list exists anymore.
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          commands: [
-            { name: "/compact", description: "Compact the current session." },
-            { name: "/new", description: "Start a fresh session." },
-            { name: "/open-session", description: "Load a session by id." },
-            {
-              name: "/open-session-as-fork",
-              description: "Load and immediately fork.",
-            },
-          ],
-          branch: "main",
-          extensions: ["wiki"],
-        },
-        clientId: 1,
-      } as never);
-      expect((await screen.findAllByText(/mock\/mini/)).length).toBeGreaterThan(
-        0,
-      );
-      const composer = screen.getByLabelText(/Message/);
-      fireEvent.change(composer, { target: { value: "/open" } });
-      expect(
-        await screen.findByRole("option", { name: /open-session-as-fork/ }),
-      ).toBeInTheDocument();
-      expect(screen.getAllByRole("option").length).toBe(2);
-      fireEvent.change(composer, { target: { value: "plain text" } });
-      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-      // Unregistered names never complete.
-      fireEvent.change(composer, { target: { value: "/deploy" } });
-      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-      // Plan 109 R2: the real branch replaces the `git —` placeholder.
-      expect(screen.getByText("git main")).toBeInTheDocument();
-      // Plan 109 R3: the foot reflects daemon-reported extensions.
-      expect(screen.getByText("extensions wiki")).toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("requests the tab's state at mount so branch + MCP are known before the first prompt (plan 117 follow-up)", async () => {
-    const store = createAgentSession({});
-    vi.mocked(sendRequest).mockClear();
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    // Nothing emits a snapshot before the first prompt, so the panel asks for
-    // the tab's STATE itself (tab-resolved server-side).
-    expect(sendRequest).toHaveBeenCalledWith(
-      expect.stringContaining("listSessions"),
-    );
-    expect(sendRequest).toHaveBeenCalledWith(
-      expect.stringContaining("tabState"),
-    );
-
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          sessionId: "",
-          branch: "feature/pane-open",
-          mcpServers: [{ serverId: "graft", connected: true, tools: 6 }],
-          skills: [],
-        },
-        clientId: 1,
-      } as never);
-      // The foot reports the tab's branch (server-side `.git` read on the
-      // mount snapshot) and its MCP summary; per-server detail is the
-      // Context tab's.
-      expect(
-        await screen.findByText("git feature/pane-open"),
-      ).toBeInTheDocument();
-      expect(
-        await screen.findByText("MCP graft · 6 tools"),
-      ).toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("renders `git —` and omits the extension segment without daemon data (plan 109 R2/R3)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    // The state store is a module singleton; pin the fields under test.
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: { branch: "", extensions: [], mcpServers: [] },
-        clientId: 1,
-      } as never);
-      // Not a repo (or not yet read) → the `—` fallback; no extensions
-      // reported → the segment is omitted, MCP stays.
-      await screen.findByText("MCP none");
-      expect(screen.getByText("/tmp/ws")).toBeInTheDocument();
-      expect(screen.getByText("git —")).toBeInTheDocument();
-      expect(screen.queryByText(/^extensions /)).not.toBeInTheDocument();
-      expect(screen.getByText("MCP none")).toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("keeps Shift+Tab a no-op when the model exposes no effort levels", () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const composer = screen.getByLabelText(/Message/);
-    const event = new KeyboardEvent("keydown", {
-      key: "Tab",
-      shiftKey: true,
-      bubbles: true,
-      cancelable: true,
-    });
-    fireEvent(composer, event);
-    expect(event.defaultPrevented).toBe(false);
-    expect(screen.queryByText(/effort /)).not.toBeInTheDocument();
-  });
-
-  it("cycles declared effort levels via the manifest-bound chord and offers the dropdown", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        effortChord={{
-          shift: true,
-          ctrl: false,
-          alt: false,
-          meta: false,
-          key: "Tab",
-        }}
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          models: [
-            {
-              provider: "mock",
-              model: "mini",
-              displayName: "Mock demo",
-              thinkingLevels: ["low", "medium", "high"],
-            },
-          ],
-          effort: "medium",
-        },
-        clientId: 1,
-      } as never);
-      // The cataloged dropdown appears for declared levels; the status row
-      // reflects the active level.
-      expect((await screen.findAllByText("medium")).length).toBeGreaterThan(0);
-      const composer = screen.getByLabelText(/Message/);
-      fireEvent.keyDown(composer, { key: "Tab", shiftKey: true });
-      // medium -> high (next in the declared ladder) is now pending; the
-      // chord is consumed (no focus change).
-      expect((await screen.findAllByText("high")).length).toBeGreaterThan(0);
-    } finally {
-      release();
-    }
-  });
-
-  it("rebound chord: the composer's cycle key follows the manifest binding", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        effortChord={{
-          shift: false,
-          ctrl: true,
-          alt: false,
-          meta: false,
-          key: "e",
-        }}
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          models: [
-            {
-              provider: "mock",
-              model: "mini",
-              displayName: "Mock demo",
-              thinkingLevels: ["low", "high"],
-            },
-          ],
-        },
-        clientId: 1,
-      } as never);
-      await screen.findByText("Effort");
-      const composer = screen.getByLabelText(/Message/);
-      // Default Shift+Tab no longer cycles: nothing pending changes.
-      const shiftTab = new KeyboardEvent("keydown", {
-        key: "Tab",
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      });
-      fireEvent(composer, shiftTab);
-      expect(shiftTab.defaultPrevented).toBe(false);
-      // The rebound chord cycles.
-      fireEvent.keyDown(composer, { key: "e", ctrlKey: true });
-      expect((await screen.findAllByText("low")).length).toBeGreaterThan(0);
-    } finally {
-      release();
-    }
-  });
-
-  it("/resume opens the workspace-scoped session picker instead of prompting", () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const composer = screen.getByLabelText(/Message/);
-    fireEvent.change(composer, { target: { value: "/resume" } });
-    fireEvent.submit(composer.closest("form") as HTMLFormElement);
-    expect(sendRequest).toHaveBeenCalledWith(
-      expect.stringContaining("clientOpenSessionPicker"),
-    );
-  });
-
-  it("/model opens the daemon model picker instead of prompting", () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const composer = screen.getByLabelText(/Message/);
-    fireEvent.change(composer, { target: { value: "/model" } });
-    fireEvent.submit(composer.closest("form") as HTMLFormElement);
-    expect(sendRequest).toHaveBeenCalledWith(
-      expect.stringContaining("clientOpenModelPicker"),
-    );
-  });
-
-  it("renders the model dropdown with the active selection from inventory state", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          providers: [
-            { id: "mock", configured: true },
-            { id: "secret", configured: false },
-          ],
-          models: [
-            { provider: "mock", model: "mini", displayName: "Mini" },
-            { provider: "mock", model: "big" },
-            { provider: "secret", model: "hidden" },
-          ],
-        },
-        clientId: 1,
-      } as never);
-      // Dropdown trigger shows the active model's display label; the grouped
-      // list itself is the ClayDropdown catalog behavior (verified in the
-      // grouping unit test below). React Aria mirrors the selection into a
-      // hidden native select, so the label may appear twice.
-      expect((await screen.findAllByText("Mini")).length).toBeGreaterThan(0);
     } finally {
       release();
     }
@@ -651,14 +338,7 @@ describe("CodingAgentPanel", () => {
 
   it("Context tab (plan 109 I7): server-authoritative categories, drawer, and item detail", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       // A live session id activates the context fetch path.
@@ -734,14 +414,7 @@ describe("CodingAgentPanel", () => {
 
   it("Context tab accepts AgentRpc result as a JSON string", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -778,14 +451,7 @@ describe("CodingAgentPanel", () => {
 
   it("Memory tab (plan 109 I8): activity log with drops plus OM worker-model dropdowns", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -892,273 +558,46 @@ describe("CodingAgentPanel", () => {
     }
   });
 
-  it("composer icon actions: submit-Send, disabled gates, and Close intent (plan 112 T8)", async () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const send = screen.getByRole("button", { name: "Send" });
-    // Icon-only composition: glyph inside, native submit semantics kept.
-    expect(send.querySelector("svg")).not.toBeNull();
-    expect(send).toHaveAttribute("type", "submit");
-    // Empty draft gates activation.
-    expect(send).toHaveProperty("disabled", true);
-    const close = screen.getByRole("button", { name: "Close" });
-    expect(close.querySelector("svg")).not.toBeNull();
-    fireEvent.click(close);
-    await waitFor(() => {
-      expect(sendRequest).toHaveBeenCalledWith(
-        expect.stringContaining("coding-agent.close"),
-      );
-    });
-  });
-
-  it("streaming state offers Stop and keeps the composer as a steering lane (plan 118 port)", async () => {
-    const store = createAgentSession({});
-    // Ported from the deleted landing panel's suite: the cancel handler and the
-    // streaming state have exactly one owner — this panel drives the shared
-    // transport's `agent.cancel`; nothing surface-specific owned them.
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: { provider: "mock", model: "mini" },
-        clientId: 1,
-      });
-      await waitFor(() =>
-        expect(screen.getByLabelText(/Message/)).toBeEnabled(),
-      );
-
-      harness.emit({
-        type: "RUN_STARTED",
-        threadId: "s",
-        runId: "r",
-        clientId: 1,
-      });
-      expect(store.getSnapshot().status.streaming).toBe(true);
-      expect(await screen.findByText("Working")).toBeInTheDocument();
-      expect(
-        screen.getByText("steer or stop from the composer"),
-      ).toBeInTheDocument();
-      // The composer stays enabled (steer), and the action swaps to Stop.
-      expect(screen.getByLabelText(/Message/)).toHaveProperty(
-        "placeholder",
-        "Steer the agent, or wait",
-      );
-      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
-      await waitFor(() => {
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining("agent.cancel"),
-        );
-      });
-    } finally {
-      release();
-    }
-  });
-
-  it("composer intents are declared action targets (plan 117 follow-up)", async () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => {
-      expect(sendRequest).toHaveBeenCalledWith(
-        expect.stringContaining("sduiAction"),
-      );
-    });
-    const sent = vi.mocked(sendRequest).mock.calls.map(([payload]) => {
-      const parsed = JSON.parse(String(payload)) as {
-        payload?: { intent?: { commandId?: string } };
-      };
-      return parsed.payload?.intent?.commandId;
-    });
-    const intents = sent.filter((id): id is string => typeof id === "string");
-    expect(intents.length).toBeGreaterThan(0);
-    for (const intent of intents) {
-      expect(surface.actionTargets).toContain(intent);
-    }
-  });
-
-  it("agent tab labels and approval actions keep text; no icon takeover (plan 112 T8)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+  it("agent tab labels keep text; no icon takeover (plan 112 T8)", () => {
+    render(<CodingAgentPanel surface={surface} uiVersion={4} />);
     for (const tab of ["Files", "Memory", "Context"]) {
       const tabNode = screen.getByRole("tab", { name: tab });
       expect(tabNode.querySelector("svg")).toBeNull();
     }
-    // Permission prompt (approval strip) keeps text buttons — no icon-only
-    // Allow/Deny. Approval arrives as clay.permissionRequest (plan 108).
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "CUSTOM",
-        name: "clay.permissionRequest",
-        value: {
-          sessionId: "s1",
-          runId: "r1",
-          requestId: "req1",
-          toolName: "write",
-        },
-        clientId: 1,
-      } as never);
-      const allow = await screen.findByRole("button", { name: "Allow" });
-      expect(allow.querySelector("svg")).toBeNull();
-      expect(allow.textContent).toContain("Allow");
-    } finally {
-      release();
-    }
+    // The approval strip (whose Allow/Deny are text buttons too) lives in the
+    // shell's lane since plan 124 — see AgentLane.test.tsx.
   });
 
-  it("hands a panel-created store the panel's own sender (plan 119 SC-6)", async () => {
-    // The store is created inside this lazy chunk on first mount; its sender
-    // must be the tab's, not the process-wide active client. AgentView
-    // forwards the tab's `send` for exactly this (a dropped pass-through made
-    // prompts ride whichever tab was activated last).
-    const send = vi.fn(async (payload: string) => {
-      void payload;
-      return undefined;
+  it("a store handed in by the host is never re-created here (plan 124)", async () => {
+    // The shell's host resolves the tab's store and runs its bootstrap, because
+    // the lane is mounted for every tab; the view must not create a second one
+    // or re-ask for the tab's STATE.
+    const store = createAgentSession({});
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
+    const asks = vi
+      .mocked(sendRequest)
+      .mock.calls.map(([payload]) => String(payload));
+    expect(asks.some((payload) => payload.includes("listSessions"))).toBe(
+      false,
+    );
+    expect(asks.some((payload) => payload.includes("tabState"))).toBe(false);
+    // A standalone mount (no host store) does keep asking for it itself.
+    cleanup();
+    vi.mocked(sendRequest).mockClear();
+    render(<CodingAgentPanel surface={surface} uiVersion={4} />);
+    await waitFor(() => {
+      const own = vi
+        .mocked(sendRequest)
+        .mock.calls.map(([payload]) => String(payload));
+      expect(own.some((payload) => payload.includes("listSessions"))).toBe(
+        true,
+      );
+      expect(own.some((payload) => payload.includes("tabState"))).toBe(true);
     });
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        send={send}
-      />,
-    );
-    // Mount asks for the session list and the tab's binding on this lane.
-    await waitFor(() => expect(send).toHaveBeenCalled());
-    const composer = screen.getByLabelText(/Message/);
-    fireEvent.change(composer, { target: { value: "/resume" } });
-    fireEvent.submit(composer.closest("form") as HTMLFormElement);
-    await waitFor(() =>
-      expect(
-        vi
-          .mocked(send)
-          .mock.calls.map(([payload]) => String(payload))
-          .some((payload) => payload.includes("clientOpenSessionPicker")),
-      ).toBe(true),
-    );
-    expect(sendRequest).not.toHaveBeenCalled();
-  });
-
-  it("approval Allow/Deny each send the runResume decision for that request (plan 119 SC-4)", async () => {
-    // The decision payload is the security-relevant half of the strip; the
-    // extraction kept it in the panel, on the store's own command lane.
-    const store = createAgentSession({});
-    const release = store.start();
-    try {
-      render(
-        <CodingAgentPanel
-          agent={store}
-          surface={surface}
-          uiVersion={4}
-          workspaceRoot="/tmp/ws"
-        />,
-      );
-      harness.emit({
-        type: "CUSTOM",
-        name: "clay.permissionRequest",
-        value: {
-          sessionId: "s1",
-          runId: "r1",
-          requestId: "req1",
-          toolName: "write",
-        },
-        clientId: 1,
-      } as never);
-      (await screen.findByRole("button", { name: "Allow" })).click();
-      await waitFor(() =>
-        expect(sendRequest).toHaveBeenCalledWith(
-          expect.stringContaining('"runId":"r1"'),
-        ),
-      );
-      const payload = String(
-        vi.mocked(sendRequest).mock.calls.at(-1)?.[0] ?? "",
-      );
-      expect(payload).toContain("runResume");
-      expect(payload).toContain("approvalId");
-      expect(payload).toContain("req1");
-      expect(payload).toContain("allow_once");
-      // The strip clears optimistically; the resumed run re-announces.
-      await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Deny" })).toBeNull(),
-      );
-    } finally {
-      release();
-    }
-  });
-
-  it("approval strip takes focus while suspended and gives it back (plan 119 review F3)", async () => {
-    // `alertdialog` promises the user is taken to the decision; announcing it
-    // while focus stayed in the composer was the review's F3 finding.
-    const store = createAgentSession({});
-    const release = store.start();
-    try {
-      render(
-        <CodingAgentPanel
-          agent={store}
-          surface={surface}
-          uiVersion={4}
-          workspaceRoot="/tmp/ws"
-        />,
-      );
-      const composer = screen.getByRole("tab", { name: "Files" });
-      composer.focus();
-      expect(document.activeElement).toBe(composer);
-      harness.emit({
-        type: "CUSTOM",
-        name: "clay.permissionRequest",
-        value: {
-          sessionId: "s1",
-          runId: "r1",
-          requestId: "req1",
-          toolName: "write",
-        },
-        clientId: 1,
-      } as never);
-      const allow = await screen.findByRole("button", { name: "Allow" });
-      await waitFor(() => expect(document.activeElement).toBe(allow));
-      allow.click();
-      await waitFor(() =>
-        expect(screen.queryByRole("button", { name: "Deny" })).toBeNull(),
-      );
-      await waitFor(() => expect(document.activeElement).toBe(composer));
-    } finally {
-      release();
-    }
   });
 
   it("Files tab (plan 118 task 36): shows the session-history empty state, never a file browser", () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel surface={surface} uiVersion={4} />);
     expect(
       screen.getByText("No files in this session yet"),
     ).toBeInTheDocument();
@@ -1186,7 +625,6 @@ describe("CodingAgentPanel", () => {
         agent={store}
         surface={surface}
         uiVersion={4}
-        workspaceRoot="/tmp/ws"
         onOpenInWorkspace={onOpen}
       />,
     );
@@ -1260,14 +698,7 @@ describe("CodingAgentPanel", () => {
 
   it("Files tab (plan 118 task 36): filters by path and keeps the editor out", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       fireEvent.click(screen.getByRole("tab", { name: "Files" }));
@@ -1327,12 +758,7 @@ describe("Settings tab (plan 117 follow-up)", () => {
       },
     });
     render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        session={session}
-      />,
+      <CodingAgentPanel surface={surface} uiVersion={4} session={session} />,
     );
     // The listing is requested on this pane's own session — no shell state,
     // no separate side panel.
@@ -1396,14 +822,7 @@ describe("Settings tab (plan 117 follow-up)", () => {
 describe("MCP UI surfaces (plan 117)", () => {
   it("Context tab lists connected servers with tool counts and marks hidden ones", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -1439,14 +858,7 @@ describe("MCP UI surfaces (plan 117)", () => {
 
   it("server section is absent when no server is configured", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -1454,11 +866,9 @@ describe("MCP UI surfaces (plan 117)", () => {
         snapshot: { provider: "mock", model: "mini", mcpServers: [] },
         clientId: 1,
       } as never);
-      // Flush the coalesced state render, then assert absence: nothing
-      // will ever paint the section (no servers configured).
-      await waitFor(() => {
-        expect(screen.getByText("MCP none")).toBeInTheDocument();
-      });
+      // The state has landed (the panel's own strip reports it), so the
+      // section's absence is the answer, not a slow render.
+      await screen.findByText("Ready");
       fireEvent.click(screen.getByRole("tab", { name: "Context" }));
       expect(
         screen.queryByLabelText("MCP servers connected"),
@@ -1468,16 +878,9 @@ describe("MCP UI surfaces (plan 117)", () => {
     }
   });
 
-  it("the foot shows the MCP summary and the Context tab the detail, both across transcript growth", async () => {
+  it("the Context tab carries the per-server MCP detail across transcript growth", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -1497,9 +900,6 @@ describe("MCP UI surfaces (plan 117)", () => {
         },
         clientId: 1,
       } as never);
-      expect(
-        await screen.findByText("MCP files · 3 tools · ghost · hidden"),
-      ).toBeInTheDocument();
       fireEvent.click(screen.getByRole("tab", { name: "Context" }));
       const section = await screen.findByLabelText("MCP servers connected");
       expect(within(section).getByText("3 tools")).toBeInTheDocument();
@@ -1507,7 +907,8 @@ describe("MCP UI surfaces (plan 117)", () => {
         within(section).getByText("hidden: connection closed"),
       ).toBeInTheDocument();
 
-      // Messages arrive; both MCP surfaces persist (foot summary + section).
+      // Messages arrive; the section persists (the lane's foot carries the
+      // one-line summary — plan 124).
       harness.emit({
         type: "TEXT_MESSAGE_CONTENT",
         delta: "hello",
@@ -1516,424 +917,16 @@ describe("MCP UI surfaces (plan 117)", () => {
       expect(
         screen.getByLabelText("MCP servers connected"),
       ).toBeInTheDocument();
-      expect(
-        screen.getByText("MCP files · 3 tools · ghost · hidden"),
-      ).toBeInTheDocument();
     } finally {
       release();
     }
-  });
-
-  it("@-mentions: dropdown merges catalog + files, filter narrows, selection embeds (plan 117)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          sessionId: "s1",
-          skills: [{ name: "brief", description: "Answer tersely." }],
-        },
-        clientId: 1,
-      } as never);
-      harness.emit({
-        type: "CUSTOM",
-        name: "clay.agentRpc",
-        value: {
-          code: "workspace.files",
-          result: { files: ["src/main.rs", "README.md"] },
-        },
-      } as never);
-      const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
-
-      // Bare @ opens both sections.
-      fireEvent.change(composer, { target: { value: "@" } });
-      const dropdown = await screen.findByRole("listbox", { name: "Mentions" });
-      expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
-      expect(
-        within(dropdown).getByText("@file:src/main.rs"),
-      ).toBeInTheDocument();
-
-      // Typing narrows across both kinds.
-      fireEvent.change(composer, { target: { value: "@br" } });
-      expect(within(dropdown).getByText("@skill:brief")).toBeInTheDocument();
-      expect(
-        within(dropdown).queryByText("@file:src/main.rs"),
-      ).not.toBeInTheDocument();
-
-      // @file: narrows to files only.
-      fireEvent.change(composer, { target: { value: "@file:re" } });
-      expect(within(dropdown).getByText("@file:README.md")).toBeInTheDocument();
-      expect(
-        within(dropdown).queryByText("@skill:brief"),
-      ).not.toBeInTheDocument();
-
-      // Selection embeds the mention token into the draft.
-      fireEvent.click(within(dropdown).getByText("@file:README.md"));
-      expect(composer.value).toBe("@file:README.md ");
-      expect(
-        screen.queryByRole("listbox", { name: "Mentions" }),
-      ).not.toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("@-mentions: Tab selects the highlighted match (plan 117)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          sessionId: "s1",
-          skills: [{ name: "brief", description: "Answer tersely." }],
-        },
-        clientId: 1,
-      } as never);
-      const composer = screen.getByLabelText("Message") as HTMLTextAreaElement;
-      fireEvent.change(composer, { target: { value: "@" } });
-      await screen.findByRole("listbox", { name: "Mentions" });
-      fireEvent.keyDown(composer, { key: "Tab" });
-      expect(composer.value).toBe("@skill:brief ");
-    } finally {
-      release();
-    }
-  });
-
-  it("token meter: compact occupancy vs ceiling with diagnostic threshold tones (plan 117)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    const emitState = (
-      tokens: number | null,
-      model = "mini",
-      window = 100_000,
-    ) => {
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model,
-          models: [
-            { provider: "mock", model: "mini", contextWindow: window },
-            { provider: "mock", model: "big", contextWindow: 1_000_000 },
-          ],
-          ...(tokens === null ? {} : { contextTokens: tokens }),
-        },
-        clientId: 1,
-      } as never);
-    };
-    try {
-      const meter = () => screen.getByTitle(/Context usage/);
-
-      // Initial state carries the window; unreported usage estimates from
-      // the transcript (empty → 0) so the meter renders from the start.
-      emitState(null);
-      const initial = await screen.findByTitle(/Context usage/);
-      expect(initial).toHaveTextContent("0/100k");
-      expect(initial.className).not.toMatch(/meterWarning|meterError/);
-
-      // Thresholds: 59% normal, 61% warning, 79% warning, 81% error.
-      emitState(59_000);
-      await waitFor(() => expect(meter()).toHaveTextContent("59k/100k"));
-      expect(meter().className).not.toMatch(/meterWarning|meterError/);
-      emitState(61_000);
-      await waitFor(() => expect(meter().className).toMatch(/meterWarning/));
-      emitState(79_000);
-      await waitFor(() => expect(meter().className).toMatch(/meterWarning/));
-      emitState(81_000);
-      await waitFor(() => expect(meter().className).toMatch(/meterError/));
-
-      // Compact format: 220000/270000 → `220k/270k` (81% — error tone).
-      emitState(220_000, "mini", 270_000);
-      await waitFor(() => expect(meter()).toHaveTextContent("220k/270k"));
-
-      // Ceiling follows the active model.
-      emitState(220_000, "big", 1_000_000);
-      await waitFor(() => expect(meter()).toHaveTextContent("220k/1m"));
-    } finally {
-      release();
-    }
-  });
-
-  it("token meter: heuristic estimates occupancy when usage is unreported (plan 117)", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      // 7200 chars ÷ 3.6 chars/token (claude family) = 2000 tokens.
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "claude-x",
-          models: [
-            { provider: "mock", model: "claude-x", contextWindow: 270_000 },
-          ],
-        },
-        clientId: 1,
-      } as never);
-      harness.emit({
-        type: "MESSAGES_SNAPSHOT",
-        messages: [{ id: "m0", role: "user", content: "x".repeat(7200) }],
-        clientId: 1,
-      } as never);
-      await waitFor(() =>
-        expect(screen.getByTitle(/Context usage/)).toHaveTextContent("2k/270k"),
-      );
-    } finally {
-      release();
-    }
-  });
-
-  it("effort dropdown is active from session start (plan 117): levels resolve from the model inventory before any prompt", async () => {
-    const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-      />,
-    );
-    const release = store.start();
-    try {
-      // Mount-time inventory STATE: trio + models inventory, NO session and
-      // no `effort` key — exactly what a fresh webview holds.
-      harness.emit({
-        type: "STATE_SNAPSHOT",
-        snapshot: {
-          provider: "mock",
-          model: "mini",
-          models: [
-            {
-              provider: "mock",
-              model: "mini",
-              displayName: "Mock demo",
-              thinkingLevels: ["low", "medium", "high"],
-            },
-          ],
-        },
-        clientId: 1,
-      } as never);
-      // The cataloged dropdown renders pre-first-message (React Aria
-      // Select trigger labeled "Effort"); selecting a level rides the
-      // next prompt through the existing pendingEffort path.
-      expect(await screen.findByText("Effort")).toBeInTheDocument();
-    } finally {
-      release();
-    }
-  });
-
-  it("is the header title, lists only the configured agents, and marks the current one", async () => {
-    const session = createDocumentSession({ send: async () => undefined });
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        session={session}
-        agentType="coding-agent"
-        onPickAgent={() => undefined}
-      />,
-    );
-    act(() => {
-      session.handleEnvelope({
-        kind: "event",
-        data: {
-          kind: "launcherEntries",
-          // The server's ServerMessage shape: the listing rides under
-          // `entries` (the same envelope the launcher parses).
-          data: {
-            clientId: 1,
-            entries: {
-              workspaces: [],
-              pruned: 0,
-              agents: [
-                {
-                  name: "coding-agent",
-                  label: "Coding Agent",
-                  configRoot: "~/.clay/agents/coding-agent",
-                  skillCount: 3,
-                },
-                {
-                  name: "reviewer",
-                  label: "Reviewer",
-                  configRoot: "~/.clay/agents/reviewer",
-                  skillCount: 1,
-                },
-              ],
-            },
-          },
-        },
-      } as never);
-    });
-
-    // The title reads the current agent, and it consumes the agentPicker
-    // trigger family (not the plain dropdown).
-    const trigger = await waitFor(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        "[data-agent-pick] button",
-      );
-      expect(button).toBeTruthy();
-      return button as HTMLButtonElement;
-    });
-    expect(trigger).toHaveAttribute("data-clay-component", "agentPicker");
-    expect(trigger).toHaveAttribute("data-clay-slot", "trigger");
-    expect(trigger).toHaveTextContent("Coding Agent");
-
-    // Opening the menu lists exactly the server-listed types.
-    act(() => {
-      fireEvent.click(trigger);
-    });
-    const currentRow = await screen.findByRole("option", {
-      name: /Coding Agent/,
-    });
-    void currentRow;
-    expect(currentRow).toHaveAttribute("aria-selected", "true");
-    const reviewerRow = screen.getByRole("option", { name: /Reviewer/ });
-    expect(reviewerRow).toHaveAttribute("aria-selected", "false");
-    // The menu names where more agent types come from and never fabricates
-    // one the data root does not hold.
-    expect(screen.getByText(/from ~\/\.clay\/agents\//)).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /Ghost/ })).toBeNull();
-  });
-
-  it("hands the picked type to the tab and resets the pending effort", async () => {
-    const picked: Array<string | null> = [];
-    const session = createDocumentSession({ send: async () => undefined });
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        session={session}
-        agentType="coding-agent"
-        onPickAgent={(agent) => picked.push(agent)}
-      />,
-    );
-    act(() => {
-      session.handleEnvelope({
-        kind: "event",
-        data: {
-          kind: "launcherEntries",
-          // The server's ServerMessage shape: the listing rides under
-          // `entries` (the same envelope the launcher parses).
-          data: {
-            clientId: 1,
-            entries: {
-              workspaces: [],
-              pruned: 0,
-              agents: [
-                {
-                  name: "coding-agent",
-                  label: "Coding Agent",
-                  configRoot: "~/.clay/agents/coding-agent",
-                  skillCount: 3,
-                },
-                {
-                  name: "reviewer",
-                  label: "Reviewer",
-                  configRoot: "~/.clay/agents/reviewer",
-                  skillCount: 1,
-                },
-              ],
-            },
-          },
-        },
-      } as never);
-    });
-    const trigger = await waitFor(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        "[data-agent-pick] button",
-      );
-      expect(button).toBeTruthy();
-      return button as HTMLButtonElement;
-    });
-    act(() => {
-      fireEvent.click(trigger);
-    });
-    act(() => {
-      fireEvent.click(screen.getByRole("option", { name: /Reviewer/ }));
-    });
-    expect(picked).toEqual(["reviewer"]);
-    // The already-current row is a no-op: no redundant tab command.
-    act(() => {
-      fireEvent.click(trigger);
-    });
-    act(() => {
-      fireEvent.click(screen.getByRole("option", { name: /Coding Agent/ }));
-    });
-    expect(picked).toEqual(["reviewer"]);
-  });
-
-  it("keeps the picker inert when there is no shell to switch through", async () => {
-    render(
-      <CodingAgentPanel
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        agentType="coding-agent"
-      />,
-    );
-    const trigger = await waitFor(() => {
-      const button = document.querySelector<HTMLButtonElement>(
-        "[data-agent-pick] button",
-      );
-      expect(button).toBeTruthy();
-      return button as HTMLButtonElement;
-    });
-    expect(trigger).toBeDisabled();
   });
 });
 
 describe("Per-turn agent labels (plan 118 task 35)", () => {
   it("labels turns with their producer and notes the switch when the tab changes agent", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        agentType="reviewer"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({
@@ -1975,15 +968,7 @@ describe("Per-turn agent labels (plan 118 task 35)", () => {
 
   it("shows no agent labels when one agent wrote the whole transcript", async () => {
     const store = createAgentSession({});
-    render(
-      <CodingAgentPanel
-        agent={store}
-        surface={surface}
-        uiVersion={4}
-        workspaceRoot="/tmp/ws"
-        agentType="coding-agent"
-      />,
-    );
+    render(<CodingAgentPanel agent={store} surface={surface} uiVersion={4} />);
     const release = store.start();
     try {
       harness.emit({

@@ -94,6 +94,14 @@ export function clientTabMoveTo(position) {
     return tabVariantId("shell.clientTabMoveTo", position);
 }
 
+/**
+ * Return the stable command ID for toggling this tab's persistent agent lane.
+ * The shell applies the per-tab visibility change after explicit user routing.
+ */
+export function toggleAgentLane() {
+    return "shell.toggleAgentLane";
+}
+
 function tabVariantId(family, position) {
     const n = Number(position);
     if (!Number.isInteger(n) || n < 1 || n > 9) {

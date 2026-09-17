@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-03T00:00:00Z",
+  "updated": "2026-09-17T00:00:00Z",
   "native_client_frozen": true,
   "status_vocabulary": [
     "pending",
@@ -986,7 +986,15 @@
             "K88",
             "K89",
             "K90",
-            "K91"
+            "K91",
+            "K92",
+            "K93",
+            "K94",
+            "K95",
+            "K96",
+            "K97",
+            "K98",
+            "K99"
           ]
         }
       ],
@@ -1026,7 +1034,7 @@
         "TransientMenuSession"
       ],
       "verified_automated": "frontend CommandCentre/workspace/editor tests + server menu/chord suites + test-plan/10",
-      "verified_manual": "test-plan/10-keybindings-and-commands.md execution records and phase UI review evidence"
+      "verified_manual": "test-plan/10-keybindings-and-commands.md execution records and phase UI review evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
     },
     {
       "capability_id": "performance.budgets.feel",
@@ -1233,7 +1241,10 @@
             "S43",
             "S44",
             "S45",
-            "S46"
+            "S46",
+            "S47",
+            "S48",
+            "S49"
           ]
         }
       ],
@@ -1270,7 +1281,7 @@
         "WorkingAreaLayout"
       ],
       "verified_automated": "frontend split-tree tests + test-plan/13",
-      "verified_manual": "test-plan/13-window-splits.md execution records and phase UI review evidence"
+      "verified_manual": "test-plan/13-window-splits.md execution records and phase UI review evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
     },
     {
       "capability_id": "tabs.workspaces.persistence",
@@ -1368,7 +1379,11 @@
             "T75",
             "T76",
             "T77",
-            "T78"
+            "T78",
+            "T79",
+            "T80",
+            "T81",
+            "T82"
           ]
         }
       ],
@@ -1380,7 +1395,8 @@
         "shell.clientTabMoveLeft",
         "shell.clientTabMoveRight",
         "shell.clientTabActivate",
-        "shell.clientTabMoveTo"
+        "shell.clientTabMoveTo",
+        "shell.toggleAgentLane"
       ],
       "protocol_messages": {
         "client": [
@@ -1398,7 +1414,7 @@
         "TabRegistryBinding"
       ],
       "verified_automated": "frontend tab isolation tests + test-plan/14",
-      "verified_manual": "test-plan/14-tabs.md execution records and phase UI review evidence"
+      "verified_manual": "test-plan/14-tabs.md execution records and phase UI review evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
     },
     {
       "capability_id": "agent.chat.prism",
@@ -1539,7 +1555,9 @@
             "A17",
             "A18",
             "A19",
-            "A20"
+            "A20",
+            "A21",
+            "A22"
           ]
         }
       ],
@@ -1569,7 +1587,7 @@
       "target_owner": "unchanged server authority; daemon-owned session runtime; Phase 2 Coding Agent package registers its profile through the facades",
       "target_tests": "clay-agent node suites + Rust protocol/inventory gates (incl. coding-agent manifest + load-entry contract) + test-plan/16",
       "verified_automated": "clay-agent suites 49/49; protocol 203/203 incl. agent_protocol gates; inventory coverage gate pins decision 2157/2158 defaults; plan 121 toolNames and attention compiler suites covered omitted/empty/subset/unknown/malformed grants, coding-only valid-window enablement, limit-less-model skip, and over-budget fail-closed behavior",
-      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans); plan 121 A20 is daemon-only and verified through automated RPC/provider evidence"
+      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans); plan 121 A20 is daemon-only and verified through automated RPC/provider evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
     },
     {
       "capability_id": "agent.codingAgent.parity",
@@ -1669,7 +1687,15 @@
             "C53",
             "C54",
             "C55",
-            "C56"
+            "C56",
+            "C57",
+            "C58",
+            "C59",
+            "C60",
+            "C61",
+            "C62",
+            "C63",
+            "C64"
           ]
         }
       ],
@@ -1687,7 +1713,7 @@
       "target_owner": "unchanged server authority; daemon-owned session runtime; package surface is client-local presentation",
       "target_tests": "clay-agent node suites + CodingAgentPanel suites + Rust protocol/inventory gates + test-plan/17",
       "verified_automated": "clay-agent suites 69/69 (with Obscura e2e); frontend 200/200; protocol suite green; parity checklist automated gates P1-P18/N1-N5 recorded 2026-09-03; plan 117 legs C24-C37 + C-N5-C-N11 recorded 2026-09-10 (clay-agent 138: 137 pass/0 fail/1 skip; frontend 294/294; lib 1307/protocol 210/security 152; scratch-config launch gate + MCP fixture connect {connected: true, tools: 2} through the real daemon); plan 121 toolNames/attention/wiki-ingest/graft tests 163 pass/1 skip; plan 121 follow-up auto-compaction + graft deep model 169 pass/1 skip (170) + protocol 216/216: auto-compaction armed only on coding sessions with a declared context window, compact-ratio gate compacts locally with zero provider calls, attention_compiled feeds the truncation streak, two truncated turns fire at the next prompt, compactAfterTokens ceiling fires under the gate, over-budget prompts still fail closed, deep model resolves from the vault and reaches the child env only as GRAFT_API_KEY (argv carries no key), rebinds on change, fails closed for missing keys/malformed shapes with Rust pre-queue shape validation",
-      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings); plan 117 live launch gate 2026-09-10 (isolated scratch config, window-cropped captures in test-plan/artifacts/117-coding-agent/, interactive surface legs per the standing input-injection ceiling); plan 121 Linux launch gate passed, while C45-C49 remain unresolved under the documented input-backend ceiling; plan 121 follow-up steps C50-C52 are automated-pass and live-unresolved under the same input-backend ceiling"
+      "verified_manual": "test-plan/17-coding-agent-parity.md record (2026-09-03): automated mock-provider subset + live fixture pass; real-provider interactive pass standing procedure pending a configured credential (recorded in module known ceilings); plan 117 live launch gate 2026-09-10 (isolated scratch config, window-cropped captures in test-plan/artifacts/117-coding-agent/, interactive surface legs per the standing input-injection ceiling); plan 121 Linux launch gate passed, while C45-C49 remain unresolved under the documented input-backend ceiling; plan 121 follow-up steps C50-C52 are automated-pass and live-unresolved under the same input-backend ceiling; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
     }
   ]
 }

@@ -6,6 +6,7 @@
 import type { BootstrapDto } from "../bridge/types";
 import { patchTab, type TabStore } from "./tab-store";
 import { detached } from "../lib/detached";
+import { agentLane } from "./layout-state";
 import {
   addEqualPane,
   closePane,
@@ -125,6 +126,11 @@ export function dispatchClientCommand(
       runtime.settingsOpen = false;
       ctx.notify();
     },
+    // Plan 124: the agent lane's visibility is per-tab layout state the shell
+    // owns, so the toggle executes here — reached from the `Ctrl+X Ctrl+P`
+    // chord (the server answers the ServerFirst intent with this id), the
+    // palette row, and the titlebar hint button.
+    "shell.toggleAgentLane": () => agentLane.toggle(),
     // The Coding Agent's two view commands (plan 118 task 33): opening shows
     // the tab's agent view, closing returns to its workspace view. The agent
     // half stays attached either way — the switcher is chrome, not state.

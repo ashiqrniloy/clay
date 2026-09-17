@@ -756,7 +756,7 @@ User-visible Phase 18.8 configuration surfaces:
 
 | Surface | Status | API / mechanism | Notes |
 |---|---|---|---|
-| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; a default `Ctrl+X Ctrl+P` chord ships in the default behavior manifest and is fully overrideable/removable via `bindKey`/`unbindKey` |
+| Control Center launch key binding | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) | Bind a key to the built-in command `controlCenter.open`; Plan 124 ships the default `Ctrl+X Ctrl+O` chord and reserves `Ctrl+X Ctrl+P` for `shell.toggleAgentLane`; both are fully overrideable/removable via `bindKey`/`unbindKey` |
 | Control Center command id | built-in server command | `controlCenter.open` (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`) | A fixed Clay command ID routed by inert behavior manifests after configuration evaluation; not an `init.js` key |
 | Built-in server commands (`workspace.refresh`, `document.focus_active`, `document.open_recent`) | built-in server command | `builtin_server_command_ids` / `builtin_server_command` | Fixed Clay command IDs, not user configuration |
 | Package command/action customization | reused, runtime-backed | [`commands.serverRegisterCommand`](commands/server-register-command.md), [`ui.serverRegisterPanelContribution`](ui/server-register-panel-contribution.md), [`ui.serverRegisterInputContribution`](ui/server-register-input-contribution.md), [`configuration.setPackageOption`](configuration/set-package-option.md) | Package commands, action targets, and `action.default`/`input.default` overrides flow through phase 18.3/18.4 package UI/configuration APIs |
@@ -769,13 +769,13 @@ The expected end-user Control Center configuration is a normal `~/.clay/init.js`
 ```js
 import { bindKey, unbindKey } from "clay:keybindings";
 
-// Remove the shipped Ctrl+X Ctrl+P default, then bind a different chord
-// (single-stroke or multi-stroke, e.g. "Ctrl+X Ctrl+P" or "Alt+X").
-unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+// Remove the shipped Ctrl+X Ctrl+O default, then bind a different chord
+// (single-stroke or multi-stroke, e.g. "Ctrl+X Ctrl+O" or "Alt+X").
+unbindKey("Ctrl+X Ctrl+O", { scope: "global" });
 bindKey("Alt+X", "controlCenter.open", { scope: "global" });
 ```
 
-`controlCenter.open` is a fixed Clay command ID routed by inert behavior manifests. Phase 24.5 ships the default `Ctrl+X Ctrl+P` chord (Global scope, `ServerFirst` routing; the pre-24.5 single-stroke default was `Ctrl+Shift+P`) in the default behavior manifest; `bindKey`/`unbindKey` can rebind or remove it — without an explicit unbind the default remains bound. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, fuzzy matcher constants, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
+`controlCenter.open` is a fixed Clay command ID routed by inert behavior manifests. Plan 124 ships the default `Ctrl+X Ctrl+O` chord (Global scope, `ServerFirst` routing); `Ctrl+X Ctrl+P` is the separate persistent agent-lane toggle. `bindKey`/`unbindKey` can rebind or remove either route — without an explicit unbind the shipped default remains bound. `bindKey` is the documented configuration surface — the transient menu is not a callable `clay:configuration` API and cannot be styled, positioned, filtered, or dismissed through `init.js`. Menu geometry, item count limit (`MAX_ITEMS = 256`), query/label/detail/accessibility bounds, focus policy, fuzzy matcher constants, and built-in command membership are Clay-owned compiled/internal constants, not hidden `init.js` keys.
 
 ## Phase 24.3 path mode configuration review
 
@@ -798,6 +798,35 @@ bindKey("Alt+P", "controlCenter.openPath", { scope: "global" });
 ```
 
 `controlCenter.openPath` is a fixed Clay command ID routed by inert behavior manifests. The Path Browser path input, listing bounds (`TRANSIENT_MENU_MAX_ITEMS`, `TRANSIENT_MENU_MAX_QUERY_CHARS`), fuzzy matcher constants, seed fallback order, and grant conversion rules are Clay-owned compiled/internal constants, not hidden `init.js` keys. Hidden/ad hoc configuration keys that would claim to configure path mode are rejected by policy unless expressed through the documented APIs above.
+
+## Plan 124 persistent agent lane and composer palette configuration review
+
+Plan 124 adds no new global layout option or hidden `init.js` key. Its configuration surface reuses `keybindings.bindKey`, `unbindKey`, and `listKeyBindings`:
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Agent lane toggle | reused, runtime-backed | [`shell.toggleAgentLane`](shell/toggle-agent-lane.md) + [`keybindings.bindKey`](keybindings/bind-key.md) | `Ctrl+X Ctrl+P` (Global, `ServerFirst`) names a bounded client UI command; users can inspect the binding with `listKeyBindings("global")` and replace/remove it with `bindKey`/`unbindKey` |
+| Composer palette launch | reused, runtime-backed | [`keybindings.bindKey`](keybindings/bind-key.md) + `controlCenter.open` | `Ctrl+X Ctrl+O` (Global, `ServerFirst`) opens the Clay-owned composer-anchored palette; there is no standalone `clay:controlCenter` facade |
+| Lane visibility default | Clay-owned per-tab state | `frontend/src/shell/layout-state.ts`, `frontend/src/shell/persist.ts` | Absent `laneVisible` means visible; explicit hide/show state persists per tab in `layout.json`. It is not a global configuration option or package property, so `init.js` cannot overwrite another tab's state or supply a hidden `agentLane.*` key. |
+
+```js
+import { bindKey, listKeyBindings, unbindKey } from "clay:keybindings";
+import { toggleAgentLane } from "clay:shell";
+
+const globalBindings = listKeyBindings("global");
+// Replace the shipped lane chord; the helper only returns the stable ID.
+unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+bindKey("Alt+L", toggleAgentLane(), { scope: "global" });
+// The palette route is independently configurable.
+unbindKey("Ctrl+X Ctrl+O", { scope: "global" });
+bindKey("Alt+X", "controlCenter.open", { scope: "global" });
+```
+
+`runtime/js/shell.d.ts` and `docs/reference/clay-js-api/api-inventory.toml` declare `shell.toggleAgentLane` with `custom_properties = []`: no behavior-changing options exist. The `laneVisible` field is layout persistence, not a Clay JS configuration property; it defaults to `true` when absent and is controlled by the user-facing command after routing. The palette remains a fixed command ID with no registry-public facade, custom properties, permissions, or session selector.
+
+Configuration evaluation only records validated inert bindings. Lane toggles change Clay-owned client state for the active tab; palette activation remains server-routed and revalidated. Neither path grants filesystem, network, process, shell, extension-loading, AI-mutation, workspace, package, WASM, raw-op, native-widget, or client-side JavaScript authority, and neither adds work to keypress-to-paint beyond existing routing.
+
+Rejected hidden/ad hoc keys include `agentLane.visible`, `agentLane.defaultVisibility`, `shell.agentLane.defaultVisibility`, `layout.agentLane.visible`, and `layout.agentLane.defaultVisibility`; use the documented command binding and per-tab layout state instead.
 
 Hidden/ad hoc configuration keys that are rejected by policy and are not valid unless expressed through a documented API above:
 

@@ -22,6 +22,7 @@ export type ClientTabMoveRightCommandId = "shell.clientTabMoveRight";
 export type ClientTabPosition = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 export type ClientTabActivateCommandId = `shell.clientTabActivate.${ClientTabPosition}`;
 export type ClientTabMoveToCommandId = `shell.clientTabMoveTo.${ClientTabPosition}`;
+export type ToggleAgentLaneCommandId = "shell.toggleAgentLane";
 
 export declare function clientSplitPaneVertical(): ClientSplitPaneVerticalCommandId;
 export declare function clientSplitPaneHorizontal(): ClientSplitPaneHorizontalCommandId;
@@ -45,6 +46,7 @@ export declare function clientTabMoveLeft(): ClientTabMoveLeftCommandId;
 export declare function clientTabMoveRight(): ClientTabMoveRightCommandId;
 export declare function clientTabActivate(position: ClientTabPosition): ClientTabActivateCommandId;
 export declare function clientTabMoveTo(position: ClientTabPosition): ClientTabMoveToCommandId;
+export declare function toggleAgentLane(): ToggleAgentLaneCommandId;
 export interface PaneFocusPolicyOptions {
     paneFocusPolicy: "click" | "cursor";
 }

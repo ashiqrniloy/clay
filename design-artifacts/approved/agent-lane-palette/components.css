@@ -1,0 +1,215 @@
+/* ===========================================================================
+   Quiet Instrument — shared component language (prototype set).
+
+   THIS FILE IS THE SHARED SURFACE between the component specimen sheet
+   (`component-catalog.html`) and the page prototypes (`shell.html`,
+   `workspace.html`, `agent-*.html`, `settings.html`, `command-centre.html`,
+   `package-workspace.html`, `overlays.html`). It is the catalog's "Section B":
+   the surfaces `DESIGN.md` §11 specifies that the approved screens never had to
+   draw, plus the `data-fx` state-forcing mechanism both kinds of page use to
+   show a state without a mouse.
+
+   It is not a design language of its own: `ds-quiet.css` (copied verbatim from
+   `design-artifacts/approved/quiet-instrument-language/`) stays the authority
+   for everything it already defines — app shell, buttons, fields, panels,
+   popovers, palette, rows, trees, tabs, badges, status bars, overlays, sheets,
+   toasts, empty states, scrollbars, focus. This file adds only what is missing,
+   and every value comes from a theme role or a named local value.
+
+   Approval blesses (or rejects) this file; plan 118 tasks 8, 16 and 20 encode
+   it into `@clay/design-instrument` recipes and host CSS, at which point the
+   host classes here become the recipe keys they mirror.
+   ========================================================================= */
+
+/* -- corrections: approved patterns DESIGN.md retires ---------------------
+   The approved language still paints a fixed film grain on the window
+   (`--grain-opacity` on `.win::after`); §14.7 bans it and task 16 deletes it,
+   so the prototype set shows the post-migration truth rather than a pattern
+   that is already scheduled to go. Same rationale as dropping the presentation
+   desk: never review a look the product will not have. */
+.win::after { opacity: 0; }
+
+/* -- type roles (label.*) -------------------------------------------------- */
+.t-display { font: 500 var(--fs-xl) / 1.2 var(--font-ui); letter-spacing: -0.02em; }
+.t-title { font: 600 var(--fs-lg) / 1.3 var(--font-ui); letter-spacing: -0.01em; }
+.t-section { font: 600 var(--fs-md) / 1.4 var(--font-ui); }
+.t-body { font: 400 var(--fs-md) / 1.6 var(--font-ui); color: var(--c-text-2); }
+.t-detail { font: 400 var(--fs-sm) / 1.5 var(--font-ui); color: var(--c-text-3); }
+.t-caption { font: 400 var(--fs-xs) / 1.5 var(--font-ui); color: var(--c-text-3); }
+.t-status { font: 400 var(--fs-sm) / 1.5 var(--font-mono); color: var(--c-text-2); font-variant-numeric: tabular-nums; }
+.t-micro { font: 500 10px / 1.2 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+
+/* -- disclosure (collapse.*) ---------------------------------------------- */
+.collapse { display: block; border-radius: var(--r-sm); }
+/* the trigger is a bare button: without this it would take the platform's
+   button surface, which is the one thing the language never does */
+.collapse-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--t-fast); }
+.collapse-head:hover { background: var(--c-hover); }
+.collapse-head:focus-visible { outline: 2px solid var(--c-focus); outline-offset: 2px; }
+.collapse-chevron { display: inline-flex; flex: none; color: var(--c-text-3); transition: transform var(--t-fast); }
+.collapse[data-open='true'] .collapse-chevron > svg { transform: rotate(90deg); }
+.collapse-body { display: block; padding: 10px; border-top: 1px solid var(--hairline); font: 400 var(--fs-xs) / 1.6 var(--font-mono); color: var(--c-text-2); }
+/* a closed disclosure hides its body: a disclosure that only rotates its
+   chevron is a lie about the content */
+.collapse[data-open='false'] > .collapse-body, .collapse[data-open='false'] > .collapse-body[data-flush] { display: none; }
+
+/* -- tooltip (tooltip.*) -------------------------------------------------- */
+.tipwrap { position: relative; display: inline-flex; align-items: center; }
+.tip { position: absolute; bottom: calc(100% + 7px); left: 0; z-index: 6; padding: 5px 9px; white-space: nowrap;
+  border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--c-surface-2); box-shadow: var(--shadow-pop);
+  font: 400 var(--fs-xs) / 1.4 var(--font-ui); color: var(--c-text);
+  opacity: 0; transform: translateY(2px); transition: opacity var(--t-fast), transform var(--t-fast); pointer-events: none; }
+.tipwrap:hover .tip, .tipwrap:focus-within .tip { opacity: 1; transform: none; }
+.tip[data-open='true'], [data-fx='tip-open'] .tip { opacity: 1; transform: none; }
+
+/* -- split handle (paneSplitTree.*) -------------------------------------- */
+.split { display: flex; align-items: stretch; }
+.split-pane { padding: 10px 12px; }
+.split-handle { position: relative; width: 11px; border: 0; padding: 0; background: transparent; cursor: col-resize; }
+.split-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: var(--hairline); transition: background var(--t-fast); }
+.split-handle:hover::before { background: color-mix(in oklab, var(--c-accent) 40%, transparent); }
+.split-handle:active::before, [data-fx='active-press'] .split-handle::before, .split-handle[data-fx='active-press']::before { background: color-mix(in oklab, var(--c-accent) 70%, transparent); }
+[data-fx='focus-ring'] .split-handle::before { background: var(--c-accent); }
+
+/* -- text field extras (textInput.*) ------------------------------------- */
+.field-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-desc { font: 400 var(--fs-xs) / 1.5 var(--font-ui); color: var(--c-text-3); }
+.field-err { font: 400 var(--fs-xs) / 1.5 var(--font-ui); color: var(--c-err); }
+[data-fx='invalid-error'] .input-shell, [data-fx='invalid-error'].input-shell { border-color: var(--c-err); }
+[data-fx='invalid-error'] .field-err { opacity: 1; }
+
+/* -- badge role variants (badge.*) --------------------------------------- */
+.badge--accent { color: var(--c-accent); background: var(--c-accent-soft); border-color: transparent; }
+.badge--muted { color: var(--c-text-2); border-color: var(--hairline); }
+.badge--error { color: var(--c-err); border-color: color-mix(in oklab, var(--c-err) 34%, transparent); }
+.badge--warning { color: var(--c-warn); border-color: color-mix(in oklab, var(--c-warn) 34%, transparent); }
+.badge--success { color: var(--c-ok); border-color: color-mix(in oklab, var(--c-ok) 34%, transparent); }
+
+/* -- file list rows (list.default.row with a trailing meta) --------------- */
+.file-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 9px 10px; border: 0; border-radius: var(--r-sm);
+  background: transparent; text-align: left; transition: background var(--t-fast); }
+.file-row:hover { background: var(--c-hover); }
+.file-name { font: 400 var(--fs-sm) / 1.4 var(--font-mono); color: var(--c-text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.file-size { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.badge--builtin { color: var(--c-text-2); border-color: var(--hairline); }
+
+/* -- tab view switcher (viewSwitch.*) -----------------------------------
+   A tab holds two views — the workspace and the agent. The switcher is tab
+   chrome, so it sits in the titlebar next to the tab it belongs to, never
+   inside one of the views it switches between. */
+.viewswitch { flex: none; }
+.viewswitch .seg-item { height: 22px; padding: 0 9px; }
+.viewswitch .seg-item > .kbd { margin-left: 1px; }
+
+/* -- agent type picker (agentPicker.* / dropdown variant) ----------------
+   The agent view's title is the switcher: one control, not a title plus a
+   picker that says the same thing. Only the trigger is new language; the menu
+   body is the shipped dropdown. */
+.agent-pick { display: inline-flex; align-items: center; gap: 7px; padding: 3px 7px 3px 8px; margin-left: -4px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: inherit; font: inherit; cursor: pointer;
+  transition: background var(--t-fast); }
+.agent-pick:hover { background: var(--c-hover); }
+.agent-pick > svg { flex: none; color: var(--c-text-3); }
+.agent-pick[aria-expanded='true'] { background: var(--c-accent-soft); color: var(--c-accent); }
+.pop-item[aria-disabled='true'] { color: var(--c-text-3); cursor: default; }
+
+/* -- focus inside a shell (textInput.*) ----------------------------------
+   One boundary per surface (§14.4): a control that lives inside a shell draws
+   no ring of its own, because the shell already shows the focus state. The
+   approved screens broke this — the composer's textarea painted its own
+   `:focus-visible` outline inside the shell's accent ring, which reads as two
+   highlighted borders. The shell's own size and layout corrections are in the
+   agent page's stylesheet (they have to beat the approved screen's own rules,
+   which load after this file). */
+.input-shell .field-input:focus,
+.input-shell .field-input:focus-visible,
+.field .field-input:focus,
+.field .field-input:focus-visible,
+.field > input:focus-visible,
+.field > textarea:focus-visible { outline: none; }
+.composer .btn--island { padding: 3px 3px 3px 12px; gap: 8px; height: 30px; }
+.composer .island-icon { width: 24px; height: 24px; }
+
+/* -- launcher rows (recent workspaces, agent types) --------------------- */
+.recent-row { gap: 10px; }
+.recent-row .row-name { font-size: var(--fs-sm); }
+.recent-row .row-desc { font-family: var(--font-mono); }
+/* Selection is one signal: the fill. The approved screens added a 2px inset
+   accent bar on the leading edge as well, which read as a second competing
+   edge next to the fill — retired (DESIGN.md §14.13). */
+.recent-row[aria-selected='true'] { background: var(--c-accent-soft); }
+.recent-row[aria-selected='true'] .row-name { color: var(--c-accent); }
+
+/* -- session file rows (the agent Files tab: files this session touched) -- */
+.sess-row { gap: 10px; }
+.sess-row .row-name, .sess-row .row-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-row .row-desc { font-family: var(--font-mono); font-size: var(--fs-xs); }
+/* a panel section head gives its filter room instead of clipping it: the agent
+   inspector is ~300px wide at the review width */
+.section-head { min-width: 0; }
+.section-head > .field { flex: 0 1 auto; }
+.sess-mark { flex: none; width: 14px; font: 600 var(--fs-xs) / 1 var(--font-mono); text-align: center; color: var(--c-text-3); }
+.sess-row[data-role='modified'] .sess-mark { color: var(--c-warn); }
+.sess-row[data-role='created'] .sess-mark { color: var(--c-ok); }
+.sess-row[data-role='deleted'] .sess-mark { color: var(--c-err); }
+.sess-role { font: 400 var(--fs-xs) / 1 var(--font-ui); color: var(--c-text-3); flex: none; }
+
+/* -- titlebar tabs: one tab per workspace, plus the new-tab launcher ----- */
+.tb-tab--add { padding: 0 7px; color: var(--c-text-3); }
+.tb-tab--add:hover { color: var(--c-text); }
+.tab-agent { flex: none; white-space: nowrap; font: 400 10px / 1 var(--font-mono); color: var(--c-text-3); letter-spacing: 0.02em; }
+.tb-tab[data-active='true'] .tab-agent { color: currentColor; opacity: 0.75; }
+
+/* -- card (card.*) ------------------------------------------------------- */
+.card { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--r-md); transition: background var(--t-fast); }
+
+/* -- menu / dropdown list body (menu.*, dropdown.default.list) ----------- */
+.pop-list { display: flex; flex-direction: column; gap: 1px; padding: 4px; }
+
+/* -- long control labels: never spill, always ellipsis ------------------- */
+.btn > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* -- tab strip (tabBar.*) ------------------------------------------------ */
+/* A strip that cannot fit its sections scrolls rather than clipping the last
+   one: at the 1024px review width the agent inspector's five sections want
+   ~341px inside a 320px strip. */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+
+.tabbar { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--hairline); }
+
+/* -- panel variants (panel.fixed / panel.transient) --------------------- */
+.panel--fixed { box-shadow: none; }
+.panel--transient { box-shadow: var(--shadow-pop); }
+
+/* -- sheet footer: a dialog footer must wrap, or a narrow window clips its
+      actions (the app ships a 1024px window) ------------------------------- */
+.sheet-foot { flex-wrap: wrap; }
+
+/* -- scrim (modal.default.scrim, overlay.*) ----------------------------- */
+.scrim { position: absolute; inset: 0; background: color-mix(in oklab, var(--c-bg) 50%, transparent); backdrop-filter: blur(3px); }
+
+/* ===========================================================================
+   State forcing. One rule per language state effect; `data-fx` on a component
+   names the state it is showing. The specimen sheet uses it per cell, the page
+   prototypes use it to freeze a state for review (a hovered row, a running
+   turn, a field in error) without a pointer. A page must never show a state
+   that has no rule here — the catalog asserts exactly that.
+   ========================================================================= */
+
+/* The forcing rules must beat the component's own base rule whatever the load
+   order, so each one carries the attribute twice: a deliberate 0-2-0 selector
+   instead of an `!important` or a dependency on which file was linked last. */
+[data-fx='plain'][data-fx] { }
+[data-fx='hover-surface'][data-fx] { background: var(--c-hover); color: var(--c-text); border-color: var(--hairline-strong); }
+[data-fx='active-press'][data-fx] { background: var(--c-active); color: var(--c-text); transform: translateY(1px); }
+[data-fx='focus-ring'][data-fx] { outline: 2px solid var(--c-focus); outline-offset: 2px; border-radius: var(--r-xs); }
+[data-fx='focus-accent'][data-fx] { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); }
+[data-fx='selected-accent'][data-fx] { background: var(--c-accent-soft); color: var(--c-accent); }
+[data-fx='disabled-muted'][data-fx] { background: var(--c-surface-2); color: var(--c-text-3); border-color: var(--hairline); cursor: not-allowed; }
+[data-fx='invalid-error'][data-fx] { border-color: var(--c-err); }
+[data-fx='thumb-hover'][data-fx] { background: var(--c-line-2); }
+[data-fx='thumb-active'][data-fx] { background: var(--c-line-2); opacity: 1; }

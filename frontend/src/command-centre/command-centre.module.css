@@ -6,6 +6,14 @@
  * narrower `popover.default.root.rest` surface instead (the approved
  * command-centre and overlays compositions).
  *
+ * Plan 124 split the palette in two by where its query lives. A window-centred
+ * session (`centered`: pickers, package menus) keeps its own input and is drawn
+ * by `CommandCentre` as the centred sheet. The composer's `/` palette (and its
+ * path mode) has the lane's field for a query, so `CommandPalette` draws it as
+ * the *menu of that box*: the composer form is the positioning context, the
+ * sheet spans the box and rises from its own edge 6px above it, and the head
+ * echoes the field rather than offering a second well (DESIGN.md §5/§7/§11/§12).
+ *
  * Layout is host-owned; every appearance value is a `--clay-ds-*` recipe or a
  * `--clay-*` theme role. Retired patterns are absent by construction: no
  * leading accent bar on a selected row (selection is the fill), no shadow on
@@ -175,7 +183,241 @@
 }
 
 .count {
-  font-family: var(--clay-font-mono);
+  font-family: var(--clay-font-monospace);
   font-variant-numeric: tabular-nums;
   color: var(--clay-ds-command-centre-default-status-rest-text-color);
+}
+
+/* --------------------------------------------------- the composer's palette */
+
+/* Anchored to the composer box: the sheet is a child of the field shell (its
+ * `menu` slot), so `bottom: 100%` *is* that box's top edge and the sheet is
+ * exactly as wide as the box it answers to — the same box the `@` mentions menu
+ * occupies. It caps at `min(52vh, 420px)` and scrolls internally (DESIGN.md
+ * §5/§12). */
+.palette {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6px;
+  max-height: min(52vh, 420px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform-origin: bottom left;
+
+  border-width: var(--clay-ds-command-centre-default-root-rest-border-width);
+  border-style: var(--clay-ds-command-centre-default-root-rest-border-style);
+  border-color: var(--clay-ds-command-centre-default-root-rest-border-color);
+  border-radius: var(--clay-ds-command-centre-default-root-rest-border-radius);
+  background: var(--clay-ds-command-centre-default-root-rest-background-color);
+  color: var(--clay-ds-command-centre-default-root-rest-text-color);
+  box-shadow: var(--clay-ds-command-centre-default-root-rest-shadow, none);
+  /* A bottom-anchored sheet rises from its own edge (DESIGN.md §7); the
+   * reduced-motion fallback is global.css's blanket override (§13.7). */
+  animation: clay-palette-in
+    var(--clay-ds-command-centre-default-root-rest-transition-duration)
+    var(--clay-ds-command-centre-default-root-rest-transition-timing) both;
+}
+
+@keyframes clay-palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+}
+
+/* No ring of its own: the composer box in focus is the boundary (§9/§14.4). */
+.palHead {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-command-centre-default-root-rest-gap);
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+/* The field's echo, not an input: mono like the composer's value, ellipsised
+ * when the query runs long, with the `/` sigil painted by the sign itself. */
+.palQuery {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-body-size);
+  line-height: var(--clay-text-body-line-height);
+  color: var(--clay-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palQuery::before {
+  content: "/";
+  color: var(--clay-accent-primary);
+}
+
+.palQuery[data-empty="true"],
+.palQuery[data-empty="true"]::before {
+  color: var(--clay-text-muted);
+}
+
+.palList {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
+}
+
+/* One row language with the centred sheet: `list` rows, title then the
+ * server's detail line; the selected row is the fill (no accent bar, §14). */
+.palRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--clay-spacing-sm, 12px);
+  width: 100%;
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  /* A row is a native button (the artifact's own markup): the recipe's border
+   * width replaces the UA's outset default, and the style makes the width real
+   * (0 today, so nothing paints). */
+  border-width: var(--clay-ds-list-default-row-rest-border-width);
+  border-style: solid;
+  border-color: var(--clay-ds-list-default-row-rest-border-color);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  --fill: var(--clay-ds-list-default-row-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-list-default-row-rest-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color
+    var(--clay-ds-list-default-row-rest-transition-duration)
+    var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+.palRow[data-selected] {
+  --fill: var(--clay-ds-list-default-row-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-list-default-row-selected-background-opacity,
+    1
+  );
+  color: var(--clay-ds-list-default-row-selected-text-color);
+}
+
+.palRow:hover {
+  --fill: var(--clay-ds-list-default-row-hover-background-color);
+  color: var(--clay-ds-list-default-row-hover-text-color);
+}
+
+.palRow:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+
+.palTitle {
+  flex: none;
+  font-size: var(--clay-text-body-size);
+}
+
+.palDetail {
+  flex: 1;
+  min-width: 0;
+  /* The artifact's meta/count step; the selected row lifts it one step. */
+  color: var(--clay-text-disabled);
+  font-size: var(--clay-text-caption-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palRow[data-selected] .palDetail {
+  color: var(--clay-text-muted);
+}
+
+/* The scope segment (DESIGN.md §12): the shipped `seg` family, the same one the
+ * titlebar's view switcher uses — one selected item, hairline pill container.
+ * It sits in the head's trailing edge and is drawn only when the session's rows
+ * carry scopes, so the sheet never offers a chip it cannot fill. */
+.palSeg {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--clay-ds-seg-default-root-rest-gap);
+  padding: var(--clay-ds-seg-default-root-rest-padding);
+  border-width: var(--clay-ds-seg-default-root-rest-border-width);
+  border-style: var(--clay-ds-seg-default-root-rest-border-style);
+  border-color: var(--clay-ds-seg-default-root-rest-border-color);
+  border-radius: var(--clay-ds-seg-default-root-rest-border-radius);
+  background: var(--clay-ds-seg-default-root-rest-background-color);
+}
+
+.palSegItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-ds-seg-default-item-rest-gap);
+  padding: var(--clay-ds-seg-default-item-rest-padding);
+  font-family: inherit;
+  font-size: var(--clay-text-caption-size);
+  border-width: var(--clay-ds-seg-default-item-rest-border-width);
+  border-radius: var(--clay-ds-seg-default-item-rest-border-radius);
+  --fill: var(--clay-ds-seg-default-item-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-seg-default-item-rest-text-color);
+  cursor: pointer;
+  transition:
+    background-color var(--clay-ds-seg-default-item-rest-transition-duration)
+      var(--clay-ds-seg-default-item-rest-transition-timing),
+    color var(--clay-ds-seg-default-item-rest-transition-duration)
+      var(--clay-ds-seg-default-item-rest-transition-timing);
+}
+
+.palSegItem:hover:not(:disabled) {
+  --fill: var(--clay-ds-seg-default-item-hover-background-color);
+  color: var(--clay-ds-seg-default-item-hover-text-color);
+}
+
+.palSegItem[data-active="true"] {
+  --fill: var(--clay-ds-seg-default-item-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-seg-default-item-selected-background-opacity,
+    1
+  );
+  color: var(--clay-ds-seg-default-item-selected-text-color);
+}
+
+.palSegItem:focus-visible {
+  outline: var(--clay-ds-seg-default-item-focus-outline-width)
+    var(--clay-ds-seg-default-item-focus-outline-style)
+    var(--clay-ds-seg-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-seg-default-item-focus-outline-offset);
+}
+
+/* The row's chords: one chip group per binding, at the row's trailing edge.
+ * A chip is `kbd` — the shipped key hint, which paints itself from its own
+ * recipe, so this only places it (one gap between strokes, a wider one between
+ * alternative bindings). */
+.palKeys {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--clay-spacing-sm, 12px);
+  margin-inline-start: auto;
+}
+
+.palChord {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 4px);
 }

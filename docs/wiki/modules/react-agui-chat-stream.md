@@ -16,8 +16,8 @@ Rust.
 | Prompt/cancel/session requests                                            | Existing validated bridge path (`session_request`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Event pipeline (chunk expansion, verification, message/state application) | `AbstractAgent` from `@ag-ui/client` — never duplicated                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Custom transport                                                          | `frontend/src/agent/TauriClayAgent.ts` (`run()` over the relay; construction-scoped sender + session filter)                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Per-tab session store                                                     | `createAgentSession()` in `frontend/src/agent/state.ts` — created by the agent view on first mount, adopted by the tab runtime (`TabRuntime.agent`, `frontend/src/shell/workspace-controller.ts`), disposed with the tab                                                                                                                                                                                                                                                                                                     |
-| Presentation binding                                                      | `frontend/src/coding-agent/CodingAgentPanel.tsx` and the components it composes — `TranscriptList.tsx` (turns + per-turn agent labels), `Composer.tsx` (input lane), `InspectorTabs.tsx` + `FilesTab.tsx`/`MemoryTab.tsx`/`ContextTab.tsx`/`SessionInfoTab.tsx`/`SettingsTab.tsx`/`BoundedText.tsx` (right column), `ApprovalStrip.tsx` (plan 119 SC-4); plan 108: bounded `tools` rows + cumulative `toolStats` from `clay.toolPhase` CUSTOM events — counts only, never payloads; renders the store its tab runtime passes |
+| Per-tab session store                                                     | `createAgentSession()` in `frontend/src/agent/state.ts` — created/adopted by `WorkspacePanes` for every `TabRuntime` before either view is shown, shared by `AgentLane` and `AgentView`, stored in `TabRuntime.agent`, and disposed with the tab                                                                                                                                                                                                                                                                                                     |
+| Presentation binding                                                      | `frontend/src/shell/AgentLane.tsx` owns the persistent composer, agent controls, approval strip, and session foot; `frontend/src/coding-agent/CodingAgentPanel.tsx` owns the transcript/state strip and inspector (`TranscriptList.tsx`, `InspectorTabs.tsx`, `FilesTab.tsx`/`MemoryTab.tsx`/`ContextTab.tsx`/`SessionInfoTab.tsx`/`SettingsTab.tsx`/`BoundedText.tsx`). `Composer.tsx` is shared by the lane and standalone fixtures; plan 108's bounded `tools` rows + cumulative `toolStats` remain counts only, never payloads. |
 
 ## Event mapping (Rust adapter)
 
@@ -86,14 +86,14 @@ or a sibling tab's action re-binds it without the panel knowing about it.
 
 ## Presentation
 
-`CodingAgentPanel` is the module's only consumer: it mounts for the bundled
-`@clay/coding-agent` pane surface (provenance-exact selection, mirroring the
-SettingsPanel precedent). Plan 119 SC-4 split that one component into a
-composition root plus focused children: the panel still owns the store, the
-snapshot subscription, the send authority (`submit`, the run lifecycle) and
-the left column's layout, while the transcript list, the composer, the approval
-strip and the inspector (with one file per tab) are props-in/props-out
-components with their own state machines. The transcript's previous-agent
+`CodingAgentPanel` is the presentation consumer for the bundled
+`@clay/coding-agent` agent view (provenance-exact selection, mirroring the
+SettingsPanel precedent). Plan 119 SC-4 split it into a composition root plus
+focused children; Plan 124 moves the interactive shell surfaces out of it:
+`AgentLane` owns the composer, controls, approval strip, and session foot,
+while the panel owns the transcript/state strip and inspector. `WorkspacePanes`
+creates the tab's store before either view is shown, so the lane does not depend
+on the agent view being visited and view switches do not remount the store. The transcript's previous-agent
 attribution is one memoized forward pass (`transcript-model.ts`
 `previousAgents`) instead of a per-turn reverse scan, and the composer's pure
 pieces (chord match, effort cycle, `@`-token parse) are exported for unit
@@ -101,12 +101,11 @@ tests — see `frontend/src/coding-agent/Composer.test.tsx` and
 `transcript-model.test.ts`. Plan 118 removed the empty-tab landing panel and its
 `@clay/chat` package, so the module carries session naming
 (`AgentSessionModule`/`AgentSnapshot`/`AgentStatus`) and no product-named
-branch. Plan 119 SC-6 removed the process-global store: the panel creates its
-tab's store on first mount (or keeps the one the runtime already adopted) —
-the creation lives in this lazy chunk on purpose, so the eager shell never
-takes a runtime dependency on the agent lane; the controller sees only the
-`AgentSessionModule` _type_ and the `attachAgentStore` lifetime hook (a full
-store on startup would move the AG-UI stack into the entry chunk's preload).
+branch. Plan 119 SC-6 removed the process-global store. The runtime keeps the agent
+code lazy: the eager shell owns only the store type and lifetime hook;
+`AgentView`/`CodingAgentPanel` load when the agent view mounts. The store is
+created for every tab runtime, shared by the lane and view, and disposed with
+the tab.
 A standalone mount (fixtures, component tests) simply keeps its own store. Its
 agent commands
 (`listSessions`, picker selects, `workspace.files`, `session.context`,
@@ -129,6 +128,22 @@ keeps streaming into it.
 - Editor input never waits on agent work: the stream is asynchronous channel
   delivery and nothing in the composer or editor hot paths blocks on it.
 
+### Plan 124 shell composition
+
+`AgentLane` is mounted as shell chrome for every tab, regardless of whether
+its agent view is active. Its `Composer` supplies the field used by both `/`
+command/path palette sessions and `@` mentions. The palette is not an AG-UI
+message: it is a server-owned `TransientMenuSnapshot` rendered by
+`CommandPalette` in the field's menu slot. `WorkspacePanes` supplies the
+`ComposerPalette` callbacks and owns the row-1 veil, leaving the lane at the
+higher stacking level so query input stays interactive.
+
+A run still uses the same `TauriClayAgent` and tab-bound session. The lane
+reports busy state to the shell, renders Stop only while streaming, and keeps
+an input draft typable when no provider is configured. Approval remains a
+role-labelled inert UI action; tool and permission payloads never become
+execution authority in React.
+
 ## Security
 
 - Credentials have no field on any mapped variant; phase25 daemon tests plus
@@ -147,9 +162,10 @@ keeps streaming into it.
   pipeline, intent payloads, cancel, per-tab isolation: a store drops another
   tab's delivery copy, another session's snapshot/lifecycle, and a binding
   claim addressed to another connection; `dispose()` stops applying and
-  notifying), state-glue tests, CodingAgentPanel component tests (each mount
-  passes its own store), and controller tests (one store per tab runtime,
-  tab-stamped binding request, store disposed on tab close). Production budgets keep the panel out of the startup shell:
+  notifying), state-glue tests, `AgentLane.test.tsx`/`Composer.test.tsx`/
+  `WorkspacePanes.test.tsx` component tests, and controller tests (one store
+  per tab runtime, tab-stamped binding request, store disposed on tab close).
+  Production budgets keep the panel out of the startup shell:
   the review harness is a DEV-only `React.lazy` route, and `CodingAgentPanel`
   is an ≈11 kB gzip lazy chunk (shell 173.7 / 180 kB; total 400.3 / 404 kB —
   plan 119 SC-4's split added ≈0.5 kB gzip of prop/plumbing code to a ceiling

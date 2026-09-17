@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-// Regression (plan 117 follow-up): Ctrl+X Ctrl+P must resolve the Control
-// Center chord with the EXACT manifest JSON the real server publishes
-// (context "global", routingPolicy "serverFirst", key as {character}) —
-// captured live from an example-config server boot
-// (tests/example_config_control_center_chord.rs). Covers both keymap
-// owners: the shell matcher outside the editor and the CodeMirror chord
-// keymap inside it, including the two real-world killers: a Control
-// keydown arriving between strokes (held/re-pressed Ctrl) and held-key
-// auto-repeat of the first stroke.
+// Regression (plan 117 follow-up): the `Ctrl+X` family must resolve the
+// Control Center and agent-lane chords with the EXACT manifest JSON the real
+// server publishes (context "global", routingPolicy "serverFirst", key as
+// {character}) — captured live from an example-config server boot
+// (tests/example_config_control_center_chord.rs). Plan 124 moved the palette
+// to `Ctrl+X Ctrl+O` and gave `Ctrl+X Ctrl+P` to `shell.toggleAgentLane`,
+// so both sides of the pair are covered. Covers both keymap owners: the
+// shell matcher outside the editor and the CodeMirror chord keymap inside it,
+// including the two real-world killers: a Control keydown arriving between
+// strokes (held/re-pressed Ctrl) and held-key auto-repeat of the first stroke.
 
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
@@ -21,7 +22,7 @@ vi.mock("../bridge/client", () => ({
   sendRequest: vi.fn(async () => undefined),
 }));
 
-import { workspaceRail } from "./layout-state";
+import { agentLane, workspaceRail } from "./layout-state";
 import { createWorkspace } from "./workspace-controller";
 import type { BootstrapDto } from "../bridge/types";
 import { useShellChords } from "./use-shell-chords";
@@ -37,6 +38,16 @@ const stroke = (character: string) => ({
 
 const CONTROL_CENTER_RULE = {
   commandId: "controlCenter.open",
+  sequence: [stroke("x"), stroke("o")],
+  context: "global",
+  routingPolicy: "serverFirst",
+};
+
+/** Plan 124: `Ctrl+X Ctrl+P` is the lane toggle, declared client-UI but
+ *  routed ServerFirst (the shell matcher resolves it; the server answers the
+ *  intent with the client command that flips the per-tab layout state). */
+const LANE_RULE = {
+  commandId: "shell.toggleAgentLane",
   sequence: [stroke("x"), stroke("p")],
   context: "global",
   routingPolicy: "serverFirst",
@@ -94,11 +105,23 @@ function bootstrap(clientId: number, keymaps: unknown[]): BootstrapDto {
 function pressChord(user: ReturnType<typeof userEvent.setup>) {
   return act(async () => {
     await user.keyboard("{Control>}x");
-    await user.keyboard("{Control>}p");
+    await user.keyboard("{Control>}o");
   });
 }
 
-describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
+/** The server's answer to a ServerFirst client-UI intent: the shell dispatches
+ *  the client command the same way the real connection does. */
+function answerClientCommand(
+  ws: ReturnType<typeof createWorkspace>,
+  commandId: string,
+) {
+  ws.handleEnvelope({
+    kind: "event",
+    data: { kind: "shellClientCommandRequest", data: { commandId } },
+  } as never);
+}
+
+describe("Ctrl+X Ctrl+O opens the Control Center (plan 117 follow-up)", () => {
   it("shell matcher dispatches the command intent with the real wire manifest", async () => {
     const sent: string[] = [];
     const ws = createWorkspace({
@@ -106,7 +129,9 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
         sent.push(payload as string);
       },
     });
-    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE, OPEN_PATH_RULE]));
+    ws.installBootstrap(
+      bootstrap(1, [CONTROL_CENTER_RULE, LANE_RULE, OPEN_PATH_RULE]),
+    );
 
     function Host() {
       useShellChords(ws, true);
@@ -153,9 +178,9 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
       fire("Control", true);
       fire("x", true);
       fire("Control", true); // the killer
-      fire("p", true);
+      fire("o", true);
       fire("x", true, true); // held-stroke auto-repeat after resolve
-      fire("p", true, true); // repeat of the resolving stroke
+      fire("o", true, true); // repeat of the resolving stroke
     });
 
     const intents = sent
@@ -172,7 +197,9 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
         sent.push(payload as string);
       },
     });
-    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE, OPEN_PATH_RULE]));
+    ws.installBootstrap(
+      bootstrap(1, [CONTROL_CENTER_RULE, LANE_RULE, OPEN_PATH_RULE]),
+    );
 
     render(<WorkspacePanes workspace={ws} />);
     const user = userEvent.setup();
@@ -180,7 +207,7 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
     await act(async () => {
       host.focus();
       await user.keyboard("{Control>}x");
-      await user.keyboard("{Control>}p");
+      await user.keyboard("{Control>}o");
     });
     // The chord dispatches the intent; the snapshot arrives as an envelope.
     ws.handleEnvelope({
@@ -219,7 +246,7 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
             manifestId: "m",
             behaviorVersion: 2,
             commands: [],
-            keymaps: [CONTROL_CENTER_RULE, OPEN_PATH_RULE],
+            keymaps: [CONTROL_CENTER_RULE, LANE_RULE, OPEN_PATH_RULE],
           } as never,
           (commandId) => {
             sent.push(commandId);
@@ -245,8 +272,82 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
     fire("Control", true);
     fire("x", true);
     fire("Control", true); // modifier noise between strokes
-    fire("p", true);
+    fire("o", true);
     expect(sent).toEqual(["controlCenter.open"]);
+    view.destroy();
+    host.remove();
+  });
+});
+
+describe("Ctrl+X Ctrl+P toggles the agent lane (plan 124)", () => {
+  it("resolves outside editor focus and flips the per-tab layout state", async () => {
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload as string);
+      },
+    });
+    ws.installBootstrap(bootstrap(1, [LANE_RULE, CONTROL_CENTER_RULE]));
+
+    function Host() {
+      useShellChords(ws, true);
+      return <div data-testid="host" />;
+    }
+    render(<Host />);
+    agentLane.setVisible(true);
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.keyboard("{Control>}x");
+      await user.keyboard("{Control>}p");
+    });
+
+    // The chord is server-first: the intent carries the lane command, and the
+    // server's answer is what the shell executes.
+    const intent = sent
+      .map((raw) => JSON.parse(raw))
+      .find((payload) => payload.family === "commandIntent");
+    expect(intent.payload.commandId).toBe("shell.toggleAgentLane");
+    expect(agentLane.isVisible()).toBe(true);
+    answerClientCommand(ws, "shell.toggleAgentLane");
+    expect(agentLane.isVisible()).toBe(false);
+    answerClientCommand(ws, "shell.toggleAgentLane");
+    expect(agentLane.isVisible()).toBe(true);
+  });
+
+  it("editor chord keymap resolves the lane toggle inside CodeMirror", () => {
+    const sent: string[] = [];
+    const state = EditorState.create({
+      doc: "hello",
+      extensions: [
+        behaviorExtensions(
+          {
+            manifestId: "m",
+            behaviorVersion: 2,
+            commands: [],
+            keymaps: [LANE_RULE],
+          } as never,
+          (commandId) => {
+            sent.push(commandId);
+            return true;
+          },
+        ),
+      ],
+    });
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = new EditorView({ state, parent: host });
+    view.focus();
+    const fire = (key: string) =>
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key,
+          ctrlKey: true,
+          bubbles: true,
+        }),
+      );
+    fire("x");
+    fire("p");
+    expect(sent).toEqual(["shell.toggleAgentLane"]);
     view.destroy();
     host.remove();
   });
@@ -255,7 +356,7 @@ describe("Ctrl+X Ctrl+P opens the Control Center (plan 117 follow-up)", () => {
 describe("Ctrl+I toggles the workspace rail (plan 118: shell and Workspace)", () => {
   it("fires from window focus, wherever the caret sits", async () => {
     const ws = createWorkspace({ send: async () => undefined });
-    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE]));
+    ws.installBootstrap(bootstrap(1, [LANE_RULE, CONTROL_CENTER_RULE]));
 
     function Host() {
       useShellChords(ws, true);
@@ -278,7 +379,7 @@ describe("Ctrl+I toggles the workspace rail (plan 118: shell and Workspace)", ()
 
   it("does not consume a plain `i` (editor text stays text)", async () => {
     const ws = createWorkspace({ send: async () => undefined });
-    ws.installBootstrap(bootstrap(1, [CONTROL_CENTER_RULE]));
+    ws.installBootstrap(bootstrap(1, [LANE_RULE, CONTROL_CENTER_RULE]));
 
     function Host() {
       useShellChords(ws, true);

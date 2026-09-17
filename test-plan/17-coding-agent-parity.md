@@ -31,6 +31,15 @@ legs cite the pinning suites; live-build steps run against
 `cargo run` + `codingAgent.profile` (Command Centre entry or Command
 Palette). P16/P17/P18 above are subsumed by C8–C11/C20 for plan 109.
 
+**Plan 124 relocation note (2026-09-17).** The composer, the agent controls
+(agent type, model, effort, token meter), the tool-approval strip, and the
+session-environment foot no longer live in the agent view: they are the
+shell's persistent agent lane, mounted for every tab (`DESIGN.md` §12). The
+agent view keeps the transcript, the state strip, and the inspector. Read
+every composer/control/foot row below (C3–C5, C26, C30–C31, C38, C50) through
+that lens — the expected behavior is unchanged, the surface moved — and see
+C57–C64 for the lane-mounted steps.
+
 | # | Action | Expected | Automated leg |
 |---|--------|----------|---------------|
 | C1 | Open two tabs with different workspace roots; open the agent surface in each | Each surface binds to its own tab's workspace root; prompts run there; switching the tab's workspace re-binds the session root | workspace-binding suites (I1) |
@@ -65,7 +74,7 @@ route and the agent-specific facts.
 
 | # | Action | Expected |
 |---|--------|----------|
-| C38 | With `@clay/coding-agent` loaded, open the agent view from the landing (agent row → primary button) or via the `coding-agent.profile` command | The tab's pane switches to the agent view: header (title, model dropdown, effort control, context meter, inspector toggle), transcript (turns or the designed empty state), state strip with the status dot, composer, and the agent foot (workspace · branch · extensions · MCP). The package claims **no** empty-tab landing — with no launcher installed the empty tab stays the core `Start with a file or folder` card (module 01 L12). UNRESOLVED on hosts without input synthesis; automated: `frontend/src/shell/WorkspacePanes.test.tsx`, `packages/coding-agent` manifest test |
+| C38 | With `@clay/coding-agent` loaded, open the agent view from the landing (agent row → primary button) or via the `coding-agent.profile` command | The tab's pane switches to the agent view: header (title, inspector toggle), transcript (turns or the designed empty state), state strip with the status dot, and — in the tab's agent lane — the agent type/model/effort controls, token meter, composer, and session foot (workspace · branch · extensions · MCP; plan 124 moved these out of the pane). The package claims **no** empty-tab landing — with no launcher installed the empty tab stays the core `Start with a file or folder` card (module 01 L12). UNRESOLVED on hosts without input synthesis; automated: `frontend/src/shell/WorkspacePanes.test.tsx`, `packages/coding-agent` manifest test |
 | C39 | Open the inspector's `Settings` tab in the agent view | The tab lists the session's delivered agent files (name, mono size, provenance badge) with its `.agents/skills/*/SKILL.md` + `SYSTEM.md` caption and a designed empty state — the Agent Settings surface lives here, not on a separate page (module [15](15-ui-design-systems.md) UI-DS-36) |
 | C40 | Open the inspector's `Files` tab after reading and editing files in the session | The tab lists **every file the session has touched** (basename + directory, status marker: `M` modified, `R` read, `A` added, `D` deleted) and opens the selected file's editor view — not a second workspace tree and not a single hard-coded document |
 
@@ -483,3 +492,45 @@ daemon/pane restart or a workspace change — runs the coding profile.
 | Steps | Result | Evidence |
 |-------|--------|----------|
 | C56 | PASS (automated) | `cargo test --lib -- server::agent::` 41/41 (mount test extended with the profile assertions); `cargo test --lib -- server::connection::` 89/89; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean. The live leg is blocked by the standing host input ceiling; the end-to-end evidence is the real server + shipped daemon reproduction above |
+
+## Plan 124 steps (lane-mounted composer, controls, approval strip, 2026-09-17)
+
+Deep references: `DESIGN.md` §7/§12, `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`,
+`design-artifacts/approved/agent-lane-palette/`, `frontend/src/coding-agent/surface-state.ts`.
+
+| # | Action | Expected | Automated leg |
+|---|--------|----------|---------------|
+| C57 | With an agent attached, submit a prompt from the lane composer (`Enter`) with the workspace view active; while streaming, hide the lane (`Ctrl+X Ctrl+P`) and show it again | The turn runs from the lane with the workspace visible (no view switch), the transcript in the agent view grows in arrival order, and the lane's composer keeps the draft across hide/show (the session is not remounted). The agent view renders **no** second composer. | `AgentLane.test.tsx` (submit, draft), `WorkspacePanes.test.tsx` (store hoisted once per tab), `CodingAgentPanel.test.tsx` |
+| C58 | Effort control in the lane toolbar: cycle with `Shift+Tab`, then rebind with `bindKey("Ctrl+M", "coding-agent.clientCycleEffort", { scope: "global" })` and cycle again; watch the token meter | The cycle walks the declared levels (`low` → `medium` → `high`) once per stroke with the pending level shown in the lane; the rebound chord works and the unbound tab keeps `Shift+Tab`; the meter shows `occupancy/ceiling` from the last finished turn with warning/error tones above 60 %/80 % and the heuristic fallback when usage is unreported | `AgentLane.test.tsx` (effort cycle, meter), thinking-level suites (I4) |
+| C59 | Model picker in the lane: open the model trigger, switch provider/model, then submit `/model` | Both routes open the daemon model picker; the selection persists to the session and the lane's trigger label follows it. With **no** provider configured the trigger is a disabled `Configure a provider` row and a prompt is refused with the configuration error (no silent fallback). With a configured provider whose models inventory is missing, the lane shows the muted provider/model caption instead of a dead dropdown | `AgentLane.test.tsx` (model trigger states), `Composer.test.tsx` (`/model` built-in), model-picker suites (I3) |
+| C60 | Trigger a tool that needs approval | An approval strip appears in the lane above the composer as `role="alertdialog"` with the first action focused and the copy `Tool '<name>' needs approval`; `Allow`/`Deny` resolve the pending call (deny fails closed, no result is fabricated); the strip disappears and the composer regains focus. No approval is applied silently and the strip never renders in the transcript's place | `AgentLane.test.tsx` (approval resolve/deny), daemon approval suites |
+| C61 | Streaming cues: submit a long turn and watch the titlebar, the state strip, and the lane | One run pulse per window: the titlebar brand dot pulses (1.1 s) for the active tab's run (a background tab's marker pulses only while its work is out of view); the agent view's state strip shows the three-bar typing animation over its `role="status"` text; the lane shows `Stop` in place of the keyboard-only send affordance and no second blinking dot exists anywhere | `frontend/src/test/workspace-composition.test.tsx` (mark pulse), `CodingAgentPanel.test.tsx` (working bars), `Composer.test.tsx` (Stop wiring) |
+| C62 | Agent-less tab: open a tab with no agent, inspect the lane, then attach an agent from the lane's picker | The lane keeps its place (full-width chrome strip, rails still end at its top edge) with the composer made typable and the placeholder `Attach an agent to this tab to send a prompt`; model/effort/meter are hidden; the agent type trigger reads `Attach an agent`. Choosing a profile switches to the attached lane (controls + meter appear, `Ask, or type / or @`) without leaving the view | `AgentLane.test.tsx` (agent-less vs attached), `WorkspacePanes.test.tsx` |
+| C63 | Slash commands and mentions from the lane: type `/` to open the palette (or `Ctrl+X Ctrl+O`), then type `@` | The palette's `Session` scope lists the daemon's slash commands (`/compact`, `/new`, `/resume`, `/tree`, … registered by `@clay/coding-agent`, measured 14 rows with the canonical config); running one dispatches to the agent. `@` opens the skills+files mention menu under the same veil, filtered by the query, with `@skill:<name>` / `@file:<path>` insertion and the row detail line (skill description or file directory). Neither menu fabricates rows the daemon did not send | `CommandPalette.test.tsx`, `Composer.test.tsx` (mentions, scope payload), `clay-agent/src/__tests__/mentions.test.ts` (skill load, file attach, symlink-escape rejection) |
+| C64 | Negative: on a tab with no provider, submit a prompt; submit an unknown slash command; hide the lane while the palette is open; open the palette on a tab whose lane is hidden | The prompt is refused with the configuration error and **no** transcript turn or provider call happens; the unknown slash command reports fail-closed with no residue; hiding the lane closes the palette and its veil (no orphan scrim — plan-124 launch-test defect D6); the palette trigger on a lane-hidden tab makes the lane visible first, then opens the sheet. Nothing in the lane path runs package JavaScript | `AgentLane.test.tsx`, `Composer.test.tsx` (unknown slash), `WorkspacePanes.test.tsx` (D6 veil coupling), `package_command_lane_*` denial suites |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+Canonical example config (`examples/config/init.js` verbatim) on an isolated
+root, fresh `npm run build` + `cargo build -p clay -p clay-desktop`; live
+evidence via window-cropped captures and AT-SPI, automated legs from the
+frontend suite (478 tests), the protocol suite (219) and the presentation
+suite (61).
+
+| Step | Result | Evidence |
+|---|---|---|
+| C57 (lane-mounted composer) | PASS partial — live composition + automated submit | Live: the lane renders the composer (`entry Message`), the agent controls, the hint row (`/ commands`, `@ mention file or skill`, `⏎ send`, `⇧⏎ newline`), and the `Session environment` foot; the agent view renders no composer. Submitting with `Enter` was not drivable on this host (no keyboard synthesis; see the module-10 host ceiling) — `AgentLane.test.tsx` covers submit/draft/Stop. |
+| C58 (effort + meter) | PASS automated / NOT RUN live | Effort cycle, rebinding, and meter tones are pinned by `AgentLane.test.tsx`; the live lane shows the controls (agent type + model trigger) in both the agent-less and attached states. |
+| C59 (model picker states) | PASS live (states) + automated | Live: with the canonical config no provider is configured, so the lane's model trigger is the disabled `Configure a provider` row and the foot reports `no provider configured · Settings · Providers`; attaching `Coding Agent` from the picker (centered `Agent type` dialog) switched the lane to the attached state. Picker/model-switch legs: model-picker suites (I3), `AgentLane.test.tsx`. |
+| C60 (approval strip) | PASS automated / NOT RUN live | Approval copy, `alertdialog` role, first-action focus, and allow/deny are pinned by `AgentLane.test.tsx` + daemon suites; live streaming/tool runs need a provider (absent by design in the canonical config) and the host cannot submit prompts. |
+| C61 (streaming cues) | PASS automated / NOT RUN live | One-pulse-per-window rule, working bars over `role="status"`, and the single blinking dot are pinned by `workspace-composition`/`CodingAgentPanel`/`Composer` tests and the approved prototype captures. Live: the rest state shows exactly one steady brand dot and no other blinking indicator. |
+| C62 (agent-less tab) | PASS live | Live: a fresh tab shows the lane keeping its place (`Agent lane` footer with the composer + `Attach an agent` picker, model/effort/meter absent); attaching `Coding Agent` produced the attached lane (`combo box Coding Agent`, `combo box Model`, placeholder `Ask, or type / or @`) — captured in `test-plan/artifacts/124-agent-lane/`. |
+| C63 (slash + mentions from the lane) | PASS live (palette rows) + automated (mentions) | Live: opening the palette and selecting the `Session` scope produced 14 rows, all daemon slash commands (`/branch /clone /compact /discard /fork /n /new /open-session /open-session-as-fork /resume /tree`, `server-first — @clay/coding-agent@0.1.0`). Mention rows/details: `Composer.test.tsx` + `clay-agent/src/__tests__/mentions.test.ts`; `@` typing was not drivable live (host ceiling). |
+| C64 (negatives) | PASS live (D6 + no-provider copy) + automated | Live: with no provider the lane shows the `no provider configured` foot and a disabled model trigger; hiding the lane with the palette open removed the sheet **and** the veil (0 dialog nodes, 0 lane nodes; pane/rail brightness back to 1.00/0.99), and showing the lane restored the sheet with its draft and scope. Denial suites cover the package-JavaScript path. |
+
+Known ceilings carried by this module: no live provider (the canonical config
+configures none, and the review root is isolated), no host keyboard/pointer
+synthesis (chords, typing, `Enter`, `Escape`, `Shift+Tab` are covered by the
+suites named above), and AT-SPI row activation inside the palette (WebKitGTK
+exposes rows as list items without actions — `test-plan/index.md`
+"Plan 124 manual-test-plan execution record").

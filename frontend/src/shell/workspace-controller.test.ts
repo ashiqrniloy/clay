@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { BootstrapDto } from "../bridge/types";
 import type { RuntimeSnapshot } from "../sdui/types";
 import { tabsFromWindow } from "./persist";
-import { agentInspector, workspaceRail } from "./layout-state";
+import { agentInspector, agentLane, workspaceRail } from "./layout-state";
 import { createWorkspace } from "./workspace-controller";
 import { createAgentSession } from "../agent/state";
 import { behaviorManifestFixture } from "../test/contract-fixtures";
@@ -77,8 +77,8 @@ function bootstrap(
   } as BootstrapDto;
 }
 
-describe("per-tab layout visibility (plan 118 task E2)", () => {
-  it("keeps rail and inspector visibility per tab and persists both", async () => {
+describe("per-tab layout visibility (plan 118 task E2; lane: plan 124)", () => {
+  it("keeps rail, inspector and lane visibility per tab and persists all three", async () => {
     vi.useFakeTimers();
     const saved: unknown[] = [];
     const ws = createWorkspace({
@@ -90,47 +90,63 @@ describe("per-tab layout visibility (plan 118 task E2)", () => {
     ws.installBootstrap(bootstrap({ clientId: 1 }));
     expect(agentInspector.isVisible()).toBe(true);
     expect(workspaceRail.isVisible()).toBe(true);
+    expect(agentLane.isVisible()).toBe(true);
 
-    // Tab 1: hide both — a toggle alone schedules the layout write.
+    // Tab 1: hide all three — a toggle alone schedules the layout write.
     workspaceRail.setVisible(false);
     agentInspector.setVisible(false);
+    agentLane.setVisible(false);
     expect(workspaceRail.isVisible()).toBe(false);
+    expect(agentLane.isVisible()).toBe(false);
     vi.advanceTimersByTime(300);
     await Promise.resolve();
     const afterToggle = saved.at(-1) as {
-      tabs: Array<{ railVisible: boolean; inspectorVisible: boolean }>;
+      tabs: Array<{
+        railVisible: boolean;
+        inspectorVisible: boolean;
+        laneVisible: boolean;
+      }>;
     };
     expect(afterToggle.tabs[0]).toMatchObject({
       railVisible: false,
       inspectorVisible: false,
+      laneVisible: false,
     });
 
-    // Tab 2: its own shape (both visible again) — switching tabs re-reads.
+    // Tab 2: its own shape (all visible again) — switching tabs re-reads.
     ws.installBootstrap(bootstrap({ clientId: 2 }));
     await ws.activate(2);
     expect(workspaceRail.isVisible()).toBe(true);
     expect(agentInspector.isVisible()).toBe(true);
+    expect(agentLane.isVisible()).toBe(true);
     workspaceRail.setVisible(true);
 
-    // Back to tab 1: the hidden rail is still hidden for that tab.
+    // Back to tab 1: the hidden surfaces are still hidden for that tab.
     await ws.activate(1);
     expect(workspaceRail.isVisible()).toBe(false);
     expect(agentInspector.isVisible()).toBe(false);
+    expect(agentLane.isVisible()).toBe(false);
 
     // Persist: one entry per tab, from the same store.
     vi.advanceTimersByTime(300);
     await Promise.resolve();
     const layout = saved.at(-1) as {
-      tabs: Array<{ railVisible: boolean; inspectorVisible: boolean }>;
+      tabs: Array<{
+        railVisible: boolean;
+        inspectorVisible: boolean;
+        laneVisible: boolean;
+      }>;
     };
     expect(layout.tabs).toHaveLength(2);
     expect(layout.tabs[0]).toMatchObject({
       railVisible: false,
       inspectorVisible: false,
+      laneVisible: false,
     });
     expect(layout.tabs[1]).toMatchObject({
       railVisible: true,
       inspectorVisible: true,
+      laneVisible: true,
     });
     vi.useRealTimers();
   });
@@ -146,6 +162,7 @@ describe("per-tab layout visibility (plan 118 task E2)", () => {
             workspaceRoot: "/tmp/one",
             railVisible: false,
             inspectorVisible: false,
+            laneVisible: false,
           },
         ],
       }),
@@ -154,10 +171,29 @@ describe("per-tab layout visibility (plan 118 task E2)", () => {
     await ws.restore();
     expect(workspaceRail.isVisible()).toBe(false);
     expect(agentInspector.isVisible()).toBe(false);
+    expect(agentLane.isVisible()).toBe(false);
   });
 });
 
 describe("workspace controller", () => {
+  it("dispatches the palette-open intent for the active pane session", async () => {
+    // Plan 124: the palette-open route is unchanged (`controlCenter.open`
+    // through the command-intent lane); only its default chord moved to
+    // `Ctrl+X Ctrl+O`, which the shell matcher reads from the manifest.
+    const sent: string[] = [];
+    const ws = createWorkspace({
+      send: async (payload) => {
+        sent.push(payload as string);
+      },
+    });
+    ws.installBootstrap(bootstrap({ clientId: 1 }));
+    expect(ws.dispatchServerCommand("controlCenter.open")).toBe(true);
+    const intent = sent
+      .map((raw) => JSON.parse(raw))
+      .find((payload) => payload.family === "commandIntent");
+    expect(intent.payload.commandId).toBe("controlCenter.open");
+  });
+
   it("adopts the tab id from a pre-bootstrap registry so server-first chords route to the right tab", async () => {
     const sent: Array<{ payload: string; tabId?: number }> = [];
     const ws = createWorkspace({
@@ -646,6 +682,18 @@ describe("workspace controller", () => {
       "menuSelectionMove",
       "menuActivate",
     ]);
+    // Plan 124: the filter update carries the scope chip beside the filter —
+    // `All` is the absence of a scope, a chip is its own word.
+    expect(JSON.parse(sent[1] ?? "{}").payload).toMatchObject({
+      query: "reload",
+      scope: null,
+    });
+    ws.menuQuery("reload", "shell");
+    await Promise.resolve();
+    expect(JSON.parse(sent[4] ?? "{}").payload).toMatchObject({
+      query: "reload",
+      scope: "shell",
+    });
     ws.handleEnvelope({
       kind: "routed",
       data: {
@@ -806,6 +854,16 @@ describe("workspace controller", () => {
     expect(dialogs).toEqual(["file"]);
     command("settings.close");
     expect(ws.active()?.settingsOpen).toBe(false);
+
+    // Plan 124: the lane toggle is a shell command too — the server answers
+    // the `Ctrl+X Ctrl+P` intent with this id, and it must run here (before
+    // any editor fallback) so the per-tab layout state flips. `agentLane` is
+    // module state keyed by the active tab, so the assertion is global.
+    agentLane.setVisible(true);
+    command("shell.toggleAgentLane");
+    expect(agentLane.isVisible()).toBe(false);
+    command("shell.toggleAgentLane");
+    expect(agentLane.isVisible()).toBe(true);
 
     // Shell commands must run before an active editor gets a chance to forward
     // unknown client commands back to the server. Otherwise the Control Centre

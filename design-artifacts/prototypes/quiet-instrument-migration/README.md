@@ -16,6 +16,21 @@ the frozen artifacts in `design-artifacts/approved/` are. Nothing in
 `frontend/`, `src/` or `packages/` changes until task 7 freezes an approved
 migration prototype set.
 
+> **Superseded in part by plan 124 (2026-09-17), which keeps this inventory's
+> authority rules and only re-anchors three surfaces it names below.** Read
+> §3/§4 with these corrections: the command palette is the composer's `/`
+> palette (bottom-anchored, exactly as wide as the field it answers to, scope
+> and chord chips from the item fields) rather than a window-centred sheet —
+> `command-centre.module.css` still owns `commandCentre.*`, and its menu origins
+> now split `CommandPalette` (bottom, the composer's menus) from `Centered`
+> (agent picker, package dialogs); the agent lane (`shell/agent-lane.module.css`)
+> is a shell surface consuming `shell.footer.*`, `textInput` and `agentPicker`,
+> so the agent surface in §4 no longer owns a composer; the scrim's second
+> caller is the composer menus' veil over the working area
+> (`shell/workspace-panes.module.css`), never over the lane. `DESIGN.md` §12/§16
+> and the plan's frozen set `design-artifacts/approved/agent-lane-palette/` are
+> normative where the two disagree.
+
 ## 0. Authority and catalog rules (restated, unchanged by this migration)
 
 1. **Recipes are inert data.** A design system is a declarative

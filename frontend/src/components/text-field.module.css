@@ -11,6 +11,12 @@
   border-radius: var(--clay-ds-text-input-default-field-rest-border-radius);
 }
 
+/* The border box of the field shell, for layers the caller positions against
+ * the whole box rather than its padding box (the composer's `/` sheet). */
+.fieldSlot {
+  position: relative;
+}
+
 .label {
   color: var(--clay-ds-text-input-default-label-rest-text-color);
   font-size: var(--clay-text-detail-size);
@@ -134,7 +140,11 @@
  * plus the accent halo), and the send/cancel actions passed as `endContent` sit
  * on its trailing edge. */
 .composer {
+  /* The shell is the containing block for the field's own menu (`menu`): the
+   * composer's `/` palette anchors itself 6px above this box (plan 124). */
+  position: relative;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: var(--clay-spacing-xs, 8px);
   padding: var(--clay-ds-text-input-default-input-rest-padding);
@@ -190,4 +200,19 @@
   background: var(--clay-ds-text-input-default-field-rest-background-color);
   box-shadow: none;
   outline: none;
+}
+
+/* The composer's second row: the lane's agent-control toolbar, inside the same
+ * shell so the box stays the only boundary (DESIGN.md §11/§12). `flex-basis:
+ * 100%` wraps it under the field + trailing actions row. */
+.composer .toolbar {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  min-width: 0;
+  padding-top: var(--clay-spacing-xxs, 4px);
+  border-top-width: var(--clay-ds-text-input-default-field-rest-border-width);
+  border-top-style: solid;
+  border-top-color: var(--clay-ds-text-input-default-input-rest-border-color);
 }

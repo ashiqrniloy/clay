@@ -17,8 +17,9 @@ use kurbo::Rect;
 use serde_json::Value;
 
 use crate::perf::budgets::{
-    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_DETAIL_CHARS,
-    TRANSIENT_MENU_MAX_ITEMS, TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS,
+    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_BINDING_CHARS,
+    TRANSIENT_MENU_MAX_BINDINGS, TRANSIENT_MENU_MAX_DETAIL_CHARS, TRANSIENT_MENU_MAX_ITEMS,
+    TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS, TRANSIENT_MENU_MAX_SCOPE_CHARS,
 };
 use crate::protocol::{
     BehaviorVersion, CompletionItem, CompletionReplacementRange, CompletionRequestId,
@@ -32,6 +33,9 @@ const MAX_QUERY_CHARS: usize = TRANSIENT_MENU_MAX_QUERY_CHARS;
 const MAX_LABEL_CHARS: usize = TRANSIENT_MENU_MAX_LABEL_CHARS;
 const MAX_DETAIL_CHARS: usize = TRANSIENT_MENU_MAX_DETAIL_CHARS;
 const MAX_ACCESSIBILITY_LABEL_CHARS: usize = TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
+const MAX_SCOPE_CHARS: usize = TRANSIENT_MENU_MAX_SCOPE_CHARS;
+const MAX_BINDINGS: usize = TRANSIENT_MENU_MAX_BINDINGS;
+const MAX_BINDING_CHARS: usize = TRANSIENT_MENU_MAX_BINDING_CHARS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransientMenuSessionId(pub u64);
@@ -58,6 +62,12 @@ pub(crate) struct TransientMenuItem {
     pub(crate) id: String,
     pub(crate) label: String,
     pub(crate) detail: Option<String>,
+    /// Plan 124: the item's scope tag (the palette's `All · Session · Shell ·
+    /// Files` chips); `None` = it shows under `All` only. The server owns the
+    /// vocabulary — see `protocol::TransientMenuItemData::scope`.
+    pub(crate) scope: Option<String>,
+    /// Plan 124: the item's chords, in the app's spelling (`"Ctrl+X Ctrl+P"`).
+    pub(crate) bindings: Vec<String>,
     pub(crate) accessibility_label: String,
     pub(crate) provenance: TransientMenuItemProvenance,
     pub(crate) action: TransientMenuAction,
@@ -98,7 +108,10 @@ pub(crate) enum TransientMenuFocusPolicy {
 /// Determines overlay anchor and focus policy defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransientMenuOrigin {
-    /// Bottom-anchored command palette (default).
+    /// The composer's command palette (default): the lane's own `/` palette in
+    /// plan 124 — the command catalogue and its path mode — drawn as the menu of
+    /// the composer box it answers to (the field is its query), plus the bottom
+    /// anchor for any other bottom-anchored menu.
     CommandPalette,
     /// Clay-native completion picker, anchored to the active caret.
     Completion,
@@ -106,8 +119,10 @@ pub(crate) enum TransientMenuOrigin {
     ContextMenu,
     /// Main-area-anchored menu bar dropdown.
     MenuBar,
-    /// Phase 24.4: window-centered Command Centre surface (command and path
-    /// modes) hosted in a window-level overlay layer with a scrim backdrop.
+    /// Phase 24.4: window-centered menu sessions (pickers, package menus)
+    /// hosted in a window-level overlay layer with a scrim backdrop. Plan 124
+    /// task 7 moved the command catalogue and the path browser out of this set:
+    /// they are the composer's palette, anchored to the lane (`CommandPalette`).
     Centered,
 }
 
@@ -380,6 +395,8 @@ impl TransientMenuItem {
             id: id.into(),
             label: label.clone(),
             detail: None,
+            scope: None,
+            bindings: Vec::new(),
             accessibility_label: label,
             provenance: TransientMenuItemProvenance::BuiltIn,
             action,
@@ -388,6 +405,24 @@ impl TransientMenuItem {
 
     pub(crate) fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(truncate(&detail.into(), MAX_DETAIL_CHARS));
+        self
+    }
+
+    /// Plan 124: the item's scope tag (the palette's chips), clamped to the
+    /// shared menu budget.
+    pub(crate) fn with_scope(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(truncate(&scope.into(), MAX_SCOPE_CHARS));
+        self
+    }
+
+    /// Plan 124: the item's chords (the palette's per-row chip groups),
+    /// clamped to the shared count/char budgets.
+    pub(crate) fn with_bindings(mut self, bindings: Vec<String>) -> Self {
+        self.bindings = bindings
+            .into_iter()
+            .take(MAX_BINDINGS)
+            .map(|binding| truncate(&binding, MAX_BINDING_CHARS))
+            .collect();
         self
     }
 

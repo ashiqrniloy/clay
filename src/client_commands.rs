@@ -89,6 +89,9 @@ pub enum ShellClientCommand {
     TabMoveRight,
     TabActivate(u32),
     TabMoveTo(u32),
+    /// Plan 124: the agent lane's per-tab visibility toggle. Not a numbered
+    /// family: there is one lane per window.
+    ToggleAgentLane,
 }
 
 impl ShellClientCommand {
@@ -116,6 +119,9 @@ impl ShellClientCommand {
             "shell.clientTabClose" => Some(Self::TabClose),
             "shell.clientTabMoveLeft" => Some(Self::TabMoveLeft),
             "shell.clientTabMoveRight" => Some(Self::TabMoveRight),
+            // Plan 124: the lane toggle is a shell client command like the
+            // pane/tab family — the shell flips its own layout state.
+            "shell.toggleAgentLane" => Some(Self::ToggleAgentLane),
             value => numbered_tab_command(value),
         }
     }
@@ -164,6 +170,10 @@ pub const SHELL_CLIENT_COMMAND_CATALOGUE: &[(&str, &str)] = &[
     ("shell.clientTabClose", "Close Tab"),
     ("shell.clientTabMoveLeft", "Move Tab Left"),
     ("shell.clientTabMoveRight", "Move Tab Right"),
+    // Plan 124: the agent lane's visibility toggle. Listed so the palette
+    // reaches it (Control Centre rows activate as shell client commands) and
+    // the native client's deny-by-default parse accepts the id.
+    ("shell.toggleAgentLane", "Toggle Agent Lane"),
     ("shell.clientTabActivate.1", "Activate Tab 1"),
     ("shell.clientTabActivate.2", "Activate Tab 2"),
     ("shell.clientTabActivate.3", "Activate Tab 3"),
@@ -197,6 +207,10 @@ mod tests {
         assert_eq!(
             ShellClientCommand::from_command_id("shell.clientTabActivate.10"),
             None
+        );
+        assert_eq!(
+            ShellClientCommand::from_command_id("shell.toggleAgentLane"),
+            Some(ShellClientCommand::ToggleAgentLane)
         );
         assert_eq!(EditorClientCommand::from_command_id("Deno.core.ops"), None);
     }

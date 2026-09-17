@@ -1854,6 +1854,12 @@ async fn path_browser_opens_from_keybinding_and_control_center_catalogue() {
     };
     assert_eq!(first.prompt, format!("Browse · {}", root.display()));
     assert_eq!(first.query, format!("{}/", root.display()));
+    // Plan 124 task 7: the path browser is the palette's path mode, so it rides
+    // the same composer anchor as the catalogue instead of a window sheet.
+    assert_eq!(
+        first.origin,
+        crate::protocol::TransientMenuOriginData::CommandPalette
+    );
     let names: Vec<_> = first.items.iter().map(|item| item.label.as_str()).collect();
     assert_eq!(
         names,
@@ -1916,6 +1922,7 @@ async fn path_browser_opens_from_keybinding_and_control_center_catalogue() {
             client_id: 11,
             session_id: control_center.session_id,
             query: "Browse Filesystem".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(filtered) =
@@ -2071,6 +2078,7 @@ async fn path_browser_navigates_descend_ascend_and_direct_jump() {
             client_id: 11,
             session_id: path_id,
             query: "c/".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(snapshot) =
@@ -2094,6 +2102,7 @@ async fn path_browser_navigates_descend_ascend_and_direct_jump() {
             client_id: 11,
             session_id: path_id,
             query: a_b.clone(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(snapshot) =
@@ -2164,6 +2173,7 @@ async fn path_browser_navigates_descend_ascend_and_direct_jump() {
             client_id: 11,
             session_id: path_id,
             query: "b1".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(snapshot) =
@@ -2188,6 +2198,7 @@ async fn path_browser_navigates_descend_ascend_and_direct_jump() {
             client_id: 11,
             session_id: path_id,
             query: format!("{}/missing/", root.display()),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(snapshot) =
@@ -2364,6 +2375,7 @@ async fn path_browser_open_file_converts_browse_to_single_file_grant() {
             client_id: 11,
             session_id: path_id,
             query: "a.txt".to_string(),
+            scope: None,
         })
         .await;
     let snapshot = recv_menu_frame("filter", &mut connection).await;
@@ -2449,6 +2461,7 @@ async fn path_browser_open_file_converts_browse_to_single_file_grant() {
             client_id: 11,
             session_id: path_id,
             query: "a.txt".to_string(),
+            scope: None,
         })
         .await;
     let snapshot = recv_menu_frame("second-filter", &mut connection).await;
@@ -2518,6 +2531,7 @@ async fn path_browser_open_file_converts_browse_to_single_file_grant() {
             client_id: 11,
             session_id: path_id,
             query: "a.txt".to_string(),
+            scope: None,
         })
         .await;
     let snapshot = recv_menu_frame("third-filter", &mut connection).await;
@@ -2803,6 +2817,7 @@ async fn path_browser_workspace_open_rebinds_only_bound_tab() {
             client_id: 11,
             session_id: path_id,
             query: "file.txt".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(snapshot) =
@@ -3039,6 +3054,7 @@ async fn path_browser_navigation_only_creates_no_grants() {
             client_id: 11,
             session_id: path_id,
             query: "RE".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(filtered) =
@@ -3062,6 +3078,7 @@ async fn path_browser_navigation_only_creates_no_grants() {
             client_id: 11,
             session_id: path_id,
             query: String::new(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(_) =
@@ -3123,6 +3140,7 @@ async fn path_browser_navigation_only_creates_no_grants() {
             client_id: 11,
             session_id: path_id,
             query: format!("{}/src/", root.display()),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(jumped) =
@@ -3579,6 +3597,7 @@ async fn menu_intents_for_unknown_sessions_produce_bounded_diagnostics() {
             client_id: 11,
             session_id: 1 << 63 | 7,
             query: "reload".to_string(),
+            scope: None,
         },
         ClientMessage::MenuSelectionMove {
             client_id: 11,
@@ -3701,6 +3720,17 @@ async fn control_center_opens_filters_activates_and_cancels_scenario() {
     };
     let second_session_id = second_snapshot.session_id;
     assert_ne!(first_session_id, second_session_id);
+    // Plan 124 task 7: the catalogue session is the composer's `/` palette — the
+    // client anchors it to the lane's composer box (bottom anchor), names it
+    // "Commands", and opens it unfiltered (the field below is the query).
+    assert_eq!(
+        second_snapshot.origin,
+        crate::protocol::TransientMenuOriginData::CommandPalette,
+        "the palette must declare the bottom/composer anchor, not a window sheet"
+    );
+    assert_eq!(second_snapshot.prompt, "Commands");
+    assert!(!second_snapshot.items.is_empty());
+    let opened_item_count = second_snapshot.items.len();
 
     // A stale selection move against the replaced session is a bounded
     // diagnostic, never an error or disconnect.
@@ -3723,6 +3753,7 @@ async fn control_center_opens_filters_activates_and_cancels_scenario() {
             client_id: 11,
             session_id: second_session_id,
             query: "reload".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(filtered) =
@@ -3739,6 +3770,97 @@ async fn control_center_opens_filters_activates_and_cancels_scenario() {
             .map(|item| &item.id)
             .collect::<Vec<_>>()
     );
+    // The palette rides one session across keystrokes: the filter update keeps
+    // the same id and the same anchor, and clearing it restores the whole
+    // open-time catalogue (the session holds it — no query rebuilds it).
+    assert_eq!(filtered.session_id, second_session_id);
+    assert_eq!(
+        filtered.origin,
+        crate::protocol::TransientMenuOriginData::CommandPalette
+    );
+    connection
+        .send(&ClientMessage::MenuQueryUpdate {
+            client_id: 11,
+            session_id: second_session_id,
+            query: String::new(),
+            scope: None,
+        })
+        .await;
+    let ServerMessage::TransientMenuSnapshot(restored) =
+        receive_menu_message(&mut connection).await
+    else {
+        panic!("expected restored TransientMenuSnapshot");
+    };
+    assert_eq!(restored.session_id, second_session_id);
+    assert_eq!(restored.items.len(), opened_item_count);
+
+    // Plan 124: the palette's rows carry the server's own scope vocabulary and
+    // their chords, so the sheet draws chips from data instead of guessing.
+    let toggle_lane = restored
+        .items
+        .iter()
+        .find(|item| item.id == "shell.toggleAgentLane")
+        .expect("the lane toggle is a palette row");
+    assert_eq!(toggle_lane.scope.as_deref(), Some("shell"));
+    assert_eq!(toggle_lane.bindings, ["Ctrl+X Ctrl+P"]);
+
+    // The scope chip rides the same update as the query: the *session* filters
+    // by it, so the client never hides a row the server still selects over.
+    connection
+        .send(&ClientMessage::MenuQueryUpdate {
+            client_id: 11,
+            session_id: second_session_id,
+            query: String::new(),
+            scope: Some("files".to_string()),
+        })
+        .await;
+    let ServerMessage::TransientMenuSnapshot(scoped) = receive_menu_message(&mut connection).await
+    else {
+        panic!("expected scoped TransientMenuSnapshot");
+    };
+    assert_eq!(scoped.session_id, second_session_id);
+    assert_eq!(
+        scoped
+            .items
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        ["controlCenter.openPath"],
+        "the Files chip shows the palette's own path mode and nothing else"
+    );
+    assert_eq!(scoped.selected_index, 0);
+
+    // The vocabulary is closed: an unknown word is not a scope (the chip falls
+    // back to All), and the session survives it.
+    connection
+        .send(&ClientMessage::MenuQueryUpdate {
+            client_id: 11,
+            session_id: second_session_id,
+            query: String::new(),
+            scope: Some("not-a-scope".to_string()),
+        })
+        .await;
+    let ServerMessage::TransientMenuSnapshot(unscoped) =
+        receive_menu_message(&mut connection).await
+    else {
+        panic!("expected unscoped TransientMenuSnapshot");
+    };
+    assert_eq!(unscoped.session_id, second_session_id);
+    assert_eq!(unscoped.items.len(), opened_item_count);
+
+    // Leave the palette filtered for the activation below.
+    connection
+        .send(&ClientMessage::MenuQueryUpdate {
+            client_id: 11,
+            session_id: second_session_id,
+            query: "reload".to_string(),
+            scope: None,
+        })
+        .await;
+    assert!(matches!(
+        receive_menu_message(&mut connection).await,
+        ServerMessage::TransientMenuSnapshot(_)
+    ));
 
     // Activating the selected item closes the menu and executes the
     // server command; the reload fanout (diagnostic + snapshot) arrives
@@ -3864,6 +3986,7 @@ async fn control_center_shell_activation_sends_shell_command_request() {
             client_id: 11,
             session_id,
             query: "clientSplitPaneVertical".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(filtered) =
@@ -3941,6 +4064,7 @@ async fn menu_backspace_deletes_one_char_and_secondary_activation_matches_primar
             client_id: 11,
             session_id,
             query: "clientSplitPaneVertical".to_string(),
+            scope: None,
         })
         .await;
     let ServerMessage::TransientMenuSnapshot(filtered) =
@@ -3969,6 +4093,7 @@ async fn menu_backspace_deletes_one_char_and_secondary_activation_matches_primar
             client_id: 11,
             session_id,
             query: "clientSplitPaneVertical".to_string(),
+            scope: None,
         })
         .await;
     let _ = receive_menu_message(&mut connection).await;
@@ -4184,6 +4309,42 @@ async fn tab_switch_cancels_the_active_server_menu_session() {
             if closed == session_id
     ));
     connection.drain_bounded().await;
+    connection.close().await;
+}
+
+#[tokio::test]
+async fn agent_lane_toggle_projects_a_shell_client_request() {
+    // Plan 124: `shell.toggleAgentLane` is declared ClientUi in the default
+    // manifest, so its Global ServerFirst `Ctrl+X Ctrl+P` intent must come
+    // back as the narrow shell-client request the shell executes (the lane's
+    // visibility is client-local per-tab layout state) — not a wire error
+    // from the server command executor, and no runtime generation bump.
+    let server = super::super::IpcServer::new(super::super::ServerConfig::new(
+        crate::ipc::IpcEndpoint::from_argument("agent-lane-toggle"),
+    ));
+    let generation_before = server.runtime_generation.generation_id().await;
+    let mut connection = TestConnection::connect_with_server(11, server.clone()).await;
+    connection.drain_bounded().await;
+    let behavior_version = server.behavior.lock().await.version();
+    connection
+        .send(&ClientMessage::CommandIntent {
+            client_id: 11,
+            document_id: 1,
+            behavior_version,
+            command_id: "shell.toggleAgentLane".to_string(),
+        })
+        .await;
+    assert_eq!(
+        connection.receive().await,
+        ServerMessage::ShellClientCommandRequest {
+            command_id: "shell.toggleAgentLane".to_string(),
+        }
+    );
+    assert_eq!(
+        server.runtime_generation.generation_id().await,
+        generation_before,
+        "a client-local toggle must not advance the runtime generation"
+    );
     connection.close().await;
 }
 
@@ -5275,15 +5436,15 @@ async fn control_center_lists_and_activates_loaded_package_commands() {
     }
     let markdown_manifest = markdown_manifest.expect("markdown mode layer must be published");
     // The default Control Center binding survives mode activation: the
-    // layer carries the Global `Ctrl+X Ctrl+P` chord from the shared
-    // default commands/keymaps.
+    // layer carries the Global `Ctrl+X Ctrl+O` chord (plan 124 moved it off
+    // the P stroke) from the shared default commands/keymaps.
     assert!(markdown_manifest.keymaps.iter().any(|rule| {
         rule.command_id == "controlCenter.open"
             && rule.context == KeyBindingContext::Global
             && rule.sequence.len() == 2
             && rule.sequence[0].key == KeyCode::Character("x".to_string())
             && rule.sequence[0].modifiers.control
-            && rule.sequence[1].key == KeyCode::Character("p".to_string())
+            && rule.sequence[1].key == KeyCode::Character("o".to_string())
             && rule.sequence[1].modifiers.control
     }));
 
@@ -5320,11 +5481,17 @@ async fn control_center_lists_and_activates_loaded_package_commands() {
             .any(|item| item.id == "markdown.toggleComment"),
         "markdown.toggleComment must be listed"
     );
-    let detail = toggle_preview.detail.as_deref().unwrap_or_default();
+    // Plan 124: the effective binding is the row's `bindings` field (the
+    // palette's chips); the detail line carries routing and provenance.
     assert!(
-        detail.contains("Ctrl+Shift+M"),
-        "detail must carry the effective binding: {detail}"
+        toggle_preview
+            .bindings
+            .iter()
+            .any(|binding| binding.contains("Ctrl+Shift+M")),
+        "bindings must carry the effective chord: {:?}",
+        toggle_preview.bindings
     );
+    let detail = toggle_preview.detail.as_deref().unwrap_or_default();
     assert!(
         detail.contains("@clay/markdown@0.1.0"),
         "detail must carry package provenance: {detail}"
@@ -5338,6 +5505,7 @@ async fn control_center_lists_and_activates_loaded_package_commands() {
                 client_id: 99,
                 session_id,
                 query: "togglePreview".to_string(),
+                scope: None,
             },
         )
         .await
@@ -5392,7 +5560,7 @@ async fn control_center_lists_and_activates_loaded_package_commands() {
 async fn control_center_opens_even_when_the_client_version_lags_the_manifest() {
     // Regression (plan 117 follow-up): the mode-layer publish bumps the
     // behavior version after the client bootstrapped; a lagging client's
-    // Ctrl+X Ctrl+P intent used to die on the stale-version gate with a
+    // `Ctrl+X Ctrl+O` intent used to die on the stale-version gate with a
     // silent wire error — the Command Centre never opened. Server-owned
     // catalogue commands re-resolve everything at open time, so they skip
     // the gate; manifest-coupled commands keep it.

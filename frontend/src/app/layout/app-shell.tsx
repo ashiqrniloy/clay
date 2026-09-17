@@ -4,7 +4,7 @@ import { Outlet, useLocation } from "react-router";
 import { ClayIconButton, ClayKbd } from "../../components";
 import { workspace } from "../../shell/workspace-singleton";
 import { tabTitle } from "../../shell/tab-store";
-import { workspaceRail } from "../../shell/layout-state";
+import { agentLane, workspaceRail } from "../../shell/layout-state";
 import { useSessionConnection } from "../use-clay-session";
 import styles from "./shell.module.css";
 import { TabBar, type ShellTab } from "./tab-bar";
@@ -55,6 +55,10 @@ export function AppShell({
     workspaceRail.subscribe,
     workspaceRail.isVisible,
   );
+  const laneVisible = useSyncExternalStore(
+    agentLane.subscribe,
+    agentLane.isVisible,
+  );
   const activeRuntime = workspace.active();
   const activeDiagnostic = activeRuntime?.diagnostic;
   const activePane = activeRuntime?.panes.get(activeRuntime.tree.activePaneId);
@@ -94,9 +98,16 @@ export function AppShell({
 
   const hints = [
     {
+      id: "lane",
+      label: laneVisible ? "hide lane" : "lane",
+      keys: "Ctrl X P",
+      // Same toggle the chord and the palette row run (plan 124).
+      run: () => agentLane.toggle(),
+    },
+    {
       id: "palette",
       label: "palette",
-      keys: "Ctrl X P",
+      keys: "Ctrl X O",
       run: () => workspace.dispatchServerCommand("controlCenter.open"),
     },
     {
@@ -126,7 +137,15 @@ export function AppShell({
   return (
     <div className={styles.shell}>
       <header className={styles.header} data-clay-ds="shell.header">
-        <span className={styles.brand}>Clay</span>
+        {/* The window mark carries the window's run signal (plan 124): its dot
+            pulses while this tab works — the one looping pulse a window has
+            (DESIGN.md §7/§9). The tab's own marker is colour only. */}
+        <span
+          className={styles.brand}
+          data-busy={activeTab?.agentBusy ? "true" : "false"}
+        >
+          Clay
+        </span>
         <div className={styles.tabs}>
           <TabBar
             tabs={tabs}
@@ -151,7 +170,7 @@ export function AppShell({
           <ClayIconButton
             icon="control-center.open"
             label="Control Center"
-            shortcut="Ctrl+X Ctrl+P"
+            shortcut="Ctrl+X Ctrl+O"
             variant="muted"
             onPress={() =>
               workspace.dispatchServerCommand("controlCenter.open")

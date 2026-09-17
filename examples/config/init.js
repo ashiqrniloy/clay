@@ -260,12 +260,13 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 //
 // Key format: single stroke "Modifier+Key" (Ctrl/Shift/Alt + a key name,
 // e.g. "Ctrl+O", "Shift+Alt+Down") OR a space-separated multi-stroke chord
-// (e.g. "Ctrl+X Ctrl+P", "g g"). Single-stroke is the fast path; a
+// (e.g. "Ctrl+X Ctrl+O", "g g"). Single-stroke is the fast path; a
 // multi-stroke chord holds a pending chord until the sequence completes,
 // times out, or mismatches — on mismatch the key re-evaluates fresh, so a
 // half-typed chord never eats typing. Example (commented; the shipped
 // defaults are re-declared in the batch tables below):
-//   // bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+//   // bindKey("Ctrl+X Ctrl+O", "controlCenter.open", { scope: "global" });
+//   // bindKey("Ctrl+X Ctrl+P", "shell.toggleAgentLane", { scope: "global" });
 // Bindings validate deny-by-default; unknown or non-editor command IDs are
 // rejected, and a chord that is a strict prefix of another binding in the
 // same scope is rejected as ambiguous at bind time. Last binding for a chord
@@ -333,6 +334,13 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 //   Move pane:     shell.clientMovePaneNext         Ctrl+Alt+]
 //                  shell.clientMovePanePrev         Ctrl+Alt+[
 //
+// Persistent agent lane (Plan 124; a client-UI command like the rail toggles):
+//   Toggle:        shell.toggleAgentLane             Ctrl+X Ctrl+P
+//                  (shows/hides the composer lane for the ACTIVE tab only —
+//                  visibility persists per tab in the window state, and the
+//                  toggle stays client-local: no server round trip beyond the
+//                  shared ServerFirst chord matcher)
+//
 // Tab management (Phase 22.4; same bindKey story as the splits above):
 //   Next/prev:    shell.clientTabNext            Ctrl+Tab        wraps around
 //                 shell.clientTabPrev            Ctrl+Shift+Tab  wraps around
@@ -370,14 +378,22 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 //   "Ctrl+Alt+Shift+9": "shell.clientTabMoveTo.9",
 // }});
 
-// Control Center (Phase 24.2): built-in server-first command
-// controlCenter.open ships with the default Ctrl+X Ctrl+P chord (Global
-// scope) in the default behavior manifest, re-declared in the batch table
-// below as an idempotent no-op override. The Control Center is a transient
-// menu session: listing grants no authority, and it cannot be styled,
-// positioned, filtered, or dismissed from init.js. Multi-stroke chord
-// sequences are supported (Phase 24.5): space-separated strokes, e.g.
-// "Ctrl+X Ctrl+P", "g g".
+// Control Center (Phase 24.2; Plan 124 re-anchor): built-in server-first
+// command controlCenter.open ships with the default Ctrl+X Ctrl+O chord
+// (Global scope) in the default behavior manifest, re-declared in the batch
+// table below as an idempotent no-op override. It opens the composer-
+// anchored `/` palette — a transient menu session: listing grants no
+// authority, and the palette cannot be styled, positioned, filtered, or
+// dismissed from init.js. Multi-stroke chord sequences are supported
+// (Phase 24.5): space-separated strokes, e.g. "Ctrl+X Ctrl+O", "g g".
+//
+// Persistent agent lane (Plan 124): built-in client-UI command
+// shell.toggleAgentLane ships with the default Ctrl+X Ctrl+P chord (Global
+// scope) in the same default behavior manifest and is re-declared in the
+// batch table below as an idempotent no-op override. The chord family keeps
+// distinct second strokes: Ctrl+X Ctrl+P toggles the lane, Ctrl+X Ctrl+O
+// opens the palette, Ctrl+X Ctrl+F opens the Path Browser. Visibility
+// persists per tab; the command is client-local and grants no authority.
 
 // Path Browser (Phase 24.3): built-in server-first command
 // controlCenter.openPath ships with the Phase 24.5 sequence default
@@ -448,10 +464,17 @@ bindKey({
     "Ctrl+Alt+]": "shell.clientMovePaneNext",
     // Built-in server-first reload; this re-declaration is idempotent.
     "Ctrl+Shift+R": "runtime.reloadConfiguration",
-    // Built-in server-first Control Center (Phase 24.2); this re-declaration
-    // is idempotent. Global scope, ServerFirst routing; override/remove via
-    // bindKey/unbindKey (see the commented example below).
-    "Ctrl+X Ctrl+P": "controlCenter.open",
+    // Built-in client-UI persistent agent-lane toggle (Plan 124); this
+    // re-declaration is idempotent. Global scope, ServerFirst routing;
+    // visibility persists per tab; override/remove via bindKey/unbindKey
+    // (see the commented example below).
+    "Ctrl+X Ctrl+P": "shell.toggleAgentLane",
+    // Built-in server-first composer palette (Phase 24.2; Plan 124 re-anchor
+    // of controlCenter.open); this re-declaration is idempotent. Global
+    // scope, ServerFirst routing; override/remove via bindKey/unbindKey (see
+    // the commented example below). Distinct second strokes in the Ctrl+X
+    // family avoid pending-chord prefix collisions.
+    "Ctrl+X Ctrl+O": "controlCenter.open",
     // Built-in server-first Path Browser (Phase 24.3); this re-declaration
     // is idempotent. Phase 24.5 sequence default; override/remove via
     // bindKey/unbindKey (see the commented example below).
@@ -521,12 +544,18 @@ bindKey("Alt+R", "editor.clientSmartSelect.shrink", { scope: "editor" });
 // chord; scope "global" matches the shipped default context):
 // bindKey("Ctrl+Shift+=", "shell.clientAddEqualPane", { scope: "global" });
 
-// Rebinding the Control Center default (Phase 24.2): unbind the shipped
-// Ctrl+X Ctrl+P chord, then bind another global chord (single-stroke or
-// multi-stroke). Without the unbind the default remains bound; last binding
-// for a chord wins:
-// unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+// Rebinding the Control Center palette default (Phase 24.2; Plan 124
+// re-anchor): unbind the shipped Ctrl+X Ctrl+O chord, then bind another
+// global chord (single-stroke or multi-stroke). Without the unbind the
+// default remains bound; last binding for a chord wins:
+// unbindKey("Ctrl+X Ctrl+O", { scope: "global" });
 // bindKey("Alt+X", "controlCenter.open", { scope: "global" });
+
+// Rebinding the persistent agent-lane toggle (Plan 124): unbind the shipped
+// Ctrl+X Ctrl+P chord, then bind another global chord (the client-local
+// command takes no arguments; visibility still persists per tab):
+// unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+// bindKey("Alt+L", "shell.toggleAgentLane", { scope: "global" });
 
 // Rebinding the Path Browser default (Phase 24.3): unbind the shipped
 // Ctrl+X Ctrl+F chord, then bind another global chord (command id stays

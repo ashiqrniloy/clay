@@ -305,11 +305,16 @@ impl PathBrowserSession {
     /// Project the session onto the shared transient-menu display session.
     /// Items carry no activation action: path activation resolves by opaque
     /// session id on the server, never from item actions.
+    ///
+    /// Plan 124 task 7: this is the palette's path mode, so it declares the
+    /// bottom-anchored `CommandPalette` origin — the client draws it in the
+    /// composer's palette surface, whose field is the query, never as a window
+    /// sheet.
     pub(crate) fn menu_session(&self, session_id: TransientMenuSessionId) -> TransientMenuSession {
         let prompt = format!("Browse · {}", self.canonical_dir.display());
         let mut session = TransientMenuSession::new(session_id, prompt)
             .with_query(&self.input)
-            .with_origin(TransientMenuOrigin::Centered);
+            .with_origin(TransientMenuOrigin::CommandPalette);
         if let Some(message) = &self.error {
             // Items stay suppressed while a listing error is pending.
             return session.with_empty_status(message);

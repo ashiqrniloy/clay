@@ -1386,6 +1386,7 @@ mod tests {
                             client_id: 7,
                             session_id: (1 << 63) | (case + 1),
                             query: format!("query-{case}"),
+                            scope: None,
                         })
                         .unwrap(),
                 ),

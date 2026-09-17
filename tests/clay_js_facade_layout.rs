@@ -197,6 +197,7 @@ const FACADE_MODULES: &[(&str, &[&str])] = &[
             "clientTabMoveRight",
             "clientTabActivate",
             "clientTabMoveTo",
+            "toggleAgentLane",
             "setPaneFocusPolicy",
         ],
     ),

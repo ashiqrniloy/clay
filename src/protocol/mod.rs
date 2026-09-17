@@ -85,7 +85,12 @@ pub use textobjects::*;
 /// `AgentInventory` so a freshly mounted webview learns the configured
 /// pair from the `listSessions` inventory snapshot instead of waiting for
 /// a picker event.
-pub const PROTOCOL_VERSION: u32 = 30;
+/// Version 31 (plan 124) adds the palette's row fields: `TransientMenuItemData`
+/// carries the item's `scope` tag (the `All · Session · Shell · Files` chips)
+/// and its `bindings` (the per-row chord chips), and `MenuQueryUpdate` carries
+/// the chip the client selected, so the server filters and selects over the
+/// scoped item set.
+pub const PROTOCOL_VERSION: u32 = 31;
 
 pub type PerformanceTraceId = u64;
 
@@ -547,16 +552,33 @@ fn default_keymaps() -> Vec<KeyBindingRule> {
             routing_policy: RoutingPolicy::ClientFirstPredictable,
         },
         KeyBindingRule::default_reload_configuration(),
-        // Phase 24.5: the Command Centre opens on the Emacs-like `Ctrl+X
-        // Ctrl+P` chord (P = palette), routed through the same server-intent
-        // lane as the Phase 24.2 single-stroke default. Global scope fires
-        // outside editor text focus; overridable via bindKey/unbindKey like
-        // every default.
+        // Plan 124: the agent lane toggles on the Emacs-like `Ctrl+X Ctrl+P`
+        // chord (P, for the panel), which the Command Centre yielded to it:
+        // the lane is the shell's bottom section, so its toggle is the chord a
+        // user reaches for. Global + ServerFirst for the same reason as the
+        // Command Centre chord below — the editor keymap owns it inside
+        // `.cm-editor`, the shell matcher outside it. The declaration is
+        // ClientUi (the shell flips its own per-tab layout state); the server
+        // answers the intent with `ShellClientCommandRequest`.
+        KeyBindingRule::global_server_first_sequence(
+            "shell.toggleAgentLane",
+            vec![
+                ctrl_key(KeyCode::Character("x".to_string())),
+                ctrl_key(KeyCode::Character("p".to_string())),
+            ],
+        ),
+        // Phase 24.5: the Command Centre opened on the Emacs-like `Ctrl+X
+        // Ctrl+P` chord (P = palette); plan 124 moved it to `Ctrl+X Ctrl+O`
+        // (O = open commands) so the lane toggle can take the P stroke. Same
+        // server-intent lane, same Global scope, same ServerFirst routing,
+        // still overridable via bindKey/unbindKey like every default — and
+        // still the entry point the titlebar's Control Center trigger
+        // dispatches.
         KeyBindingRule::global_server_first_sequence(
             "controlCenter.open",
             vec![
                 ctrl_key(KeyCode::Character("x".to_string())),
-                ctrl_key(KeyCode::Character("p".to_string())),
+                ctrl_key(KeyCode::Character("o".to_string())),
             ],
         ),
         // Phase 24.5: Path Mode's default is the Emacs-like `Ctrl+X Ctrl+F`
@@ -745,7 +767,8 @@ fn default_commands() -> Vec<CommandDeclaration> {
         },
         // Phase 24.2: the Control Center opens via the command-intent lane
         // (server-owned menu session); declared like any built-in server
-        // intent so the default Global `Ctrl+X Ctrl+P` chord routes.
+        // intent so the default Global `Ctrl+X Ctrl+O` chord routes (plan 124
+        // moved it off the P stroke, which now toggles the agent lane).
         CommandDeclaration::server_intent("controlCenter.open", "Open Control Center"),
         // Phase 24.3: Path Mode (dired-style filesystem browsing) opens via
         // the same command-intent lane; default Global `Ctrl+X Ctrl+F` chord
@@ -787,6 +810,12 @@ fn default_commands() -> Vec<CommandDeclaration> {
         CommandDeclaration::client_ui("shell.clientTabClose", "Close Tab"),
         CommandDeclaration::client_ui("shell.clientTabMoveLeft", "Move Tab Left"),
         CommandDeclaration::client_ui("shell.clientTabMoveRight", "Move Tab Right"),
+        // Plan 124: the agent lane's visibility is client-local per-tab layout
+        // state (like the workspace rail and the inspector), declared here so
+        // the default `Ctrl+X Ctrl+P` chord resolves against the manifest command
+        // set, `bindKey` accepts it, and the palette reaches it; the server
+        // answers the ServerFirst intent with `ShellClientCommandRequest`.
+        CommandDeclaration::client_ui("shell.toggleAgentLane", "Toggle Agent Lane"),
     ];
     for n in 1..=9 {
         commands.push(CommandDeclaration::client_ui(
@@ -2254,6 +2283,13 @@ pub enum ClientMessage {
         #[serde(with = "menu_session_id_serde")]
         session_id: u64,
         query: String,
+        /// Plan 124: the palette's scope chip selection (`All` = absent/`None`,
+        /// else one of the server's closed scope words). It rides the filter
+        /// update because it *is* one: the session filters and selects over the
+        /// scoped item set, so the client never hides rows it did not filter.
+        /// Sessions whose items carry no scope ignore it.
+        #[serde(default)]
+        scope: Option<String>,
     },
     /// Generic semantic Backspace (Phase 24.3): the server session decides
     /// whether Backspace deletes query text or ascends (path mode). The
@@ -3405,8 +3441,9 @@ mod tests {
             .iter()
             .filter(|rule| rule.command_id == "controlCenter.open")
             .collect();
-        // Exactly one default route (Phase 24.5): Global, ServerFirst,
-        // two-stroke `Ctrl+X Ctrl+P` chord.
+        // Exactly one default route: Global, ServerFirst, two-stroke `Ctrl+X
+        // Ctrl+O` chord (plan 124 moved it off the P stroke for the lane
+        // toggle).
         assert_eq!(
             rules.len(),
             1,
@@ -3424,7 +3461,7 @@ mod tests {
                     },
                 },
                 KeyStroke {
-                    key: KeyCode::Character("p".to_string()),
+                    key: KeyCode::Character("o".to_string()),
                     modifiers: KeyModifiers {
                         control: true,
                         ..KeyModifiers::NONE
@@ -3434,6 +3471,50 @@ mod tests {
         );
         assert_eq!(rule.context, KeyBindingContext::Global);
         assert_eq!(rule.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_keymaps_contain_agent_lane_toggle_binding() {
+        // Plan 124: `Ctrl+X Ctrl+P` toggles the agent lane (Global,
+        // ServerFirst) — the chord the Control Centre used to own.
+        let rules: Vec<_> = default_keymaps()
+            .into_iter()
+            .filter(|rule| rule.command_id == "shell.toggleAgentLane")
+            .collect();
+        assert_eq!(rules.len(), 1, "exactly one default lane toggle route");
+        assert_eq!(
+            rules[0].sequence,
+            vec![
+                ctrl_key(KeyCode::Character("x".to_string())),
+                ctrl_key(KeyCode::Character("p".to_string())),
+            ]
+        );
+        assert_eq!(rules[0].context, KeyBindingContext::Global);
+        assert_eq!(rules[0].routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_keymaps_ctrl_x_family_keeps_distinct_second_strokes() {
+        // Plan 124: `Ctrl+X` is the shell's chord prefix. Lane (P), palette
+        // (O) and path mode (F) must keep distinct second strokes: a shared
+        // one is a duplicate (context, sequence) pair and `validate_manifest`
+        // would reject the default manifest outright.
+        let mut seconds: Vec<String> = default_keymaps()
+            .into_iter()
+            .filter(|rule| {
+                rule.sequence.len() == 2
+                    && rule.sequence[0] == ctrl_key(KeyCode::Character("x".to_string()))
+            })
+            .map(|rule| match &rule.sequence[1].key {
+                KeyCode::Character(character) => character.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        seconds.sort();
+        assert_eq!(
+            seconds,
+            vec!["f".to_string(), "o".to_string(), "p".to_string()]
+        );
     }
 
     #[test]
@@ -3522,6 +3603,22 @@ mod tests {
         assert_eq!(command.display_name, "Open Control Center");
         assert_eq!(command.authority, CommandAuthority::ServerIntent);
         assert_eq!(command.routing_policy, RoutingPolicy::ServerFirst);
+    }
+
+    #[test]
+    fn default_commands_declare_agent_lane_toggle_as_client_ui() {
+        // Plan 124: the lane toggle is declared so the `Ctrl+X Ctrl+P` keymap
+        // rule resolves against the manifest command set; the authority is
+        // ClientUi (the shell owns per-tab layout state), which is what makes
+        // the server answer the intent with a ShellClientCommandRequest.
+        let commands = default_commands();
+        let command = commands
+            .iter()
+            .find(|command| command.command_id == "shell.toggleAgentLane")
+            .expect("default commands missing shell.toggleAgentLane");
+        assert_eq!(command.display_name, "Toggle Agent Lane");
+        assert_eq!(command.authority, CommandAuthority::ClientUi);
+        assert_eq!(command.routing_policy, RoutingPolicy::ClientUiCommand);
     }
 
     #[test]

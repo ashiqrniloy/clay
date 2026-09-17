@@ -770,11 +770,15 @@ fn stamp_client_id(
             ClientMessage::TabCommand { client_id, command }
         }
         ClientMessage::MenuQueryUpdate {
-            session_id, query, ..
+            session_id,
+            query,
+            scope,
+            ..
         } => ClientMessage::MenuQueryUpdate {
             client_id,
             session_id,
             query,
+            scope,
         },
         ClientMessage::MenuBackspace { session_id, .. } => ClientMessage::MenuBackspace {
             client_id,

@@ -3524,6 +3524,33 @@ security_notes = "Bindable client UI command ID only; The numbered family is doc
 current_rust_owner = "src/client_commands.rs::ShellClientCommand (client-local; tab set executed by the React tab bar and workspace controller, frontend/src/app/layout/tab-bar.tsx; frontend/src/shell/workspace-controller.ts)"
 registry_public = true
 
+# Plan 124: persistent agent lane command facade. The helper returns a stable
+# ClientUiCommand id for user configuration; lane visibility remains client-
+# local per-tab state and the helper does not open a second runtime path.
+
+[[api]]
+id = "shell.toggleAgentLane"
+category = "shell-agent-lane"
+visibility = "public"
+status = "runtime-backed-command"
+js_module = "clay:shell"
+js_export = "toggleAgentLane"
+user_facing_name = "Toggle Agent Lane"
+authority = "client-ui-command-id"
+runtime_path = "configuration-bindKey-to-shell-client-command"
+hot_path_policy = "The helper is synchronous and side-effect free; the shell applies the per-tab visibility change only after explicit user routing, so no JavaScript or new operation runs in the keypress-to-paint path."
+facade_path = "runtime/js/shell.js::toggleAgentLane"
+backing_rust = "src/client_commands.rs::ShellClientCommand::ToggleAgentLane; src/protocol/mod.rs::default_keymaps; frontend/src/shell/workspace-commands.ts::dispatchClientCommand"
+deno_op = "op_clay_keybindings_bind_key"
+deno_op_path = "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key"
+documentation_path = "docs/reference/clay-js-api/shell/toggle-agent-lane.md"
+key_bindings = ["Ctrl+X Ctrl+P"]
+custom_properties = []
+permissions = []
+security_notes = "Names a bounded client UI command only; after explicit user routing it toggles Clay-owned per-tab lane visibility and grants no filesystem, network, process, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
+current_rust_owner = "src/client_commands.rs::ShellClientCommand::ToggleAgentLane; frontend/src/shell/workspace-commands.ts::dispatchClientCommand"
+registry_public = true
+
 # Phase 1: Base Coding Agent Host Uplift — `agent` domain facades. These are
 # the only JS paths that reach the clay-agent daemon; the package (third-party)
 # runtime has no such access.

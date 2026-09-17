@@ -207,6 +207,17 @@ export interface TransientMenuItemDto {
   id: string;
   label: string;
   detail: string | null;
+  /**
+   * Plan 124: the row's scope tag, from the server's closed vocabulary
+   * (`session` / `shell` / `files`). `null`/absent = the row belongs to no
+   * scope and shows under `All` only (never a guessed one).
+   */
+  scope?: string | null;
+  /**
+   * Plan 124: the command's effective chords in the app's spelling
+   * (`"Ctrl+X Ctrl+P"`) — the palette's per-row chips. Absent when unbound.
+   */
+  bindings?: string[];
   accessibilityLabel: string;
 }
 

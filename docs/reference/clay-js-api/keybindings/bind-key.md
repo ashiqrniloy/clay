@@ -67,6 +67,7 @@ Use this API when JavaScript configuration, extensions, or future Clay automatio
 
 ```ts
 import { bindKey } from "clay:keybindings";
+import { toggleAgentLane } from "clay:shell";
 import { clientCopySelection, clientCutSelection, clientPasteClipboard, clientUndo, clientRedo, clientShowOpenDocuments, clientRequestResync, clientDismissRecovery } from "clay:editor";
 import { clientOpenFolderDialog } from "clay:workspace";
 
@@ -83,8 +84,9 @@ bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 bindKey("Ctrl+Shift+R", clientRequestResync(), { scope: "editor" });
 bindKey("Ctrl+Shift+D", clientDismissRecovery(), { scope: "editor" });
 
-// Multi-stroke chords (Phase 24.5): a space-separated stroke list, Emacs-style.
-bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+// Multi-stroke chords (Phase 24.5 / plan 124): a space-separated stroke list, Emacs-style.
+bindKey("Ctrl+X Ctrl+P", toggleAgentLane(), { scope: "global" });
+bindKey("Ctrl+X Ctrl+O", "controlCenter.open", { scope: "global" });
 bindKey("Ctrl+X Ctrl+F", "controlCenter.openPath", { scope: "global" });
 bindKey("g g", "workspace.refresh", { scope: "editor" });
 ```
@@ -151,8 +153,10 @@ hot-path allocation beyond the bounded pending buffer.
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 // Configure the Phase 20 save route from ~/.clay/init.js.
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
-// Configure the Phase 18.8 Control Center launch route from ~/.clay/init.js.
-bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" });
+// Configure the Phase 18.8/Plan 124 Control Center palette launch route from ~/.clay/init.js.
+bindKey("Ctrl+X Ctrl+O", "controlCenter.open", { scope: "global" });
+// Configure the Plan 124 persistent agent-lane visibility route.
+bindKey("Ctrl+X Ctrl+P", "shell.toggleAgentLane", { scope: "global" });
 // Configure the Phase 18.11 manual completion trigger route from ~/.clay/init.js.
 bindKey("Ctrl+Space", "completion.trigger", { scope: "editor" });
 // Configure Phase 18.12 file-browser/fuzzy-open routes from ~/.clay/init.js.
@@ -197,7 +201,7 @@ bindKey({
 bindKey({ scope: "global", bindings: { "Ctrl+Shift+R": "runtime.reloadConfiguration" } });
 ```
 
-Phase 18.8 note: `controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Phase 24.5 ships the default `Ctrl+X Ctrl+P` chord (Global scope, `ServerFirst` routing; the pre-24.5 single-stroke default was `Ctrl+Shift+P`) in the default behavior manifest; binding it (again) through `bindKey` is the documented configuration surface for overriding the Control Center launch route, and `unbindKey` removes the default. Activating the bound key enqueues an inert command intent that the server-owned `CommandExecutor` validates before any side effect. The transient menu session itself is Clay-owned internal state and is not a callable `clay:configuration` API; see `docs/reference/clay-js-api/configuration.md`.
+Phase 18.8 / Plan 124 note: `controlCenter.open` is a fixed built-in server-first command id (registered through `builtin_server_command`, `RoutingPolicy::ServerFirst`). Plan 124 ships it on `Ctrl+X Ctrl+O` (Global scope, `ServerFirst` routing) because `Ctrl+X Ctrl+P` now toggles the persistent agent lane through `shell.toggleAgentLane`; both routes are rebindable and removable with `bindKey`/`unbindKey`. Activating the palette key enqueues an inert command intent that the server-owned `CommandExecutor` validates before opening the composer-anchored session. The transient menu session is Clay-owned internal state, not a callable `clay:configuration` or package menu API; see `docs/reference/clay-js-api/configuration.md`.
 
 Phase 18.12/22.8 note: `workspace.openFuzzyFile` and `workspace.toggleFileBrowser` are fixed built-in server-first workspace file-browser command ids. Binding them through `bindKey` is the documented configuration surface for fuzzy-open and file-browser toggle routes. Plan 109 (Phase 2.1 I6) ships the default `Ctrl+B` chord for `workspace.toggleFileBrowser` (Global scope, `ServerFirst` routing) in the default behavior manifest, so the left workspace tab toggle is reachable without a user init.js; the canonical `examples/init.js` re-declares it, and the server retains visibility per tab. The workspace tree renders only in that left workspace tab — the coding-agent Files tab is the session's file history (plan 118 task 36: one row per path the session touched, opening in the workspace view, no tree and no editor instance of its own). Activation is revalidated by `CommandExecutor`, and file opening still routes through server workspace roots or selected-file grants. The left file-browser panel, bottom transient fuzzy-open menu, workspace marker set, ignore set, and listing budgets are Clay-owned internals, not callable `clay:configuration` APIs.
 
@@ -210,6 +214,42 @@ Phase 20 daily-editing note: `documents.serverSaveDocument`, `documents.serverRe
 Phase 19 runtime reload note: `runtime.reloadConfiguration` is a fixed built-in Clay-owned global command (**Reload Configuration and Packages**) with `RoutingPolicy::ServerFirstWithLock { lock_scope: Behavior }` and a shipped global `Ctrl+Shift+R` default. Binding it through `bindKey` remains the documented configuration surface for overriding or restoring that chord; `unbindKey` removes the default in the active behavior manifest. The editor-scope `Ctrl+Shift+R` resync example is independent because keybinding scopes route separately. Activating the bound key routes through the same inert behavior manifest and `CommandExecutor` validation as other server-first commands. The command has no JS facade and is rejected with `UnauthorizedTarget` when called from package JavaScript through `clay:commands`. See `docs/reference/clay-js-api/configuration.md#phase-19-persistent-runtime-hot-reload-configuration-review` for compiled budgets, rejected hidden keys, and the full configuration review.
 
 Shifted character matching note: character-key chords match case-insensitively at route time. The chord parser stores the manifest character as lowercase (for example `Ctrl+Shift+O` stores `"o"`), and the client compares modifier sets exactly but character keys case-insensitively, so a Linux/GNOME key event reporting uppercase `"O"` (because Shift is held) still routes to the bound command. Unbound shifted printable input (for example `Shift+1`) still inserts its shifted text (`!`) into the editor. Modifier sets (`Ctrl`, `Alt`, `Shift`, `Super`) must match exactly.
+
+## Plan 124 shell and palette command IDs
+
+Plan 124 adds one documented `clay:shell` command-ID helper and keeps the palette launch route as a fixed Clay command target. Neither route adds a new authority-bearing operation or puts JavaScript on the keypress-to-paint path.
+
+| Stable ID | User-facing name | JS facade | Default binding | Custom properties | Permissions |
+|---|---|---|---|---|---|
+| `shell.toggleAgentLane` | Toggle Agent Lane | `clay:shell.toggleAgentLane` (`toggleAgentLane()`) | `Ctrl+X Ctrl+P` (Global, `ServerFirst`) | none | none |
+| `controlCenter.open` | Open Control Center | none — bind the bare ID with `keybindings.bindKey` | `Ctrl+X Ctrl+O` (Global, `ServerFirst`) | none | none |
+
+### Agent lane
+
+```ts
+import { toggleAgentLane } from "clay:shell";
+import { bindKey } from "clay:keybindings";
+
+bindKey("Ctrl+X Ctrl+P", toggleAgentLane(), { scope: "global" });
+```
+
+- The helper returns `"shell.toggleAgentLane"` synchronously; it does not toggle the lane while configuration code runs.
+- After user routing, the shell flips visibility for the active tab only. State is Clay-owned layout state, starts visible by default, and preserves the lane's draft/session state when hidden.
+- Backing path: `src/client_commands.rs::ShellClientCommand::ToggleAgentLane` → `frontend/src/shell/workspace-commands.ts::dispatchClientCommand` / `frontend/src/shell/layout-state.ts::agentLane`. The binding uses the existing `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` boundary.
+- Lookup tags: `shell`, `agent-lane`, `visibility`, `keybindings`, `command`, `js-api`.
+
+### Composer palette
+
+```ts
+// `controlCenter.open` is a fixed built-in command ID, not a package callback.
+bindKey("Ctrl+X Ctrl+O", "controlCenter.open", { scope: "global" });
+```
+
+- `controlCenter.open` means **Open Control Center** and opens the `/` palette on the agent lane's composer. The sheet is `TransientMenuOrigin::CommandPalette`, six logical pixels above and the width of the composer field; its working-area veil and query focus remain Clay-owned.
+- It has no standalone JS export, op wrapper, custom properties, or permissions. There is no standalone `clay:controlCenter` facade: the documented facade for its launch route is `keybindings.bindKey`; `controlCenter.open` is the user-facing command ID, not a callable module.
+- Backing path: `src/server/command_execution.rs::CONTROL_CENTER_COMMAND_ID` → `src/server/connection/menus.rs::open_command_centre_session` → `src/server/menu_sessions.rs::ServerMenuSessions::open_control_center`; keybinding validation uses `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key`.
+- Listing, activation, and palette inclusion confer no filesystem, network, process, shell, extension loading, AI mutation, workspace, package, WASM, raw-op, native-widget, or client-side-JavaScript authority. Packages cannot open, populate, filter, intercept, or drive this session.
+- Lookup tags: `control-center`, `command-palette`, `composer`, `transient-menu`, `keybindings`, `shell`.
 
 ## Phase 28 editor commands
 
@@ -229,7 +269,7 @@ remain behavior-manifest data.
 ## Options
 
 - `key` (`string`): Key chord or space-separated multi-stroke sequence, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`.
-- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in server-first command ids `"controlCenter.open"`, `"controlCenter.openPath"`, `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, the built-in `UiReactivePriority` completion command id `"completion.trigger"`, or the package-contributed coding-agent command id `"coding-agent.clientCycleEffort"`; future extension commands must be registered and permissioned before they can be bound.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in shell/palette command ids `"shell.toggleAgentLane"`, `"controlCenter.open"`, and `"controlCenter.openPath"`, the workspace server-first command ids `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, the built-in `UiReactivePriority` completion command id `"completion.trigger"`, or the package-contributed coding-agent command id `"coding-agent.clientCycleEffort"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 

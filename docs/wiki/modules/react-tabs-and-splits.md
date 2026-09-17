@@ -2,13 +2,14 @@
 
 ## Source
 
-- `frontend/src/shell/{split-tree,tab-store,persist,workspace-controller}.ts`
-- `frontend/src/shell/{PaneTree,WorkspacePanes}.tsx`
+- `frontend/src/shell/{split-tree,tab-store,persist,workspace-controller,layout-state}.ts`
+- `frontend/src/shell/{PaneTree,WorkspacePanes,AgentLane}.tsx`
 - `frontend/src/app/layout/{tab-bar,app-shell}.tsx`
 - `frontend/src/components/tab-strip.tsx` (unified strip primitive)
 - `src-tauri/src/bridge/{session,layout}.rs`
 - `src/shell/layout_persist.rs`
-- `frontend/src/shell/*.test.ts`
+- `frontend/src/shell/{tab-store,workspace-controller,WorkspacePanes}.test.ts*`
+- `src/shell/layout_persist.rs` tests
 
 ## Overview
 
@@ -71,6 +72,32 @@ workspace.openPath("notes.md"); // focuses the owner pane if already open
 cd frontend && npx vitest run src/shell
 cargo test -p clay-desktop --all-targets
 ```
+
+## Plan 124: tab-owned agent lane state
+
+The agent lane is not window-global. The `agentLane` store in `frontend/src/shell/layout-state.ts` is read by the active tab's `AgentLane`; its toggle is routed
+as `shell.toggleAgentLane` and `workspace-controller.ts` subscribes it to the
+same debounced persistence path as the workspace rail and agent inspector.
+
+`PersistedTab.laneVisible` is optional for compatibility with older `layout.json`
+v2 files and defaults to `true`. Restore collects rail, inspector, and lane
+visibility by client id while rebuilding each tab, then restores all three
+stores after mounts exist. A hidden lane is a visibility state, not a teardown:
+its composer draft and the tab's agent store remain alive. A palette open
+reveals the lane because the lane's composer is the palette's query owner.
+
+`WorkspacePanes` also owns one agent store per `TabRuntime`. It creates the
+store before either view is shown, adopts it into the runtime, and passes it to
+both `AgentLane` and `AgentView`; tab close disposes it. This prevents view
+switches from creating duplicate stores or losing a running transcript, while
+keeping tabs isolated.
+
+Tests: `src/shell/layout_persist.rs::tab_visibility_round_trips_and_defaults_to_visible`,
+`frontend/src/shell/tab-store.test.ts`,
+`frontend/src/shell/workspace-controller.test.ts`,
+`frontend/src/shell/WorkspacePanes.test.tsx`, and
+`frontend/src/shell/AgentLane.test.tsx`. The manual live evidence is in
+`test-plan/artifacts/124-agent-lane/`.
 
 ## Related
 

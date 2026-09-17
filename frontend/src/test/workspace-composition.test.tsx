@@ -312,12 +312,51 @@ describe("workspace composition (plan 118: shell and Workspace page)", () => {
     expect(shell).toMatch(
       /\.footer\s*{[^}]*font-family: var\(--clay-font-monospace\)/,
     );
-    // No blur, no filter, no animation on any of the three surfaces.
+    // No blur and no filter on any of the three surfaces.
     for (const css of [shell, workspace, editor]) {
       expect(css).not.toMatch(/backdrop-filter/);
       expect(css).not.toMatch(/\bfilter:/);
-      expect(css).not.toMatch(/@keyframes/);
     }
+    // Motion: the shell carries exactly one looping animation — the window
+    // mark's run pulse (plan 124, DESIGN.md §7) — and the tab strip none. The
+    // window shows one blinking dot, so a second keyframe anywhere on these
+    // surfaces (or the retired tab-marker `agentPulse`) is the regression this
+    // pins.
+    expect(shell.match(/@keyframes/g) ?? []).toHaveLength(1);
+    expect(shell).toMatch(/@keyframes markPulse/);
+    expect(workspace).not.toMatch(/@keyframes/);
+    expect(editor).not.toMatch(/@keyframes/);
+    expect(
+      readRepo("frontend/src/components/tab-strip.module.css"),
+    ).not.toMatch(/@keyframes|animation:/);
+  });
+
+  it("mounts the tab's lane as the working area's own full-width chrome row", () => {
+    // Plan 124 visual review: the lane is chrome, not a pane — it spans the
+    // working area below the panes *and* the rail, so both end at its top edge,
+    // and the field's veil covers that same row while the lane's own z-index
+    // keeps its sheet above the veil (DESIGN.md §6/§12).
+    const view = readRepo("frontend/src/routes/workspace.module.css");
+    const panes = readRepo("frontend/src/shell/workspace-panes.module.css");
+    const lane = readRepo("frontend/src/shell/agent-lane.module.css");
+    // Two rows: panes beside the rail, then the lane; the route wrapper and the
+    // panes host pass through so the tab's own lane can be a grid item.
+    expect(view).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto/);
+    expect(view).toMatch(/\.viewMain\s*{\s*display:\s*contents/);
+    expect(panes).toMatch(/\.host\s*{\s*display:\s*contents/);
+    expect(view).toMatch(
+      /\.view\s*\[data-clay-ds="shell\.default\.footer\.rest"\]\s*{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*2/s,
+    );
+    // The rail keeps column 2 of the first row, so its height stops at the lane.
+    expect(view).toMatch(/\.rail\s*{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/s);
+    // The veil is the working area's row (panes + rail), and the lane sits
+    // above it: its field is the palette's query and its sheet rises over it.
+    expect(view).toMatch(
+      /\.view\s*\[data-panes="veil"\]\s*{[^}]*grid-area:\s*1\s*\/\s*1\s*\/\s*2\s*\/\s*-1/s,
+    );
+    expect(view).toMatch(/\.view\s*{[^}]*isolation:\s*isolate/s);
+    expect(panes).toMatch(/z-index:\s*var\(--clay-z-modal,\s*40\)/);
+    expect(lane).toMatch(/\.lane\s*{[^}]*z-index:\s*41/s);
   });
 
   it("keeps the sidebar a flush region and the rail a transient drawer when narrow", () => {

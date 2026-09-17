@@ -511,11 +511,13 @@ impl ClientEditQueue {
         &self,
         session_id: u64,
         query: String,
+        scope: Option<String>,
     ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
         self.sender.try_send(ClientMessage::MenuQueryUpdate {
             client_id: self.client_id,
             session_id,
             query,
+            scope,
         })
     }
 

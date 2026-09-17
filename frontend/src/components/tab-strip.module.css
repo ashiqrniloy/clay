@@ -193,17 +193,10 @@
   opacity: 0.75;
 }
 
+/* Plan 124: the tab's marker carries its state in the accent colour only. The
+ * window shows exactly one looping pulse — the mark's dot while the tab in view
+ * works (DESIGN.md §7/§9/§14.15), because a second blinking dot makes the tab
+ * strip read as two independent runs. */
 .agent[data-busy="true"] {
   color: var(--clay-accent-primary);
-  animation: agentPulse 1.1s ease-in-out infinite;
-}
-
-@keyframes agentPulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
 }

@@ -65,11 +65,11 @@ impl ServerMenuSessions {
         Self::default()
     }
 
-    /// Opens a new Control Center session (24.1's first kind) and returns its
-    /// initial snapshot plus the replaced session's id. One active session per
-    /// connection: the previous session (if any) is dropped and its id
-    /// returned, which the caller must report as `TransientMenuClosed` before
-    /// pushing the new snapshot.
+    /// Opens a new palette session (24.1's first kind — the composer's `/`
+    /// palette since plan 124 task 7) and returns its initial snapshot plus the
+    /// replaced session's id. One active session per connection: the previous
+    /// session (if any) is dropped and its id returned, which the caller must
+    /// report as `TransientMenuClosed` before pushing the new snapshot.
     pub(crate) fn open_control_center(
         &mut self,
         catalogue: &CommandCatalogue,
@@ -271,6 +271,29 @@ impl ServerMenuSession {
         }
     }
 
+    /// Plan 124: the palette's scope chip selection (`All` = `None`). Only the
+    /// command catalogue has scopes — its items carry them, and the palette's
+    /// chips must filter what the server selects over, so the client sends the
+    /// chip with its query instead of hiding rows locally (the client stays a
+    /// renderer, and the session's selection never points at a hidden row).
+    /// Sessions whose items carry no scope (path browser, pickers) ignore it:
+    /// `None` means "no snapshot from this call", and the caller keeps the one
+    /// it already had.
+    pub(crate) fn set_scope(&mut self, scope: Option<&str>) -> Option<TransientMenuSession> {
+        let scope: Option<String> = scope.map(|scope| {
+            scope
+                .chars()
+                .take(crate::perf::budgets::TRANSIENT_MENU_MAX_SCOPE_CHARS)
+                .collect()
+        });
+        match &mut self.kind {
+            ServerMenuSessionKind::ControlCenter(center) => {
+                Some(center.set_scope(scope.as_deref()))
+            }
+            ServerMenuSessionKind::PathBrowser(_) | ServerMenuSessionKind::AgentPicker(_) => None,
+        }
+    }
+
     /// Generic semantic Backspace (Phase 24.3): the session kind decides
     /// whether Backspace deletes query text (Control Center) or ascends when
     /// the filter is empty (path mode). An ascent produces a relist target
@@ -429,12 +452,21 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
             .items()
             .iter()
             .map(|item| {
-                TransientMenuItemData::new(
+                let projected = TransientMenuItemData::new(
                     item.id.clone(),
                     item.label.clone(),
                     item.detail.clone(),
                     item.accessibility_label.clone(),
-                )
+                );
+                // Plan 124: the row's scope tag and chords ride the item, so
+                // the palette draws its chips from server data (the scope
+                // vocabulary is closed and server-owned; a row without one is
+                // `All`-only).
+                let projected = match &item.scope {
+                    Some(scope) => projected.with_scope(scope.clone()),
+                    None => projected,
+                };
+                projected.with_bindings(item.bindings.clone())
             })
             .collect(),
         session.selected_index() as u32,
@@ -1046,14 +1078,16 @@ mod tests {
 
         let snapshot = snapshot_from_session(&store.get_mut(id).unwrap().session());
         assert_eq!(snapshot.session_id, id);
-        assert_eq!(snapshot.prompt, "Control Center");
+        assert_eq!(snapshot.prompt, "Commands");
         assert_eq!(snapshot.query, "markdown");
         assert_eq!(snapshot.items.len(), 3);
         // Items are label-sorted; the three package commands match.
         assert_eq!(snapshot.items[0].id, "markdown.refreshPreview");
         assert_eq!(snapshot.items[0].label, "Refresh Preview");
         assert_eq!(snapshot.focus_policy, TransientMenuFocusPolicyData::Modal);
-        assert_eq!(snapshot.origin, TransientMenuOriginData::Centered);
+        // Plan 124 task 7: the catalogue is the composer's palette, so the
+        // snapshot declares the bottom anchor the client draws in the lane.
+        assert_eq!(snapshot.origin, TransientMenuOriginData::CommandPalette);
     }
 
     #[test]

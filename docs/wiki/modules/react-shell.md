@@ -5,7 +5,10 @@
 - `frontend/src/app/{App,router,use-clay-session}.tsx`
 - `frontend/src/app/layout/{app-shell,tab-bar,working-area}.tsx`
 - `frontend/src/components/*`
-- `frontend/src/shell/{PaneTree,WorkspacePanes,workspace-controller,layout-state,use-shell-chords}.ts`
+- `frontend/src/shell/{PaneTree,WorkspacePanes,AgentLane,workspace-controller,layout-state,use-shell-chords}.ts`
+- `frontend/src/command-centre/{CommandPalette,CommandCentre}.tsx`
+- `frontend/src/coding-agent/{AgentView,CodingAgentPanel,Composer}.tsx`
+- `frontend/src/components/text-field.tsx`
 - `frontend/src/routes/{workspace,WorkspaceRail,fixture}.tsx`
 - `frontend/src/theme/{adapter,types}.ts`
 - `frontend/src/state/{theme-store,stores,connection-store}.ts`
@@ -77,6 +80,9 @@ The design-system migration re-laid the host chrome instead of re-skinning it
   left-aligned** (no centred measure, no line-number gutter, zero `.cm-content`
   padding), and the rail is
   `340px` (`312px` at `≤1240px`, a fixed drawer at `≤1000px`).
+  The grid now has a second row for Plan 124's persistent agent lane:
+  `WorkspacePanes` and its host are `display: contents`, the panes and rail
+  occupy row 1, and the lane occupies `grid-column: 1 / -1`, row 2.
   `WorkspaceRail.tsx` derives the outline from `## HH:MM — title` headings plus
   a facts list (file, revision, state, entries, words) and navigates through
   `DocumentSession.revealLine`; its visibility lives in
@@ -91,7 +97,11 @@ The design-system migration re-laid the host chrome instead of re-skinning it
   theme's `surface.scrim` role, and the reduced-transparency fallback in
   `frontend/src/styles/global.css` paints veil-bearing components opaque
   (`[data-clay-component]` / `[data-clay-slot]` selectors, not the retired
-  material attribute).
+  material attribute). Plan 124 splits the menu surface: centered picker and
+  package sessions still use `CommandCentre`, while command/path sessions use
+  `CommandPalette` as a child of the composer's `ClayTextField` menu slot.
+  The sheet is full field width, rises 6px above the field, and the `.veil` is
+  a row-1 grid item at z-index 40 while the lane stays at z-index 41.
 - **Consumption rule.** Component CSS must not carry geometry or colour
   literals: radius, border width, shadow, colour and duration come from
   `var(--clay-ds-*)` recipes or `var(--clay-*)` roles, with translucency
@@ -100,6 +110,40 @@ The design-system migration re-laid the host chrome instead of re-skinning it
   SDUI and package-workspace surfaces (no literals, recipes wired, fixed-slot
   panels flattened), and `frontend/src/test/design-system-consumption.test.ts`
   keeps every consumed variable backed by a recipe or a host fallback.
+
+## Plan 124: persistent agent lane and composer palette
+
+`WorkspacePanes` is the tab-owned composition root for both the workspace and
+agent views. It creates/adopts one `AgentSessionModule` per `TabRuntime`, runs
+`listSessions`, `requestBinding`, and `setUiVersion` bootstrap work there, and
+passes the same store to `AgentLane` and `AgentView`. The lane is mounted for
+every tab, remains mounted across view switches, and uses the per-tab
+`agentLane` visibility store; `hidden` removes it from paint and accessibility
+while preserving its draft and picker state. `Ctrl+X Ctrl+P` routes through
+`shell.toggleAgentLane`, a client-local command that persists `laneVisible` in
+`layout.json`.
+
+The lane contains the optional approval strip, the composer, and the session
+foot. Agent controls (agent type, model, effort, token meter) are the
+composer field's toolbar. The composer is keyboard-submit only: Enter submits,
+Stop appears only while streaming, and a missing provider leaves the field
+typable. `@` mentions remain a narrow field menu; their rows include skill
+ descriptions or file directories.
+
+The `/` palette is different from `@`: its query is the lane's composer field,
+not a second input. `CommandPalette` is rendered through the field's `menu`
+slot, so it is positioned 6px above and exactly as wide as the field. The
+server-owned menu snapshot supplies rows, scope (`All`, `Session`, `Shell`,
+`Files`), and binding chips. `WorkspacePanes` renders the shared modal scrim
+as a row-1 grid item over panes and the inspector rail; it excludes the lane,
+whose higher stacking level keeps the query and sheet interactive. When the
+lane hides, the palette and veil are both removed rather than leaving an
+orphaned scrim.
+
+Centered picker/package sessions remain the only `CommandCentre` consumer.
+The palette and Path Browser use `TransientMenuOrigin::CommandPalette`, do not
+run package JavaScript on query or paint paths, and carry no new package
+layout or authority surface.
 
 ## Code Examples
 
@@ -138,6 +182,15 @@ const router = createMemoryRouter(routes, {
 - `frontend/src/test/components.test.tsx`: keyboard/focus for button, field,
   list, collapse, modal.
 - `frontend/src/test/shell.test.tsx`: landmarks, fixture states, separator.
+- `frontend/src/test/workspace-composition.test.tsx`: shell grid rows, full-width
+  lane, veil stacking/coverage, and the single brand-dot run signal.
+- `frontend/src/shell/{AgentLane,WorkspacePanes,shell-chords}.test.tsx`:
+  lane composition, palette lifecycle, client command routing, and chord
+  catalogue behavior.
+- `frontend/src/coding-agent/Composer.test.tsx` and
+  `frontend/src/command-centre/CommandPalette.test.tsx`: keyboard-only
+  submission/Stop, agent-control states, slash scopes/binding chips, mentions,
+  and palette activation.
 - `frontend/src/test/performance.test.tsx`: store notify count, reducer
   identity for non-lifecycle envelopes.
 - `src/shell/theme.rs` + `tests/theme_packages.rs`: 91-token snapshot and

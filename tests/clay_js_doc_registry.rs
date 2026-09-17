@@ -2018,6 +2018,117 @@ fn phase22_8_programmatic_surface_inventory_is_closed() {
 }
 
 #[test]
+fn plan124_agent_lane_api_and_palette_command_are_documented() {
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let lane = registry
+        .by_id("shell.toggleAgentLane")
+        .expect("Plan 124 agent-lane API must be registry-public");
+
+    assert_eq!(lane.js_module, "clay:shell");
+    assert_eq!(lane.js_export, "toggleAgentLane");
+    assert_eq!(lane.user_facing_name, "Toggle Agent Lane");
+    assert_eq!(lane.key_bindings, vec!["Ctrl+X Ctrl+P"]);
+    assert!(lane.custom_properties.is_empty());
+    assert!(lane.permissions.is_empty());
+    assert_eq!(
+        lane.documentation_path,
+        "docs/reference/clay-js-api/shell/toggle-agent-lane.md"
+    );
+    assert!(root.join(&lane.documentation_path).is_file());
+
+    let docs_index = std::fs::read_to_string(root.join("docs/index.md")).expect("read docs index");
+    assert!(
+        docs_index.contains(
+            "reference/clay-js-api/shell/toggle-agent-lane.md) — `shell.toggleAgentLane`"
+        )
+    );
+
+    let shell =
+        std::fs::read_to_string(root.join("runtime/js/shell.js")).expect("read shell facade");
+    let declarations = std::fs::read_to_string(root.join("runtime/js/shell.d.ts"))
+        .expect("read shell declarations");
+    assert!(shell.contains("export function toggleAgentLane()"));
+    assert!(shell.contains("return \"shell.toggleAgentLane\""));
+    assert!(declarations.contains("ToggleAgentLaneCommandId"));
+    assert!(declarations.contains("function toggleAgentLane"));
+
+    let keybindings =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey API doc");
+    for marker in [
+        "## Plan 124 shell and palette command IDs",
+        "`shell.toggleAgentLane`",
+        "`controlCenter.open`",
+        "`Ctrl+X Ctrl+P`",
+        "`Ctrl+X Ctrl+O`",
+        "no standalone `clay:controlCenter` facade",
+        "no filesystem, network, process, shell",
+        "open_command_centre_session",
+    ] {
+        assert!(
+            keybindings.contains(marker),
+            "bindKey docs must document Plan 124 marker {marker:?}"
+        );
+    }
+
+    // The palette remains a built-in command target, not a second callable JS
+    // facade. Its launch route is documented through bindKey above.
+    assert!(
+        registry.by_id("controlCenter.open").is_none(),
+        "controlCenter.open must remain a command-only surface"
+    );
+    let command_doc = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/commands/server-register-command.md"),
+    )
+    .expect("read command registration API doc");
+    assert!(
+        command_doc
+            .contains("`controlCenter.open` — shipped with the Plan 124 default `Ctrl+X Ctrl+O`")
+    );
+}
+
+#[test]
+fn plan124_configuration_contract_uses_existing_keybinding_api() {
+    let root = repository_root();
+    let config = std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+        .expect("read configuration API contract");
+
+    for marker in [
+        "## Plan 124 persistent agent lane and composer palette configuration review",
+        "`shell.toggleAgentLane`",
+        "`controlCenter.open`",
+        "`Ctrl+X Ctrl+P`",
+        "`Ctrl+X Ctrl+O`",
+        "listKeyBindings(\"global\")",
+        "laneVisible",
+        "custom_properties = []",
+        "agentLane.defaultVisibility",
+        "no standalone `clay:controlCenter` facade",
+    ] {
+        assert!(
+            config.contains(marker),
+            "configuration docs must document Plan 124 marker {marker:?}"
+        );
+    }
+
+    let inventory =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+            .expect("read API inventory");
+    let lane_start = inventory
+        .find("id = \"shell.toggleAgentLane\"")
+        .expect("lane command must be in API inventory");
+    let lane_entry = &inventory[lane_start..];
+    assert!(
+        lane_entry
+            .lines()
+            .take_while(|line| !line.starts_with("[[api]]"))
+            .any(|line| line.trim() == "custom_properties = []"),
+        "lane command must declare no hidden configuration properties"
+    );
+}
+
+#[test]
 fn configuration_api_documents_phase22_8_workspace_surface_without_new_keys() {
     // Plan 079 task 11: Phase 22.8 reuses bindKey; per-tab roots and pane
     // visibility remain server/client implementation state.

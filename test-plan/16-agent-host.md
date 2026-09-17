@@ -148,3 +148,20 @@ input-capable host.
 | Recall rules unchanged | PASS automated | `OM attach records an observation; recall round-trips a known id; invalid id fails closed`; `chat session without OM attach has no recall tool` (unchanged suites) |
 | Daemon suite | PASS automated | Fresh `clay-agent npm test`: 180 pass / 0 fail / 1 pre-existing skip (181 total; `spawn-agent` supervisor steps apply unchanged) |
 | Live GUI steps | NOT RUN | Same host ceiling as the plan 120 record; this cut adds no user-visible chrome, so no manual step is weakenable by it |
+
+## Plan 124 steps (the lane is Clay-owned shell chrome, 2026-09-17)
+
+Deep references: `DESIGN.md` §12, `docs/reference/packages/creating-packages.md`
+(plan 124 authoring contract), `frontend/src/coding-agent/surface-state.ts`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| A21 | Open a tab with an agent, open the agent view, and inspect the lane + the view together; hide/show the lane; finally switch the tab's workspace root | The lane and the agent view read **one** tab session (the store is hoisted to the tab runtime): the same transcript, model, effort, and environment foot, and `session.list` shows one session for the tab — hiding/showing the lane forms no second session and no remount, and a workspace re-bind moves both surfaces together. Automated: `frontend/src/shell/WorkspacePanes.test.tsx` (one store per tab runtime), daemon session-isolation suite |
+| A22 | With no provider configured, inspect the lane; then try to make a package render into the lane (package UI/layout manifest, overlay or panel contribution) | The lane is Clay-owned shell chrome, not a contribution slot: no package manifest field or SDUI contribution can compile into the lane's composer, controls, approval strip, or foot — package surfaces keep rendering through their existing panels/overlays/dialogs. The lane's foot reports host truth only (workspace root, git branch, loaded extensions, MCP connection summary) and with no provider it reports `no provider configured · Settings · Providers` with a disabled model trigger rather than a fabricated provider row. Automated: `packages/coding-agent` manifest tests, `tests/package_ui_conformance.rs`, `AgentLane.test.tsx` |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+| Step | Result | Evidence |
+|---|---|---|
+| A21 | PASS automated | One store per tab runtime, adoption/diposal on close, and shared derived state are pinned by `frontend/src/shell/WorkspacePanes.test.tsx` + `AgentLane.test.tsx`; the daemon-side one-session-per-workspace rule is unchanged by this plan. Live: the lane and the agent view rendered from the same tab session in the canonical launch (single `session.list` entry per tab). |
+| A22 | PASS live (no-provider truth) + automated (boundary) | Live: the canonical config configures no provider, and the lane reported `no provider configured · Settings · Providers` with the disabled `Configure a provider` model trigger (capture `test-plan/artifacts/124-agent-lane/14-agent-attached.png`). The "no package UI in the lane" boundary is documented in the plan-124 authoring contract and pinned by the package UI conformance tests. |

@@ -23,15 +23,45 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--clay-dimension-rail-width, 340px);
+  /* Two rows: the two views beside the rail, then the tab's lane as the row
+   * below both (DESIGN.md §12 — the lane is the working area's own chrome
+   * strip, so the sidebar *and* the rail end at its top edge and it spans the
+   * full working-area width). */
+  grid-template-rows: minmax(0, 1fr) auto;
+  /* Backdrop root for the field's veil and the stacking context the lane's
+   * z-index climbs in: the blur must sample the working area, never the lane
+   * the spec leaves above it (DESIGN.md §6). */
+  position: relative;
+  isolation: isolate;
 }
 
+/* The route's wrapper and the panes host are layout-transparent (each states
+ * `display: contents` in its own sheet): the views, the rail and the lane keep
+ * their own boxes and are this grid's items, which is what lets the lane —
+ * owned by the tab, not by the route — take the full-width row. Every item is
+ * placed explicitly, so the row the lane takes is not a matter of DOM order. */
+.viewMain {
+  display: contents;
+}
+
+.view [data-panes="view-area"] {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* The field's menus veil the working area's own row: the panes *and* the rail,
+ * never the lane below (§6). It shares the cell with the panes and paints above
+ * them (the lane's own z-index keeps its sheet above this). */
+.view [data-panes="veil"] {
+  grid-area: 1 / 1 / 2 / -1;
+}
+
+.view [data-clay-ds="shell.default.footer.rest"] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
 .view[data-rail="collapsed"] {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.viewMain {
-  min-width: 0;
-  min-height: 0;
 }
 
 .editor {
@@ -42,6 +72,10 @@
 /* ---------- right rail -------------------------------------------------- */
 
 .rail {
+  /* Column 2, beside the views and above the lane (§12: it ends at the lane's
+   * top edge). */
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;

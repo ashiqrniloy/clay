@@ -18,9 +18,11 @@ The session stores prompt text, query text, a bounded item list, selection index
 
 `TransientMenuSessionId` is a stable numeric session identifier. A new session starts with a prompt, an empty query, no items, selection at zero, and an `Empty` status. Items are supplied through `with_items`, which caps the list at `MAX_ITEMS` (256), resets selection to zero, and sets `Active` status when items exist.
 
-`TransientMenuItem` holds a display label, optional detail text, accessibility label, provenance (`BuiltIn` or `Package { name, version }`), and an inert `TransientMenuAction`. Item labels are capped at `MAX_LABEL_CHARS` (128), details at `MAX_DETAIL_CHARS` (256), and accessibility labels at `MAX_ACCESSIBILITY_LABEL_CHARS` (256). Before hosted Masonry projection, `compose_menu_item_accessibility_label` removes controls/path separators, falls back from an invalid accessibility label to the display label and then `Menu item`, and keeps the selected suffix inside the 256-character ceiling; display/action fields remain unchanged. Command-palette actions carry only a command ID plus bounded JSON arguments. Completion actions carry only `CompletionMenuAcceptAction` text-replacement metadata: request/document/version IDs, replacement range, insert text, and commit characters. No item carries callbacks, native handles, raw CSS, raw op names, or executable code.
+`TransientMenuItem` holds a display label, optional detail text, accessibility label, provenance (`BuiltIn` or `Package { name, version }`), an inert `TransientMenuAction`, and Plan 124's optional scope/group plus bounded binding strings for palette presentation. Item labels are capped at `MAX_LABEL_CHARS` (128), details at `MAX_DETAIL_CHARS` (256), and accessibility labels at `MAX_ACCESSIBILITY_LABEL_CHARS` (256). Before hosted Masonry projection, `compose_menu_item_accessibility_label` removes controls/path separators, falls back from an invalid accessibility label to the display label and then `Menu item`, and keeps the selected suffix inside the 256-character ceiling; display/action fields remain unchanged. Command-palette actions carry only a command ID plus bounded JSON arguments. Completion actions carry only `CompletionMenuAcceptAction` text-replacement metadata: request/document/version IDs, replacement range, insert text, and commit characters. No item carries callbacks, native handles, raw CSS, raw op names, or executable code.
 
-`update_query` replaces the query text (capped at `MAX_QUERY_CHARS` / 256) and resets selection to zero. The session does not automatically re-filter its backing list; callers (such as a future Control Center builder) own the filtering policy and call `with_items` with a freshly filtered snapshot. This keeps the session state simple, deterministic, and bounded.
+`update_query` replaces the query text (capped at `MAX_QUERY_CHARS` / 256) and resets selection to zero. The session does not automatically re-filter its backing list; callers such as `ControlCenter` own the filtering policy and call `with_items` with a freshly filtered snapshot. Plan 124 adds
+server-owned scope filtering before the same fuzzy ranking. This keeps the
+session state simple, deterministic, and bounded.
 
 Selection movement uses `select_next` and `select_previous`, which wrap at list boundaries. `activate_selected` returns the action of the selected item, or `None` when the list is empty. `cancel` sets `Cancelled` status; `is_active` returns false only when cancelled.
 
@@ -37,7 +39,7 @@ use crate::shell::transient_menu::{
     TransientMenuItemProvenance, TransientMenuSession, TransientMenuSessionId,
 };
 
-let session = TransientMenuSession::new(TransientMenuSessionId(1), "Control Center")
+let session = TransientMenuSession::new(TransientMenuSessionId(1), "Commands")
     .with_focus_policy(TransientMenuFocusPolicy::Modal)
     .with_items(vec![
         TransientMenuItem::new(
@@ -60,7 +62,7 @@ Packages reach a transient menu only through server-owned workflows such as the 
 
 ## Integration with Shell, Control Center, and Command Execution
 
-`TransientMenuSession` lives in `src/shell/transient_menu.rs` and is declared in `src/shell/mod.rs`. It does not render itself. Phase 18.8 Task 6 projects the session onto existing shell transient-overlay and component primitives through `TransientPackageOverlay::from_menu_session` in `src/shell/package_ui.rs`. The projection creates a bottom-anchored overlay with a `stack` root containing prompt/query labels, an empty-status `statusItem`, or a `list` of selectable items. The selected item is marked so Masonry renders a highlight. The overlay is anchored to the bottom of the main editor pane and does not consume fixed-slot geometry, so editor region and caret hit-testing remain unchanged while the menu is visible.
+`TransientMenuSession` lives in `src/shell/transient_menu.rs` and is declared in `src/shell/mod.rs`. It does not render itself. Historical Masonry projection uses `TransientPackageOverlay::from_menu_session`; current server-owned command/path sessions use `TransientMenuOrigin::CommandPalette` and are rendered by the React `CommandPalette` field child. The projection creates a bottom-anchored overlay with a `stack` root containing prompt/query labels, an empty-status `statusItem`, or a `list` of selectable items. The selected item is marked so Masonry renders a highlight. The overlay is anchored to the bottom of the main editor pane and does not consume fixed-slot geometry, so editor region and caret hit-testing remain unchanged while the menu is visible.
 
 `SduiNativeState` stores an optional active menu and includes it in overlay observation and paint. `PaneDocumentView::local_key` in `src/masonry_pane_document.rs` runs `route_menu_key` before editor key routing: arrow keys move selection locally, Enter/Tab enqueues a server-first command intent for the selected item's inert action (completion items produce a local accept edit instead), and Escape cancels and clears the menu. Editor command routing resumes when no menu is active. No package JavaScript, command execution, or IPC round-trip runs inside Masonry paint/layout/pointer/key/text handlers.
 
@@ -96,7 +98,9 @@ Phase 20.5 added `TransientMenuOrigin` (`src/shell/transient_menu.rs`) to distin
 
 24.1 adds an additive second class: **server-owned** interactive sessions (the Command Centre round trip; see [Transient Menu Round Trip](transient-menu-round-trip.md)). The server owns the session and pushes bounded snapshots; the client renders and forwards keystrokes only. The session shell gained three `pub(crate)` builders for this:
 
-- `from_snapshot_data(data)` — hydrates an inert wire DTO (`TransientMenuSnapshotData`) into a session: `new(session_id, prompt)` → `with_items` → `with_query` → `with_focus_policy` → `with_origin` → `with_empty_status` (wire `Empty`) → `with_selected_index`. Items are inert (action = `TransientMenuAction::new(id)`), no provenance (not on the wire).
+- `from_snapshot_data(data)` — hydrates an inert wire DTO (`TransientMenuSnapshotData`) into a session: `new(session_id, prompt)` → `with_items` → `with_query` → `with_focus_policy` → `with_origin` → `with_empty_status` (wire `Empty`) → `with_selected_index`. Items remain inert
+(`TransientMenuAction::new(id)`); protocol v31 also preserves bounded scope,
+group, and binding metadata for palette presentation.
 - `with_query(query)` — truncates to `TRANSIENT_MENU_MAX_QUERY_CHARS`; no status/selection side effects (unlike `update_query`).
 - `with_selected_index(index)` — restores a persisted selection, clamped to `items.len().saturating_sub(1)`, empty list maps to 0.
 
@@ -110,21 +114,20 @@ The session itself never ranks items — filtering policy stays with the caller.
 
 The [Path Browser](path-browser.md) is the second server-owned session kind and the first that treats the query line as an editable path bar: the session derives a filter fragment from the input (split at the last platform separator), scores its **installed** bounded entries with the same shared scorer, and projects prompt `Browse · {canonical_dir}` / query = input / inert empty-string actions through the identical builder chain (`with_items`/`with_selected_index`/`with_empty_status`). Filter-only edits never touch the filesystem — only directory-prefix changes relist.
 
-## Phase 24.4: centered dialog accessibility and containment
+## Plan 124: composer palette projection
 
-Command Centre command/path snapshots use `TransientMenuOrigin::Centered`.
-`TransientPackageOverlay::from_menu_session` carries the sanitized prompt,
-selected item labels, and a bounded result-count string to the retained
-`PackageRegionWidget`. The window-level `PackageOverlayHost` is the modal
-`Role::Dialog`; its child region is the `Role::Menu` with `Role::MenuItem`
-children and one stable polite `Role::Status` count node.
+Command and path sessions use `TransientMenuOrigin::CommandPalette`.
+`WorkspacePanes` owns the server-menu callbacks and passes the snapshot to
+`Composer`; `CommandPalette` renders inert rows, the server-provided scope and
+binding fields, the empty state, and one polite result count. The composer's
+field remains the only input and focus boundary.
 
-Masonry focus stays on the originating pane. `PaneDocumentView` routes
-server-owned modal keys through the existing intent queue and consumes unknown
-keys, queue failures, clipboard paste, and IME events instead of allowing
-editor mutation. The centered root layer swallows scrim pointer events. Query
-and selection snapshots reconcile the same root/region and synthetic AccessKit
-IDs; selection changes with unchanged count do not re-announce.
+The sheet is a child of the field's `menu` slot, full field width, 6px above
+the field, and capped at `min(52vh, 420px)`. The working-area grid owns one
+modal veil over panes and the inspector rail; the lane stays above it and
+interactive. Hiding the lane removes the palette session's veil as well, so
+there is no stranded scrim. Centered `CommandCentre` remains valid for
+non-palette picker/package sessions.
 
 ## Plan 087: caret-adjacent completion projection
 
@@ -178,7 +181,12 @@ focus-restoration behavior.
 - `src/masonry_pane_document.rs`: `server_menu_snapshot_hydration_preserves_display_fields`
 - `src/masonry_pane_document.rs`: `server_menu_closed_clears_only_the_matching_session`
 - `src/masonry_pane_document.rs`: `server_menu_snapshot_replaces_and_resyncs_query_buffer`
-- `src/masonry_package_region.rs`: `menu_selection_keeps_selected_row_in_scroll_viewport`, `centered_command_center_scrolls_60_results_without_overflow`, `package_menu_accessibility_labels_are_sanitized_bounded_and_consumer_valid`
+- `src/masonry_package_region.rs`: retained menu selection/scroll and
+  accessibility-bound checks for Masonry-owned menus
+- `frontend/src/command-centre/{CommandPalette,CommandPalette.test.tsx}`:
+  palette rows, scope/binding fields, empty state, result count, and activation
+- `frontend/src/shell/{WorkspacePanes,AgentLane,WorkspacePanes.test.tsx}`:
+  composer ownership, veil/lane lifecycle, and per-tab palette routing
 - `src/masonry_pane_document.rs`: `local_menu_open_cancels_the_active_server_session`
 - `src/masonry_pane_document.rs`: `menu_sync_pending_semantics` (2-arg `push` + `push_server`)
 - `src/editor/surface/mod.rs`: `editor_accepts_completion_as_local_replacement`
@@ -212,4 +220,6 @@ cargo test --lib masonry_pane_document --quiet
 - [Fuzzy Matching](fuzzy-matching.md) — the shared bounded query scorer (Phase 24.2)
 - [Phase 20.5 Overlay, Menu, and Input Components](../archive/phase20.5-overlay-menu-input-components.md) — `TransientMenuOrigin`, z-level stacking, new component kinds
 - [Shell/Layout Strategy Reference](../../reference/primitives/shell-layout-strategy.md)
-- [Repeatable UI Review Harness](ui-review-harness.md) — plan 087 fixture/capture workflow exercising completion and centered menus live
+- [Repeatable UI Review Harness](ui-review-harness.md) — fixture/capture workflow and host ceilings
+- `test-plan/artifacts/124-agent-lane/` — Plan 124 live palette/lane evidence
+- [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md) — current composer-owned palette

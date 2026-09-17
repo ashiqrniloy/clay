@@ -1,0 +1,137 @@
+/* The agent lane (plan 124): the shell's one bottom section, mounted once per
+ * tab beside the two view slots. Chrome, not a panel — it inherits the canvas
+ * and draws one hairline on its inner edge (DESIGN.md §6/§11/§12). */
+
+.lane {
+  position: relative;
+  /* Above the composer's own menus' veil (z-index 40, the modal tier): the
+   * field the menu answers to never dims, and the sheet it opens rises over
+   * that veil from inside this lane (§6/§12). */
+  z-index: 41;
+  flex: none;
+  background: inherit;
+  border-top-width: var(--clay-ds-shell-default-footer-rest-border-width);
+  border-top-style: var(--clay-ds-shell-default-footer-rest-border-style);
+  border-top-color: var(--clay-ds-shell-default-footer-rest-border-color);
+}
+
+/* The tab's own controls ride inside the composer box, under the field: the
+ * box stays the only boundary around both rows (§11). */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 6px);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.pick {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The agent-type picker as a *control* (the agent view's title is gone, plan
+ * 124): the `agentPicker` family supplies colour, radius and transition; the
+ * weight is muted chrome, not a heading. */
+[data-clay-component="agentPicker"][data-clay-slot="trigger"] {
+  background-color: var(
+    --clay-ds-agent-picker-default-trigger-rest-background-color
+  );
+  border-radius: var(--clay-ds-agent-picker-default-trigger-rest-border-radius);
+  color: var(
+    --clay-text-muted,
+    var(--clay-ds-agent-picker-default-trigger-rest-text-color)
+  );
+  font-size: var(--clay-text-caption-size);
+  font-weight: 500;
+  padding-inline: var(--clay-spacing-xxs, 6px);
+  transition-duration: var(
+    --clay-ds-agent-picker-default-trigger-rest-transition-duration
+  );
+  transition-timing-function: var(
+    --clay-ds-agent-picker-default-trigger-rest-transition-timing
+  );
+}
+
+/* Context meter (plan 117): real values only, beside the model it measures. */
+.meter {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.meterTrack {
+  width: 56px;
+  height: 3px;
+  border-radius: var(--clay-ds-stat-row-default-bar-rest-border-radius);
+  background: color-mix(in srgb, var(--clay-text-primary) 12%, transparent);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--clay-ds-stat-row-default-bar-rest-border-radius);
+  background: var(--clay-ds-stat-row-default-bar-rest-background-color);
+}
+
+.meterValue,
+.meterWarning,
+.meterError {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.meterValue {
+  color: var(--clay-text-muted);
+}
+
+.meterWarning {
+  color: var(--clay-diagnostic-warning);
+}
+
+.meterError {
+  color: var(--clay-diagnostic-error);
+}
+
+/* Session environment: root · branch · extensions — MCP summary right. The
+ * lane's foot states the environment only, never a run cue (§12). */
+.foot {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-ds-shell-default-footer-rest-padding);
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+  color: var(--clay-ds-shell-default-footer-rest-text-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+}
+
+.faint {
+  color: var(--clay-text-disabled);
+}
+
+/* The one reason nothing would send: stated where the environment is. */
+.note {
+  color: var(--clay-diagnostic-warning);
+}
+
+.foot [data-tone="ok"] {
+  color: var(--clay-text-primary);
+}

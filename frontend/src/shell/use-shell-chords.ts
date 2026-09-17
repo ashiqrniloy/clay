@@ -42,10 +42,13 @@ function eventMatchesStroke(
 
 /** Default client-local shell chords from test-plan/13 and /14, plus the
  *  shell-side matcher for Global server-first manifest chords (e.g.
- *  `Ctrl+X Ctrl+P` → `controlCenter.open`): the editor keymap owns those
- *  only inside `.cm-editor`, so outside editor focus the shell resolves
- *  them — otherwise the Command Centre is unreachable with no document
- *  open. */
+ *  `Ctrl+X Ctrl+P` → `shell.toggleAgentLane`, `Ctrl+X Ctrl+O` →
+ *  `controlCenter.open`): the editor keymap owns those only inside
+ *  `.cm-editor`, so outside editor focus the shell resolves them —
+ *  otherwise the lane and the palette are unreachable with no document
+ *  open. The lane's chord dispatches a server intent like any other
+ *  server-first command; the server answers it with the client command
+ *  (`workspace-commands.ts` flips the per-tab layout state). */
 export function useShellChords(
   workspace: WorkspaceController,
   enabled: boolean,

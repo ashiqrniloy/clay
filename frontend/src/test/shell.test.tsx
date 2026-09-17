@@ -206,6 +206,25 @@ describe("app shell landmarks", () => {
     expect([...(header?.children ?? [])].at(-1)?.tagName).toBe("NAV");
   });
 
+  it("carries the window's run signal on the mark, not in the tab strip (plan 124)", async () => {
+    workspace.reset();
+    workspace.installBootstrap(readyBootstrap);
+    const { container } = renderAt("/workspace");
+    const brand = () => container.querySelector("header > span");
+    // At rest: the mark holds no animation (the tab is not working).
+    expect(brand()).toHaveAttribute("data-busy", "false");
+    // The tab runtime's own run state is what the mark reads — the lane
+    // reports it, and a hidden agent view still marks its window.
+    await act(async () => {
+      workspace.setAgentBusy(1, true);
+    });
+    expect(brand()).toHaveAttribute("data-busy", "true");
+    await act(async () => {
+      workspace.setAgentBusy(1, false);
+    });
+    expect(brand()).toHaveAttribute("data-busy", "false");
+  });
+
   it("carries mono status data and the keyboard hint row", () => {
     renderAt("/workspace");
     // Left: where the window is; middle: the connection; right: the real
@@ -220,6 +239,13 @@ describe("app shell landmarks", () => {
     expect(hints.some((label) => label?.includes("palette"))).toBe(true);
     expect(hints.some((label) => label?.includes("files"))).toBe(true);
     expect(hints.some((label) => label?.includes("outline"))).toBe(true);
+    // Plan 124: the lane toggle is a hint of its own, on the chord the
+    // manifest binds (`Ctrl+X Ctrl+P`).
+    const laneHint = [...(bar?.querySelectorAll("button") ?? [])].find(
+      (button) => button.textContent?.includes("lane"),
+    );
+    expect(laneHint?.textContent).toContain("Ctrl");
+    expect(laneHint?.textContent).toContain("P");
     // Every hint shows its keys as kbd chips, not as prose.
     for (const button of bar?.querySelectorAll("button") ?? []) {
       expect(button.querySelectorAll("kbd").length).toBeGreaterThan(0);

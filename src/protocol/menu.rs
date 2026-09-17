@@ -27,8 +27,9 @@
 //! never cross the wire. This DTO is the stable protocol projection.
 
 use crate::perf::budgets::{
-    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_DETAIL_CHARS,
-    TRANSIENT_MENU_MAX_ITEMS, TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS,
+    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_BINDING_CHARS,
+    TRANSIENT_MENU_MAX_BINDINGS, TRANSIENT_MENU_MAX_DETAIL_CHARS, TRANSIENT_MENU_MAX_ITEMS,
+    TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS, TRANSIENT_MENU_MAX_SCOPE_CHARS,
 };
 
 /// Char-count truncation shared by every bounded snapshot field.
@@ -53,13 +54,27 @@ pub struct TransientMenuItemData {
     pub id: String,
     pub label: String,
     pub detail: Option<String>,
+    /// Plan 124: the item's scope tag — the palette's `All · Session · Shell ·
+    /// Files` chips. A **closed vocabulary the server owns**: today `session`
+    /// (the agent package's commands), `shell` (the app's own commands) and
+    /// `files` (the palette's path mode), so the client renders a chip per word
+    /// it is given and never derives one from a command id. `None` = the row
+    /// belongs to no scope: it shows under `All` only.
+    pub scope: Option<String>,
+    /// Plan 124: the command's effective chords, in the app's own spelling
+    /// (`"Ctrl+X Ctrl+P"`), most-significant first; empty when unbound. The
+    /// client draws a chip group per chord and splits its strokes itself — the
+    /// binding is display data here, not prose inside `detail`.
+    pub bindings: Vec<String>,
     pub accessibility_label: String,
 }
 
 impl TransientMenuItemData {
     /// Build with label/detail/accessibility clamped to the shared menu
     /// budgets (`TRANSIENT_MENU_MAX_LABEL_CHARS`, `_DETAIL_CHARS`,
-    /// `_ACCESSIBILITY_LABEL_CHARS`).
+    /// `_ACCESSIBILITY_LABEL_CHARS`). Scope and bindings default empty; set
+    /// them with [`Self::with_scope`] / [`Self::with_bindings`], which apply
+    /// their own budgets.
     pub fn new(
         id: impl Into<String>,
         label: impl Into<String>,
@@ -70,11 +85,30 @@ impl TransientMenuItemData {
             id: id.into(),
             label: truncate(&label.into(), TRANSIENT_MENU_MAX_LABEL_CHARS),
             detail: detail.map(|d| truncate(&d, TRANSIENT_MENU_MAX_DETAIL_CHARS)),
+            scope: None,
+            bindings: Vec::new(),
             accessibility_label: truncate(
                 &accessibility_label.into(),
                 TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS,
             ),
         }
+    }
+
+    /// Set the item's scope tag, clamped to `TRANSIENT_MENU_MAX_SCOPE_CHARS`.
+    pub fn with_scope(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(truncate(&scope.into(), TRANSIENT_MENU_MAX_SCOPE_CHARS));
+        self
+    }
+
+    /// Set the item's chords, keeping at most `TRANSIENT_MENU_MAX_BINDINGS`
+    /// entries of at most `TRANSIENT_MENU_MAX_BINDING_CHARS` chars each.
+    pub fn with_bindings(mut self, bindings: Vec<String>) -> Self {
+        self.bindings = bindings
+            .into_iter()
+            .take(TRANSIENT_MENU_MAX_BINDINGS)
+            .map(|binding| truncate(&binding, TRANSIENT_MENU_MAX_BINDING_CHARS))
+            .collect();
+        self
     }
 }
 
@@ -119,9 +153,11 @@ pub enum TransientMenuFocusPolicyData {
 }
 
 /// Mirrors `TransientMenuOrigin` (shell layer): selects the overlay anchor
-/// (`Bottom`/`Pointer`/`Main`) or, Phase 24.4, the window-centered Command
-/// Centre surface (`Centered`). Additive: `CommandPalette` remains the
-/// compatibility spelling for the bottom origin.
+/// (`Bottom`/`Pointer`/`Main`) or, Phase 24.4, the window-centered surface
+/// (`Centered`). Additive: `CommandPalette` remains the compatibility spelling
+/// for the bottom origin, which plan 124 task 7 uses for the composer's `/`
+/// palette (command catalogue and its path mode) while `Centered` keeps the
+/// window-level menu sessions (pickers, package menus).
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -306,6 +342,7 @@ mod tests {
             client_id: 42,
             session_id: 1 << 63 | 7,
             query: "reload config".to_string(),
+            scope: Some("shell".to_string()),
         };
         let frame = codec.encode_client_message(&message).unwrap();
         let restored = codec.decode_client_message(&frame).unwrap();
@@ -376,6 +413,8 @@ mod tests {
                         Some(long.clone()),
                         long.clone(),
                     )
+                    .with_scope(long.clone())
+                    .with_bindings(vec![long.clone(); TRANSIENT_MENU_MAX_BINDINGS + 2])
                 })
                 .collect(),
             0,
@@ -404,6 +443,15 @@ mod tests {
                 item.accessibility_label.chars().count(),
                 TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS
             );
+            // Plan 124: the scope tag and the chords are bounded too.
+            assert_eq!(
+                item.scope.as_ref().unwrap().chars().count(),
+                TRANSIENT_MENU_MAX_SCOPE_CHARS
+            );
+            assert_eq!(item.bindings.len(), TRANSIENT_MENU_MAX_BINDINGS);
+            for binding in &item.bindings {
+                assert_eq!(binding.chars().count(), TRANSIENT_MENU_MAX_BINDING_CHARS);
+            }
         }
         // Non-string fields are preserved verbatim.
         assert_eq!(snapshot.session_id, 1);

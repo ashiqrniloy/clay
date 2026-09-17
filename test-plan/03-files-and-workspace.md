@@ -76,6 +76,17 @@ binding from Setup.
 
 ## Path Browser — dired-style filesystem browsing (Phase 24.3)
 
+**Plan 124 note (2026-09-17).** The Path Browser was re-anchored with the
+command surface: it renders as the same composer-width bottom sheet as the `/`
+palette (server origin `CommandPalette`) instead of a centered panel, sharing
+the `modal.scrim` veil over the panes + inspector rail. The step expectations
+below keep their semantics (seed fallback, fuzzy filter, descend/ascend/jump,
+recovery, security checks, one named dialog + one polite status); read
+"centered" placement statements against module 10 K92–K99 (sheet anchoring and
+veil) and the plan-124 execution record in `test-plan/index.md`. F30's
+"one centered Spotlight-style panel dims full window" is the historical
+geometry.
+
 Built-in server-first browse workflow (`controlCenter.openPath`, shipped with
 the temporary default `Ctrl+Alt+P` chord — no init.js needed; see module 10
 K48–K53 for rebind/unbind). Deep reference:

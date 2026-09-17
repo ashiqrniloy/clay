@@ -262,7 +262,7 @@
 }
 .dropdownItemHint {
   color: var(--clay-text-muted);
-  font-family: var(--clay-font-mono, monospace);
+  font-family: var(--clay-font-monospace);
   font-size: var(--clay-text-status-size, 11px);
 }
 /* Provenance note under the list (where the values come from). */

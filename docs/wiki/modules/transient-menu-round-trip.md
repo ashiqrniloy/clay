@@ -15,15 +15,17 @@ accept hot path. Phase 24.1 adds a second, additive session class —
 the session, filters on query updates, moves selection, and executes the
 selected item. The client renders server-pushed bounded snapshots and only
 forwards keystrokes. The proving session kind is the Control Center
-(`controlCenter.open`); path mode (24.3) and the centered surface (24.4)
-build on the same transport.
+(`controlCenter.open`); path mode (24.3) and Plan 124's composer-anchored
+palette build on the same transport. Centered remains only a presentation
+origin for picker/package sessions.
 
 ## Source files
 
 - `src/protocol/menu.rs`: wire DTOs — `TransientMenuSnapshotData`,
   `TransientMenuItemData`, `TransientMenuStatusData`,
   `TransientMenuFocusPolicyData`, `TransientMenuOriginData` (rkyv-archived,
-  inert display data only, no action payloads).
+  inert display data only, no action payloads); protocol v31 adds row
+  `group`/`bindings`/`scope` fields.
 - `src/protocol/mod.rs`: `ClientMessage` variants `MenuQueryUpdate`,
   `MenuSelectionMove {delta}`, `MenuActivate`, `MenuCancel`; boxed
   `ServerMessage` variants `TransientMenuSnapshot(Box<TransientMenuSnapshotData>)`
@@ -43,7 +45,11 @@ build on the same transport.
   `dispatch_server_menu_key`; `handle_text_event` Backspace interception.
 - `src/app_driver.rs`: driver routing — snapshots go to chrome + all pane views.
 - `src/shell/transient_menu.rs`: `from_snapshot_data` hydration,
-  `with_query`, `with_selected_index` builders.
+  `with_query`, `with_selected_index` builders; `CommandPalette` origin
+  remains the bottom-anchored projection for command/path sessions.
+- `frontend/src/shell/{WorkspacePanes,workspace-controller}.tsx` and
+  `frontend/src/command-centre/CommandPalette.tsx`: composer-owned query,
+  scope/filter wiring, sheet, and working-area veil.
 - `src/perf/baselines.rs`: `encode_decode_max_transient_menu_snapshot`
   wire-size baseline (worst case under the 1 MiB frame cap).
 
@@ -55,17 +61,18 @@ ids: the server allocator uses `SERVER_MENU_SESSION_ID_HIGH_BIT` (`1 << 63`)
 `| n`, which can never collide with the client-local `PaneMenuSync` allocator
 (starting at 1) that owns local-session ids.
 
-Phase 24.3 adds two protocol extensions beside `MenuQueryUpdate`: a
+Phase 24.3 added two protocol extensions beside `MenuQueryUpdate`: a
 semantic `MenuBackspace` intent (a dedicated backspace instead of a full
 query update) and a bounded `Primary`/`Secondary` activation `kind` on
-`MenuActivate` (Enter/Tab vs Alt+Enter). `PROTOCOL_VERSION` bumped once
-(15 → 16); Control Center behavior stayed byte-for-byte equivalent, no
-path-specific wire variants exist, and activation resolves server-side
+`MenuActivate` (Enter/Tab vs Alt+Enter). Plan 124 then added the palette's
+row metadata and scope filter in protocol v31. Control Center behavior stayed
+path-agnostic, no path-specific wire variants exist, and activation resolves server-side
 from installed entries only — never client-supplied paths.
 
 The snapshot DTO is protocol-owned and inert: `session_id`, `prompt`,
-`query`, bounded `items` (id, label, detail, accessibility label),
-`selected_index`, `status`, `focus_policy`, `origin`. All strings are clamped
+`query`, bounded `items` (id, label, detail, accessibility label, group,
+bindings, scope), `selected_index`, `status`, `focus_policy`, `origin`. A
+`MenuQueryUpdate` also carries the bounded scope filter. All strings are clamped
 to `TRANSIENT_MENU_MAX_*` at both client parse and server build. Actions
 never cross the wire — activation is by opaque session id, and the action
 stays server-side. `TransientMenuStatus::Cancelled` never crosses the wire:
@@ -140,12 +147,12 @@ keep their exact pre-24.1 path unchanged.
 
 ## Phase 24.2: live catalogue, typed activation, generation invalidation
 
-- **Open**. `controlCenter.open` ships as a default `Ctrl+X Ctrl+P`
+- **Open**. `controlCenter.open` ships as a default `Ctrl+X Ctrl+O`
   sequence binding (`Global`, `ServerFirst`) in the default behavior
-  manifest (Phase 24.5; pre-24.5 it was the single-stroke `Ctrl+Shift+P`),
-  and the ID is runtime-bindable (`is_runtime_bindable_command` allowlist),
-  so the menu opens from the routed default chord without an `init.js`
-  binding.
+  manifest. Its sibling `shell.toggleAgentLane` uses `Ctrl+X Ctrl+P` and
+  `controlCenter.openPath` uses `Ctrl+X Ctrl+F`; all are runtime-bindable via
+  the existing allowlist. The titlebar trigger and lane hint route to the same
+  command IDs.
   The `CommandIntent` arm clones the active behavior manifest and awaits
   `RuntimeGenerationStore::command_catalogue_snapshot(active_manifest)`, a
   generation-stamped four-source merge (22 built-ins, 38 `shell.client*`
@@ -200,21 +207,28 @@ live query and selection. Activation details changed in 24.2 (see above);
 the Path Browser adds `Navigate` (session stays open) and the
 `OpenFile`/`OpenWorkspace` outcomes (24.3, see [Path Browser](path-browser.md)).
 
-## Phase 24.4 centered accessibility boundary
+## Plan 124 composer palette boundary
 
-Centered command/path snapshots remain inert server-owned display data. The
-client derives only a sanitized dialog name, item labels, selected flags, and
-bounded result-count status from the snapshot. The root-layer dialog does not
-own command/path authority or move focus; pane routing continues to enqueue the
-existing opaque session intents. Modal containment consumes unsupported input
-locally, while activation/query/backspace/selection retain their existing
-server-authoritative behavior.
+Command and path snapshots now use `TransientMenuOrigin::CommandPalette`.
+`WorkspacePanes` selects that origin and gives `Composer` a typed
+`ComposerPalette` interface; the composer is the query input and focus owner.
+`CommandPalette` renders the snapshot as a field-child sheet, with scope chips,
+binding chips, a bounded result count, and an empty state. No second input or
+client-side catalogue exists.
+
+The sheet is full composer width and bottom-anchored 6px above the field. A
+single modal scrim is a working-area grid item over panes and the inspector
+rail, while the lane is above it and stays interactive. `Esc`/cancel and lane
+hiding remove the session and its veil together; the server's closed message
+remains authoritative. Centered `CommandCentre` rendering survives only for
+non-palette picker/package origins.
 
 ## Performance and budgets
 
 - One bounded snapshot per keystroke (~70 KiB worst case, under the 1 MiB
   frame cap); the `encode_decode_max_transient_menu_snapshot` baseline
-  guards the ceiling. A diff protocol was rejected unless profiling demands.
+  guards the ceiling. Protocol v31 adds row metadata without a separate
+  palette protocol or diff stream.
 - One catalogue snapshot per menu open (not per keystroke) and one bounded
   fuzzy scan per query; open latency is one snapshot merge + one projection.
 - Phase 24.5 adds advisory latency constants (`src/perf/budgets.rs`) —
@@ -267,11 +281,14 @@ server-authoritative behavior.
   conversion, workspace rebind, vanished-directory denial, no-grant
   navigation, cross-client denial, tab-switch/disconnect survival, reload
   dismissal).
-- `src/masonry_pane_document.rs`: server-menu routing tests
+- `src/masonry_pane_document.rs`: retained server-menu routing tests
   (single query update per key, arrows without local mutation, activate/
   cancel intents, snapshot hydration, closed-id matching, replace + buffer
   resync, backspace emits `MenuBackspace`, Alt+Enter emits `Secondary`
   only) + `local_menu_open_cancels_the_active_server_session`.
+- `frontend/src/command-centre/{CommandPalette,CommandPalette.test.tsx}` and
+  `frontend/src/shell/{WorkspacePanes,AgentLane,shell-chords}.test.tsx`:
+  palette fields, scope/filter wiring, lane/veil lifecycle, and chords.
 - `src/client/mod.rs`: `client_forwards_transient_menu_snapshot_and_closed_events`.
 - `src/perf/baselines.rs` → `benches/protocol_server_baselines.rs`.
 

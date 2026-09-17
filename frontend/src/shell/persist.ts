@@ -23,6 +23,8 @@ export interface PersistedTab {
   railVisible?: boolean;
   /** Agent-inspector visibility for this tab; absent means visible. */
   inspectorVisible?: boolean;
+  /** Agent-lane visibility for this tab; absent means visible (plan 124). */
+  laneVisible?: boolean;
   activePane: number;
   splitTree: PersistedSplitNode | null;
   slots: unknown[];
@@ -39,9 +41,10 @@ export interface TabLayout {
   workspaceRoot: string;
   agent: TabAgent | null;
   view: TabView;
-  /** Per-tab layout visibility (plan 118 task E2). */
+  /** Per-tab layout visibility (plan 118 task E2; the lane is plan 124). */
   railVisible: boolean;
   inspectorVisible: boolean;
+  laneVisible: boolean;
   tree: SplitTree;
   /** paneId → workspace-relative path (null = empty pane). */
   documents: Map<number, string | null>;
@@ -60,6 +63,7 @@ export function windowFromTabs(
       view: tab.view,
       railVisible: tab.railVisible,
       inspectorVisible: tab.inspectorVisible,
+      laneVisible: tab.laneVisible,
       activePane: tab.tree.activePaneId,
       splitTree: toPersisted(tab.tree.root),
       slots: [],
@@ -128,6 +132,7 @@ export function tabsFromWindow(raw: unknown): {
       // written before the fields existed means.
       railVisible: entry.railVisible !== false,
       inspectorVisible: entry.inspectorVisible !== false,
+      laneVisible: entry.laneVisible !== false,
       tree,
       documents,
     });
@@ -149,6 +154,7 @@ export function emptyLayout(workspaceRoot: string): TabLayout {
     view: "workspace",
     railVisible: true,
     inspectorVisible: true,
+    laneVisible: true,
     tree: singlePane(),
     documents: new Map([[DEFAULT_PANE_ID, null]]),
   };

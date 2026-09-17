@@ -45,6 +45,86 @@ export function scanCssModuleFiles(dir: string): string[] {
 }
 
 /**
+ * Extracts every `font-family` value declared in a CSS string, in source order.
+ */
+export function extractFontFamilies(cssContent: string): string[] {
+  return [...cssContent.matchAll(/font-family:\s*([^;}]+)[;}]/g)].map((m) =>
+    (m[1] ?? "").trim(),
+  );
+}
+
+/**
+ * (f) Typography boundary: a host component may name a host-owned font *role*
+ * (`var(--clay-font-ui|monospace|proportional)` — the tokens the user's
+ * typography profile feeds, `theme/adapter.ts`) or inherit. It may not carry a
+ * concrete stack (`ui-monospace, monospace`) and may not name a role that
+ * exists nowhere: a phantom name silently drops the declaration, so the surface
+ * renders in the wrong font *and* ignores the profile. Returns the offenders as
+ * `file: declaration`.
+ */
+export function checkFontRoleDiscipline(
+  cssByFile: ReadonlyMap<string, string>,
+  definedRoles: ReadonlySet<string>,
+): string[] {
+  const offenders: string[] = [];
+  const allowed = /^var\(--clay-font-[a-z0-9-]+\)$/;
+  for (const [file, css] of cssByFile) {
+    for (const value of extractFontFamilies(css)) {
+      if (value === "inherit") continue;
+      const role = allowed.exec(value)?.[0];
+      if (!role) {
+        offenders.push(`${file}: ${value}`);
+        continue;
+      }
+      const roleName = role.slice("var(".length, -1);
+      if (!definedRoles.has(roleName)) {
+        offenders.push(`${file}: ${value} (undefined role)`);
+      }
+    }
+  }
+  return offenders.sort();
+}
+
+/**
+ * (g) Colour boundary: a host component paints with a semantic theme role or a
+ * design-system recipe variable — never a raw colour. Hex, `rgb()`/`rgba()`,
+ * `hsl()`/`hsla()`, and the CSS named colours have no place in a stylesheet
+ * under `frontend/src` other than `tokens.css`, which states the fallback
+ * values. Returns the offenders as `file:line: declaration`.
+ */
+export function checkNoRawColors(
+  cssByFile: ReadonlyMap<string, string>,
+): string[] {
+  const offenders: string[] = [];
+  const literal =
+    /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(|\b(?:aliceblue|aqua|beige|black|blue|brown|coral|crimson|cyan|fuchsia|gold|gray|grey|green|indigo|ivory|khaki|lavender|lime|magenta|maroon|navy|olive|orange|orchid|pink|plum|purple|red|salmon|silver|snow|tan|teal|tomato|turquoise|violet|wheat|white|yellow)\b(?![\w-])/;
+  for (const [file, css] of cssByFile) {
+    for (const [index, line] of css.split("\n").entries()) {
+      const declaration = line.split(":")[0]?.trim() ?? "";
+      // Comments quote the language's own vocabulary, they do not paint.
+      if (line.trim().startsWith("/*") || line.trim().startsWith("*")) continue;
+      if (declaration === "content") continue;
+      if (literal.test(line)) {
+        offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+      }
+    }
+  }
+  return offenders.sort();
+}
+
+/** Font-role tokens the host actually defines (`styles/`: the fallback values). */
+export function extractDefinedFontRoles(hostCssContent: string): Set<string> {
+  const roles = new Set<string>();
+  for (const m of hostCssContent.matchAll(
+    /^\s*(--clay-font-[a-z0-9-]+)\s*:/gm,
+  )) {
+    const name = m[1];
+    if (name) roles.add(name);
+  }
+  return roles;
+}
+
+/**
  * Extracts all `--clay-ds-*` CSS custom properties referenced in a CSS string.
  */
 export function extractConsumedVariables(cssContent: string): Set<string> {
@@ -184,9 +264,18 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
     // The agent inspector's Settings tab lists delivered config files as
     // `list.default.row`s (no second row language for a file listing).
     "agent-settings/agent-settings.module.css",
+    // The composer's `/` palette (plan 124) draws catalogue rows from the same
+    // row recipe as the centred sheet: one row language, two surfaces.
+    "command-centre/command-centre.module.css",
   ],
   collapse: ["components/controls.module.css"],
-  seg: ["components/controls.module.css", "app/layout/shell.module.css"],
+  seg: [
+    "components/controls.module.css",
+    "app/layout/shell.module.css",
+    // Plan 124: the `/` palette's scope segment is the shipped `seg` family —
+    // the same chrome the titlebar's view switcher uses.
+    "command-centre/command-centre.module.css",
+  ],
   menu: [
     // The command palette; the agent composer's completion menus paint the
     // same family from the coding-agent surface (Plan 118 task 22 will move
@@ -198,7 +287,12 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
     "components/controls.module.css",
     "command-centre/command-centre.module.css",
   ],
-  modal: ["components/modal.module.css"],
+  modal: [
+    "components/modal.module.css",
+    // Plan 124: the composer's menus veil the working area with the same scrim
+    // recipe (DESIGN.md §6: one recipe, one tier, two callers).
+    "shell/workspace-panes.module.css",
+  ],
   toast: ["components/toast.module.css"],
   empty: ["coding-agent/coding-agent.module.css"],
   tab: ["components/tab-strip.module.css"],
@@ -213,11 +307,14 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
   commandCentre: ["command-centre/command-centre.module.css"],
   statusItem: ["app/layout/shell.module.css"],
   statusDot: ["coding-agent/coding-agent.module.css"],
+  // Plan 124: the lane is shell chrome, so the shell recipes (`shell.footer`,
+  // the composer's `textInput` shell) and the tab's agent controls
+  // (`agentPicker`, the meter's `statRow` bar) are consumed by its own module.
+  shell: ["app/layout/shell.module.css", "shell/agent-lane.module.css"],
   statusBar: [
     "app/layout/shell.module.css",
     "packages/package-workspace.module.css",
   ],
-  shell: ["app/layout/shell.module.css"],
   card: ["sdui/registry.module.css"],
   panel: [
     "sdui/registry.module.css",
@@ -238,10 +335,14 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
   settingsPanel: ["settings/settings-panel.module.css"],
   agentPicker: [
     "coding-agent/coding-agent.module.css",
+    "shell/agent-lane.module.css",
     "components/controls.module.css",
   ],
   sessionRow: ["coding-agent/coding-agent.module.css"],
-  statRow: ["coding-agent/coding-agent.module.css"],
+  statRow: [
+    "coding-agent/coding-agent.module.css",
+    "shell/agent-lane.module.css",
+  ],
   keyHint: [
     "coding-agent/coding-agent.module.css",
     "command-centre/command-centre.module.css",
@@ -352,17 +453,20 @@ function loadRepoData() {
   const cssFiles = scanCssModuleFiles(srcDir);
   const allConsumedVars = new Set<string>();
   const consumedByFile = new Map<string, Set<string>>();
+  const cssByFile = new Map<string, string>();
 
   for (const file of cssFiles) {
     const content = fs.readFileSync(file, "utf8");
     const rel = path.relative(srcDir, file);
     const vars = extractConsumedVariables(content);
     consumedByFile.set(rel, vars);
+    cssByFile.set(rel, content);
     for (const v of vars) allConsumedVars.add(v);
   }
 
   const tokensContent = fs.readFileSync(tokensPath, "utf8");
   const fallbackVars = extractFallbackVariables(tokensContent);
+  const fontRoles = extractDefinedFontRoles(tokensContent);
 
   const shippedPkg = extractPackageRecipes(
     fs.readFileSync(shippedPath, "utf8"),
@@ -377,6 +481,8 @@ function loadRepoData() {
     cssFiles,
     allConsumedVars,
     consumedByFile,
+    cssByFile,
+    fontRoles,
     fallbackVars,
     shippedPkg,
     packageRecipeKeys,
@@ -514,6 +620,43 @@ describe("Phase 20.7 / Plan 110 Task 2 / Plan 118 Task 21: recipe-consumption dr
         "--clay-ds-text-input-default-input-focus-outline-color",
       );
     });
+    it("fails when host CSS carries a concrete font stack or a phantom font role", () => {
+      const defined = new Set(["--clay-font-ui", "--clay-font-monospace"]);
+      expect(
+        checkFontRoleDiscipline(
+          new Map([
+            ["a.module.css", ".a { font-family: ui-monospace, monospace; }"],
+            ["b.module.css", ".b { font-family: var(--clay-font-mono); }"],
+            ["c.module.css", ".c { font-family: inherit; }"],
+            ["d.module.css", ".d { font-family: var(--clay-font-monospace); }"],
+          ]),
+          defined,
+        ),
+      ).toEqual([
+        "a.module.css: ui-monospace, monospace",
+        "b.module.css: var(--clay-font-mono) (undefined role)",
+      ]);
+    });
+
+    it("fails when a synthetic stylesheet paints a raw colour", () => {
+      expect(
+        checkNoRawColors(
+          new Map([
+            ["a.module.css", ".a {\n  color: #ff00aa;\n}"],
+            ["b.module.css", ".b {\n  background: rgba(0, 0, 0, 0.5);\n}"],
+            ["c.module.css", ".c {\n  color: var(--clay-text-primary);\n}"],
+            [
+              "d.module.css",
+              ".d {\n  /* black is written like this, never painted */\n}",
+            ],
+          ]),
+        ),
+      ).toEqual([
+        "a.module.css:2: color: #ff00aa;",
+        "b.module.css:2: background: rgba(0, 0, 0, 0.5);",
+      ]);
+    });
+
     it("fails when a synthetic recipe key is consumed outside its owner module", () => {
       const consumedByFile = new Map<string, Set<string>>([
         [
@@ -694,6 +837,36 @@ describe("Phase 20.7 / Plan 110 Task 2 / Plan 118 Task 21: recipe-consumption dr
         misrouted,
         `consumed outside its recorded owner module: ${misrouted.join("; ")}`,
       ).toEqual([]);
+    });
+
+    it("keeps every host font-family on a declared typography role", () => {
+      const repo = loadRepoData();
+      const offenders = checkFontRoleDiscipline(repo.cssByFile, repo.fontRoles);
+      expect(
+        offenders,
+        `host CSS must name a role from tokens.css (the user profile's own tokens) or inherit: ${offenders.join("; ")}`,
+      ).toEqual([]);
+      // Not vacuous: the tree declares more than one role and uses it.
+      expect(repo.fontRoles.size).toBeGreaterThanOrEqual(3);
+      const used = new Set(
+        [...repo.cssByFile.values()]
+          .flatMap((css) => extractFontFamilies(css))
+          .filter((v) => v !== "inherit"),
+      );
+      expect(used.size).toBeGreaterThanOrEqual(2);
+    });
+
+    it("paints only with theme roles and recipe variables, never a raw colour", () => {
+      const repo = loadRepoData();
+      const offenders = checkNoRawColors(repo.cssByFile);
+      expect(
+        offenders,
+        `host CSS outside tokens.css must not carry colour literals: ${offenders.join("; ")}`,
+      ).toEqual([]);
+      // Not vacuous: the tree does consume colour roles somewhere.
+      expect([...repo.allConsumedVars].some((v) => v.endsWith("-color"))).toBe(
+        true,
+      );
     });
 
     it("names an owner module for every declared recipe family", () => {

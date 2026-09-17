@@ -1,0 +1,72 @@
+# Plan 124 live drive — canonical example config, isolated root
+# Date: 2026-09-17.  App: fresh npm run build + cargo build -p clay -p clay-desktop.
+# Each line: action -> observed result (state name = screenshot/AT-SPI artifact).
+
+01 rest: launch server + client on /tmp/plan124-mtp-root/review.sock (canonical
+   examples/config/init.js in the scratch HOME) -> Connected, gruvbox-material-dark
+   applied, scratch workspace + notes.md listed, agent lane visible.
+   AT-SPI: `footer Agent lane`, `entry Message`, `combo box "Attach an agent
+   Agent type"`, `section Session environment`; status-bar hints `hide lane Ctrl
+   X P`, `palette Ctrl X O`, `files Ctrl B`, `hide outline Ctrl I`, `filter /`.
+   Captures: 01-rest.png.  Steps: module 10 K92/K93, 13 S47/S48, 17 C57/C62.
+
+02 lane toggle off (status bar `hide lane`, the command `Ctrl+X Ctrl+P`
+   dispatches) -> lane gone from the flow and the tree (0 `Agent lane` nodes),
+   hint flips to `lane Ctrl X P`; no editor/caret change.  Capture:
+   02-lane-hidden.png (module 10 K92, 13 S49).
+
+03 lane toggle on -> lane returns (1 `Agent lane` node, composer + picker +
+   foot back, draft intact).  Capture: 03-lane-restored.png (module 10 K92).
+
+04 palette open (titlebar `Control Center`, the command `Ctrl+X Ctrl+O`
+   dispatches) -> composer draft becomes `/`; bottom-anchored sheet at the
+   composer's width, dialog `Commands`, scope chips `All/Session/Shell/Files`,
+   `95 results` including package rows (`/branch … @clay/coding-agent@0.1.0`)
+   and built-in rows with chord chips.  Capture: 04-palette-open.png.
+   Steps: module 10 K93/K94/K97.
+
+05 scope filter (`Session` chip) -> server-side filter + snapshot push:
+   `14 results`, all daemon slash commands; Session chip focused/active.
+   Capture: 05-scope-session.png (module 10 K94/K95, 17 C63).
+
+06 hide the lane with the palette open (`hide lane`) -> sheet and veil both
+   gone (0 dialog nodes, 0 lane nodes); pane/rail brightness back to rest
+   (1.00/0.99) — defect D6 fixed.  Capture: 06-lane-hidden-palette.png
+   (module 10 K96, 13 S48, 17 C64).
+
+07 show the lane again -> the sheet returns with the same draft (`/`) and the
+   same scope (`Session`, 14 results).  Capture: 07-palette-back.png
+   (module 10 K96).
+
+08 agent picker (`combo box "Attach an agent"`) -> centered dialog `Agent type`
+   with `Attach an agent (current)` and `Coding Agent`.  Capture:
+   13-agent-picker.png (module 17 C62).
+
+09 attach `Coding Agent` -> lane switches to the attached state: agent-type
+   combo `Coding Agent`, model combo `Model` (disabled `Configure a provider`
+   — the canonical config sets no provider), placeholder `Ask, or type / or @`,
+   hint row, foot `no provider configured · Settings · Providers` + scratch
+   workspace + `git —` + MCP none.  Capture: 14-agent-attached.png
+   (module 16 A22, 17 C59/C62).
+
+10 new tab (`New tab`) -> two tabs; the new tab shows the lane (footer present)
+   although the first tab's lane is hidden -> per-tab lane state.
+   Captures: 09-second-tab.png, 12-newtab-lane-visible.png (module 14 T79).
+
+11 hide the lane on the second tab -> 0 `Agent lane` nodes on that tab; the
+   persisted `layout.json` in the scratch HOME carries `laneVisible`.
+   Capture: 10-second-tab-lane-hidden.png (module 14 T79/T81).
+
+12 transient observation: one rapid sequence (create tab -> AT-SPI default
+   action on a tab node -> create tab) surfaced the empty-tab diagnostic
+   `no live server session; call session_bootstrap first` (bridge
+   NotConnected) in the pane's role="alert".  The AT-SPI default action on a
+   tab node closes that tab on this host, so the sequence is not a user path;
+   a plain `New tab` immediately afterwards showed 0 diagnostics.
+   Capture: 15-third-tab.png (recorded in module 14, not attributed to plan 124).
+
+Not driven live (host ceilings; automated legs named in the modules):
+keystrokes for the chords themselves, free-text palette queries, `Enter` row
+activation, `Escape` cancel, `Shift+Tab` effort cycle, prompt submission /
+streaming / approval strip (the canonical config configures no provider), and
+AT-SPI activation of palette rows.

@@ -692,11 +692,15 @@ This boundary follows from the trust-domain rule for commands: menu activation r
 
 ### Centered Command Centre surface (Phase 24.4)
 
-Command and path sessions use an internal `TransientMenuOrigin::Centered` and
-are mounted as one Clay-owned window-level retained overlay above the shell.
-The host paints the token-driven `surface.scrim`/`opacity.scrim` backdrop and
-uses `dimension.overlay.centered.width`; it provides modal Dialog/Menu/MenuItem/
-Status accessibility and contains input on the originating pane. This is a
+Phase 24.4 mounted command and path sessions in an internal
+`TransientMenuOrigin::Centered`, one Clay-owned window-level retained overlay
+above the shell: the host paints the token-driven `surface.scrim`/`opacity.scrim`
+backdrop and uses `dimension.overlay.centered.width`; it provides modal
+Dialog/Menu/MenuItem/Status accessibility and contains input on the originating
+pane. Plan 124 re-anchored the command and path sessions onto the composer's own
+field (`TransientMenuOrigin::CommandPalette`, see
+[the Plan 124 authoring contract](#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette)),
+so `Centered` now hosts the agent picker and package UI dialogs. This is a
 presentation change only: command/path authority, grants, activation, and
 server-owned snapshots remain unchanged.
 
@@ -710,6 +714,68 @@ in its paint/layout/input paths. Its default centered result surface is 640
 logical pixels wide and 220 logical pixels high before available-window
 clamping; the retained result list is scrollable and modal input remains
 Clay-owned.
+
+### Plan 124 authoring contract: the persistent agent lane and the composer's `/` palette
+
+Plan 124 moves the shell's one bottom section into a **persistent agent lane**
+and re-anchors the command palette onto that lane's composer. It adds no
+package-facing surface: no `ComponentKind`, typed style variable, token, overlay
+anchor, manifest field, permission, or JS API. Every existing contribution path
+is unchanged: packages still register panels, component trees, transient
+overlays, input/state metadata, layout overrides, theme tokens, options, and
+commands through the same validated `clay:ui`/`commands` facades, with the same
+provenance, budgets, and precedence rules.
+
+**The lane is Clay-owned shell chrome, not a package extension point.** It is the
+working area's own bottom row — present in every tab, in both views, spanning the
+full working area width so the workspace sidebar and the inspector rail end at
+its top edge — and it hosts the tab's agent session: the optional approval strip,
+the composer box (the prompt field plus that tab's agent-type/model/effort
+controls), the hint row, and the session-environment foot. Packages cannot claim,
+replace, hide, or contribute UI to it:
+
+- There is no lane `PanelContribution` slot. Package-facing slots remain the leaf
+  pane's mandatory `main` plus its optional `left`/`right`/`top`/`bottom`; a
+  package `bottom` panel still composes inside its pane, above the lane.
+- The lane is not a `TransientMenuOrigin` or an `OverlayAnchor`: package overlays
+  remain limited to `working-area`, `active-pane`, `main`, and `pointer`.
+- No package JavaScript runs in the lane's paint/layout/input paths, and the lane
+  grants no authority: it renders the tab's agent session with Clay's own
+  components over the documented agent session APIs, exactly as before.
+
+**A package reaches the palette one way: by registering a command.** The `/`
+palette is the same generation-stamped catalogue described in
+[Menu session ownership](#menu-session-ownership-phase-241-extended-by-phase-242),
+drawn as the composer field's own menu, and any validated registered command
+appears in it automatically once its package is loaded:
+
+- A command declared in the manifest (`clay.contributions.commands`) or registered
+  through `commands.serverRegisterCommand` becomes a row whose label is the
+  command's display name, whose detail line is `"<routing> — <package>@<version>"`
+  (a built-in reads `"… — built-in"`), and whose chords are the command's effective
+  key bindings. A row is findable by id, label, detail, accessibility label, or
+  chord, because the shared fuzzy matcher scores all of them.
+- The row's scope chip comes from Clay's closed vocabulary: `files` for
+  `controlCenter.openPath`, `shell` for Clay-owned shell/editor client commands and
+  every `clay`-declared command, `session` for the coding agent package's commands.
+  A third-party command carries no scope, so it appears under *All* only — the
+  chips filter Clay's built-in groups, they are not a package taxonomy.
+- Listing is **routing-policy-filtered**: client-first commands stay out of the
+  catalogue (Clay-owned client-UI ids excepted, which are listed and bridged back
+  to the client driver through the server-approved `ShellClientCommandRequest`
+  frame).
+- Listing grants no authority and confers no capability: inclusion is metadata
+  aggregation, activation re-validates through the server-owned execution
+  boundary, and a package still cannot open, populate, filter, drive, or intercept
+  the palette session — no package API exposes sessions or the connection-scoped
+  menu intent frames.
+
+The lane's toggle (`shell.toggleAgentLane`) and the palette's open command
+(`controlCenter.open`) are Clay-owned shell commands listed in the same catalogue.
+Packages cannot bind or issue them — binding is a user configuration-time API
+(`keybindings.bindKey` in `~/.clay/init.js`, see
+[Configuration](#configuration)) — and neither command grants filesystem, network,
+or process authority.
 
 ### Plan 087 package-facing contract: entry, completion, and bounded built-ins
 

@@ -147,27 +147,32 @@ describe("layout.json v2 tab record (plan 118 task 33)", () => {
     expect(parsed?.tabs[0]?.view).toBe("agent");
   });
 
-  it("round-trips rail and inspector visibility per tab (plan 118 E2)", () => {
+  it("round-trips rail, inspector and lane visibility per tab (plan 118 E2, plan 124)", () => {
     const first = {
       ...emptyLayout("/tmp/one"),
       railVisible: false,
       inspectorVisible: true,
+      laneVisible: false,
     };
     const second = {
       ...emptyLayout("/tmp/two"),
       view: "agent" as const,
       railVisible: true,
       inspectorVisible: false,
+      laneVisible: true,
     };
     const persisted = windowFromTabs([first, second], 1);
     expect(persisted.tabs[0]?.railVisible).toBe(false);
+    expect(persisted.tabs[0]?.laneVisible).toBe(false);
     expect(persisted.tabs[1]?.inspectorVisible).toBe(false);
 
     const parsed = tabsFromWindow(persisted);
     expect(parsed?.tabs[0]?.railVisible).toBe(false);
     expect(parsed?.tabs[0]?.inspectorVisible).toBe(true);
+    expect(parsed?.tabs[0]?.laneVisible).toBe(false);
     expect(parsed?.tabs[1]?.railVisible).toBe(true);
     expect(parsed?.tabs[1]?.inspectorVisible).toBe(false);
+    expect(parsed?.tabs[1]?.laneVisible).toBe(true);
   });
 
   it("reads a document without the visibility fields as visible (plan 118 E2)", () => {
@@ -178,6 +183,7 @@ describe("layout.json v2 tab record (plan 118 task 33)", () => {
     });
     expect(parsed?.tabs[0]?.railVisible).toBe(true);
     expect(parsed?.tabs[0]?.inspectorVisible).toBe(true);
+    expect(parsed?.tabs[0]?.laneVisible).toBe(true);
   });
 
   it("keeps an agent-only tab and drops a tab with neither half", () => {

@@ -21,6 +21,32 @@
   min-height: 0;
 }
 
+/* The palette fixture draws the lane at the foot of the frame, so the sheet the
+ * lane's composer owns has the room it has in the app — a lane at the top of a
+ * short page would put the palette above the viewport (plan 124). */
+.paletteFixture {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* The agent fixture draws the app's composition: the view above, the tab's
+ * lane at its foot (plan 124). */
+.agentFixture {
+  display: flex;
+  flex-direction: column;
+}
+
+.agentFixture > :first-child {
+  flex: 1;
+  min-height: 0;
+}
+
 .documentFixture {
   display: grid;
   grid-template-rows: auto 1fr;

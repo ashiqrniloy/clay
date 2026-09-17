@@ -21,6 +21,7 @@ import { createWorkspace } from "../shell/workspace-controller";
 import { PackageWorkspace } from "../packages/PackageWorkspace";
 import { AgentSettingsPanel } from "../agent-settings/AgentSettingsPanel";
 import { createAgentSession, type AgentSessionModule } from "../agent/state";
+import type { ComposerPalette } from "../coding-agent/Composer";
 import type { AgentSettingsFileInfo } from "../agent-settings/AgentSettingsPanel";
 import { themeStore } from "../state/stores";
 import { installSduiTree } from "../sdui/state";
@@ -363,6 +364,17 @@ function SplitsFixture() {
   );
 }
 
+/** A palette for fixtures with no workspace of their own (the agent surfaces):
+ *  no session, inert intents. */
+const IDLE_PALETTE: ComposerPalette = {
+  menu: null,
+  request: () => undefined,
+  query: () => undefined,
+  move: () => undefined,
+  activate: () => undefined,
+  cancel: () => undefined,
+};
+
 function CommandCentreFixture({
   empty = false,
   pathMode = false,
@@ -388,14 +400,17 @@ function CommandCentreFixture({
               ? "Session actions"
               : pathMode
                 ? "Browse workspace"
-                : "Command Centre",
-            query: menuMode ? "" : pathMode ? "workspace/" : "git",
+                : "Commands",
+            query: menuMode ? "" : pathMode ? "workspace/" : "",
             selectedIndex: 0,
             status: empty
               ? { empty: { message: "No commands match this query" } }
               : "active",
             focusPolicy: "modal",
-            origin: menuMode ? "contextMenu" : "centered",
+            // Plan 124: the catalogue and the path browser are the composer's
+            // palette (the lane draws them); only pickers and package menus are
+            // window-centred.
+            origin: menuMode ? "contextMenu" : "commandPalette",
             items: menuMode
               ? [
                   {
@@ -430,22 +445,28 @@ function CommandCentreFixture({
                     ]
                   : [
                       {
-                        id: "git.refresh",
-                        label: "Refresh Git status",
-                        detail: "@clay/git - Ctrl+G",
-                        accessibilityLabel: "Refresh Git status",
+                        id: "coding-agent.compact",
+                        label: "/compact",
+                        detail: "server-first — @clay/coding-agent@0.1.0",
+                        scope: "session",
+                        bindings: [],
+                        accessibilityLabel: "/compact @clay/coding-agent@0.1.0",
                       },
                       {
-                        id: "runtime.reloadConfiguration",
-                        label: "Reload configuration",
-                        detail: "Clay - Ctrl+Shift+R",
-                        accessibilityLabel: "Reload configuration",
+                        id: "shell.toggleAgentLane",
+                        label: "Toggle Agent Lane",
+                        detail: "client — built-in",
+                        scope: "shell",
+                        bindings: ["Ctrl+X Ctrl+P"],
+                        accessibilityLabel: "Toggle Agent Lane built-in",
                       },
                       {
-                        id: "settings.open",
-                        label: "Open settings",
-                        detail: "@clay/settings",
-                        accessibilityLabel: "Open settings",
+                        id: "controlCenter.openPath",
+                        label: "Browse Filesystem",
+                        detail: "client — built-in",
+                        scope: "files",
+                        bindings: ["Ctrl+X Ctrl+F"],
+                        accessibilityLabel: "Browse Filesystem built-in",
                       },
                     ],
           },
@@ -454,9 +475,41 @@ function CommandCentreFixture({
     });
     return created;
   }, [empty, pathMode, menuMode]);
+  // The palette's intents are the fixture workspace's own (the sheet is the
+  // field's menu, so the lane drives the session): the fixture opens the
+  // session itself and lets query/move/activate/cancel reach the stub send.
+  const palette = useMemo<ComposerPalette>(
+    () => ({
+      menu:
+        workspace.active()?.menu?.origin === "commandPalette"
+          ? (workspace.active()?.menu ?? null)
+          : null,
+      request: () => undefined,
+      query: (filter, scope) => workspace.menuQuery(filter, scope),
+      move: (delta) => workspace.menuMove(delta),
+      activate: () => workspace.menuActivate(),
+      cancel: () => workspace.menuCancel(),
+    }),
+    [workspace],
+  );
+  const storeRef = useRef<AgentSessionModule | null>(null);
+  storeRef.current ??= createAgentSession({});
   return (
-    <div className={styles.fixture} data-fixture="command-centre">
-      <CommandCentre workspace={workspace} />
+    <div
+      className={`${styles.fixture} ${menuMode ? "" : styles.paletteFixture}`}
+      data-fixture="command-centre"
+    >
+      {menuMode ? (
+        <CommandCentre workspace={workspace} />
+      ) : (
+        <AgentLaneLazy
+          store={storeRef.current}
+          uiVersion={4}
+          workspaceRoot="/tmp/project"
+          agentType="coding-agent"
+          palette={palette}
+        />
+      )}
     </div>
   );
 }
@@ -1069,20 +1122,35 @@ function CodingAgentFixture() {
   }, [store, state]);
   return (
     <div
-      className={styles.packageFixture}
+      className={`${styles.packageFixture} ${styles.agentFixture}`}
       data-fixture={`coding-agent-${state}`}
     >
+      {/* Plan 124: the composition under review is the agent *view* plus the
+          tab's persistent lane beneath it — the panel no longer owns a
+          composer, so a fixture that rendered the panel alone would review a
+          surface the app never draws. */}
       <Suspense fallback={<ClayText variant="status">Loading agent…</ClayText>}>
         <CodingAgentSurfaceLazy
           surface={codingAgentFixtureSurface}
           uiVersion={4}
-          workspaceRoot="/tmp/project"
           agent={store}
         />
       </Suspense>
+      <AgentLaneLazy
+        store={store}
+        uiVersion={4}
+        workspaceRoot="/tmp/project"
+        agentType="coding-agent"
+        palette={IDLE_PALETTE}
+      />
     </div>
   );
 }
+
+const AgentLaneLazy = lazy(async () => {
+  const module = await import("../shell/AgentLane");
+  return { default: module.AgentLane };
+});
 
 const CodingAgentSurfaceLazy = lazy(async () => {
   const module = await import("../coding-agent/CodingAgentPanel");

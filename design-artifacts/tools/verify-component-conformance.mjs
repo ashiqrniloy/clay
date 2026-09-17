@@ -562,17 +562,22 @@ function audit() {
     "contract declares no filter/animation",
   );
 
-  // 9. Host CSS adds no filter/blur of its own in component modules, and no
-  // animation beyond the one the language allows: the running-work pulse
-  // (DESIGN.md §7/§14), which may only animate `opacity`/`transform`. Keyframes
-  // that touch paint-heavy properties are still a violation.
+  // 9. Host CSS adds no filter/blur of its own, and no animation beyond the ones
+  // the language allows: the running-work pulse (DESIGN.md §7/§14) and a
+  // surface's *entering tier* (its recipe's transition duration/timing driving
+  // keyframes that only touch `opacity`/`transform`), plus the reduced-motion /
+  // reduced-transparency fallbacks that remove them again. Keyframes that touch
+  // paint-heavy properties are still a violation. Every stylesheet is scanned —
+  // the command centre, the shell and the coding agent are where the plan-124
+  // surfaces live, and a gate that only reads `components/` cannot see them.
   const cssOffenders = [];
-  const cssDir = join(ROOT, "frontend/src/components");
+  const cssDir = join(ROOT, "frontend/src");
   const scan = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) scan(path);
-      else if (entry.name.endsWith(".module.css")) {
+      // `tokens.css` *states* the fallback values rather than consuming them.
+      else if (entry.name.endsWith(".css") && entry.name !== "tokens.css") {
         const text = readFileSync(path, "utf8");
         const pulseFrames = new Set();
         for (const match of text.matchAll(
@@ -585,17 +590,26 @@ function audit() {
           }
         }
         for (const [index, line] of text.split("\n").entries()) {
+          // At-rules (`@supports not (backdrop-filter: …)`) gate the property,
+          // they do not set it.
+          if (line.trim().startsWith("@")) continue;
           const property = line.split(":")[0].trim();
           const value = line.split(":").slice(1).join(":").trim();
           // A recipe-driven blur is the scrim's and nothing else; `filter` has
-          // no recipe at all, so any use is a violation.
+          // no recipe at all, so any other use is a violation. `none` is the
+          // accessibility fallback (global.css) *removing* blur, not adding it.
           const recipeBlur =
             /^\s*backdrop-filter\s*:/.test(line) &&
             /var\(--clay-ds-modal-default-scrim-rest-backdrop-blur\)/.test(
               value,
             );
-          if (/\bfilter\s*:/.test(property) && recipeBlur) continue;
-          if (/\b(filter|backdrop-filter)\s*:/.test(line) && !recipeBlur) {
+          const blurOff = /^none\s*(!important)?;?$/.test(value);
+          if (/\bfilter\s*:/.test(property) && (recipeBlur || blurOff)) continue;
+          if (
+            /\b(filter|backdrop-filter)\s*:/.test(line) &&
+            !recipeBlur &&
+            !blurOff
+          ) {
             cssOffenders.push(
               `${path.slice(ROOT.length + 1)}:${index + 1} ${line.trim()}`,
             );
@@ -606,7 +620,7 @@ function audit() {
             const namedPulse = [...pulseFrames].some((frame) =>
               value.includes(frame),
             );
-            if (!namedPulse) {
+            if (!namedPulse && !/^none\s*(!important)?;?$/.test(value)) {
               cssOffenders.push(
                 `${path.slice(ROOT.length + 1)}:${index + 1} ${line.trim()}`,
               );
@@ -620,7 +634,7 @@ function audit() {
   row(
     "material/no-filter-or-animation-in-host-css",
     cssOffenders.length === 0,
-    cssOffenders.join("; ") || "components/ clean",
+    cssOffenders.join("; ") || "every stylesheet clean (minus tokens.css)",
   );
 
   // 10. The specimen's own gaps are the manifest's gaps (no hidden omissions).

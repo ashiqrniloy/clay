@@ -6,7 +6,9 @@
 // provenance-exact lookup the pane path used (an untrusted same-named package
 // never reaches the host panel), or an SDUI surface for a third-party agent
 // package. The panel keeps the tab's active pane session, so its Files tab and
-// the editor still follow the workspace selection.
+// the editor still follow the workspace selection. Plan 124: the tab's composer
+// and agent controls belong to the shell's agent lane, so this view is the
+// transcript, the state strip, and the inspector only.
 
 import { lazy, Suspense } from "react";
 
@@ -15,7 +17,6 @@ import type { AgentSessionModule } from "../agent/state";
 import type { PackageSurface, PackageUiSnapshot } from "../sdui/types";
 import type { DocumentSession } from "../editor/sync/session";
 import { hostRenderedSurface } from "../shell/PaneTree";
-import type { EffortChord } from "./CodingAgentPanel";
 
 import styles from "./agent-view.module.css";
 
@@ -32,13 +33,12 @@ const CodingAgentPanel = lazy(async () => {
 export interface AgentViewProps {
   packageUi: PackageUiSnapshot | null;
   uiVersion: number;
-  /** Folder the tab is about (the session's own root when nothing is picked). */
-  workspaceRoot: string;
   /** Active pane session: the Settings tab lists the agent's delivered files
    *  through it (plan 118 task 36 made the Files tab session history). */
   session: DocumentSession | null;
-  /** The tab's agent session store (plan 119 SC-6), once its agent view has
-   *  mounted one; the panel creates and adopts it on first mount. */
+  /** The tab's agent session store (plan 119 SC-6): the host resolves it for
+   *  the lane and hands the same one here (plan 124); a standalone mount keeps
+   *  its own. */
   agent: AgentSessionModule | null;
   /** The tab's connection id (the store's delivery filter) and the tab-stamped
    *  sender its agent intents ride. */
@@ -48,15 +48,6 @@ export interface AgentViewProps {
   /** SDUI package surfaces send through the pane session; the coding-agent
    *  panel uses its tab store instead. */
   send: ((payload: string) => Promise<void>) | null;
-  effortChord: EffortChord | null;
-  /** Agent working / idle: the tab strip's marker pulses while busy. */
-  onBusyChange?: (busy: boolean) => void;
-  /** Plan 118 task 35: the tab's agent type (`null` = none picked yet); the
-   *  agent view's title is the picker for it. */
-  agentType?: string | null;
-  /** Switch the tab's agent through tab chrome (the shell sends the
-   *  server-validated `tabCommand`; the tab's workspace is untouched). */
-  onPickAgent?: ((agent: string | null) => void) | null;
   /** Plan 118 task 36: open a path in the tab's workspace view — the Files
    *  tab's row action. `null` keeps the rows inert (fixtures). */
   onOpenInWorkspace?: ((path: string) => void) | null;
@@ -76,16 +67,11 @@ export function codingAgentSurfaceOf(
 export function AgentView({
   packageUi,
   uiVersion,
-  workspaceRoot,
   session,
   agent,
   agentClientId,
   onAgentStore = null,
   send,
-  effortChord,
-  onBusyChange,
-  agentType = null,
-  onPickAgent = null,
   onOpenInWorkspace = null,
 }: AgentViewProps) {
   const surface = codingAgentSurfaceOf(packageUi);
@@ -116,16 +102,11 @@ export function AgentView({
         <CodingAgentPanel
           surface={surface}
           uiVersion={uiVersion}
-          workspaceRoot={workspaceRoot}
           session={session}
           agent={agent}
           agentClientId={agentClientId}
           onAgentStore={onAgentStore}
           send={send ?? undefined}
-          effortChord={effortChord}
-          onBusyChange={onBusyChange}
-          agentType={agentType}
-          onPickAgent={onPickAgent}
           onOpenInWorkspace={onOpenInWorkspace}
         />
       ) : send ? (

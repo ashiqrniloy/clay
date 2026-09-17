@@ -398,3 +398,24 @@ per-pane documents are untouched. Artifacts:
 
 No existing step was deleted or weakened; S35's expected result was rewritten
 for the shipped landing.
+
+## Plan 124 steps (lane chrome + palette in the working area, 2026-09-17)
+
+Deep references: `DESIGN.md` §12 (shell layout), `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| S47 | Open the workspace view and measure the shell bands (window edges, sidebar, rail, lane, status bar) | The agent lane is the working area's own chrome strip: it spans the **full** content width and the sidebar and inspector rails end exactly at its top edge (live: rail landmark bottom `946` == lane top `946`; lane box `x=26 w=1280` == the content width). The lane does not overlap or scroll with the panes; the status bar stays below it. Automated: `frontend/src/test/workspace-composition.test.tsx` (grid rows, lane spans `1 / -1`, `display: contents` hosts), `frontend/src/shell/WorkspacePanes.test.tsx` |
+| S48 | With two or more panes open (and again with the rail visible), open the palette and hide the lane | Exactly one sheet appears — anchored to the lane composer, so it spans the whole lane width rather than one pane — and exactly one veil dims **every** pane and the rail (live: pane/rail ratio 0.88, lane 1.00). No per-pane duplicate surface; closing the sheet (or hiding the lane: plan-124 defect D6) removes the veil in one step and pane interaction resumes. Automated: `workspace-composition.test.tsx` (veil is a grid item of row 1, lane z=41 > veil z=40), `CommandPalette.test.tsx` |
+| S49 | In a split layout with focus in a non-first pane, use the shell chords: `Ctrl+X Ctrl+P` (lane), `Ctrl+X Ctrl+O` (palette), `Ctrl+\`/direction splits, `Ctrl+B`, `Ctrl+I` | Shell chords act on the active tab/pane regardless of which pane holds focus; the lane/palette chords never reach the editor, and split/pane chords keep working while the lane is hidden. Pane focus policy and split aliases are unaffected by the lane's presence. Automated: shell-chord routing tests, `frontend/src/shell/workspace-commands.ts` command tests |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+Live pass on the canonical example config (isolated root, fresh build),
+window-cropped captures + AT-SPI, plus the automated suites.
+
+| Step | Result | Evidence |
+|---|---|---|
+| S47 | PASS live | AT-SPI extents: `footer Agent lane` at `26,946 1280x200`; inspector `landmark Document outline` at `966,110 340x836` → bottom `946` == the lane's top edge; the lane's width equals the window content width. Visual: `test-plan/artifacts/124-agent-lane/01-rest.png` (sidebar and rail both stop at the lane). Plan 124 task 9 measured the same geometry after the fix (lane 1160 px → 1500 px, rails re-ended). |
+| S48 | PASS live (single pane + rail) + automated (multi-pane) | Live: palette open → pane/rail means 40.0 → 35.3/35.6 (ratio 0.88) with the lane band 1.00; lane hidden with the sheet open → 0 dialog nodes, 0 lane nodes and pane/rail back to 1.00/0.99 (D6 fix). Multi-pane duplicate-surface behavior is pinned by `workspace-composition.test.tsx` + `CommandPalette.test.tsx`. |
+| S49 | PASS automated / NOT RUN live | Chord routing is pinned by the shell-chord matcher tests and the command catalogue tests; chords could not be delivered to the live window on this host (standing ceiling, module 10 K-series), and the live lane/palette routes were driven through the status-bar hints that call the same commands. Split/pane chords were not re-run in this instance. |

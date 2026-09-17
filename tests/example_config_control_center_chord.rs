@@ -3,9 +3,11 @@
 //! `scripts/build.sh run` does, so these tests are the regression net for the
 //! canonical example itself:
 //!
-//! - Plan 117 follow-up: the Global `Ctrl+X Ctrl+P` → `controlCenter.open`
-//!   default keymap still ships, and the `controlCenter.open` command intent
-//!   still round-trips to a TransientMenuSnapshot.
+//! - Plan 117 follow-up, re-pointed by Plan 124: the canonical example keeps
+//!   the Global `Ctrl+X Ctrl+O` → `controlCenter.open` palette chord and the
+//!   separate Global `Ctrl+X Ctrl+P` → `shell.toggleAgentLane` lane chord, and
+//!   the `controlCenter.open` command intent still round-trips to a
+//!   TransientMenuSnapshot.
 //! - Plan 118: the example's design-system selection boots the shipped Quiet
 //!   Instrument system (bundled resolution, no `loadPackage`), the Settings
 //!   choice set is the shipped one, and nothing removed is requested or fails
@@ -53,6 +55,21 @@ fn copy_dir(source: &Path, destination: &Path) {
     }
 }
 
+fn has_ctrl_x_chord(
+    manifest: &clay::protocol::BehaviorManifest,
+    command_id: &str,
+    second_stroke: &str,
+) -> bool {
+    manifest.keymaps.iter().any(|rule| {
+        rule.command_id == command_id
+            && rule.sequence.len() == 2
+            && rule.sequence[0].key == KeyCode::Character("x".to_string())
+            && rule.sequence[0].modifiers.control
+            && rule.sequence[1].key == KeyCode::Character(second_stroke.to_string())
+            && rule.sequence[1].modifiers.control
+    })
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn example_config_boot_publishes_the_control_center_chord() {
     let root = unique_root("chord");
@@ -88,8 +105,8 @@ async fn example_config_boot_publishes_the_control_center_chord() {
         .unwrap();
 
     // Collect bootstrap frames until the initial state settles; assert the
-    // default Control Center chord ships even with the example config's
-    // bindKey tables active.
+    // default palette chord (Plan 124 re-anchor) and the separate lane-toggle
+    // chord both ship even with the example config's bindKey tables active.
     let mut saw_chord = false;
     let mut boot_version: Option<u64> = None;
     let mut client_id: Option<u64> = None;
@@ -107,14 +124,9 @@ async fn example_config_boot_publishes_the_control_center_chord() {
             }
             ServerMessage::BehaviorManifest(manifest) => {
                 boot_version = Some(manifest.behavior_version);
-                if manifest.keymaps.iter().any(|rule| {
-                    rule.command_id == "controlCenter.open"
-                        && rule.sequence.len() == 2
-                        && rule.sequence[0].key == KeyCode::Character("x".to_string())
-                        && rule.sequence[0].modifiers.control
-                        && rule.sequence[1].key == KeyCode::Character("p".to_string())
-                        && rule.sequence[1].modifiers.control
-                }) {
+                if has_ctrl_x_chord(&manifest, "controlCenter.open", "o")
+                    && has_ctrl_x_chord(&manifest, "shell.toggleAgentLane", "p")
+                {
                     saw_chord = true;
                     break;
                 }
@@ -127,7 +139,8 @@ async fn example_config_boot_publishes_the_control_center_chord() {
     }
     assert!(
         saw_chord,
-        "the example config must keep the Global Ctrl+X Ctrl+P controlCenter.open default"
+        "the example config must keep the Global Ctrl+X Ctrl+O controlCenter.open \
+         palette chord and the separate Global Ctrl+X Ctrl+P shell.toggleAgentLane chord"
     );
     let boot_version = boot_version.expect("manifest carried a behavior version");
     let client_id = client_id.expect("welcome must assign the client id");

@@ -104,7 +104,7 @@ Core tokens live in `core_theme_value` (`src/shell/theme.rs`) and are the only s
 | `surface.main` | App background |
 | `surface.panel` | Panel background |
 | `surface.overlay` | Floating layer background |
-| `surface.scrim` | Full-window dim behind the centered Command Centre surface (Phase 24.4) |
+| `surface.scrim` | Dim behind the window-centered Command Centre sheet (Phase 24.4) and behind the composer's `/` and `@` menus since plan 124 (over the working area, never over the agent lane) |
 | `surface.control` | Button/control background |
 | `surface.list` | List background |
 | `surface.selected` | Selected row/item |
@@ -194,7 +194,7 @@ Legacy `textStyles` themes are projected into modern UI roles by `ResolvedUiThem
 |-------|-------|-----|
 | `opacity.disabled` | 0.55 | Disabled state |
 | `opacity.full` | 1.0 | Default |
-| `opacity.scrim` | 0.5 | Scrim dim behind the centered Command Centre surface (Phase 24.4) |
+| `opacity.scrim` | 0.5 | Scrim dim behind the centered Command Centre sheet and the composer's menus (Phase 24.4; plan 124 re-anchored the palette onto it) |
 
 ### Dimension (Phase 20.1)
 
@@ -326,7 +326,7 @@ Plan 088 Tasks 3–7 use the existing typed token catalog; no core token or pack
 
 ## Phase 24.4 consumption (centered Command Centre)
 
-Phase 24.4 adds three core tokens consumed by the Clay-internal centered Command Centre surface: `surface.scrim` (color role), `opacity.scrim` (0.5), and `dimension.overlay.centered.width` (640). All three resolve once at active-theme install into the cached `ResolvedUiTheme` and are read on paint/layout from cache — never re-resolved per frame. The centered host adds no blur/filter/offscreen work; `dimension.overlay.centered.width` clamps to the available window width. Authority: the scrim and centered surface are Clay-owned — theme packages may override the three typed values through `designTokens` (same validation rules as any core token), but packages cannot paint, configure, or request the centered surface; package overlay anchors remain `working-area` | `active-pane` | `main` | `pointer`.
+Phase 24.4 adds three core tokens consumed by the Clay-internal centered Command Centre surface: `surface.scrim` (color role), `opacity.scrim` (0.5), and `dimension.overlay.centered.width` (640). Plan 124 re-anchors the command palette onto the composer box as the `/` palette: it keeps `surface.scrim` / `opacity.scrim` for its veil, but `dimension.overlay.centered.width` no longer applies to it (the sheet is exactly as wide as the composer box it answers to; the token stays for the surfaces that are still `Centered` — agent picker, package dialogs). All three resolve once at active-theme install into the cached `ResolvedUiTheme` and are read on paint/layout from cache — never re-resolved per frame. The centered host adds no blur/filter/offscreen work; `dimension.overlay.centered.width` clamps to the available window width. Authority: the scrim and centered surface are Clay-owned — theme packages may override the three typed values through `designTokens` (same validation rules as any core token), but packages cannot paint, configure, or request the centered surface; package overlay anchors remain `working-area` | `active-pane` | `main` | `pointer`.
 
 ## Phase 20.4 consumption (no new tokens)
 

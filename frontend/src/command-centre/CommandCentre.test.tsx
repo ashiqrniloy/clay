@@ -293,7 +293,7 @@ describe("CommandCentre", () => {
     );
   });
 
-  it("composes the palette sheet: head, results, foot hints, live count", () => {
+  it("composes the centred sheet: head, results, foot hints, live count", () => {
     mountMenu({
       prompt: "Command Centre",
       items: [
@@ -306,7 +306,9 @@ describe("CommandCentre", () => {
       ],
     });
     const sheet = screen.getByTestId("command-centre");
-    // One sheet: the palette surface, never a second frame inside it.
+    // One sheet: the centred surface, never a second frame inside it. (The
+    // composer's `/` palette is the lane's own sheet — plan 124 — and is not
+    // drawn here; `WorkspacePanes` filters that origin out before mounting.)
     expect(sheet.className).toContain("surface");
     expect(sheet.className).not.toContain("menu");
     // The prompt is the head's one visible label and the field's name (the
@@ -358,8 +360,9 @@ describe("CommandCentre", () => {
       prompt: "Command Centre",
       items: [{ id: "git.refresh", label: "Refresh Git status", detail: null }],
     });
-    // The prototype's all/Session/Skills/MCP scopes have no server data, so the
-    // shipped palette renders none of them.
+    // The prototype's all/Session/Skills/MCP scopes have no server data, so no
+    // surface fabricates them (the item-field addition that would carry a scope
+    // group is its own task).
     expect(screen.queryByRole("radiogroup")).toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();
   });

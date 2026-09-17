@@ -52,6 +52,29 @@
   background: var(--clay-accent-primary);
 }
 
+/* Plan 124: the mark's dot is the window's run signal — it pulses while the
+ * tab in view works, and nothing else in the window loops (§7/§9). The tab's
+ * own marker steps to the accent colour without a pulse of its own. */
+.brand[data-busy="true"]::before {
+  animation: markPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes markPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand[data-busy="true"]::before {
+    animation: none;
+  }
+}
+
 /* The window tabs hug their content — the strip and its new-tab button stay
  * beside the brand instead of stretching into the middle of the bar; the
  * spacer after them carries the remaining width. */

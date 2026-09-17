@@ -433,3 +433,32 @@ landing. Artifacts: `test-plan/artifacts/118-quiet-instrument-migration/`.
 | Tab model (approved, not shipped) | NOT RUN — not built | Recorded here so no reader assumes the titlebar view switcher exists; tracking: plan 118 Part D task 33 |
 
 No existing step was deleted or weakened.
+
+## Plan 124 steps (per-tab lane state, 2026-09-17)
+
+Deep references: `DESIGN.md` §12, `frontend/src/shell/persist.ts`, `src/shell/layout_persist.rs`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T79 | Hide the lane on tab A (`Ctrl+X Ctrl+P`), then create a new tab B and switch back and forth | The lane state is per tab: tab B starts with the lane visible while tab A keeps it hidden; switching tabs never copies one tab's lane state to the other, and the state survives the workspace ⇄ agent view switch inside a tab (the lane is tab chrome, not a view). Automated: `frontend/src/shell/WorkspacePanes.test.tsx`, `layout-state`/`persist` tests |
+| T80 | Type a draft in the lane, hide the lane, show it again, then switch tabs and come back | The draft is preserved per tab (hide/show does not remount the composer; the same session stays adopted); the palette sheet and its veil belong to the tab that opened them — switching tabs cancels the session and leaves no sheet or veil on the other tab. Automated: `WorkspacePanes.test.tsx` (session cancel on switch, veil coupling), `AgentLane.test.tsx` (draft) |
+| T81 | Hide the lane in one tab, switch to the other tab, quit the client, and relaunch; also relaunch after a hostile/truncated `layout.json` (module 14 window-state steps) | The persisted layout carries `laneVisible` per tab, so the hidden state comes back with that tab while the other tab stays visible; a truncated/invalid layout file falls back to the visible default without losing the other tabs' fields (fail-closed restore, unchanged by this plan). Automated: `frontend/src/shell/tab-store.test.ts`, `frontend/src/shell/workspace-controller.test.ts`, `src/shell/layout_persist.rs` tests |
+| T82 | With the lane visible, switch tabs and close one; inspect the tab list and the session list in the accessibility tree | Tab activation/close never remounts the lane's session (the store is per tab runtime, disposed only when the tab closes) and the lane is not part of the tab list traversal; the tab list still announces activate/create/close as before. Automated: `WorkspacePanes.test.tsx` (one store per tab runtime), tab a11y tests |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+| Step | Result | Evidence |
+|---|---|---|
+| T79 | PASS live | Live: hiding the lane on the first tab and creating a new tab showed the lane visible on the new tab (`Agent lane` footer present, `Attach an agent` picker) while the first tab's lane stayed hidden — per-tab state, not global. Capture: `test-plan/artifacts/124-agent-lane/12-newtab-lane-visible.png`. |
+| T80 | PASS live (hide/show) + automated (switch) | Live: hiding the lane with `/` + `Session` scope in the palette and showing it again restored the sheet with the same draft and 14 results. Tab-switch cancellation is pinned by `WorkspacePanes.test.tsx`. |
+| T81 | PASS automated / NOT RUN live | `laneVisible` is persisted per tab (`frontend/src/shell/persist.ts` and its `tab-store`/`workspace-controller` tests, `src/shell/layout_persist.rs`); the live root's `layout.json` carries the field (`"laneVisible": true` for the visible tab) and the restore/fallback paths are pinned by the persist suites. A live quit/relaunch cycle of two tabs was not driven (the AT-SPI default action on a tab node closes it on this host — recorded below). |
+| T82 | PASS automated | Store hoisting/diposal and lane/tab-list separation are pinned by `WorkspacePanes.test.tsx`; live tab activation was not safely drivable. |
+
+**Observed (not a defect):** one rapid sequence (create tab → AT-SPI "activate"
+on a tab node → create tab again) surfaced the empty-tab diagnostic
+`no live server session; call session_bootstrap first` (bridge `NotConnected`)
+in the pane's `role="alert"`; the AT-SPI default action on a tab node closes
+that tab on this host, so the diagnostic is a bootstrap-race observation in a
+sequence no human produces. A plain `New tab` immediately afterwards produced
+zero diagnostics in the same tab's accessibility dump. The bridge `busy`/bootstrap path is untouched by plan
+124.

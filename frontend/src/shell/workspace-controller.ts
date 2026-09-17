@@ -47,7 +47,11 @@ import {
   windowFromTabs,
   type TabLayout,
 } from "./persist";
-import { agentInspector, workspaceRail } from "./layout-state";
+import { agentInspector, agentLane, workspaceRail } from "./layout-state";
+import {
+  scopeWireValue,
+  type PaletteScope,
+} from "../command-centre/CommandPalette";
 import { detached } from "../lib/detached";
 // Type-only on purpose: the store is created by the lazy agent view, so the
 // eager shell must never take a runtime dependency on the agent lane (it drags
@@ -176,11 +180,12 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     }, 250);
   };
 
-  // Rail/inspector visibility is per-tab layout state: a toggle persists with
-  // the rest of the layout, not only when something else schedules a write
-  // (plan 118 task E2).
+  // Rail/inspector/lane visibility is per-tab layout state: a toggle persists
+  // with the rest of the layout, not only when something else schedules a
+  // write (plan 118 task E2; the lane is plan 124).
   workspaceRail.subscribe(schedulePersist);
   agentInspector.subscribe(schedulePersist);
+  agentLane.subscribe(schedulePersist);
 
   const bindSession = (runtime: TabRuntime): DocumentSession => {
     const session = createDocumentSession({
@@ -270,6 +275,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     if (tabs.get().activeClientId == null) {
       workspaceRail.setActiveTab(bootstrap.clientId);
       agentInspector.setActiveTab(bootstrap.clientId);
+      agentLane.setActiveTab(bootstrap.clientId);
     }
     // Only an explicit pick commits a tab's folder. The server always roots a
     // session (configured root or cwd fallback), so adopting its root here
@@ -368,6 +374,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
     const snapshot = tabs.get();
     const rails = workspaceRail.snapshot();
     const inspectors = agentInspector.snapshot();
+    const lanes = agentLane.snapshot();
     const layouts: TabLayout[] = snapshot.tabs.map((tab) => {
       const runtime = runtimes.get(tab.clientId);
       return {
@@ -377,6 +384,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         // Absent means visible, which is also what the store answers.
         railVisible: rails.get(tab.clientId) ?? true,
         inspectorVisible: inspectors.get(tab.clientId) ?? true,
+        laneVisible: lanes.get(tab.clientId) ?? true,
         tree: runtime?.tree ?? singlePane(),
         documents: runtimeDocuments(runtime),
       };
@@ -426,7 +434,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       const first = existing[0];
       const restoredVisibility = new Map<
         number,
-        { rail: boolean; inspector: boolean }
+        { rail: boolean; inspector: boolean; lane: boolean }
       >();
       if (first && parsed.tabs[0]) {
         const restored = parsed.tabs[0];
@@ -443,10 +451,11 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
         for (const [paneId, path] of parsed.tabs[0].documents) {
           if (path) first.panes.get(paneId)?.session.open(path);
         }
-        // Per-tab visibility (plan 118 task E2): the first tab's own values.
+        // Per-tab visibility (plan 118 task E2; lane: plan 124).
         restoredVisibility.set(first.clientId, {
           rail: restored.railVisible,
           inspector: restored.inspectorVisible,
+          lane: restored.laneVisible,
         });
         // The registry may have delivered the root id before these panes
         // existed (fresh boot: the handshake broadcast races the bootstrap
@@ -473,6 +482,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           restoredVisibility.set(runtime.clientId, {
             rail: extra.railVisible,
             inspector: extra.inspectorVisible,
+            lane: extra.laneVisible,
           });
           for (const id of paneIds(extra.tree.root)) ensurePane(runtime, id);
           for (const [paneId, path] of extra.documents) {
@@ -506,6 +516,12 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
           value.inspector,
         ]),
       );
+      agentLane.restore(
+        [...restoredVisibility].map(([clientId, value]) => [
+          clientId,
+          value.lane,
+        ]),
+      );
       if (parsed.activeIndex != null) {
         const target = tabs.get().tabs[parsed.activeIndex];
         if (target) await this.activate(target.clientId);
@@ -521,6 +537,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       tabs.set({ ...tabs.get(), activeClientId: clientId });
       workspaceRail.setActiveTab(clientId);
       agentInspector.setActiveTab(clientId);
+      agentLane.setActiveTab(clientId);
       notify();
       if (runtime.tabId != null && adapters.activateTab) {
         return adapters.activateTab(runtime.tabId);
@@ -537,6 +554,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       tabs.set({ ...tabs.get(), activeClientId: bootstrap.clientId });
       workspaceRail.setActiveTab(bootstrap.clientId);
       agentInspector.setActiveTab(bootstrap.clientId);
+      agentLane.setActiveTab(bootstrap.clientId);
       schedulePersist();
     },
     setSettingsOpen(open: boolean) {
@@ -545,7 +563,7 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
       runtime.settingsOpen = open;
       notify();
     },
-    menuQuery(query: string) {
+    menuQuery(query: string, scope: PaletteScope = "all") {
       const runtime = activeRuntime();
       const menu = runtime?.menu;
       if (!runtime || !menu) return;
@@ -557,6 +575,9 @@ export function createWorkspace(adapters: WorkspaceAdapters) {
               clientId: runtime.clientId,
               sessionId: menu.sessionId,
               query,
+              // Plan 124: the scope chip is part of the filter, so it rides the
+              // same update; `All` is the absence of a scope on the wire.
+              scope: scopeWireValue(scope),
             },
           }),
           runtime.tabId ?? undefined,

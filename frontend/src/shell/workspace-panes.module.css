@@ -1,19 +1,57 @@
+/* Layout-transparent: the panes and the lane this host owns are the working
+ * area grid's own items, so the lane can be its full-width bottom row
+ * (DESIGN.md §12 — see `routes/workspace.module.css`). The overlays below
+ * (centred menu, unsaved-changes modal) position themselves, so they are
+ * unaffected by dropping this box. */
 .host {
-  height: 100%;
+  display: contents;
+}
+
+/* The two views share the working area above the lane; the inactive one is
+ * hidden but stays mounted so switching keeps its state (plan 118 task 33).
+ * `hidden` removes it from the accessibility tree as well, and the explicit
+ * display rule survives a `display: grid` host. */
+.viewArea {
+  position: relative;
+  flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.empty {
-  height: 100%;
-  display: grid;
-  place-items: center;
+/* The composer's menus' veil: the modal scrim recipe (`modal.default.scrim`),
+ * one tier, second caller (DESIGN.md §6/§11) — the `modal` slot attributes
+ * carry the reduced-transparency, no-backdrop-filter and forced-colors
+ * fallbacks in `styles/global.css`. It veils the working area only: the lane,
+ * whose field is the palette's query, stays above it (its own z-index), and the
+ * sheet rises over this veil from inside that lane. Its box is the working
+ * area's own row — the panes *and* the rail — which the working-area grid
+ * places it in (`routes/workspace.module.css`), so it needs no offsets. */
+.veil {
+  /* Positioned so its z-index applies: the working-area grid places it in the
+   * panes' row, and the rail follows it in the DOM, so the layer order must be
+   * explicit (the lane's own z-index keeps its sheet above this). */
+  position: relative;
+  z-index: var(--clay-z-modal, 40);
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-modal-default-scrim-rest-background-color)
+      calc(var(--clay-ds-modal-default-scrim-rest-background-opacity, 1) * 100%),
+    transparent
+  );
+  backdrop-filter: blur(var(--clay-ds-modal-default-scrim-rest-backdrop-blur));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--clay-motion-fast, 100ms) ease-out;
 }
 
-/* The tab's two views share the working area; the inactive one is hidden but
- * stays mounted so switching keeps its state (plan 118 task 33). `hidden`
- * removes it from the accessibility tree as well, and the explicit display
- * rule survives a `display: grid` host. */
+.veil[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .viewSlot {
+  flex: 1;
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -21,4 +59,10 @@
 
 .viewSlot[hidden] {
   display: none;
+}
+
+.empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
 }

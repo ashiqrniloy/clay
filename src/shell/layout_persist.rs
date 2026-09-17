@@ -156,6 +156,9 @@ pub struct PersistedTabState {
     pub rail_visible: bool,
     /// The tab's agent inspector was visible; absent means visible.
     pub inspector_visible: bool,
+    /// The tab's agent lane was visible (plan 124). Absent on documents
+    /// written before the lane existed, where the default is visible.
+    pub lane_visible: bool,
 }
 
 /// Whole-window persisted state.
@@ -195,6 +198,7 @@ pub(crate) fn serialize_window_state(state: &PersistedWindowState) -> Value {
                 "slots": tab.slots,
                 "railVisible": tab.rail_visible,
                 "inspectorVisible": tab.inspector_visible,
+                "laneVisible": tab.lane_visible,
                 "panes": tab.panes
                     .iter()
                     .map(|(id, doc)| (id.0.to_string(), json!(doc)))
@@ -310,6 +314,11 @@ fn parse_tab_state(value: &Value) -> Option<PersistedTabState> {
             .unwrap_or(true),
         inspector_visible: value
             .get("inspectorVisible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+        // Absent means visible (a v2 document written before plan 124).
+        lane_visible: value
+            .get("laneVisible")
             .and_then(|v| v.as_bool())
             .unwrap_or(true),
     })
@@ -822,29 +831,34 @@ mod tests {
             panes,
             rail_visible: true,
             inspector_visible: true,
+            lane_visible: true,
         }
     }
 
-    /// Plan 118 task E2: rail/inspector visibility round-trips per tab, and a
-    /// document written before the fields existed means visible.
+    /// Plan 118 task E2 / plan 124: rail, inspector and lane visibility
+    /// round-trip per tab, and a document written before the fields existed
+    /// means visible.
     #[test]
     fn tab_visibility_round_trips_and_defaults_to_visible() {
         let mut tab =
             round_trip_tab_state("/tmp/ws", DEFAULT_PANE_ID, None, vec![], BTreeMap::new());
         tab.rail_visible = false;
         tab.inspector_visible = true;
+        tab.lane_visible = false;
         let document = serialize_window_state(&PersistedWindowState {
             tabs: vec![tab],
             active_tab: Some(0),
         });
         assert_eq!(document["tabs"][0]["railVisible"], json!(false));
         assert_eq!(document["tabs"][0]["inspectorVisible"], json!(true));
+        assert_eq!(document["tabs"][0]["laneVisible"], json!(false));
 
         let parsed = parse_window_state(&document).expect("round trip");
         assert!(!parsed.tabs[0].rail_visible);
         assert!(parsed.tabs[0].inspector_visible);
+        assert!(!parsed.tabs[0].lane_visible);
 
-        // Pre-E2 document: both fields absent.
+        // Pre-E2 document: the visibility fields are absent.
         let legacy = json!({
             "version": 2,
             "activeTab": 0,
@@ -853,6 +867,7 @@ mod tests {
         let parsed = parse_window_state(&legacy).expect("legacy v2 loads");
         assert!(parsed.tabs[0].rail_visible);
         assert!(parsed.tabs[0].inspector_visible);
+        assert!(parsed.tabs[0].lane_visible);
     }
 
     #[test]

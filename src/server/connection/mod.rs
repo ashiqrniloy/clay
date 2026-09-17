@@ -1256,6 +1256,7 @@ where
                 client_id,
                 session_id,
                 query,
+                scope,
             } => {
                 menus::handle_menu_query_update(
                     codec,
@@ -1264,6 +1265,7 @@ where
                     client_id,
                     session_id,
                     query,
+                    scope,
                     reload_server.as_ref().map(|server| &server.agent),
                     bound_tab_id,
                 )

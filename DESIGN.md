@@ -21,9 +21,20 @@ and approved (`design-artifacts/approved/quiet-instrument-migration/`) but not
 yet built (tasks 33–36). Migration work must not reintroduce the retired patterns
 in §14.
 
+Shell composition amendment (2026-09-17): the persistent **agent lane** and the
+**`/` palette** (§6/§7/§9/§11/§12/§13/§14) are approved
+(`design-artifacts/approved/agent-lane-palette/`) and **built**: plan 124 landed
+the lane, the palette session behind it, the lane-anchored sheet
+(`frontend/src/shell/AgentLane.tsx`, `frontend/src/command-centre/CommandPalette.tsx`),
+and the row fields the §12 chips read (`scope`, `bindings` — protocol version 31),
+so §16's shipped-state bullets for the composer, the agent view's header and the
+centred command sheet describe the previous shell.
+
 Provenance: `design-artifacts/approved/quiet-instrument-language/workspace-rethink.html`,
 `design-artifacts/approved/quiet-instrument-language/agent-rethink.html`, `design-artifacts/approved/quiet-instrument-language/ds-quiet.css`, `design-artifacts/approved/quiet-instrument-language/theme.css`
-(approved design language, 2026-09-11; contract: `design-artifacts/README.md`).
+(approved design language, 2026-09-11), and
+`design-artifacts/approved/agent-lane-palette/lane-palette.html` + `lane.css`
+(approved shell composition, 2026-09-17; contract: `design-artifacts/README.md`).
 The approved artifact is the binding surface/state reference; where it and this
 document disagree, this document is normative and the artifact is re-approved.
 Hand-maintained file: Impeccable design-documentation runs **merge into** this
@@ -139,7 +150,7 @@ host CSS + typed dimension tokens):
 | Sidebar width | 244px (224px ≤1240px) | — (the workspace sidebar is the SDUI region the server sizes by token: `dimension.sidebar.default` / `.compact`) |
 | Right rail / inspector width | 340px (312px ≤1240px) | — |
 | Sheet width | 700px (880px wide variant) | — |
-| Command palette width | 640px (the centered overlay width: one token) | — |
+| Command palette width | the composer box's own width (it is anchored to that box, §12 — the centered overlay token `dimension.overlay.centered.width` does not apply to it) | — |
 | Hit target minimum | 24px (WCAG 2.2) | — |
 
 **Spacing** — 4-point grid plus the deliberate 6/10/14 steps already in the
@@ -159,13 +170,14 @@ Text is never stretched edge to edge in a wide window.
 | Surface | Fill | Opacity | Border | Radius | Shadow |
 |---|---|---|---|---|---|
 | Window / canvas | `surface.main` | 1.0 | 1px `border.hairline` (window edge only) | 16 | overlay shadow (window only) |
-| Chrome strips (title bar, status bar) | inherits canvas | — | 1px `border.hairline` on the inner edge | — | none |
+| Chrome strips (title bar, agent lane, status bar) | inherits canvas | — | 1px `border.hairline` on the inner edge | — | none |
 | Sidebar / rail | `surface.main` | 1.0 | 1px `border.hairline` right/left edge | — | none |
 | Panel / plane ("veil") | `surface.panel` | 0.55 | 1px `border.hairline` | 12 | none |
 | Inset well (field, composer, stat block) | `surface.control` | 1.0 | 1px `border.hairline` | 12 | none |
 | Row / tab (rest) | transparent | — | none | 8 | none |
 | Popover, dropdown, menu | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 | pop shadow |
 | Sheet, palette, modal | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay shadow |
+| Bottom-anchored sheet (the composer's palette) | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay shadow (rises from its own edge, §7) |
 | Scrim | `surface.scrim` | 0.5 (`opacity.scrim`) | none | — | none, `backdropBlur: 3` |
 | Toast | `surface.panel` | 0.88 | 1px `border.hairline` | pill | pop shadow, `backdropBlur: 8` |
 
@@ -183,6 +195,10 @@ editor canvas, gutter, scroll track, panels, rows, and lists are always
 `backdropBlur: 0` — a hard performance invariant (`backdropBlur == 0.0` on
 editor/scroll paths is conformance-tested).
 
+The agent lane (§12) is chrome, not a panel: it inherits the canvas, draws one
+hairline on its inner edge, and stays **above the veil** while the composer's
+menus are open — the veil covers content, never the control the menu answers to.
+
 **No** gradients on chrome, no inner-highlight rims, no textures, and no film
 grain: the proposal artifact's fixed film-grain layer is deliberately **not**
 carried into the product (it costs a full-window composited layer, softens
@@ -196,8 +212,9 @@ small text, and no typed recipe property expresses it).
 | Press on a button | 150 | `ease-out` | `press-shift-down` (translateY 1px) — buttons only |
 | Popover / dropdown entrance | 240 (`motion.enter`) | `spring-snappy` | from `translateY(-6px) scale(0.985)` |
 | Sheet / palette / modal entrance | 240 | `spring-snappy` | from `translateY(-12px) scale(0.99)` |
+| Bottom-anchored sheet entrance (the composer's palette) | 240 | `spring-snappy` | from `translateY(10px) scale(0.99)` — rises from its own edge |
 | Keyboard focus move | 620 (`motion.flash`) | `ease-out` | one-shot accent halo pulse |
-| Running work indicator | 1.1s loop | `ease-in-out` | opacity pulse on the running-work marker (status dot, tab marker, typing bars). The one looping animation §14 allows |
+| Running work indicator | 1.1s loop | `ease-in-out` | opacity pulse on the running-work marker: the window mark's dot (the tab in view) and the working bars (the state strip while a turn is in flight, and the transcript's live turn). The one looping animation §14 allows |
 
 Rules: no hover lift anywhere (hover changes fill, not position); no motion on
 scroll, typing, resize, or data updates; `prefers-reduced-motion: reduce`
@@ -205,6 +222,15 @@ collapses every duration to instant and removes transforms; the design-system
 motion enums are limited to the validated set (`linear`, `ease-out`,
 `spring-snappy`, `spring-smooth`) — Quiet Instrument uses `ease-out` and
 `spring-snappy` only, and never `linear` for a state transition.
+
+**Running work is motion in exactly two places, both of them the run itself:**
+the window mark's dot (whose run it is — the tab in view) and the working bars
+(what the agent is doing). No surface adds a third: a tab's own marker steps to
+the accent colour, the lane's foot states the environment only, and the status
+bar states facts. The bars are three 4×11px accent bars at the text's cap
+height, pill radius, pulsing 1.1s `ease-in-out` with 160ms offsets — the mark's
+cadence, drawn as bars so "working" is motion in the words rather than another
+dot.
 
 ## 8. Typography and roles
 
@@ -244,10 +270,17 @@ State is a fill change plus, where needed, one shape signal. Exactly one.
 `outlineStyle: solid`.
 
 **Accent halo** (a shell that owns the boundary — text fields, the textarea
-composer, the command palette sheet): a zero-blur, 3px-spread shadow layer in
+composer, and the composer box the command palette answers to): a zero-blur,
+3px-spread shadow layer in
 `accent.primary` at 15%
 (`shadow: [{x:0, y:0, blur:0, spread:3, colorRole: accent.primary, opacity:0.15}]`)
 so the field reads as active without a second border weight.
+
+**Running work** is motion, not a fill, and it reads once per window (§7): the
+mark's dot pulses while the tab in view is working, the working bars say what
+the agent is doing, and a tab's own marker carries its state in the accent
+colour alone (no pulse of its own, tooltip naming the state) — so work in a tab
+that is not in view stays visible without a second blinking dot.
 
 **Edge indicators** — a selected row is a fill and nothing else: no leading
 accent bar and no underline (§14.13, retired 2026-09-11). Where a component
@@ -447,13 +480,22 @@ case — a host slot with no shipped recipe — is marked `†` in
 - `modal.scrim` — `surface.scrim` @ `opacity.scrim` + `backdropBlur: 3`;
   `modal.dialog` — `surface.overlay`, radius 16, 1px hairline, overlay
   shadow; entrance 240ms `spring-snappy` from `translateY(-12px) scale(0.99)`.
-- `commandCentre.root` — radius 16, overlay shadow, opaque overlay fill; the
-  sheet is the shell, so the head's input draws no ring and the sheet's
-  boundary turns accent with the halo on focus (§14.4); rows are `list` rows
-  and a selected row is the accent @0.15 fill. A menu session
+  The scrim has **two callers**: a modal dialog, and the composer's menus in
+  the agent lane (§12) — the `/` palette and the `@` mentions — which draw the
+  same treatment over the **working area only**, the lane itself staying above
+  it, because the lane's field is the menu's own input. No second scrim key:
+  one recipe, one tier (3px), two callers.
+- `commandCentre.root` — radius 16, overlay shadow, opaque overlay fill; rows
+  are `list` rows and a selected row is the accent @0.15 fill. In the shell it
+  is the composer's palette: it spans the composer box's own width, sits 6px
+  above that box, caps at `min(52vh, 420px)` and scrolls internally, and it
+  owns **no input** — the field below it is the query, so the sheet draws no
+  well and no ring of its own (§9 halo belongs to the composer box) and its
+  head echoes the query; the boundary in focus is the box's, not the sheet's
+  (§14.4); `commandCentre.empty` — the bare centred empty
+  state; `commandCentre.status` — the foot's key-hint row. A menu session
   (`contextMenu`/`menuBar`) takes `popover.root` instead — radius 12, pop
-  shadow, content-sized. `commandCentre.empty` — the bare centred empty
-  state; `commandCentre.status` — the foot's key-hint row.
+  shadow, content-sized.
 - `tooltip.default.root.rest` — `surface.overlay`, radius 8, 1px hairline,
   pop shadow, `padding: spacing.tooltip`, `typography.body`,
   `transitionDuration: 150` (`motion.fast`; the 100 this section first stated
@@ -470,6 +512,14 @@ case — a host slot with no shipped recipe — is marked `†` in
 - `shell.default.root.rest` — `surface.main`, no border.
 - `shell.default.header.rest` — 1px `border.hairline` bottom, radius 0 on the
   window's own edges, transparent fill.
+- `shell.default.footer.rest` — the agent lane's own boundary (§12):
+  transparent fill over the canvas, 1px `border.hairline` top,
+  `padding: spacing.xxs`, mono `text.muted` for the session-environment foot.
+  The composer box inside the lane is `textInput`'s composer slot
+  (`surface.control`, radius 12, one hairline, focus = accent border + halo);
+  the agent-control toolbar row inside that box (agent-type picker, model,
+  effort, context meter) is the `agentPicker`/`dropdown` family at muted
+  weight, and the box stays the only boundary between them.
 - `statusBar.default.root.rest` — inherit canvas, 1px `border.hairline` top,
   mono 11px, `textColor: text.muted`; `statusBar.item` — `text.muted`, hover
   `surface.hover`, radius 8, `transitionDuration: 150`.
@@ -493,13 +543,55 @@ case — a host slot with no shipped recipe — is marked `†` in
 it holds exactly two views: the **workspace view** (the folder — editor today,
 other viewers as they exist) and the **agent view** (the agent attached to the
 tab). The switcher between them is tab chrome: it sits at the titlebar's trailing
-edge, right-aligned beside the tab strip, with the Control Center trigger
-immediately to its left — never inside a view it switches between. A tab with no
-agent yet
-shows the agent view's picker; a tab with no folder shows the workspace view's
-prompt. Tab titles are the folder's basename with the full path in the tooltip and
+edge, right-aligned beside the tab strip, with the palette trigger
+immediately to its left — the icon trigger of the window actions opens the
+composer's `/` palette and puts the field in query mode (`/` typed, caret after
+it), never a window-centred modal — never inside a view it switches between. A
+tab with no agent yet shows the lane's agent picker; a tab with no folder shows
+the workspace view's prompt. Tab titles are the folder's basename with the full path in the tooltip and
 a hairline marker when an agent is attached. `⌘T` opens a new tab on the launcher,
 which is also what a fresh window shows.
+
+**The title bar is the app's own composition** — the `Clay` mark with its accent
+dot, the tab strip hugging it, a spacer, then the window actions at the trailing
+edge (the palette trigger, then the tab's view switcher). The shell draws **no
+window buttons**: the OS window frame owns minimise/maximise/close. Where the
+earlier approved migration artifact (`approved/quiet-instrument-migration/shell.html`)
+drew a `palette · ? · Inspector` action set and its own window buttons, the app
+as implemented governs, and `approved/agent-lane-palette/` is the approved
+drawing of the shell's chrome.
+
+**The lane is the shell's one bottom section.** Every tab draws one persistent
+agent lane at the bottom of the working area — the working area's own chrome
+strip (§6/§11), so it sits below both views and their rails (the workspace
+sidebar and the agent inspector end at its top edge, and the lane's hairline is
+the boundary between them) — and it is the same lane in both views: it mounts
+once per tab beside the two view slots, so switching views never remounts it and
+never moves the draft, the run or the pickers. Top to
+bottom: the approval strip when a tool is suspended (warning-toned text, Allow
+and Deny, `alertdialog`, focus moved in and handed back), the **composer box**
+(the field's row, then the tab's own agent controls as one toolbar row inside
+that box — agent-type picker, model, reasoning effort, context meter — then the
+hint row), and the session-environment foot (workspace · branch · extensions ·
+MCP summary). `Ctrl+X Ctrl+P` toggles it — a state, not a deletion, persisted
+per tab like the rails. The field is always typeable: with no provider
+configured the composer stays live and the foot says why nothing will send
+(`no provider configured · Settings → Providers`); with no agent the box offers
+the agent picker (`Attach an agent`) and the field is inert. **There is no Send
+button** — `↵` sends, the hint row says so, and Stop takes that slot exactly
+while a run is live. The lane's foot never carries a run indicator.
+
+**The command surface.** The Control Centre is consolidated into the composer's
+`/` palette: one command surface, opened by typing `/` in the lane's field or by
+`controlCenter.open` (`Ctrl+X Ctrl+O`), over the server's command catalogue, with
+each row's chord as chips and scope chips (`All · Session · Shell · Files`) that
+filter it — both read from the server's own item fields (a row states no scope it
+was not tagged with, and the sheet renders no control it cannot fill). The palette
+owns no input and no output zone of its own — it is the field's menu, spanning
+the composer box's own width 6px above it — and it rises from its own edge (§7)
+over the shared veil: the `/` palette and the `@` mentions menu are the same
+gesture on the same field, so they share one veil, and the lane stays above it.
+`controlCenter.openPath` keeps its own chord and stays a palette row.
 
 A tab's record — what the shell owns and what persistence round-trips — is
 **the folder it has picked** (empty while nothing has been picked: the launcher's
@@ -518,7 +610,8 @@ prompt — and the item for the view that is up carries the only selection signa
 §14.13). Switching is tab chrome: `Ctrl+1` workspace view, `Ctrl+2` agent view,
 and the inactive view stays mounted (state kept, nothing re-fetched, no package
 re-activated). Positional tab activation therefore sits on `Ctrl+Alt+<N>`, and the
-strip's marker pulses while that tab's agent is working.
+tab's own marker carries its state in the accent colour — the pulse lives in the
+window mark (§7).
 
 **Launcher surface.** The landing surface, and the content of every empty tab that
 has picked nothing yet (an uncommitted tab): two
@@ -530,7 +623,7 @@ primary button names exactly what it will open ("Open clay", "Open Coding Agent"
 folder. Picking a workspace opens the workspace view; picking an agent opens the
 agent view; both open one tab holding both. **One of each per launch** — each pane
 is single-select, and the launcher sets a tab's first state, not its only state:
-the agent is changed afterwards from the agent view's picker, the folder from the
+the agent is changed afterwards from the lane's agent picker, the folder from the
 workspace view, each without discarding the other half of the tab. Several
 workspaces means several tabs. Recents are real (a deleted folder is pruned, not
 shown) and a first-run state with nothing to list is a designed state, not an
@@ -544,25 +637,32 @@ center editor column (gutter + 92ch measure, centered) · optional right rail
 visible: it is an on-demand strip (`⌘O`). All document actions (save, undo,
 redo, close) live in one document bar above the canvas; the path is text, not
 a control. The status bar carries workspace, connection, counts, and the
-keyboard hint row.
+keyboard hint row. The workspace view keeps the lane at its foot: the composer
+belongs to the tab, not to the agent view, so a document can prompt the tab's
+agent without leaving the page.
 
-**Agent surface.** Header row (the agent-type picker as the view's title, model,
-usage meter, effort) — the picker is the `agentPicker` family's trigger: the
-view's title *is* the control, it opens the shared dropdown popover over the
-configured agent types (the same server enumeration the launcher lists, one
-directory scan of the data root's `agents/`), marks the current one, and its note
-states where more come from (`~/.clay/agents/`). Picking one switches the tab's
+**Agent surface.** The transcript and the state strip; no header — the agent's
+own controls live in the lane's composer box below (one place, both views). The
+`agentPicker` family's trigger is the lane's agent control: it opens the shared
+dropdown popover over the configured agent types (the same server enumeration
+the launcher lists, one directory scan of the data root's `agents/`), marks the
+current one, and its note states where more come from (`~/.clay/agents/`).
+Picking one switches the tab's
 agent in place — the workspace half is untouched, the tab keeps its session, and
 the config the next run reads (system prompt, skill roots, tool caps, MCP servers,
 model/effort defaults) is that agent's own. A transcript that spans a switch keeps
 every turn labelled with the agent that produced it, with one note marking the
-boundary; a turn is never attributed to an agent that did not write it. · transcript as the primary column (72ch) · composer
-anchored at the bottom · inspector on the right with tabs (Files, Memory,
+boundary; a turn is never attributed to an agent that did not write it. ·
+transcript as the primary column (72ch) · state strip
+at the foot of the column, directly above the lane (status dot + message + note,
+mono 11px — the working bars replace the tone dot while a turn is in flight) ·
+inspector on the right with tabs (Files, Memory,
 Context, Session Info, Settings). The composer is one boundary: the shell owns
 the focus ring, the field inside it draws none (the shell's focus state is the accent border plus
-the 3px halo, §9 — one boundary, deliberately), the field spans the zone the
-transcript is written in (never a centred measure narrower than its own controls),
-and the send/cancel controls sit inside the shell's trailing edge. The **Files
+the 3px halo, §9 — one boundary, deliberately), the box spans the lane's width
+(never a centred measure narrower than its own controls), and Stop sits inside
+the shell's trailing edge while a run is live — no Send button, and nothing in
+that slot at rest. The **Files
 tab is the session's file history** — the files this session has read, written,
 created or deleted, newest first, one row per path (role mark, basename, muted
 directory, role word), with `⏎` switching the tab to its workspace view at that
@@ -592,10 +692,11 @@ separated row per delivered file (mono path, size as data, provenance as a
 badge), with a designed empty state. Neither surface frames a box inside a box:
 the only bordered control is the input well.
 
-**Universal.** One command palette (`⌘K`) is the only global launcher; every
+**Universal.** One command surface (§ above) is the only global launcher; every
 action it lists also shows its key. `?` opens the keyboard map. Layout state
-(sidebar, rail, inspector, density, theme, tab) persists per surface — the rail
-and the agent inspector per **tab**, with the tab's folder and view. Transient surfaces
+(sidebar, rail, lane, inspector, density, theme, tab) persists per surface — the
+rail, the lane and the agent inspector per **tab**, with the tab's folder and
+view. Transient surfaces
 never scroll the canvas, and overlays never nest more than one level
 (popover inside sheet inside scrim is the limit).
 
@@ -641,6 +742,12 @@ never scroll the canvas, and overlays never nest more than one level
    typography hierarchy and never clips its own UI geometry.
 9. ARIA, focus management, and keyboard flows stay host-owned; styling never
    removes an affordance a screen reader or keyboard user needs.
+10. A menu whose input lives outside itself keeps that input usable: the
+   composer's `/` palette veils the content it covers and leaves the lane above
+   the veil (the field below it is the menu's own query, and its focus ring is
+   the composer box's). The palette is a `listbox` the field names through
+   `aria-controls`/`aria-activedescendant`; the veil is never a modal barrier
+   over the input it serves, and `esc` returns focus to the field it came from.
 
 ## 14. Retired patterns (do not reintroduce)
 
@@ -667,6 +774,18 @@ never scroll the canvas, and overlays never nest more than one level
     row read as two signals; the fill alone is the signal (§11
     `list.row.selected`). An editor's current-line marker is not a row and is
     unaffected — it is document chrome, not selection.
+14. A window-centred command sheet as the standing command surface. The
+    Control Centre's catalogue belongs to the composer that queries it (§12):
+    the palette spans that composer box, rises from its own edge, and is the
+    only command list — the composer's local `/` completion list stops being a
+    second surface and *is* the palette. A centred palette is a modal, and a
+    modal competes with the field it answers to. (The `modal.dialog` recipe
+    keeps its callers — the app's own dialogs — and its scrim is now shared with
+    the composer's menus; what is retired is the centred *command* sheet.)
+15. A second blinking dot for the run. The window mark's dot and the working
+    bars are the run's motion (§7/§9); a tab's own marker, the lane's foot and
+    the status bar state it without motion, so a busy window never shows two
+    blinking dots in one titlebar row.
 
 ## 15. Review checklist
 
@@ -686,6 +805,11 @@ Use this in every UI task, plan acceptance, and visual review:
 - [ ] `backdropBlur == 0` everywhere except scrim/toast.
 - [ ] Reduced motion, reduced transparency, and forced colors verified.
 - [ ] Keyboard path complete: every action reachable, every shortcut shown.
+- [ ] Palette chips (scope and per-row chords) are read from the server's item
+      fields — a row states no scope it was not tagged with, renders no chord it
+      does not have, and the filter it selects is the session's own.
+- [ ] Run state appears once (the window mark's dot, the working bars); nothing
+      else pulses, and the lane's foot states the environment only.
 - [ ] No retired pattern from §14 present.
 - [ ] Catalog/docs updated if a primitive, token, or component changed.
 
@@ -694,6 +818,18 @@ Use this in every UI task, plan acceptance, and visual review:
 Machine-readable contract this language is implemented by — **no schema extension
 required**, and no schema extension was needed:
 
+*Shipped state below is plan 118's, as implemented, with plan 124's lane shipped
+by its task 6: the agent view is now the transcript, the state strip (tone dot at
+rest, the three working bars while a turn is in flight) and the inspector, and
+the composer, the tab's agent controls and the session-environment foot live in
+the shell's lane (`frontend/src/shell/AgentLane.tsx`), which mounts once per tab
+below the two view slots. Sentences below that describe the agent header, the
+view's own composer, or the window-centred command sheet are plan 118's record —
+plan 124's §6/§7/§9/§11/§12/§13/§14 above supersede them (the lane landed in its
+task 6, the palette session in task 7, the lane-anchored sheet in task 8; the
+palette's scope/chord item fields are the one piece still scheduled), and the key
+set stays exactly as counted below — the lane and the palette add no recipe key.*
+
 - **Package:** `@clay/design-instrument`, `displayName: "Quiet Instrument"`,
   `schemaVersion: 1`, no `extends`, inert data only, zero permissions, no
   `entry` (shipped by plan 118 task 8 as `packages/design-instrument/`).
@@ -701,8 +837,8 @@ required**, and no schema extension was needed:
 - **Recipes:** the key set shared with the existing reference packages **minus
   the 12 `chat.default.*` keys** (the chat surface is removed), **plus the
   families the target IA and the drawn-but-unbacked surfaces need** (`seg` — which
-  is also the tab's view switcher, `agentPicker` (the agent view's title
-  trigger), `recentRow`, `sessionRow`,
+  is also the tab's view switcher, `agentPicker` (the lane's agent trigger),
+  `recentRow`, `sessionRow`,
   `toast`, `empty`, `statusDot`, `keyHint`, `swatch`, `statRow`). **165 keys,
   fixed by plan 118 task 8 and asserted in task 12**; no key is declared without a
   consumer, and the two name collisions were resolved by unification rather than
@@ -794,7 +930,7 @@ required**, and no schema extension was needed:
 - **Shell and Workspace composition (shipped, plan 118's shell/Workspace task):**
   the window is three rows — a 40px titlebar (mono, tracked `Clay` mark with the
   accent dot, pill tabs with their new-tab button, and the right-aligned action
-  group: the Control Center icon trigger then the tab's view switcher), the
+  group: the palette icon trigger then the tab's view switcher), the
   working area, and a 28px status bar
   (mono, tabular figures, `text.muted`, hairline top, workspace · document ·
   connection and one hint row whose items run the commands they name). The
@@ -846,7 +982,8 @@ required**, and no schema extension was needed:
   printed; turns round only in their fill states. The composer draws **exactly
   one** boundary (the field well and its focus ring — `textInput`'s composer
   slot, §14.4), text left-aligned, Send/Stop/Close inside the field's trailing
-  edge. Skills, MCP servers and context counts are the inspector's Context tab
+  edge — *superseded in plan 124: the composer is the lane's, draws no Send
+  button, and holds Stop alone while a run is live.* Skills, MCP servers and context counts are the inspector's Context tab
   (reference data, §12), not transcript cards. Consumed recipes: `shell.footer.*`,
   `list.*` (turns and rows), `textInput.*` (the composer and the open strip),
   `menu.*` (the `/` and `@` completion menus), `empty.*`, `statusDot.*`,

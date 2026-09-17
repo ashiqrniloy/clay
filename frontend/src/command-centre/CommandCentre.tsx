@@ -12,12 +12,18 @@ import type { WorkspaceController } from "../shell/workspace-controller";
 import styles from "./command-centre.module.css";
 
 /**
- * The one global palette and the transient menus the shell opens through the
- * same session. It is a single elevated sheet: a head with the search input,
- * the scrolling results, and a foot of key hints — the approved command-centre
- * composition. Menu sessions (`contextMenu`/`menuBar`) take the narrower
- * popover surface and show their prompt as the head's micro-label; the
- * palette's prompt is the sheet's accessible name.
+ * The window's transient menus that own their input and their surface: the
+ * centred sheet (`centered`: pickers, package menus — a head with its field,
+ * the scrolling results, and a foot of key hints) and the narrower
+ * `contextMenu`/`menuBar` popover. Menu sessions take the popover surface and
+ * show their prompt as the head's micro-label; the sheet's prompt is its
+ * accessible name.
+ *
+ * Plan 124: the composer's `/` palette is **not** here. Its query is the lane's
+ * field and its anchor is that field's box, so the lane draws it
+ * (`CommandPalette`) — this component keeps the sessions that are window
+ * surfaces of their own (the `commandPalette` origin is filtered out before it
+ * is mounted, `WorkspacePanes`).
  */
 export function CommandCentre({
   workspace,
@@ -57,8 +63,7 @@ export function CommandCentre({
     workspace.menuActivate(secondary);
   };
   const secretPrompt = /api key|hidden|base url/i.test(menu.prompt);
-  const palette =
-    menu.origin === "centered" || menu.origin === "commandPalette";
+  const palette = menu.origin === "centered";
   const count =
     menu.items.length === 1 ? "1 result" : `${menu.items.length} results`;
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {

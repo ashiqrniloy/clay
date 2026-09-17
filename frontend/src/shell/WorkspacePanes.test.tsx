@@ -3,7 +3,9 @@
 // entering the agent view must actually render the agent surface (the chain
 // runtimeSnapshot envelope → packageUi.surfaces → view switch → AgentView),
 // the inactive view must stay mounted, and the launcher must be the landing of
-// an *uncommitted* tab only.
+// an *uncommitted* tab only. Plan 124 added the tab's persistent agent lane
+// below both views — the same instance in either view, mounted once per tab,
+// reading the one store the host resolves for the tab.
 
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
@@ -60,6 +62,7 @@ import { createWorkspace } from "./workspace-controller";
 import type { BootstrapDto } from "../bridge/types";
 import { sendRequest } from "../bridge/client";
 import { WorkspacePanes } from "./WorkspacePanes";
+import { agentLane } from "./layout-state";
 import type { PackageSurfaceDto, PackageUiSnapshotDto } from "../bridge/types";
 
 function bootstrap(
@@ -477,5 +480,285 @@ describe("WorkspacePanes two views", () => {
     expect(
       await screen.findByRole("button", { name: "Open folder…" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("the tab's agent lane (plan 124)", () => {
+  it("mounts one lane for both views and never remounts it on a switch", async () => {
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const lane = screen.getByRole("contentinfo", { name: "Agent lane" });
+    // Agent view up: the lane is still there (the composer belongs to the tab).
+    expect(lane.contains(screen.getByLabelText("Message"))).toBe(true);
+    await act(async () => {
+      ws.setView("workspace");
+    });
+    // Same DOM node, not a second lane: switching views moves neither the
+    // draft nor the pickers (performance AC).
+    expect(screen.getByRole("contentinfo", { name: "Agent lane" })).toBe(lane);
+  });
+
+  it("hides the lane when the tab's lane state is off and keeps its draft", async () => {
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const lane = document.querySelector(
+      "footer[aria-label='Agent lane']",
+    ) as HTMLElement;
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "half a thought" } });
+
+    // `Ctrl+X Ctrl+P` flips this state (the chord is the shell matcher's —
+    // plan 124 task 5); hiding is a state, so the draft survives.
+    await act(async () => {
+      agentLane.setVisible(false);
+    });
+    // Hidden is out of the accessibility tree as well as out of the flow.
+    expect(
+      screen.queryByRole("contentinfo", { name: "Agent lane" }),
+    ).toBeNull();
+    expect(lane.hidden).toBe(true);
+    await act(async () => {
+      agentLane.setVisible(true);
+    });
+    expect(lane.hidden).toBe(false);
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).value,
+    ).toBe("half a thought");
+  });
+
+  it("draws the palette in the lane and veils the working area only", async () => {
+    // Plan 124/DESIGN §6: the composer's menus use the modal scrim recipe, but
+    // over the working area — the lane keeps the field that *is* the palette's
+    // query above the veil, and the sheet rises from inside it.
+    const sent: string[] = [];
+    const ws = await mountedWorkspace(true, undefined, {
+      send: async (payload: string) => {
+        sent.push(payload);
+      },
+    });
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const host = screen.getByTestId("workspace-panes");
+    const veil = host.querySelector("[data-clay-slot='scrim']") as HTMLElement;
+    expect(veil.dataset.open).toBe("false");
+    // The field opens the session (the shell sends `controlCenter.open`); the
+    // snapshot that follows is what draws the sheet.
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "/" } });
+    await act(async () => {
+      ws.handleEnvelope({
+        kind: "routed",
+        data: {
+          clientId: 1,
+          tabId: 1,
+          event: {
+            kind: "transientMenuSnapshot",
+            data: {
+              sessionId: "9" as never,
+              prompt: "Commands",
+              query: "",
+              items: [
+                {
+                  id: "shell.toggleAgentLane",
+                  label: "Toggle Agent Lane",
+                  detail: "client — built-in",
+                  scope: "shell",
+                  bindings: ["Ctrl+X Ctrl+P"],
+                  accessibilityLabel: "Toggle Agent Lane built-in",
+                },
+              ],
+              selectedIndex: 0,
+              status: "active",
+              focusPolicy: "modal",
+              origin: "commandPalette",
+            },
+          },
+        },
+      } as never);
+    });
+    const sheet = await screen.findByTestId("command-palette");
+    // The sheet is inside the lane's composer form (its anchor), so it spans
+    // the composer box it answers to.
+    expect(
+      screen.getByRole("contentinfo", { name: "Agent lane" }).contains(sheet),
+    ).toBe(true);
+    expect(field.closest("form")?.contains(sheet)).toBe(true);
+    // One veil, over the view area — never over the lane.
+    const veiled = host.querySelector(
+      "[data-clay-slot='scrim']",
+    ) as HTMLElement;
+    expect(veiled).toBe(veil);
+    expect(veiled.dataset.open).toBe("true");
+    expect(
+      veiled.closest("footer[aria-label='Agent lane']"),
+      "the lane stays above the veil: its field is the palette's query",
+    ).toBeNull();
+    // It is the modal scrim *recipe* (the attribute is what carries the
+    // reduced-transparency / no-backdrop-filter fallbacks in global.css) on a
+    // host element, not a modal dialog.
+    expect(veiled.getAttribute("data-clay-component")).toBe("modal");
+    expect(veiled.getAttribute("data-clay-slot")).toBe("scrim");
+    expect(veiled.getAttribute("aria-hidden")).toBe("true");
+    // Plan 124: the sheet's scope chip reaches the session as a filter — the
+    // host is the one wiring between the field's menu and the server, so the
+    // payload (not just the component's intent) is what this asserts.
+    const updates = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.family === "menuQueryUpdate");
+    expect(updates.at(-1)?.payload).toMatchObject({ query: "", scope: null });
+    // Plan 124 launch test: hiding the lane takes its menus with it, so the
+    // veil closes instead of stranding a scrim over the working area with the
+    // palette's query input gone. The session survives; showing the lane
+    // again restores the sheet and the veil.
+    await act(async () => {
+      agentLane.setVisible(false);
+    });
+    expect(veiled.dataset.open).toBe("false");
+    expect(
+      (document.querySelector("footer[aria-label='Agent lane']") as HTMLElement)
+        .hidden,
+    ).toBe(true);
+    await act(async () => {
+      agentLane.setVisible(true);
+    });
+    expect(veiled.dataset.open).toBe("true");
+    expect(await screen.findByTestId("command-palette")).toBe(sheet);
+    fireEvent.click(screen.getByRole("button", { name: "Shell" }));
+    await act(async () => undefined);
+    const chipUpdate = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.family === "menuQueryUpdate")
+      .at(-1);
+    expect(chipUpdate?.payload).toMatchObject({ query: "", scope: "shell" });
+  });
+
+  it("boots the tab's store itself and shares it with the agent view", async () => {
+    // The lane mounts for tabs whose agent view was never shown, so the host —
+    // not the view — resolves and bootstraps the store (plan 124). The old
+    // "panel-created store" assertion became the host's.
+    const send = vi.fn(async (payload: string) => {
+      void payload;
+      return undefined;
+    });
+    const ws = await mountedWorkspace(true, null, { send });
+    render(<WorkspacePanes workspace={ws} />);
+    const runtime = ws.active();
+    if (!runtime) throw new Error("no active tab");
+    await waitFor(() => {
+      expect(runtime.agent).not.toBeNull();
+    });
+    const store = runtime.agent;
+    const asks = send.mock.calls.map(([payload]) => String(payload));
+    expect(asks.some((payload) => payload.includes("listSessions"))).toBe(true);
+    expect(asks.some((payload) => payload.includes("tabState"))).toBe(true);
+    // The agent view was never mounted; the lane exists anyway, and the view
+    // reads the same store once it is.
+    expect(
+      screen.getByRole("contentinfo", { name: "Agent lane" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      ws.setView("agent");
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    expect(runtime.agent).toBe(store);
+    expect(sendRequest).not.toHaveBeenCalled();
+  });
+
+  it("shows the agent-less state from the approved artifact", async () => {
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    const field = await screen.findByLabelText("Message");
+    expect(field).toBeDisabled();
+    expect(field).toHaveProperty(
+      "placeholder",
+      "Attach an agent to this tab to send a prompt",
+    );
+    const trigger = document.querySelector("[data-agent-pick] button");
+    expect(trigger).toHaveTextContent("Attach an agent");
+    expect(screen.queryByRole("button", { name: "Effort" })).toBeNull();
+  });
+
+  it("marks the window while this tab works, and only while it works", async () => {
+    const ws = await mountedWorkspace(true);
+    const view = render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const runtime = ws.active();
+    if (!runtime) throw new Error("no active tab");
+    await waitFor(() => expect(runtime.agent).not.toBeNull());
+    // The lane reports the tab's run state: the tab record carries it (the
+    // titlebar's mark reads it — the tab strip's own marker is colour only).
+    await act(async () => {
+      harness.emit({
+        type: "RUN_STARTED",
+        threadId: "s",
+        runId: "r",
+        clientId: runtime.clientId,
+      });
+    });
+    await waitFor(() => {
+      const tab = ws
+        .getSnapshot()
+        .tabs.find((entry) => entry.clientId === runtime.clientId);
+      expect(tab?.agentBusy).toBe(true);
+    });
+    await act(async () => {
+      harness.emit({
+        type: "RUN_FINISHED",
+        threadId: "s",
+        runId: "r",
+        clientId: runtime.clientId,
+      });
+    });
+    await waitFor(() => {
+      const tab = ws
+        .getSnapshot()
+        .tabs.find((entry) => entry.clientId === runtime.clientId);
+      expect(tab?.agentBusy).toBe(false);
+    });
+    view.unmount();
+  });
+
+  it("keeps one store per tab across a tab switch", async () => {
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const first = ws.active();
+    if (!first) throw new Error("no active tab");
+    await waitFor(() => expect(first.agent).not.toBeNull());
+
+    // A second tab gets its own store; the first tab's survives the switch.
+    await act(async () => {
+      ws.installBootstrap(bootstrap({ clientId: 2, tabId: 20 }));
+      await ws.activate(2);
+    });
+    await waitFor(() => {
+      expect(ws.active()?.clientId).toBe(2);
+    });
+    const second = ws.active();
+    if (!second) throw new Error("no second tab");
+    await waitFor(() => expect(second.agent).not.toBeNull());
+    expect(second.agent).not.toBe(first.agent);
+    await act(async () => {
+      await ws.activate(1);
+    });
+    await waitFor(() => expect(ws.active()?.clientId).toBe(1));
+    expect(ws.active()?.agent).toBe(first.agent);
   });
 });

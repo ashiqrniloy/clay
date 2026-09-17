@@ -42,6 +42,16 @@ export interface ClayTextFieldProps {
    *  send/cancel actions, which the approved layout places inside the
    *  shell's trailing edge. */
   endContent?: ReactNode;
+  /** Rendered inside the field shell as its own row, below the control and
+   *  `endContent` — the lane composer's agent-control toolbar (agent type,
+   *  model, reasoning effort, context meter). The shell stays the only
+   *  boundary around both rows (DESIGN.md §11/§12). */
+  toolbar?: ReactNode;
+  /** Rendered inside the field shell as a layer the caller positions: the
+   *  field's own menu (the composer's `/` palette anchors itself 6px above this
+   *  box, so being a child of the shell *is* the geometry — DESIGN.md §12). It
+   *  takes no flow space; the shell is the containing block. */
+  menu?: ReactNode;
   description?: string;
   /** The field's error message, rendered as the declared error slot below the
    *  well (`textInput.default.error.rest`) and announced through
@@ -66,6 +76,8 @@ export function ClayTextField({
   role = "ui",
   labelHidden = false,
   endContent,
+  toolbar,
+  menu,
   description,
   errorMessage,
   onSubmit,
@@ -97,8 +109,15 @@ export function ClayTextField({
       .join(" ") || undefined;
   const roleClass = role === "monospace" ? styles.monospace : "";
   return (
-    <RACTextField
-      className={`${styles.field} ${variant === "composer" ? styles.composer : ""}`}
+    // The field's menu anchors to the shell's *outer* box, so a border-box
+    // wrapper carries it: an absolutely positioned child of the shell itself
+    // resolves against the padding box, which puts it 1px in and 1px down on a
+    // 1px hairline (DESIGN.md §12 pins the composer's `/` sheet 6px above the
+    // box and exactly as wide as it). The mentions list stays a child of the
+    // shell — its insets are the form's, not the box's.
+    <div className={styles.fieldSlot}>
+      <RACTextField
+        className={`${styles.field} ${variant === "composer" ? styles.composer : ""}`}
       value={value}
       onChange={onChange}
       isDisabled={disabled}
@@ -145,6 +164,7 @@ export function ClayTextField({
         />
       )}
       {endContent}
+      {toolbar ? <span className={styles.toolbar}>{toolbar}</span> : null}
       {description && (
         <span
           id={descriptionId}
@@ -163,6 +183,8 @@ export function ClayTextField({
           {errorMessage}
         </span>
       )}
-    </RACTextField>
+      </RACTextField>
+      {menu}
+    </div>
   );
 }

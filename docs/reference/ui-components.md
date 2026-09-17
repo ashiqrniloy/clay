@@ -47,11 +47,16 @@ are cataloged here so package authors do not mistake them for extension points:
   caret/IME projection with an 8 visible-row and 480 logical-pixel cap,
   retained scrolling, stale/empty/error dismissal, and sanitized status/a11y
   data. Completion is not a package overlay anchor or component kind.
-- **Command Centre/Path Browser:** `TransientMenuOrigin::Centered` is a
-  Clay-owned modal window-level surface using the token-backed centered width
-  (640 logical-pixel default), retained result scrolling, and a single scrim.
-  Package commands may be listed but packages cannot open, drive, configure, or
-  intercept the session. `centered` is not a package anchor.
+- **Command Centre/Path Browser:** the command and path sessions are the
+  composer's own `/` palette since plan 124 (`TransientMenuOrigin::CommandPalette`:
+  the sheet is the field's menu, 6 logical pixels above the box, as wide as the
+  box, with the working-area veil behind it). `TransientMenuOrigin::Centered`
+  remains a Clay-owned modal window-level surface using the token-backed
+  centered width (640 logical-pixel default) for the agent picker and package UI
+  dialogs, with retained result scrolling and a single scrim. Package commands
+  may be listed behind `/` but packages cannot open, drive, configure, or
+  intercept either session. `centered` and `commandPalette` are not package
+  anchors.
 - **Package overlays:** package declarations remain limited to
   `working-area`, `active-pane`, `main`, and `pointer`; no package JavaScript
   runs in paint/layout/input paths. Package-authored transient-menu labels are
@@ -71,8 +76,9 @@ records the boundaries that are easiest to confuse with package extension
 points:
 
 - Clay owns the working area, pane/split tree, fixed slots, tab bar, status
-  chrome, core welcome fallback, file browser, completion projection, and
-  centered Command Centre. The loaded empty-tab landing is package pane-content
+  chrome, the persistent agent lane, the composer's `/` palette, core welcome
+  fallback, file browser, completion projection, and centered overlays. The
+  loaded empty-tab landing is package pane-content
   (whatever package contributes the empty-tab landing). Packages contribute inert component trees, action
   intents, input/state metadata, and typed semantic tokens only.
 - Retained package/SDUI hosts clip children to their owning bounds and expose
@@ -125,6 +131,34 @@ and the [UI Chrome Primitives](primitives/ui-chrome-primitives.md) reference.
 - **`ClayIconButton` composition** (`frontend/src/components/button.tsx`, plan 112 task 7): icon-only controls require a `label` prop (the single accessible name), show a tooltip on hover **and** keyboard focus via `ClayTooltip`, keep a ≥24px CSS hit target around the 16px glyph (WCAG 2.2), and fall back to the visible text label when the icon key resolves to no geometry — a failed pack never leaves a blank control.
 - **`ClayTooltip`** (`frontend/src/components/tooltip.tsx`, plan 112 task 7): React Aria `TooltipTrigger`/`Tooltip` with host-owned string content only; consumes the `tooltip.default.root.rest` design-system recipe. See the [React UI catalog mapping](../development/react-ui-catalog-mapping.md) for the implementation table.
 - **Icon-pack activation API** (plan 112 task 12): [`theme.setIconPack`](clay-js-api/theme/set-icon-pack.md) activates a bundled `@clay/icons-*` pack or an enabled package's `iconPack` contribution; selection is independent of theme/appearance/design-system selections and re-validated at every commit. Package authors: see [Icon Packs](icon-packs.md) and [Creating Clay Packages — Icon-pack declarations](packages/creating-packages.md#icon-pack-declarations-claycontributionsiconpack-plan-112).
+
+## Plan 124 agent lane and composer `/` palette
+
+The persistent agent lane and the palette it answers to add no package-facing
+kind, style variable, token, overlay anchor, manifest field, permission, or JS
+API. Recorded here because both are easy to mistake for extension points:
+
+- **Agent lane** (`frontend/src/shell/AgentLane.tsx`): the working area's own
+  bottom chrome row — approval strip, composer box (prompt field plus the tab's
+  agent-type/model/effort controls), hint row, session-environment foot — shared
+  by the Workspace and Agent views of the same tab, toggled by
+  `shell.toggleAgentLane`, its per-tab visibility persisted by the client. It is
+  not a `PanelContribution` slot, a `ComponentKind`, a `TransientMenuOrigin`, or
+  an `OverlayAnchor`; the pane `bottom` slot still composes inside its pane,
+  above the lane. Clay-owned presentation over the documented agent session APIs.
+- **`/` palette** (`frontend/src/command-centre/CommandPalette.tsx`): the
+  generation-stamped command catalogue drawn as the composer field's own menu
+  (`TransientMenuOrigin::CommandPalette`), 6 logical pixels above the box and as
+  wide as it, with the `modal.scrim` veil over the working area (never over the
+  lane — the field that holds the query stays interactive). Rows carry the
+  server's own scope and chord fields (`scope`, `bindings`); package-registered
+  commands appear automatically, routing-policy-filtered, with no authority.
+  `commandPalette` is not a package anchor, and no package API opens or drives
+  the session.
+
+Complete package-facing explanation:
+[Creating Clay Packages — Plan 124 authoring contract](packages/creating-packages.md#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette)
+and the normative shell composition in [`DESIGN.md` §12](../../DESIGN.md).
 
 ## Reference Documents
 

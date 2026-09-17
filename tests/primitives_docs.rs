@@ -2011,3 +2011,69 @@ fn plan101_documentation_cross_links_and_token_synchronization() {
         "PRODUCT.md must record design-system recipe commitments"
     );
 }
+
+#[test]
+fn plan124_agent_lane_and_composer_palette_authoring_contracts_are_pinned() {
+    // Plan 124 task 10: the persistent agent lane and the composer's `/` palette
+    // are Clay-owned shell chrome, not package extension points. The authoring
+    // contract, the UI navigation page, the catalog, and the master index must
+    // keep saying so, and the boundary must not lose the two facts package
+    // authors act on: a package reaches the palette by registering a command,
+    // and listing is routing-policy-filtered with no authority granted.
+    let guide = read("docs/reference/packages/creating-packages.md");
+    for marker in [
+        "### Plan 124 authoring contract: the persistent agent lane and the composer's `/` palette",
+        "The lane is Clay-owned shell chrome, not a package extension point",
+        "There is no lane `PanelContribution` slot",
+        "A package reaches the palette one way: by registering a command",
+        "routing-policy-filtered",
+        "no package API exposes sessions or the connection-scoped",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md must keep the Plan 124 authoring-contract marker {marker:?}"
+        );
+    }
+
+    let ui_components = read("docs/reference/ui-components.md");
+    for marker in [
+        "## Plan 124 agent lane and composer `/` palette",
+        "`frontend/src/shell/AgentLane.tsx`",
+        "`TransientMenuOrigin::CommandPalette`",
+        "packages/creating-packages.md#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette",
+    ] {
+        assert!(
+            ui_components.contains(marker),
+            "docs/reference/ui-components.md must record the Plan 124 boundary {marker:?}"
+        );
+    }
+
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    assert!(
+        catalog.contains("| Agent lane | internal | `frontend/src/shell/AgentLane.tsx` |"),
+        "the component catalog must list the agent lane as a Clay-native internal surface"
+    );
+    assert!(
+        catalog.contains("the persistent agent lane, the composer's `/` palette"),
+        "the catalog's package UI/layout contract must exclude the lane and the palette from package ownership"
+    );
+
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    for marker in [
+        "the persistent **agent lane** (plan 124)",
+        "It is shell chrome, not a `PaneSlotLayout` slot, package contribution",
+        "Plan 124 re-anchored the command and\npath sessions onto the agent lane's composer (`CommandPalette`)",
+    ] {
+        assert!(
+            strategy.contains(marker),
+            "shell-layout-strategy.md must keep the Plan 124 shell-vocabulary marker {marker:?}"
+        );
+    }
+
+    let index = read("docs/index.md");
+    assert!(
+        index.contains("plan 124 agent-lane and composer `/` palette boundary")
+            && index.contains("Plan 124 agent-lane and composer `/` palette contract"),
+        "docs/index.md must index the Plan 124 lane/palette authoring contract"
+    );
+}

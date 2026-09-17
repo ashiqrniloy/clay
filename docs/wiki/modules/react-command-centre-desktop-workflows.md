@@ -2,119 +2,142 @@
 
 ## Source
 
-- `frontend/src/command-centre/CommandCentre.tsx`
+- `frontend/src/shell/{WorkspacePanes,AgentLane,workspace-controller}.tsx`
+- `frontend/src/command-centre/{CommandPalette,CommandCentre}.tsx`
+- `frontend/src/coding-agent/{Composer,AgentView}.tsx`
+- `frontend/src/components/text-field.tsx`
 - `frontend/src/settings/SettingsPanel.tsx`
-- `frontend/src/shell/workspace-controller.ts`
-- `src-tauri/src/commands.rs`
-- `src-tauri/src/bridge/session.rs`
-- `src/server/connection/runtime.rs`
-- `src/server/command_execution.rs`
+- `frontend/src/shell/{layout-state,use-shell-chords}.ts`
+- `frontend/src/shell/{workspace-panes,command-centre}.module.css`
+- `src/server/{control_center,menu_sessions,command_execution}.rs`
+- `src/protocol/menu.rs` / `src/protocol/mod.rs`
+- `src-tauri/src/{commands.rs,bridge/session.rs}`
 
 ## Overview
 
-Plan 097 Phase 9 ports Clay's server-owned Command Centre, Path Browser,
-settings, diagnostics, native file/folder selection, and client workflow
-commands to the Tauri/React client. Existing server sessions and configuration
-runtime remain authoritative. React renders bounded inert snapshots and sends
-opaque session intents; it does not filter command catalogues, resolve paths,
-or execute package code.
+Plan 097's React command workflows retain server authority for command
+catalogues, menu sessions, path resolution, grants, settings validation, and
+runtime generations. Plan 124 changes only the host projection: the command
+and path sessions are now a `/` palette owned by the agent lane's composer;
+centered picker and package sessions remain `CommandCentre` consumers.
+
+React renders bounded inert snapshots and sends opaque menu intents. It does
+not filter commands, resolve paths, execute package code, or decide grants.
 
 ## Responsibilities
 
-- `CommandCentre` renders command, path, and picker snapshots through one React
-  Aria modal/list projection.
-- `workspace-controller` keeps one menu, diagnostic, and settings visibility
-  state per tab connection and deny-by-default dispatches approved client UI
-  commands.
-- `SettingsPanel` is a compiled first-party presentation module for the exact
-  `@clay/settings` contribution. It emits only versioned `settings.*` SDUI
-  intents.
-- Tauri commands run existing Clay native dialog backends off the render thread
-  and hand selected paths directly to `ClientEditQueue`; paths never enter the
-  DOM.
-- Server Rust retains command catalogue, path listing, grant conversion,
-  configuration reload, preference validation, package provenance, and runtime
-  generation authority.
+- `WorkspacePanes` owns the per-tab `ComposerPalette` callbacks and selects the
+  `commandPalette` session from the tab runtime.
+- `AgentLane` mounts the composer for every tab and supplies the query field;
+  `CommandPalette` is rendered inside that field's `menu` slot.
+- `CommandCentre` renders only non-`commandPalette` centered sessions, such as
+  agent pickers and package UI dialogs.
+- `workspace-controller` installs menu snapshots on the owning tab and keeps
+  client UI dispatch deny-by-default.
+- `SettingsPanel` remains the compiled first-party presentation for the exact
+  `@clay/settings` contribution and emits only versioned `settings.*` intents.
+- Tauri dialog commands retain their narrow platform backends and pass selected
+  paths to `ClientEditQueue`; path authority stays server-side.
 
 ## How It Works
 
-1. A manifest chord or command intent opens `ServerMenuSessions`; the server
-   pushes `TransientMenuSnapshotData` with an opaque high-bit session ID.
-2. The bridge forwards the validated event with its client/tab identity.
-   `workspace-controller` installs it only on that tab.
-3. React renders prompt, query, bounded rows, server-selected row, empty status,
-   and polite result count. Query, semantic backspace, relative selection,
-   primary/secondary activation, and cancel go back as existing menu messages.
-4. Path Browser reuses the same component. `Alt+Enter` sends secondary
-   activation; the server resolves its installed canonical entry and converts
-   the user browse action into a directory grant.
-5. Client UI activations return `ShellClientCommandRequest`. The controller
-   accepts a closed command set for panes, tabs, dialogs, editor commands, and
-   settings visibility; unknown sibling IDs do nothing.
-6. Native dialog commands call Clay's existing portal/Windows/macOS backend in
-   `spawn_blocking`. A selected path is submitted through the queue's single-use
-   selected-path capability and server canonicalization. Cancel is a no-op.
-7. `settings.open`/`settings.close` receive a server-approved client projection.
-   Theme and appearance choices persist through the existing preference/reload
-   path. Typography sends one complete JSON transaction, validated before the
-   atomic preference write and validated again during reload.
-8. Live `RuntimeDiagnostic` events and runtime-snapshot diagnostics update the
-   shell footer. Failed reloads preserve the previous generation.
+1. A titlebar Control Center trigger, `Ctrl+X Ctrl+O`, or a composer `/` opens
+   `controlCenter.open` through the tab's server connection. The server creates
+   a generation-stamped `TransientMenuSession` and pushes its bounded snapshot.
+2. The bridge and `workspace-controller` install that snapshot only on the
+   bound tab. `WorkspacePanes` maps the snapshot and menu intents into the
+   `ComposerPalette` interface.
+3. `Composer` owns the draft and the focus boundary. On palette-session
+   appearance it resets the local scope to `All`, sends the current `/`-led
+   filter, and sends later query/scope changes to the server. `Tab` is not a
+   row-completion mechanism; Enter submits the selected palette row when one
+   exists and otherwise reaches the composer's built-in handling.
+4. `CommandPalette` is a display-only results sheet: it echoes the field query,
+   renders server rows, scope chips (`All`, `Session`, `Shell`, `Files`),
+   per-row binding chips, the bounded empty state, and an `aria-live` result
+   count. It owns no input or menu session.
+5. `CommandPalette` is a child of `ClayTextField`'s `menu` slot. CSS anchors it
+   6px above the field border box at exactly the field width, caps its height
+   at `min(52vh, 420px)`, and scrolls its rows internally. It has no separate
+   focus ring; the composer field remains the focus boundary.
+6. `WorkspacePanes` renders one modal scrim in the working-area grid over the
+   panes and inspector rail. The lane stays above it (`z-index` 41 over veil
+   40), so the query field and palette remain interactive. Hiding the lane
+   removes both its palette and the veil; showing it restores the live session.
+7. Path Browser uses the same `CommandPalette` origin and sheet. Its server
+   session still owns canonical listing, filtering, navigation, and file/root
+   grant conversion; `Alt+Enter` remains secondary workspace activation.
+8. Non-palette snapshots still go to `CommandCentre`, which retains the
+   centered modal projection for picker/package dialogs. Client UI activations
+   continue through the closed `ShellClientCommand` parser; unknown IDs do
+   nothing.
+9. Native file/folder dialogs, settings persistence, and runtime diagnostics
+   keep their existing validated paths. Failed reloads preserve the previous
+   runtime generation.
 
 ## Code Examples
 
 ```ts
-workspace.menuActivate(true); // Path Browser: open selected directory as workspace
-workspace.menuCancel();       // opaque session id remains server-owned
+// Internal shell wiring: the menu remains server-owned.
+workspace.dispatchServerCommand("controlCenter.open");
+workspace.menuQuery("/resume", "session");
+workspace.menuCancel();
 ```
 
 ```text
-native picker -> ClientEditQueue selected-path capability -> server canonicalize
--> SingleFile or Directory grant -> document/tab snapshot
+composer `/` -> server menu snapshot -> CommandPalette field child
+           -> opaque query/selection/activation intent -> server authority
 ```
 
 ## Invariants and Constraints
 
-- One menu per connection; tab switch, reload, replacement, and disconnect
-  remove it.
-- Snapshot query/selection is server truth. React keeps no parallel command
-  catalogue or fuzzy matcher.
-- Menu and file-browser collections remain capped at 256 rows. Native scrolling
-  is retained until profiling demonstrates a virtualization need.
-- Dialog paths are never returned to package code or rendered as DOM data.
-- Clipboard reads/writes happen only for explicit user-routed editor commands;
-  package and configuration runtimes receive no clipboard API.
-- Typography requires all three profiles and all seven hierarchy ratios. Any
-  invalid field rejects the whole transaction.
-- No package gets Tauri commands, native dialogs, centered overlay authority,
-  raw CSS, or direct configuration mutation.
+- There is one server-owned menu session per tab connection; replacement, tab
+  switch, reload, cancel, and disconnect close it.
+- The server owns query results, selection, scope filtering, path resolution,
+  grants, command validation, and generation checks. React owns only draft/focus
+  presentation state.
+- Rows, query text, scope, binding chips, and result counts are bounded; no
+  package JavaScript or registry rebuild runs on query, paint, or layout paths.
+- The palette's scrim covers the working-area row, including the inspector
+  rail, but never blocks the lane query input. Reduced-transparency fallback
+  removes blur through the global design-system fallback.
+- Dialog paths never enter package code. Path activation resolves only from the
+  server's installed canonical entries and converts browse authority into the
+  existing single-file or directory grant.
+- Packages cannot open or drive menu sessions, request the palette veil, obtain
+  Tauri dialogs, or receive raw paths. Their commands appear only through the
+  validated command-registration path.
 
 ## Tests
 
-- `frontend/src/command-centre/CommandCentre.test.tsx`: modal semantics and all
-  menu intents.
-- `frontend/src/settings/SettingsPanel.test.tsx`: complete typography payload,
-  invalid-bound denial, and secret-free DOM.
-- `frontend/src/shell/workspace-controller.test.ts`: per-tab menu lifecycle,
-  client-command allowlist, and dialog routing.
-- `src/server/connection/runtime.rs`: exact manifest client-UI projection and
-  settings persistence/reload.
-- `src/server/command_execution.rs`: settings theme/appearance/typography
-  validation.
-- `src-tauri/tests/config_security.rs`: no broad filesystem/shell/network plugin
-  capabilities.
+- `frontend/src/command-centre/CommandPalette.test.tsx`: sheet rows, scopes,
+  binding chips, empty state, result-count accessibility, and activation.
+- `frontend/src/command-centre/CommandCentre.test.tsx`: centered picker/package
+  session projection and modal behavior.
+- `frontend/src/coding-agent/{Composer,Composer.test}.tsx`: `/` query sync,
+  `@` mentions, keyboard submission, and Stop behavior.
+- `frontend/src/shell/{WorkspacePanes,AgentLane,shell-chords}.test.tsx`:
+  palette ownership, veil/lane lifecycle, per-tab controls, and chord routes.
+- `frontend/src/shell/workspace-controller.test.ts`: menu lifecycle, client
+  command allowlist, tab routing, and persistence callbacks.
+- `src/server/{control_center,menu_sessions,connection/tests}.rs`: catalogue,
+  scope/filtering, typed activation, lifecycle, stale generation, and shell
+  client request tests.
+- `src-tauri/tests/config_security.rs`: narrow dialog capability posture.
 
 ```bash
-cargo test --lib menu_sessions -- --test-threads=1
-cargo test --lib settings_ -- --test-threads=1
-cargo test -p clay-desktop --all-targets
+cargo test --test protocol
 npm --prefix frontend test
 ```
 
 ## Related
 
-- [Transient Menu Round Trip](transient-menu-round-trip.md)
-- [Path Browser](path-browser.md)
+- [Control Center](control-center.md) — server catalogue and activation authority
+- [Transient Menu Session](transient-menu-session.md) — generic bounded session
+- [Transient Menu Round Trip](transient-menu-round-trip.md) — protocol and lifecycle
+- [Path Browser](path-browser.md) — composer-owned path mode
+- [React Shell](react-shell.md) — grid, lane, veil, and theme ownership
+- [Tabs and Independent Client Views](tabs-and-clients.md) — per-tab state/lifetime
 - [Configuration Runtime](configuration-runtime.md)
 - [Client File Dialog](client-file-dialog.md)
 - [React SDUI and Package UI](react-sdui-package-ui.md)

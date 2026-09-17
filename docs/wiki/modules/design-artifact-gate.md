@@ -101,7 +101,15 @@ running app against the approved specimen and the shipped manifest:
 offline manifest audits, then CDP computed-style comparison across the four
 shipped themes (plus `@clay/core`), including forced interaction states (hover,
 focus, press, selection, transform), radius/border/colour normalisation, and a
-`FLUSH_KEYS` allowlist for the genuinely 0-radius full-bleed regions. It uses
+`FLUSH_KEYS` allowlist for the genuinely 0-radius full-bleed regions. Its
+host-CSS material/motion check reads **every** stylesheet under `frontend/src`
+(`tokens.css` excepted — it states the fallback values): blur may only come from
+the scrim recipe, animation only from keyframes that touch `opacity`/`transform`
+(carrying a recipe's own duration/timing), and the reduced-motion /
+reduced-transparency fallbacks that remove them are allowed. Plan 124 widened it
+from `frontend/src/components` — the palette's entrance and the lane veil live
+in `command-centre/` and `shell/`, exactly the surfaces a components-only scan
+cannot see. It uses
 `tests/fixtures/design-system-reference-keys.txt` as the baseline: 130 reference
 keys (142 minus the 12 removed `chat.default.*` keys) plus the 35 post-approval
 additions. Accepted deviations are declared in the tool, not ignored ad hoc.

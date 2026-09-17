@@ -4,7 +4,7 @@ Phase 18.8 Task 7: built-in command-palette workflow. Phase 24.1: first
 server-owned session kind on the transient-menu round trip. Phase 24.2:
 command execution mode — generation-stamped live catalogue, shared fuzzy
 matching, typed activation with the client shell bridge, and a default
-`Ctrl+X Ctrl+P` sequence binding (Phase 24.5; pre-24.5 `Ctrl+Shift+P`).
+`Ctrl+X Ctrl+O` sequence binding (Plan 124; pre-Plan-124 `Ctrl+X Ctrl+P`).
 
 ## What it is
 
@@ -12,6 +12,9 @@ The Control Center is a server-owned transient menu that lists executable comman
 
 ## Source files
 
+- `frontend/src/command-centre/{CommandPalette,CommandCentre}.tsx`: palette and centered non-palette projections.
+- `frontend/src/coding-agent/{Composer,Composer.test.tsx}`: composer query/focus and tests.
+- `frontend/src/shell/{AgentLane,WorkspacePanes,workspace-controller}.tsx`: lane host, veil, per-tab menu routing.
 - `src/server/control_center.rs`: `ControlCenter` state, command-to-item projection, fuzzy query scoring, persisted selection, and typed activation.
 - `src/server/mod.rs`: `RuntimeGenerationStore::command_catalogue_snapshot(active_manifest)` — the four-source generation-stamped catalogue.
 - `src/server/menu_sessions.rs`: per-connection server session store (`ServerMenuSessions`) hosting the Control Center as a session kind; `ServerMenuSession::activate` produces typed activations.
@@ -28,12 +31,45 @@ The Control Center is a server-owned transient menu that lists executable comman
 - `src-tauri/src/bridge` + `frontend/src/shell/workspace-{envelope,commands}.ts`: ShellClientCommandRequest envelopes reach the React client, which executes the routed client command (Plan 097 Phase 12 removed the native driver; the request surface is unchanged).
 - `frontend/src/app/layout/{app-shell,working-area}.tsx` + shell transient-menu components: render the overlay and route keyboard navigation/activation/cancel (React shell since Plan 097 Phase 4/12).
 
+## Plan 124 client projection
+
+The server-side Control Center catalogue remains the source for the composer's
+`/` palette, but the old centered command/path surface is retired. A
+`TransientMenuOrigin::CommandPalette` snapshot is selected by `WorkspacePanes`
+and rendered by `CommandPalette` inside the agent lane's composer field. The
+field owns the query and focus; the palette owns neither.
+
+Protocol v31 carries `group`, `bindings`, and `scope` on each menu row, plus the
+scope on `MenuQueryUpdate`. The server classifies rows into the closed `All`,
+`Session`, `Shell`, and `Files` vocabulary and filters the session before fuzzy
+scoring. `CommandPalette` renders scope chips and per-stroke `ClayKbd` chips
+without deriving either from command IDs. `Files` selects Path Browser mode;
+`Session` exposes `@clay/coding-agent` commands; `Shell` covers Clay client,
+editor, and built-in commands.
+
+The palette sheet is a child of `ClayTextField`'s menu slot, exactly the width
+of the composer and 6px above it. `WorkspacePanes` renders the modal veil over
+the panes and inspector rail at z-index 40, while the lane remains interactive
+at z-index 41. Centered `CommandCentre` rendering is retained for picker and
+package-dialog origins only.
+
 ## How it works
 
 1. **Open**. The connection locks the document, clones the active behavior manifest, and calls `RuntimeGenerationStore::command_catalogue_snapshot(active_manifest)`, which merges four sources in order: the 22 built-in server commands (`builtin_server_command_ids`, incl. `controlCenter.openPath` since 24.3), the 38 declared `shell.client*` entries (`SHELL_CLIENT_COMMAND_CATALOGUE`), the trusted-domain registry snapshot, and the third-party-domain registry snapshot. The merge is deterministic (sorted by display name then command ID), fails closed on duplicate IDs and on catalogues above `TRANSIENT_MENU_MAX_ITEMS`, swaps in effective keybindings from the active behavior manifest, and is stamped with the runtime generation ID. The store then opens `ControlCenter::open_catalogue(catalogue, session_id)`, which filters out client-first edit commands and projects each remaining command to an inert `TransientMenuItem` (label, detail, accessibility label, provenance, inert action). One snapshot per open — the catalogue is never rebuilt per keystroke.
-2. **Display**. Each command becomes a `TransientMenuItem` with a display label, detail string (`keybinding - routing - provenance`, e.g. `Ctrl+Shift+M - server-first - @clay/markdown@0.1.0`), accessibility label, provenance (`BuiltIn` for `package_name == "clay"`, else `Package { name, version }`), and an inert `TransientMenuAction` carrying only the command ID and empty arguments. Keybindings shown come from the active behavior manifest (which already folds user `bindKey`/`unbindKey` overlays); registered/default keybinding metadata is the fallback.
+2. **Display**. Each command becomes a `TransientMenuItem` with a display label,
+   one detail line (`routing - provenance`), accessibility label, provenance
+   (`BuiltIn` for `package_name == "clay"`, else `Package { name, version }`),
+   inert action data, closed-vocabulary `scope`, optional `group`, and bounded
+   `bindings`. Keybindings shown come from the active behavior manifest (which
+   already folds user `bindKey`/`unbindKey` overlays); registered/default
+   metadata is the fallback. Protocol v31 carries the row fields separately so
+   the frontend can render chips without parsing detail text.
 3. **Filter**. `ControlCenter::session` scores every item against the query with the shared bounded fuzzy subsequence matcher (`src/shell/fuzzy.rs`), then sorts by score descending, label, then ID (source order when the query is empty). Ranking rewards word boundaries, consecutive matches, and earlier positions; queries longer than 256 chars score `None`; deterministic ties keep the list stable. No registry re-consultation and no package JavaScript runs per query.
-4. **Render**. The filtered session is projected through `TransientPackageOverlay::from_menu_session` onto a bottom-anchored transient overlay and painted by Masonry using existing package-overlay primitives.
+4. **Render**. `WorkspacePanes` routes `CommandPalette`-origin snapshots to
+   the composer's `ComposerPalette`; `CommandPalette` paints the bounded sheet
+   in the field's menu slot. The veil is a separate working-area grid item.
+   Non-palette origins continue through `CommandCentre`'s centered modal
+   projection.
 5. **Activate**. `ControlCenter::selected_activation(target)` produces a typed `ServerMenuActivation`: `Command(CommandExecutionRequest)` for server/package commands, or `ShellClientCommand(command_id)` for `ClientUiCommand` items. On `MenuActivate`, the connection cancels the session first (pushing `TransientMenuClosed`), then dispatches: command activations go through the shared `execute_command_intent` dispatcher with a live aggregated registry built by `CommandRegistry::from_snapshots([trusted, third_party])` (later source wins; built-ins are omitted because the executor falls back to the built-in table); shell activations go out as the narrow `ServerMessage::ShellClientCommandRequest { command_id }` frame, which the client re-parses deny-by-default via `ShellClientCommand::from_command_id` and routes through `apply_shell_client_command` (tab commands, dirty-close gate, pane commands included).
 
 ## Phase 24.1: Server-owned round trip
@@ -71,19 +107,13 @@ Round Trip](transient-menu-round-trip.md):
 
 ## Phase 24.2: Command execution mode
 
-- **Default binding**. `controlCenter.open` ships as a built-in server-intent
-  command in the default behavior manifest with a two-stroke `Ctrl+X Ctrl+P`
-  sequence rule (Phase 24.5; `KeyBindingRule::global_server_first_sequence`:
-  `Global` context, `ServerFirst` routing), shared by
-  `minimal_text_editing` and `core_code_editing`. It is
-  in the `is_runtime_bindable_command` allowlist, so `bindKey`/`unbindKey`
-  configuration overlays can rebind or remove it; the chord survives mode
-  activation because every published mode manifest starts from the shared
-  default commands/keymaps. Phase 24.3 adds the sibling
-  `controlCenter.openPath` with a temporary Global `Ctrl+Alt+P` default in
-  the same allowlist, replaced by the `Ctrl+X Ctrl+F` sequence default in
-  Phase 24.5 without changing the id — see [Path Browser](path-browser.md)
-  and [Sequence Keybindings](sequence-keybindings.md).
+- **Default bindings**. `controlCenter.open` ships as a built-in server-intent
+  command with `Ctrl+X Ctrl+O` (`Global`, `ServerFirst`);
+  `shell.toggleAgentLane` is the sibling client-UI command on `Ctrl+X Ctrl+P`,
+  and `controlCenter.openPath` uses `Ctrl+X Ctrl+F`. All remain
+  runtime-bindable, so `bindKey`/`unbindKey` can rebind or remove them. The
+  palette trigger and chord focus the composer and seed `/`; the lane toggle
+  preserves its draft when hidden.
 - **Live catalogue**. The menu reflects the runtime's current command
   registry: built-ins, the full `shell.client*` surface, and every
   validated package command from both trust domains — loaded packages
@@ -111,14 +141,19 @@ The Control Center also surfaces two built-in mode-discovery commands for diagno
 - Listing grants no authority: a `shell.client*` item is inert on the wire; activation ships the narrow server-approved `ShellClientCommandRequest { command_id }` frame and the client re-parses it deny-by-default (`ShellClientCommand::from_command_id` — unknown or forged IDs are dropped with no state mutation). Packages cannot emit, request, or influence that frame or any activation path.
 - Each selected command still passes through `CommandExecutor` validation: unknown commands, invalid provenance, undeclared permissions, malformed/oversize arguments, and unauthorized targets are rejected before any side effect.
 - The catalogue merge trusts only the two runtime trust domains (verified bundled inventory vs third-party), rejects duplicate IDs across domains fail-closed, and cannot be polluted by packages claiming reserved core IDs (`register_command` namespace rules plus the reserved-domain check). Stale generations cannot activate a stamped session.
-- Menu items carry only inert command IDs and bounded JSON arguments; no callbacks, native handles, raw ops, or executable package code.
+- Menu items carry only inert command IDs, bounded arguments, scope/group
+  metadata, and binding strings; no callbacks, native handles, raw ops, or
+  executable package code. `shell.toggleAgentLane` remains client-local
+  per-tab layout state, not server/runtime generation state.
 
 ## Invariants
 
 - Command metadata filtering is bounded by the `TransientMenuSession` item/query budgets; the full catalogue must fit `TRANSIENT_MENU_MAX_ITEMS` or open fails explicitly.
 - Exactly one catalogue snapshot per menu open and one bounded fuzzy scan per query; no registry rebuild and no package JavaScript on query/paint paths.
 - No package JavaScript, command side effects, or synchronous IPC run in Masonry paint/layout/pointer/key/text handlers.
-- The Control Center does not consume fixed-slot geometry; editor region and caret hit-testing remain unchanged while it is open.
+- The composer palette does not consume editor fixed-slot geometry; its veil
+  occupies only the working-area grid row and the lane occupies the full-width
+  shell row below it. Editor-region and caret hit-testing remain unchanged.
 
 ## Tests
 
@@ -128,6 +163,10 @@ The Control Center also surfaces two built-in mode-discovery commands for diagno
 - `src/server/connection/tests.rs`: `control_center_opens_filters_activates_and_cancels`, `control_center_shell_activation_sends_shell_command_request`, `control_center_lists_and_activates_loaded_package_commands`, `runtime_generation_replacement_cancels_open_control_center`, `tab_switch_cancels_the_active_server_menu_session`, `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`
 - `src/shell/fuzzy.rs`: subsequence vs substring, word-boundary and consecutive bonuses, case-insensitivity, Unicode safety, empty-query and over-long-query behavior
 - `src/client/mod.rs`: event mapping for `ShellClientCommandRequest`; `src/client/behavior.rs`: default-binding routing
+- `frontend/src/command-centre/{CommandPalette,CommandPalette.test.tsx}`:
+  scope/binding fields, rows, empty state, count, and activation
+- `frontend/src/shell/{AgentLane,WorkspacePanes,shell-chords}.test.tsx`:
+  palette/lane integration and default chord surface
 - `src/server/ops/keybindings.rs`: `control_center_open_is_bindable_and_server_routed`
 
 Run with:
@@ -149,4 +188,6 @@ cargo test --lib shell::fuzzy --quiet
 - `docs/reference/clay-js-api/commands/server-list-commands.md`
 - `docs/reference/clay-js-api/commands/server-register-command.md`
 - `docs/reference/clay-js-api/keybindings/bind-key.md`
+- [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md) — current palette/veil projection
 - `plans/082-Phase24.2-Command-Execution-Mode.md`
+- `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`

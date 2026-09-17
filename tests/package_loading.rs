@@ -2224,14 +2224,23 @@ fn keypress_routing_uses_manifest_without_javascript() {
                 );
             }
             RoutingPolicy::ClientUiCommand => {
-                // Clay-owned client UI commands (shell pane management and
-                // editor commands) are allowed in the base manifest; packages
-                // must not declare their own. Phase 28.5 adds the built-in
-                // `editor.toggleInlayHints` local overlay command.
+                // Clay-owned client UI commands are allowed in the base
+                // manifest: shell pane/tab management (including plan 124's
+                // `shell.toggleAgentLane`), and editor commands (Phase 28.5
+                // adds the built-in `editor.toggleInlayHints` local overlay
+                // command). Packages must not declare their own — and the two
+                // catalogues checked here are exactly the allowlists the
+                // native client parses deny-by-default, so a package-authored
+                // id cannot ride this arm by naming itself `shell.*`.
+                let clay_owned =
+                    clay::client_commands::ShellClientCommand::from_command_id(&cmd.command_id)
+                        .is_some()
+                        || clay::client_commands::EditorClientCommand::from_command_id(
+                            &cmd.command_id,
+                        )
+                        .is_some();
                 assert!(
-                    cmd.command_id.starts_with("shell.client")
-                        || cmd.command_id.starts_with("editor.client")
-                        || cmd.command_id == "editor.toggleInlayHints",
+                    clay_owned,
                     "package manifest command `{}` must not request native client UI authority",
                     cmd.command_id
                 );

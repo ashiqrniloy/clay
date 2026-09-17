@@ -6,9 +6,10 @@ sibling of the Control Center. It browses user-authorized paths with an
 editable path bar, a derived fuzzy filter, descend/ascend/direct-jump
 navigation, and primary/secondary activation (`Enter`/`Alt+Enter`). It is a
 pure wiring phase over existing primitives: the Phase 18.8
-`TransientMenuSession` state/projection, the Phase 24.1 server-owned session
-store and menu round trip, and the Phase 24.2 shared fuzzy scorer and
-generation-stamped command routing (`plans/083`).
+`TransientMenuSession` state model, the Phase 24.1 server-owned session store
+and menu round trip, the Phase 24.2 shared fuzzy scorer, and Plan 124's
+composer-owned `CommandPalette` projection and generation-stamped command
+routing (`plans/083`, `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`).
 
 ## What it is
 
@@ -61,8 +62,8 @@ command id never changed).
   and the `MenuQueryUpdate`/`MenuBackspace`/`MenuActivate` handler arms.
 - `src/protocol/menu.rs`, `src/protocol/mod.rs` — `MenuBackspace` intent,
   `MenuActivate` activation `kind` (`Primary`/`Secondary`),
-  `PROTOCOL_VERSION` 16, `controlCenter.openPath` declaration and default
-  keymap.
+  protocol v31 palette row fields/scope filter, `controlCenter.openPath`
+  declaration and default keymap.
 - `src/client/mod.rs`, `src/masonry_pane_document.rs` — client intent
   enqueuers (`enqueue_menu_backspace`, activation kind) and
   `dispatch_server_menu_key` routing (Enter/Tab primary, Alt+Enter
@@ -126,8 +127,8 @@ installed entries, a persisted `selected_index`, and a sticky
 - **Projection** — prompt `Browse · {canonical_dir}`, query = input, inert
   `TransientMenuAction::new("")` items, empty states “Empty directory” /
   “No matches for {filter}”, same overlay composition and tokens as the
-  Control Center (bottom anchor, `z.overlay`, Modal focus, hosted
-  `MenuA11y`).
+  Control Center (the same `CommandPalette` bottom sheet, full composer-field
+  width, 6px above the field, with the working-area veil and lane above it).
 
 ## Built-in user-browse listing primitive
 
@@ -281,7 +282,8 @@ reachable only from the built-in session):
   through `clay:keybindings`.
 - `src/protocol/mod.rs` — default keymap contains the path-browser binding.
 - Manual plan: `test-plan/03-files-and-workspace.md` F17–F29,
-  `test-plan/10-keybindings-and-commands.md` K48–K54.
+  `test-plan/10-keybindings-and-commands.md` K93–K97 and
+  `test-plan/13-window-splits.md` S48.
 
 Run with:
 
@@ -297,6 +299,7 @@ cargo test --lib server::connection::tests --quiet
 - [Transient Menu Session](transient-menu-session.md) — the shared state model
 - [Transient Menu Round Trip](transient-menu-round-trip.md) — wire DTOs, intents, store, client routing
 - [Control Center](control-center.md) — the sibling server-owned session kind
+- [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md) — current composer-owned projection
 - [Fuzzy Matching](fuzzy-matching.md) — the shared scorer used for filter derivation
 - [Workspace File Browser](workspace-file-browser.md) — the workspace-root-bound listing and SDUI tree
 - [Client File Dialog](client-file-dialog.md) — the native-dialog fallback capability issuer

@@ -1,0 +1,139 @@
+# Plan 124 manual-test-plan live accessibility evidence
+# Live app: canonical examples/config/init.js on an isolated root; tree via atspi_dump.py.
+# Lines are '<depth>|<role>|<selected>|<states>|<name>|<text>|<extents>|<app>'.
+
+===== 01-rest
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|||CLAY-DESKTOP
+12|combo box|-|visible|Attach an agent Agent type|||CLAY-DESKTOP
+
+===== 02-lane-hidden
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+
+===== 03-lane-restored
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|||CLAY-DESKTOP
+12|combo box|-|visible|Attach an agent Agent type|||CLAY-DESKTOP
+
+===== 04-palette-open
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|/||CLAY-DESKTOP
+12|combo box|-|visible|Attach an agent Agent type|||CLAY-DESKTOP
+12|dialog|-|visible|Commands|||CLAY-DESKTOP
+14|toggle button|-|visible|All|||CLAY-DESKTOP
+14|toggle button|-|visible|Session|||CLAY-DESKTOP
+14|toggle button|-|visible|Shell|||CLAY-DESKTOP
+
+===== 05-scope-session
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|/||CLAY-DESKTOP
+12|combo box|-|visible|Attach an agent Agent type|||CLAY-DESKTOP
+12|dialog|-|visible|Commands|||CLAY-DESKTOP
+14|toggle button|-|visible|All|||CLAY-DESKTOP
+14|toggle button|-|focused,visible|Session|||CLAY-DESKTOP
+14|toggle button|-|visible|Shell|||CLAY-DESKTOP
+
+===== 06-lane-hidden-palette
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+
+===== 07-palette-back
+9|page tab|selected|visible|workspace|||CLAY-DESKTOP
+10|page tab|selected|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|/||CLAY-DESKTOP
+12|combo box|-|visible|Attach an agent Agent type|||CLAY-DESKTOP
+12|dialog|-|visible|Commands|||CLAY-DESKTOP
+14|toggle button|-|visible|All|||CLAY-DESKTOP
+14|toggle button|-|visible|Session|||CLAY-DESKTOP
+14|toggle button|-|visible|Shell|||CLAY-DESKTOP
+
+===== 09-second-tab
+9|page tab|-|visible|workspace Close workspace|||CLAY-DESKTOP
+9|page tab|selected|visible|New tab Close New tab|||CLAY-DESKTOP
+10|page tab|-|visible|Workspace|||CLAY-DESKTOP
+10|page tab|-|visible|Agent|||CLAY-DESKTOP
+11|entry|-|visible|Filter files|||CLAY-DESKTOP
+15|list item|-|visible|workspace /tmp/plan124-mtp-root/workspace|||CLAY-DESKTOP
+14|entry|-|visible|Filter agents|||CLAY-DESKTOP
+15|list item|-|visible|Coding Agent ~/.clay/agents/coding-agent 3 skills|||CLAY-DESKTOP
+13|footer|-|visible||||CLAY-DESKTOP
+10|footer|-|visible|Package status|||CLAY-DESKTOP
+10|footer|-|visible|Agent lane|||CLAY-DESKTOP
+12|entry|-|visible|Message|||CLAY-DESKTOP
+
+===== 12-newtab-lane-visible
+9|page tab|-|visible|New tab Close New tab||111,72,92x35|CLAY-DESKTOP
+9|page tab|selected|visible|New tab Close New tab||204,72,92x35|CLAY-DESKTOP
+10|page tab|-|visible|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible|Agent||1253,80,36x19|CLAY-DESKTOP
+11|entry|-|visible|Filter files||26,150,220x36|CLAY-DESKTOP
+15|list item|-|visible|workspace /tmp/plan124-mtp-root/workspace||302,277,304x48|CLAY-DESKTOP
+14|entry|-|visible|Filter agents||764,238,165x25|CLAY-DESKTOP
+15|list item|-|visible|Coding Agent ~/.clay/agents/coding-agent 3 skills||630,277,304x48|CLAY-DESKTOP
+13|footer|-|visible|||296,859,644x61|CLAY-DESKTOP
+10|footer|-|visible|Package status||26,920,940x26|CLAY-DESKTOP
+10|footer|-|visible|Agent lane||26,946,1280x200|CLAY-DESKTOP
+12|entry|-|visible|Message||53,966,1226x48|CLAY-DESKTOP
+
+===== 13-agent-picker
+8|dialog|-|visible|Agent type||53,919,297x99|CLAY-DESKTOP
+10|list item|selected|focused,visible|Attach an agent current||58,924,287x31|CLAY-DESKTOP
+10|list item|-|visible|Coding Agent||58,956,287x31|CLAY-DESKTOP
+
+===== 14-agent-attached
+9|page tab|-|visible|New tab Close New tab||111,72,92x35|CLAY-DESKTOP
+9|page tab|selected|visible|coding-agent agent Close coding-agent||204,72,156x35|CLAY-DESKTOP
+10|page tab|selected|visible|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible|Agent||1253,80,36x19|CLAY-DESKTOP
+11|entry|-|visible|Filter files||26,150,220x36|CLAY-DESKTOP
+10|footer|-|visible|Package status||26,920,940x26|CLAY-DESKTOP
+10|footer|-|visible|Agent lane||26,946,1280x200|CLAY-DESKTOP
+12|entry|-|visible|Message||53,966,1226x48|CLAY-DESKTOP
+12|combo box|-|visible|Coding Agent Agent type||53,1026,98x34|CLAY-DESKTOP
+12|combo box|-|visible|Model||154,1026,170x34|CLAY-DESKTOP
+
+===== 15-third-tab
+9|page tab|-|visible|New tab Close New tab||111,72,92x35|CLAY-DESKTOP
+9|page tab|-|visible|coding-agent agent Close coding-agent||204,72,156x35|CLAY-DESKTOP
+9|page tab|selected|visible|New tab Close New tab||360,72,92x35|CLAY-DESKTOP
+10|page tab|-|visible|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible|Agent||1253,80,36x19|CLAY-DESKTOP
+11|entry|-|visible|Filter files||26,150,220x36|CLAY-DESKTOP
+15|list item|-|visible|workspace /tmp/plan124-mtp-root/workspace||302,277,304x48|CLAY-DESKTOP
+14|entry|-|visible|Filter agents||764,238,165x25|CLAY-DESKTOP
+15|list item|-|visible|Coding Agent ~/.clay/agents/coding-agent 3 skills||630,277,304x48|CLAY-DESKTOP
+13|footer|-|visible|||296,859,644x61|CLAY-DESKTOP
+10|footer|-|visible|Package status||26,920,940x26|CLAY-DESKTOP
+10|footer|-|visible|Agent lane||26,946,1280x200|CLAY-DESKTOP
+

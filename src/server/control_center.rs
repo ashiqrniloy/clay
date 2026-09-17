@@ -1,17 +1,27 @@
-//! Control Center command workflow.
+//! Control Center command workflow — the composer's `/` palette.
 //!
 //! The Control Center is a built-in transient menu that lists registered
 //! commands, filters them by query, and produces inert activation actions.
 //! It is not a bespoke command-palette dispatcher: it reuses
 //! `TransientMenuSession`, the generation-stamped command catalogue snapshot,
 //! and the existing server/shell execution paths (Phase 24.2).
+//!
+//! Plan 124 task 7: since the Control Centre is the agent lane's `/` palette,
+//! the session declares the bottom-anchored `CommandPalette` origin — the
+//! client draws it as the composer's own menu, 6px above the box (DESIGN.md
+//! §12) — and names itself `Commands`, the artifact's accessible name. The
+//! session's query is the *filter* the field holds after the `/` sigil: the
+//! field is the input, so opening the palette shows the whole catalogue and
+//! every later keystroke arrives as a `MenuQueryUpdate`. One session holds the
+//! whole unfiltered catalogue for its lifetime, so a keystroke re-filters and
+//! never rebuilds it.
 
 use crate::{
     packages::commands::{CommandCatalogue, RegisteredCommand},
     protocol::{KeyCode, KeyStroke, RoutingPolicy},
     server::command_execution::{
         CommandExecutionDiagnostic, CommandExecutionRequest, CommandExecutionRule,
-        CommandExecutionTarget,
+        CommandExecutionTarget, OPEN_PATH_BROWSER_COMMAND_ID,
     },
     shell::{
         fuzzy::fuzzy_score_fields,
@@ -33,24 +43,43 @@ pub(crate) enum ServerMenuActivation {
     ShellClientCommand(String),
 }
 
+/// The palette's **closed scope vocabulary** (DESIGN.md §12's chips): the
+/// server owns the words, the client renders a chip per word it is handed and
+/// sends the word back untouched. `session` is the agent package's own
+/// commands, `shell` the app's (chrome, panes, tabs, editor, workspace),
+/// `files` the palette's path mode. A command outside the three shows under
+/// `All` only — never under a guessed scope.
+const SCOPE_SESSION: &str = "session";
+const SCOPE_SHELL: &str = "shell";
+const SCOPE_FILES: &str = "files";
+const PALETTE_SCOPES: [&str; 3] = [SCOPE_SESSION, SCOPE_SHELL, SCOPE_FILES];
+
+/// The package that owns the agent session's commands (`/compact`, `/new`, …);
+/// its declarations are what the palette groups under `Session`.
+const AGENT_PACKAGE_NAME: &str = "@clay/coding-agent";
+
 /// Server-owned Control Center state.
 ///
 /// Holds the full unfiltered command list (with routing policy for activation
-/// typing) and the current query. The filtered `TransientMenuSession` is
-/// produced on demand so Masonry only ever sees the bounded, filtered item
-/// list.
+/// typing), the current query, and the palette's scope chip. The filtered
+/// `TransientMenuSession` is produced on demand so Masonry only ever sees the
+/// bounded, filtered item list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ControlCenter {
     session_id: TransientMenuSessionId,
     all_items: Vec<(TransientMenuItem, RoutingPolicy)>,
     query: String,
+    /// `None` = the `All` chip. A known [`PALETTE_SCOPES`] word else.
+    scope: Option<&'static str>,
     selected_index: usize,
 }
 
 impl ControlCenter {
-    /// Opens a Control Center session from one generation-stamped catalogue.
+    /// Opens a palette session from one generation-stamped catalogue.
     /// Client-first edit commands stay excluded; shell `ClientUiCommand`
     /// entries stay visible and are activated through the client shell bridge.
+    /// The query starts empty: the lane's field owns it and every keystroke
+    /// arrives as a `MenuQueryUpdate` against this same session.
     pub(crate) fn open_catalogue(catalogue: &CommandCatalogue, session_id: u64) -> Self {
         let all_items = catalogue
             .commands()
@@ -70,6 +99,7 @@ impl ControlCenter {
             session_id: TransientMenuSessionId(session_id),
             all_items,
             query: String::new(),
+            scope: None,
             selected_index: 0,
         }
     }
@@ -107,6 +137,20 @@ impl ControlCenter {
         self.session()
     }
 
+    /// Plan 124: selects a scope chip (`All` = `None`) and returns the filtered
+    /// session. Unknown words fall back to `All`: the vocabulary is closed, so
+    /// a client cannot invent a scope, and none of them carries authority.
+    /// A genuinely changed scope resets the selection to index 0 for the same
+    /// reason a changed query does — the item set changed.
+    pub(crate) fn set_scope(&mut self, scope: Option<&str>) -> TransientMenuSession {
+        let scope = scope.and_then(known_scope);
+        if scope != self.scope {
+            self.selected_index = 0;
+        }
+        self.scope = scope;
+        self.session()
+    }
+
     /// Generic semantic Backspace (Phase 24.3): delete the last query
     /// character. The Control Center has no path semantics; path mode
     /// overrides this with ascend-when-filter-empty behavior.
@@ -122,6 +166,7 @@ impl ControlCenter {
             .all_items
             .iter()
             .enumerate()
+            .filter(|(_, (item, _))| self.in_scope(item))
             .filter_map(|(index, (item, _))| {
                 query_score(item, &self.query).map(|score| (index, score, item))
             })
@@ -140,11 +185,23 @@ impl ControlCenter {
             .into_iter()
             .map(|(_, _, item)| item.clone())
             .collect();
-        TransientMenuSession::new(self.session_id, "Control Center")
+        TransientMenuSession::new(self.session_id, "Commands")
             .with_items(filtered)
             .with_selected_index(self.selected_index)
             .with_query(&self.query)
-            .with_origin(TransientMenuOrigin::Centered)
+            // Plan 124 task 7: the composer's palette, not a window sheet. The
+            // Bottom anchor is the shipped plumbing (`PackageOverlayAnchor::
+            // Bottom`); the client anchors it to the lane's composer box.
+            .with_origin(TransientMenuOrigin::CommandPalette)
+    }
+
+    /// The `All` chip (`scope == None`) shows every row; a scope chip shows the
+    /// rows tagged with it, so an untagged package command is `All`-only.
+    fn in_scope(&self, item: &TransientMenuItem) -> bool {
+        match self.scope {
+            None => true,
+            Some(scope) => item.scope.as_deref() == Some(scope),
+        }
     }
 
     /// Moves the persisted selection by `delta` (relative steps, wrapping per
@@ -208,6 +265,11 @@ impl ControlCenter {
     }
 }
 
+/// The closed vocabulary's membership test: a word outside it is not a scope.
+fn known_scope(scope: &str) -> Option<&'static str> {
+    PALETTE_SCOPES.iter().copied().find(|known| *known == scope)
+}
+
 fn is_executable_from_control_center(command_id: &str, routing_policy: &RoutingPolicy) -> bool {
     crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some()
         || !matches!(
@@ -226,25 +288,18 @@ fn command_to_menu_item(command: &RegisteredCommand) -> TransientMenuItem {
         }
     };
 
-    let binding_summary = format_key_bindings(&command.key_bindings);
-    let detail = if binding_summary.is_empty() {
-        format!(
-            "{} — {}",
-            routing_label(&command.routing_policy),
-            provenance_label(&provenance)
-        )
-    } else {
-        format!(
-            "{} — {} — {}",
-            binding_summary,
-            routing_label(&command.routing_policy),
-            provenance_label(&provenance)
-        )
-    };
+    // Plan 124: the chords and the scope are item fields now, so the detail
+    // line stops restating the chords — the row's chips own them, and the
+    // palette finds a command by chord because `query_score` reads `bindings`.
+    let detail = format!(
+        "{} — {}",
+        routing_label(&command.routing_policy),
+        provenance_label(&provenance)
+    );
 
     let accessibility_label = format!("{} {}", command.display_name, provenance_label(&provenance));
 
-    TransientMenuItem::new(
+    let mut item = TransientMenuItem::new(
         &command.command_id,
         &command.display_name,
         TransientMenuAction::new(&command.command_id),
@@ -252,6 +307,32 @@ fn command_to_menu_item(command: &RegisteredCommand) -> TransientMenuItem {
     .with_detail(&detail)
     .with_accessibility_label(&accessibility_label)
     .with_provenance(provenance)
+    .with_bindings(binding_chords(&command.key_bindings));
+    if let Some(scope) = command_scope(command) {
+        item = item.with_scope(scope);
+    }
+    item
+}
+
+/// The closed scope a command belongs to (DESIGN.md §12's chips). Checked in
+/// precedence order: the palette's own path mode is `files` even though the
+/// built-in is otherwise a shell command, and the client-UI spellings are
+/// `shell` whatever package declares them.
+fn command_scope(command: &RegisteredCommand) -> Option<&'static str> {
+    if command.command_id == OPEN_PATH_BROWSER_COMMAND_ID {
+        return Some(SCOPE_FILES);
+    }
+    if crate::client_commands::ShellClientCommand::from_command_id(&command.command_id).is_some()
+        || crate::client_commands::EditorClientCommand::from_command_id(&command.command_id)
+            .is_some()
+        || command.package_name == "clay"
+    {
+        return Some(SCOPE_SHELL);
+    }
+    if command.package_name == AGENT_PACKAGE_NAME {
+        return Some(SCOPE_SESSION);
+    }
+    None
 }
 
 pub(crate) fn score_menu_item(item: &TransientMenuItem, query: &str) -> Option<i32> {
@@ -269,7 +350,11 @@ fn query_score(item: &TransientMenuItem, query: &str) -> Option<i32> {
             item.id.as_str(),
             item.detail.as_deref().unwrap_or_default(),
             item.accessibility_label.as_str(),
-        ],
+        ]
+        .into_iter()
+        // A command is findable by its chord (plan 124 moved the chords out of
+        // `detail` into `bindings`, so the search follows them).
+        .chain(item.bindings.iter().map(String::as_str)),
     )
 }
 
@@ -294,22 +379,19 @@ fn provenance_label(provenance: &TransientMenuItemProvenance) -> String {
     }
 }
 
-fn format_key_bindings(bindings: &[crate::protocol::KeyBindingRule]) -> String {
-    if bindings.is_empty() {
-        return String::new();
-    }
-    bindings
+/// One chord string per registered binding, in the app's own spelling
+/// (`"Ctrl+X Ctrl+P"`): the palette's per-row chip groups (plan 124).
+fn binding_chords(bindings: &[crate::protocol::KeyBindingRule]) -> Vec<String> {
+    bindings.iter().map(format_chord).collect()
+}
+
+fn format_chord(binding: &crate::protocol::KeyBindingRule) -> String {
+    binding
+        .sequence
         .iter()
-        .map(|binding| {
-            binding
-                .sequence
-                .iter()
-                .map(format_keystroke)
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
+        .map(format_keystroke)
         .collect::<Vec<_>>()
-        .join(", ")
+        .join(" ")
 }
 
 fn format_keystroke(stroke: &KeyStroke) -> String {
@@ -472,13 +554,10 @@ mod tests {
             .iter()
             .find(|item| item.id == "runtime.reloadConfiguration")
             .expect("reload command is listed");
-        assert!(
-            reload
-                .detail
-                .as_deref()
-                .is_some_and(|detail| detail.contains("Ctrl+Shift+R")),
-            "Control Center should show the default reload chord"
-        );
+        // Plan 124: the chord is the row's `bindings` (the palette's chips), not
+        // text inside the detail line, and a built-in is in the shell scope.
+        assert_eq!(reload.bindings, ["Ctrl+Shift+R"]);
+        assert_eq!(reload.scope.as_deref(), Some("shell"));
     }
 
     #[test]
@@ -588,6 +667,59 @@ mod tests {
         );
         let session = center.set_query("toggleList");
         assert_eq!(session.selected_index(), 0);
+    }
+
+    #[test]
+    fn palette_session_opens_full_and_keeps_the_catalogue_across_queries() {
+        // Plan 124 task 7: the catalogue session is the composer's `/` palette.
+        // The lane's field owns the query, so opening shows the whole
+        // route-filtered catalogue and every keystroke only re-filters the
+        // session's own held list — nothing is rebuilt per query.
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+        register_command(
+            &mut registry,
+            "markdown.toggleList",
+            "Toggle List",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+
+        let mut center = ControlCenter::open(&registry, 9);
+        let opened = center.session();
+        assert_eq!(opened.origin(), TransientMenuOrigin::CommandPalette);
+        assert_eq!(opened.prompt(), "Commands");
+        assert_eq!(opened.query(), "");
+        let ids = |session: &TransientMenuSession| -> Vec<String> {
+            session.items().iter().map(|item| item.id.clone()).collect()
+        };
+        let all = ids(&opened);
+        assert!(all.contains(&"markdown.togglePreview".to_string()));
+        assert!(all.contains(&"markdown.toggleList".to_string()));
+
+        let narrowed = center.set_query("toggleList");
+        assert_eq!(narrowed.items().len(), 1);
+        assert_eq!(narrowed.origin(), TransientMenuOrigin::CommandPalette);
+
+        // Backspace is the palette's own gesture: it deletes one filter
+        // character from the same session.
+        let shorter = center.backspace();
+        assert_eq!(shorter.query(), "toggleLis");
+        assert_eq!(shorter.items().len(), 1);
+
+        // Clearing the filter restores the open-time set: one session held the
+        // whole catalogue the entire time; no query rebuilt it.
+        let cleared = center.set_query("");
+        assert_eq!(ids(&cleared), all);
+        assert_eq!(cleared.prompt(), "Commands");
     }
 
     #[test]
@@ -750,6 +882,13 @@ mod tests {
         });
 
         assert!(center.set_query("addedAfterOpen").items().is_empty());
+        // Plan 124 task 7: the palette's origin rides the same session, so a
+        // query update re-filters the held catalogue and never re-anchors or
+        // rebuilds it.
+        assert_eq!(
+            center.session().origin(),
+            TransientMenuOrigin::CommandPalette
+        );
     }
 
     #[test]
@@ -811,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn item_detail_includes_key_binding_and_provenance() {
+    fn item_states_its_chords_and_scope_while_the_detail_keeps_provenance() {
         let mut registry = CommandRegistry::new();
         register_command(
             &mut registry,
@@ -835,14 +974,190 @@ mod tests {
             .find(|item| item.id == "markdown.togglePreview")
             .expect("toggle preview item");
 
-        assert!(
-            item.detail
-                .as_ref()
-                .unwrap()
-                .to_ascii_lowercase()
-                .contains("p")
+        assert_eq!(
+            item.bindings,
+            ["P"],
+            "the chord is an item field, not prose"
         );
-        assert!(item.detail.as_ref().unwrap().contains("server-first"));
-        assert!(item.detail.as_ref().unwrap().contains("@clay/markdown"));
+        let detail = item.detail.as_ref().unwrap();
+        assert!(detail.contains("server-first"));
+        assert!(detail.contains("@clay/markdown"));
+        assert!(
+            !detail.contains('P'),
+            "the detail line stops restating the chord: {detail}"
+        );
+        // A package outside the app and the agent has no scope of its own: it
+        // shows under `All` only.
+        assert_eq!(item.scope, None);
+    }
+
+    #[test]
+    fn items_carry_the_closed_scope_vocabulary() {
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+        let agent_manifest = crate::packages::manifest::validate_manifest_value(&json!({
+            "name": "@clay/coding-agent",
+            "version": "0.1.0",
+            "clay": {
+                "apiPrefix": "coding-agent",
+                "permissions": ["command-registration"],
+                "modes": ["coding-agent"],
+                "entry": "./dist/index.js"
+            }
+        }))
+        .expect("valid agent manifest");
+        registry
+            .register_command(
+                &agent_manifest,
+                PackageCommandDeclaration {
+                    package_name: "@clay/coding-agent".to_string(),
+                    package_version: "0.1.0".to_string(),
+                    api_prefix: "coding-agent".to_string(),
+                    command_id: "coding-agent.compact".to_string(),
+                    display_name: "/compact".to_string(),
+                    routing_policy: RoutingPolicy::ServerFirst,
+                    key_bindings: Vec::new(),
+                    custom_properties: BTreeMap::new(),
+                    permissions: vec![PackagePermission::CommandRegistration],
+                },
+            )
+            .expect("register agent command");
+
+        let session = ControlCenter::open(&registry, 9).session();
+        let scope_of = |id: &str| {
+            session
+                .items()
+                .iter()
+                .find(|item| item.id == id)
+                .unwrap_or_else(|| panic!("{id} is listed"))
+                .scope
+                .clone()
+        };
+
+        // The app's own commands (built-ins and shell client commands) are
+        // `shell`; the palette's path mode is `files` even though it is a
+        // built-in; the agent package's commands are `session`; a third-party
+        // package's command has no scope.
+        assert_eq!(scope_of("workspace.refresh").as_deref(), Some("shell"));
+        assert_eq!(scope_of("controlCenter.openPath").as_deref(), Some("files"));
+        assert_eq!(scope_of("coding-agent.compact").as_deref(), Some("session"));
+        assert_eq!(scope_of("markdown.togglePreview"), None);
+
+        // The vocabulary follows the command family, not the declaring package:
+        // a shell/editor client-UI spelling is the shell scope wherever it is
+        // declared (registration namespaces real packages, so classify a
+        // synthetic spelling directly).
+        let foreign_shell = RegisteredCommand {
+            package_name: "@clay/markdown".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: "markdown".to_string(),
+            command_id: "shell.clientTabNew".to_string(),
+            display_name: "New Tab".to_string(),
+            routing_policy: RoutingPolicy::ClientUiCommand,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: Vec::new(),
+        };
+        assert_eq!(command_scope(&foreign_shell), Some("shell"));
+        let editor_command = RegisteredCommand {
+            command_id: "editor.clientToggleFold".to_string(),
+            ..foreign_shell
+        };
+        assert_eq!(command_scope(&editor_command), Some("shell"));
+    }
+
+    #[test]
+    fn scope_chip_narrows_the_catalogue_and_resets_the_selection() {
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            Vec::new(),
+        );
+        let shell_ids = |session: &TransientMenuSession| {
+            session
+                .items()
+                .iter()
+                .filter(|item| item.scope.as_deref() == Some("shell"))
+                .count()
+        };
+
+        let mut center = ControlCenter::open(&registry, 4);
+        let all = center.session();
+        assert!(all.items().len() > shell_ids(&all));
+        center.move_selection(2);
+        assert_eq!(center.selected_index, 2);
+
+        let shell = center.set_scope(Some("shell"));
+        assert_eq!(shell.items().len(), shell_ids(&shell));
+        assert!(
+            shell
+                .items()
+                .iter()
+                .all(|item| item.scope.as_deref() == Some("shell")),
+            "a scope chip shows only its own rows"
+        );
+        assert_eq!(
+            shell.selected_index(),
+            0,
+            "a changed scope resets the selection onto the new item set"
+        );
+
+        // The path mode is the only `files` row, and `All` restores everything.
+        let files = center.set_scope(Some("files"));
+        assert_eq!(
+            files
+                .items()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["controlCenter.openPath"]
+        );
+        assert_eq!(center.set_scope(None).items().len(), all.items().len());
+
+        // The vocabulary is closed: an unknown word is not a scope.
+        assert_eq!(
+            center.set_scope(Some("not-a-scope")).items().len(),
+            all.items().len()
+        );
+    }
+
+    #[test]
+    fn a_command_is_findable_by_its_chord() {
+        let mut registry = CommandRegistry::new();
+        register_command(
+            &mut registry,
+            "markdown.togglePreview",
+            "Toggle Preview",
+            RoutingPolicy::ServerFirst,
+            vec![PackagePermission::ParseDocument],
+            vec![KeyBindingRule::single(
+                "markdown.togglePreview",
+                KeyCode::Character("p".to_string()),
+            )],
+        );
+
+        // The chord used to be searchable only because the detail line repeated
+        // it; it is an item field now, so the filter reads that field.
+        let session = ControlCenter::open(&registry, 5).set_query("ctrl+x ctrl+p");
+        assert!(session.items().is_empty());
+        let session = ControlCenter::open(&registry, 5).set_query("P");
+        assert!(
+            session
+                .items()
+                .iter()
+                .any(|item| item.id == "markdown.togglePreview"),
+            "typing a chord finds the command that owns it"
+        );
     }
 }

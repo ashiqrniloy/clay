@@ -431,6 +431,12 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             // surface — the panel consumes it client-side (composer chord
             // + dropdown), like the editor's client commands.
             | "coding-agent.clientCycleEffort"
+            // Plan 124: the agent lane's visibility toggle — client-local
+            // per-tab layout state like the rails, but routed ServerFirst so
+            // the shell matcher resolves its `Ctrl+X Ctrl+P` chord outside
+            // editor focus (its declaration is ClientUi, so the server
+            // answers the intent with a ShellClientCommandRequest).
+            | "shell.toggleAgentLane"
     )
 }
 
@@ -801,6 +807,22 @@ mod tests {
         assert!(!is_runtime_bindable_command("controlCenter.close"));
         assert!(!is_runtime_bindable_command("controlCenter.openX"));
         assert!(!is_runtime_bindable_command("controlCenter.openPathExtra"));
+    }
+
+    #[test]
+    fn agent_lane_toggle_is_bindable_and_server_routed() {
+        // Plan 124: the lane toggle executes client-side (its declaration is
+        // ClientUi) but its default keymap is Global + ServerFirst, so a
+        // `bindKey` rebind must compile to the same ServerFirst route the
+        // shell matcher resolves — the ClientUiCommand route would leave the
+        // chord dead outside editor focus.
+        let command = "shell.toggleAgentLane";
+        assert!(is_runtime_bindable_command(command));
+        assert_eq!(
+            command_routing_policy(command).unwrap(),
+            RoutingPolicy::ServerFirst
+        );
+        assert_eq!(validate_command_id(command).unwrap(), command);
     }
 
     #[test]

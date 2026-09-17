@@ -322,16 +322,24 @@ pub fn encode_decode_max_transient_menu_snapshot() -> usize {
         crate::perf::budgets::TRANSIENT_MENU_MAX_LABEL_CHARS
             .max(crate::perf::budgets::TRANSIENT_MENU_MAX_DETAIL_CHARS),
     );
-    let items = (0..crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
-        .map(|i| {
-            TransientMenuItemData::new(
-                format!("item-{i}"),
-                max_string.clone(),
-                Some(max_string.clone()),
-                max_string.clone(),
-            )
-        })
-        .collect();
+    let items =
+        (0..crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
+            .map(|i| {
+                TransientMenuItemData::new(
+                    format!("item-{i}"),
+                    max_string.clone(),
+                    Some(max_string.clone()),
+                    max_string.clone(),
+                )
+                // Plan 124: the worst case includes the palette's row fields — a
+                // max-length scope tag and the full count of max-length chords.
+                .with_scope("x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_SCOPE_CHARS))
+                .with_bindings(vec![
+                "x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_BINDING_CHARS);
+                crate::perf::budgets::TRANSIENT_MENU_MAX_BINDINGS
+            ])
+            })
+            .collect();
     let snapshot = TransientMenuSnapshotData::new(
         1 << 63 | 1,
         max_string.clone(),
@@ -379,5 +387,20 @@ pub fn protocol_hello_roundtrip() -> u32 {
             protocol_version, ..
         } => protocol_version,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plan 124: the palette's row fields (`scope`, `bindings`) join the
+    /// bounded item projection, so the worst-case snapshot must still encode,
+    /// decode, and stay far below the codec's frame cap. Runs in CI, unlike the
+    /// criterion benches that share this builder.
+    #[test]
+    fn worst_case_transient_menu_snapshot_stays_inside_the_frame_cap() {
+        let items = encode_decode_max_transient_menu_snapshot();
+        assert_eq!(items, crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS);
     }
 }
