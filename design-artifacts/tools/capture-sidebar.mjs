@@ -14,13 +14,12 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = "/home/arn/Projects/clay";
-const OUT = join(
-  ROOT,
-  "design-artifacts/screenshots/quiet-instrument-sidebar",
-);
+const OUT =
+  process.env.CLAY_REVIEW_OUT ??
+  join(ROOT, "design-artifacts/screenshots/quiet-instrument-sidebar");
 const BASE = process.env.CLAY_DEV_URL ?? "http://localhost:5199";
 const PORT = 9343;
-const WIDTHS = [1500, 1024];
+const WIDTHS = [1500, 1024, 900];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function findChrome() {
@@ -142,6 +141,30 @@ const PROBE = `(async () => {
   const region = document.querySelector('[data-clay-size]');
   const rect = region?.getBoundingClientRect() ?? null;
   const regionToken = region?.getAttribute('data-clay-size') ?? null;
+  // Plan 126 — the region is the working area's *rail*, not a column inside the
+  // pane: the shell draws it (the tree leaves it out), it spans the working
+  // area's rows, and the lane is the pane's column between the two rails.
+  const round = (value) => Math.round(value);
+  const box = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      x: round(r.x),
+      y: round(r.y),
+      w: round(r.width),
+      h: round(r.height),
+      top: round(r.top),
+      right: round(r.right),
+      bottom: round(r.bottom),
+    };
+  };
+  const view = document.querySelector("[data-rail]");
+  const rail = document.querySelector('[data-panes="side"]');
+  const lane = document.querySelector('[aria-label="Agent lane"]');
+  const inspector = document.querySelector('[data-testid="workspace-rail"]');
+  const railBox = box(rail);
+  const laneBox = box(lane);
+  const viewBox = box(view);
   const result = {
     field: field !== null,
     fieldAriaLabel: field?.getAttribute("aria-label") ?? null,
@@ -152,6 +175,21 @@ const PROBE = `(async () => {
     regionToken,
     countIdle: count(),
     overflow: document.documentElement.scrollWidth - window.innerWidth,
+    rail: railBox,
+    railPosition: rail ? getComputedStyle(rail).position : null,
+    lane: laneBox,
+    inspector: box(inspector),
+    view: viewBox,
+    // The rail's height and the lane/pane relationship, as booleans the run can
+    // assert without re-deriving geometry in the tool.
+    railSpansWorkingArea:
+      railBox != null && viewBox != null && railBox.bottom === viewBox.bottom,
+    laneStartsAtRailEdge:
+      railBox != null && laneBox != null && laneBox.x === railBox.right,
+    laneEndsAtPaneEdge:
+      laneBox != null && viewBox != null && laneBox.right <= viewBox.right,
+    laneBottomIsRailBottom:
+      railBox != null && laneBox != null && laneBox.bottom === railBox.bottom,
   };
   if (!field) return result;
   const needle = (firstLabel ?? "").slice(0, 3).toLowerCase() || "a";
@@ -196,7 +234,8 @@ async function main() {
     matrix.push({ width, ...probe });
     if (probe.field !== true) findings.push(`${width}px: no filter field`);
     if (probe.shortcut !== "/") findings.push(`${width}px: missing / chip`);
-    if (probe.overflow > 0) findings.push(`${width}px: ${probe.overflow}px overflow`);
+    if (probe.overflow > 0)
+      findings.push(`${width}px: ${probe.overflow}px overflow`);
     if (!(probe.rowsFiltered < probe.rowsBefore))
       findings.push(`${width}px: filter did not narrow the listing`);
     if (probe.rowsEmpty !== 0)
@@ -216,16 +255,57 @@ async function main() {
     } else {
       findings.push(`${width}px: sidebar region not measurable`);
     }
+    // Plan 126: the region is the working area's rail. It spans the working
+    // area's full height (it does not stop at the lane's hairline), and the
+    // lane is the pane's column between it and the inspector — it starts at the
+    // rail's inner edge and never covers it (DESIGN.md §12).
+    if (width > 1000) {
+      if (!probe.rail) findings.push(`${width}px: no sidebar rail`);
+      if (probe.railPosition !== "static")
+        findings.push(
+          `${width}px: rail should be a column, got ${probe.railPosition}`,
+        );
+      if (!probe.railSpansWorkingArea)
+        findings.push(
+          `${width}px: rail bottom ${probe.rail?.bottom} != working area bottom ${probe.view?.bottom}`,
+        );
+      if (!probe.laneStartsAtRailEdge)
+        findings.push(
+          `${width}px: lane starts at ${probe.lane?.x}, rail ends at ${probe.rail?.right}`,
+        );
+      if (!probe.laneBottomIsRailBottom)
+        findings.push(
+          `${width}px: lane bottom ${probe.lane?.bottom} != rail bottom ${probe.rail?.bottom}`,
+        );
+      if (probe.lane && probe.inspector && probe.lane.right > probe.inspector.x)
+        findings.push(
+          `${width}px: lane runs under the inspector rail (${probe.lane.right} > ${probe.inspector.x})`,
+        );
+    } else {
+      // Below 1000px both rails are drawers: the lane keeps the pane's full
+      // width (DESIGN.md §12).
+      if (probe.railPosition !== "fixed")
+        findings.push(
+          `${width}px: rail should be a fixed drawer, got ${probe.railPosition}`,
+        );
+      if (probe.lane && probe.view && Math.abs(probe.lane.x - probe.view.x) > 1)
+        findings.push(
+          `${width}px: lane starts at ${probe.lane?.x}, working area at ${probe.view?.x}`,
+        );
+    }
   }
 
   mkdirSync(OUT, { recursive: true });
   const report = {
-    note: "Plan 118 task E1: the workspace sidebar's approved filter field, count foot and slot width.",
+    note: "Plan 118 task E1 (filter field, count foot, 244/224 slot width) + plan 126 (the sidebar is the working area's own left rail: full height, lane confined to the pane).",
     matrix,
     findings,
     pass: findings.length === 0,
   };
-  writeFileSync(join(OUT, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  writeFileSync(
+    join(OUT, "report.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
   console.log(JSON.stringify(report.matrix, null, 2));
   console.log(
     report.pass

@@ -36,9 +36,10 @@
 - `src/server/agent_checkpoints.rs`
 - `src/server/agent_mcp_config.rs`
 - `src/server/agent_settings.rs`
-- `frontend/src/coding-agent/CodingAgentPanel.tsx` (composition root)
+- `frontend/src/shell/AgentLane.tsx`, `frontend/src/shell/WorkspacePanes.tsx` (persistent shell composition and per-tab store host)
+- `frontend/src/coding-agent/CodingAgentPanel.tsx` (transcript/state/inspector composition root)
 - `frontend/src/coding-agent/TranscriptList.tsx`, `transcript-model.ts` (turns, agent labels)
-- `frontend/src/coding-agent/Composer.tsx` (input lane: slash/@-mentions, effort chord)
+- `frontend/src/coding-agent/Composer.tsx` (lane field: slash/@-mentions, effort chord)
 - `frontend/src/coding-agent/InspectorTabs.tsx`, `FilesTab.tsx`, `MemoryTab.tsx`, `ContextTab.tsx`, `SessionInfoTab.tsx`, `SettingsTab.tsx`, `BoundedText.tsx`
 - `frontend/src/coding-agent/ApprovalStrip.tsx` (durable-run allow/deny)
 
@@ -466,14 +467,32 @@ workflows (`startWorkflow` driver errors until then), Phase 6 supervisors.
 
 `frontend/src/coding-agent/CodingAgentPanel.tsx` renders the plan 117
 user-visible surfaces, all state-driven from snapshot state / AG-UI custom
-events (never invented client-side). Plan 119 SC-4 split the renderer into a
-composition root plus the transcript list, composer, approval strip and
-inspector tabs listed above; the panel keeps the store, the snapshot
-subscription, the prompt/steer/approval authority and the column layout. Plan 118 composed them into the approved
-agent view of a tab (`DESIGN.md` §12, §16): the column is header /
-72ch transcript / state strip / composer / environment foot, the inspector is
-the view's right column (340px, 312px ≤ 1240px, a drawer below 1000px), and
-reference data lives in the inspector rather than in the transcript.
+events (never invented client-side). Plan 119 SC-4 split the renderer into a composition root plus focused
+children. Plan 124 relocates the interactive shell-owned pieces: `AgentLane`
+owns the composer, agent type/model/effort controls, token meter, approval
+strip, and session-environment foot; `CodingAgentPanel` owns the
+transcript/state strip and inspector. The lane is mounted for every tab and the
+panel is the agent view, so switching views does not destroy the composer or
+running store.
+
+`WorkspacePanes` creates/adopts one `AgentSessionModule` per `TabRuntime`, runs
+`listSessions`, `requestBinding`, and `setUiVersion`, and makes that store the shared owner for
+both surfaces. `Ctrl+X Ctrl+P` toggles the lane's per-tab visibility;
+`laneVisible` persists in `layout.json`, and hiding uses `hidden` to remove the
+lane from paint/accessibility without dropping its draft. Plan 125 closed three
+loose ends here: (a) a tab with no agent adopts the server's default type —
+`coding-agent` first, then `coding`, else the first listed — as soon as the
+listing arrives, so a fresh tab is ready to send; (b) the field stays typable in
+the agent-less/`disabled` states (only the provider-dependent controls are
+disabled: the model trigger shows `Configure a provider`), so `/` and `@` are
+reachable before an agent exists, and a submission without one reports the
+configuration problem instead of failing silently; (c) the agent picker, model
+picker, and session pickers were re-anchored from the retired centered sheet into
+the palette's stages (`/model`, `/resume`, `Agent`, `Configure Provider`). The
+lane's composer also owns the `/` palette query field; see [React Command Centre
+and Desktop
+Workflows](react-command-centre-desktop-workflows.md) for its server-menu
+projection.
 
 - **Skills and MCP servers** — the inspector's Context tab lists the catalog
   skills (name + description) from the three roots and the per-server
@@ -482,13 +501,13 @@ reference data lives in the inspector rather than in the transcript.
   server is configured. The foot carries one summary segment
   (`MCP files · 3 tools · ghost · hidden`). Display-only (no
   restart/connect actions).
-- **@ mentions** — trailing `@token` opens a sectioned dropdown (Skills +
+- **@ mentions** — trailing `@token` opens a narrow sectioned dropdown (Skills +
   Files, type-to-filter, ArrowUp/Down/Tab/Escape); `@skill:<name>` embeds
   the skill as an explicit user instruction (body loaded for that run),
   `@file:<path>` attaches file content (images as image blocks).
   Workspace file list comes from the `workspace.files` daemon RPC
   (bounded 200 paths, depth 8).
-- **Token meter** — header occupancy `used/ceiling` drawn as the stat-row bar,
+- **Token meter** — lane-toolbar occupancy `used/ceiling` drawn as the stat-row bar,
   from the LAST
   provider turn's prompt tokens (never the run-total `agent_finished`
   usage, which double-counts) vs the model's context window (resolved
@@ -496,7 +515,7 @@ reference data lives in the inspector rather than in the transcript.
   80%; live updates ride the `clay.contextTokens` AG-UI custom event;
   when usage is unreported the meter estimates from transcript
   chars-per-token (calibration, not measurement).
-- **Effort dropdown + branch from session start** — effort levels resolve
+- **Effort dropdown in the lane + branch from session start** — effort levels resolve
   client-side from the models inventory's `thinkingLevels` (no longer
   gated on the first prompt); the git branch is recorded at session
   creation, not just on rebind, and the environment foot reports it with the

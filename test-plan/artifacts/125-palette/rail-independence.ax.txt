@@ -1,0 +1,359 @@
+# Post-fix rail/lane independence (plan 125 defect D9), live AT-SPI dumps
+# driver: test-plan/artifacts/125-palette/atspi.py (extents included)
+
+## rest: lane visible, rail visible
+depth|role|selected|states|name|text|extents|app
+0|application|-|-|clay-desktop||-|CLAY-DESKTOP
+1|frame|-|visible,showing,enabled|Clay||0,0,1332x1203|CLAY-DESKTOP
+2|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+3|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||1186,23,114x46|CLAY-DESKTOP
+5|separator|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Minimise||1186,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Maximise||1226,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Close||1266,31,34x30|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||631,37,69x17|CLAY-DESKTOP
+5|label|-|visible,showing,enabled|Clay||631,37,69x17|CLAY-DESKTOP
+5|label|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible,showing,enabled|||26,70,1280x1104|CLAY-DESKTOP
+3|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+4|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+5|scroll pane|-|enabled|||26,70,1280x1104|CLAY-DESKTOP
+6|document web|-|visible,showing,enabled|Clay||26,70,1280x1104|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,70,1280x40|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible,showing,enabled|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible,showing,selected,enabled|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Application controls||1152,73,142x33|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Control Center||1152,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible,showing,enabled|Tab view||1188,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible,showing,selected,enabled|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible,showing,enabled|Agent||1253,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|Clay workspace||26,110,1280x1036|CLAY-DESKTOP
+8|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+9|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+10|landmark|-|visible,showing,enabled|||26,110,940x810|CLAY-DESKTOP
+11|button|-|visible,showing,enabled|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible,enabled|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible,showing,enabled|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible,showing,enabled|Server-driven items||26,194,244x693|CLAY-DESKTOP
+12|list item|-|visible,showing,enabled|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible,enabled|||26,887,244x10|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||154,895,23x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||159,900,13x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||180,900,32x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||219,895,19x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||224,900,9x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||241,900,30x15|CLAY-DESKTOP
+11|landmark|-|visible,showing,enabled|Pane 1||270,110,696x810|CLAY-DESKTOP
+12|panel|-|visible,showing,enabled|Empty tab||270,110,696x810|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open file||531,515,75x34|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open folder||613,515,92x34|CLAY-DESKTOP
+10|footer|-|visible,showing,enabled|Package status||26,920,940x26|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,920,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,920,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,920,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,920,940x10|CLAY-DESKTOP
+10|footer|-|visible,showing,enabled|Agent lane||26,946,940x200|CLAY-DESKTOP
+11|form|-|visible,showing,enabled|||26,947,940x175|CLAY-DESKTOP
+12|label|-|visible,showing,enabled|||53,1059,1x1|CLAY-DESKTOP
+12|entry|-|visible,showing,enabled|Message||53,966,886x48|CLAY-DESKTOP
+12|combo box|-|visible,showing,enabled|Coding Agent Agent type||53,1026,98x34|CLAY-DESKTOP
+12|combo box|-|visible,showing|Configure a provider Model||154,1026,170x34|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||48,1081,16x25|CLAY-DESKTOP
+13|section|-|visible,showing,enabled|||53,1086,6x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||67,1086,52x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||126,1081,17x25|CLAY-DESKTOP
+13|section|-|visible,showing,enabled|||131,1086,7x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||146,1086,88x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||241,1081,19x25|CLAY-DESKTOP
+13|section|-|visible,showing,enabled|||246,1086,9x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||264,1086,24x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||294,1081,19x25|CLAY-DESKTOP
+13|section|-|visible,showing,enabled|||299,1086,9x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||316,1081,19x25|CLAY-DESKTOP
+13|section|-|visible,showing,enabled|||321,1086,9x15|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||338,1086,37x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|Session environment||26,1122,940x24|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Document outline||966,110,340x1036|CLAY-DESKTOP
+9|section|-|visible,showing,enabled|||1046,132,7x16|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Hide outline||1260,124,32x32|CLAY-DESKTOP
+9|description list|-|visible,showing,enabled|||967,166,339x114|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,167,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,166,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,188,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,187,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,209,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,208,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,230,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,229,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,251,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,250,244x15|CLAY-DESKTOP
+9|separator|-|visible,showing|||967,280,339x1|CLAY-DESKTOP
+9|paragraph|-|visible,showing,enabled|||967,281,339x833|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,1146,1280x28|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible,showing,enabled|||89,1138,467x45|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|hide lane Ctrl
+X
+P||583,1144,162x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|palette Ctrl
+X
+O||758,1144,147x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|files Ctrl
+B||918,1144,109x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|hide outline Ctrl
+I||1040,1144,164x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|filter /||1217,1144,78x33|CLAY-DESKTOP
+
+## after clicking the status-bar 'hide lane' hint (Ctrl+X Ctrl+P): lane gone, rail INTACT (D9 fix)
+depth|role|selected|states|name|text|extents|app
+0|application|-|-|clay-desktop||-|CLAY-DESKTOP
+1|frame|-|visible,showing,enabled|Clay||0,0,1332x1203|CLAY-DESKTOP
+2|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+3|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||1186,23,114x46|CLAY-DESKTOP
+5|separator|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Minimise||1186,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Maximise||1226,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Close||1266,31,34x30|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||631,37,69x17|CLAY-DESKTOP
+5|label|-|visible,showing,enabled|Clay||631,37,69x17|CLAY-DESKTOP
+5|label|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible,showing,enabled|||26,70,1280x1104|CLAY-DESKTOP
+3|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+4|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+5|scroll pane|-|enabled|||26,70,1280x1104|CLAY-DESKTOP
+6|document web|-|visible,showing,enabled|Clay||26,70,1280x1104|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,70,1280x40|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible,showing,enabled|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible,showing,selected,enabled|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Application controls||1152,73,142x33|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Control Center||1152,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible,showing,enabled|Tab view||1188,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible,showing,selected,enabled|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible,showing,enabled|Agent||1253,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|Clay workspace||26,110,1280x1036|CLAY-DESKTOP
+8|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+9|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+10|landmark|-|visible,showing,enabled|||26,110,940x1010|CLAY-DESKTOP
+11|button|-|visible,showing,enabled|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible,enabled|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible,showing,enabled|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible,showing,enabled|Server-driven items||26,194,244x893|CLAY-DESKTOP
+12|list item|-|visible,showing,enabled|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible,enabled|||26,1087,244x10|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||154,1095,23x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||159,1100,13x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||180,1100,32x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||219,1095,19x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||224,1100,9x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||241,1100,30x15|CLAY-DESKTOP
+11|landmark|-|visible,showing,enabled|Pane 1||270,110,696x1010|CLAY-DESKTOP
+12|panel|-|visible,showing,enabled|Empty tab||270,110,696x1010|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open file||531,615,75x34|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open folder||613,615,92x34|CLAY-DESKTOP
+10|footer|-|visible,showing,enabled|Package status||26,1120,940x26|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Document outline||966,110,340x1036|CLAY-DESKTOP
+9|section|-|visible,showing,enabled|||1046,132,7x16|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Hide outline||1260,124,32x32|CLAY-DESKTOP
+9|description list|-|visible,showing,enabled|||967,166,339x114|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,167,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,166,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,188,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,187,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,209,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,208,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,230,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,229,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,251,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,250,244x15|CLAY-DESKTOP
+9|separator|-|visible,showing|||967,280,339x1|CLAY-DESKTOP
+9|paragraph|-|visible,showing,enabled|||967,281,339x833|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,1146,1280x28|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible,showing,enabled|||92,1145,502x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|lane Ctrl
+X
+P||622,1144,123x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|palette Ctrl
+X
+O||758,1144,147x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|files Ctrl
+B||918,1144,109x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|hide outline Ctrl
+I||1040,1144,164x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|filter /||1217,1144,78x33|CLAY-DESKTOP
+
+## after clicking the titlebar 'Hide outline' (Ctrl+I): rail gone, lane stays hidden (independent)
+depth|role|selected|states|name|text|extents|app
+0|application|-|-|clay-desktop||-|CLAY-DESKTOP
+1|frame|-|visible,showing,enabled|Clay||0,0,1332x1203|CLAY-DESKTOP
+2|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+3|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||1186,23,114x46|CLAY-DESKTOP
+5|separator|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Minimise||1186,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Maximise||1226,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Close||1266,31,34x30|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||631,37,69x17|CLAY-DESKTOP
+5|label|-|visible,showing,enabled|Clay||631,37,69x17|CLAY-DESKTOP
+5|label|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible,showing,enabled|||26,70,1280x1104|CLAY-DESKTOP
+3|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+4|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+5|scroll pane|-|enabled|||26,70,1280x1104|CLAY-DESKTOP
+6|document web|-|visible,showing,enabled|Clay||26,70,1280x1104|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,70,1280x40|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible,showing,enabled|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible,showing,selected,enabled|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Application controls||1152,73,142x33|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Control Center||1152,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible,showing,enabled|Tab view||1188,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible,showing,selected,enabled|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible,showing,enabled|Agent||1253,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|Clay workspace||26,110,1280x1036|CLAY-DESKTOP
+8|section|-|visible,enabled|||26,110,1280x1036|CLAY-DESKTOP
+9|section|-|visible,enabled|||26,110,1280x1036|CLAY-DESKTOP
+10|landmark|-|visible,showing,enabled|||26,110,1280x1010|CLAY-DESKTOP
+11|button|-|visible,showing,enabled|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible,enabled|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible,showing,enabled|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible,showing,enabled|Server-driven items||26,194,244x893|CLAY-DESKTOP
+12|list item|-|visible,showing,enabled|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible,enabled|||26,1087,244x10|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||154,1095,23x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||159,1100,13x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||180,1100,32x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||219,1095,19x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||224,1100,9x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||241,1100,30x15|CLAY-DESKTOP
+11|landmark|-|visible,showing,enabled|Pane 1||270,110,1036x1010|CLAY-DESKTOP
+12|panel|-|visible,showing,enabled|Empty tab||270,110,1036x1010|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open file||701,615,75x34|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open folder||783,615,92x34|CLAY-DESKTOP
+10|footer|-|visible,showing,enabled|Package status||26,1120,1280x26|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,1280x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,1280x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,1280x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,1280x10|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,1146,1280x28|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible,showing,enabled|||94,1145,539x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|lane Ctrl
+X
+P||661,1144,123x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|palette Ctrl
+X
+O||797,1144,147x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|files Ctrl
+B||957,1144,109x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|outline Ctrl
+I||1079,1144,125x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|filter /||1217,1144,78x33|CLAY-DESKTOP
+
+## after clicking the 'hide outline' hint again: rail back, lane still hidden
+depth|role|selected|states|name|text|extents|app
+0|application|-|-|clay-desktop||-|CLAY-DESKTOP
+1|frame|-|visible,showing,enabled|Clay||0,0,1332x1203|CLAY-DESKTOP
+2|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+3|panel|-|visible,showing,enabled|||26,23,1280x47|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||1186,23,114x46|CLAY-DESKTOP
+5|separator|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Minimise||1186,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Maximise||1226,31,34x30|CLAY-DESKTOP
+5|button|-|visible,showing,enabled|Close||1266,31,34x30|CLAY-DESKTOP
+4|filler|-|visible,showing,enabled|||631,37,69x17|CLAY-DESKTOP
+5|label|-|visible,showing,enabled|Clay||631,37,69x17|CLAY-DESKTOP
+5|label|-|enabled|||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible,showing,enabled|||26,70,1280x1104|CLAY-DESKTOP
+3|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+4|filler|-|-|||26,70,1280x1104|CLAY-DESKTOP
+5|scroll pane|-|enabled|||26,70,1280x1104|CLAY-DESKTOP
+6|document web|-|visible,showing,enabled|Clay||26,70,1280x1104|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,70,1280x40|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible,showing,enabled|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible,showing,selected,enabled|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Application controls||1152,73,142x33|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Control Center||1152,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible,showing,enabled|Tab view||1188,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible,showing,selected,enabled|Workspace||1193,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible,showing,enabled|Agent||1253,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|Clay workspace||26,110,1280x1036|CLAY-DESKTOP
+8|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+9|section|-|visible,enabled|||26,110,940x1036|CLAY-DESKTOP
+10|landmark|-|visible,showing,enabled|||26,110,940x1010|CLAY-DESKTOP
+11|button|-|visible,showing,enabled|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible,enabled|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible,showing,enabled|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible,showing,enabled|Server-driven items||26,194,244x893|CLAY-DESKTOP
+12|list item|-|visible,showing,enabled|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible,enabled|||26,1087,244x10|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||154,1095,23x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||159,1100,13x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||180,1100,32x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||219,1095,19x25|CLAY-DESKTOP
+12|section|-|visible,showing,enabled|||224,1100,9x15|CLAY-DESKTOP
+11|section|-|visible,showing,enabled|||241,1100,30x15|CLAY-DESKTOP
+11|landmark|-|visible,showing,enabled|Pane 1||270,110,696x1010|CLAY-DESKTOP
+12|panel|-|visible,showing,enabled|Empty tab||270,110,696x1010|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open file||531,615,75x34|CLAY-DESKTOP
+13|button|-|visible,showing,enabled|Open folder||613,615,92x34|CLAY-DESKTOP
+10|footer|-|visible,showing,enabled|Package status||26,1120,940x26|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+11|status bar|-|visible,enabled|||26,1120,940x10|CLAY-DESKTOP
+8|landmark|-|visible,showing,enabled|Document outline||966,110,340x1036|CLAY-DESKTOP
+9|section|-|visible,showing,enabled|||1046,132,7x16|CLAY-DESKTOP
+9|button|-|visible,showing,enabled|Hide outline||1260,124,32x32|CLAY-DESKTOP
+9|description list|-|visible,showing,enabled|||967,166,339x114|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,167,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,166,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,188,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,187,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,209,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,208,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,230,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,229,244x15|CLAY-DESKTOP
+10|description term|-|visible,showing,enabled|||981,251,56x15|CLAY-DESKTOP
+10|description value|-|visible,showing,enabled|||1049,250,244x15|CLAY-DESKTOP
+9|separator|-|visible,showing|||967,280,339x1|CLAY-DESKTOP
+9|paragraph|-|visible,showing,enabled|||967,281,339x833|CLAY-DESKTOP
+7|landmark|-|visible,showing,enabled|||26,1146,1280x28|CLAY-DESKTOP
+8|section|-|visible,showing,enabled|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible,showing,enabled|||92,1145,502x31|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|lane Ctrl
+X
+P||622,1144,123x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|palette Ctrl
+X
+O||758,1144,147x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|files Ctrl
+B||918,1144,109x33|CLAY-DESKTOP
+8|button|-|visible,showing,focused,enabled|hide outline Ctrl
+I||1040,1144,164x33|CLAY-DESKTOP
+8|button|-|visible,showing,enabled|filter /||1217,1144,78x33|CLAY-DESKTOP

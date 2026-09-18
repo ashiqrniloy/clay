@@ -1,10 +1,33 @@
 /* Layout-transparent: the panes and the lane this host owns are the working
- * area grid's own items, so the lane can be its full-width bottom row
+ * area grid's own items, so the lane can be the view pane's own bottom row
  * (DESIGN.md §12 — see `routes/workspace.module.css`). The overlays below
  * (centred menu, unsaved-changes modal) position themselves, so they are
  * unaffected by dropping this box. */
 .host {
   display: contents;
+}
+
+/* The workspace sidebar's rail: the shell's own box for the tree's token-sized
+ * region (`dimension.sidebar.default`). It is the rail DESIGN.md §6 draws —
+ * `surface.main` at 1.0 with one hairline on its inner edge, no shadow — and
+ * DESIGN.md §12's left rail: it spans the working area's rows, so it never ends
+ * at the lane's hairline. Its width is the host geometry token (§5) and drives
+ * the working-area grid's first track (`routes/workspace.module.css`), so a
+ * hidden rail's track collapses to 0. */
+.side {
+  display: flex;
+  flex-direction: column;
+  width: var(--rail-files, var(--clay-dimension-sidebar-default, 244px));
+  min-width: 0;
+  min-height: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  border-right-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-right-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-right-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.side[hidden] {
+  display: none;
 }
 
 /* The two views share the working area above the lane; the inactive one is
@@ -22,14 +45,15 @@
 /* The composer's menus' veil: the modal scrim recipe (`modal.default.scrim`),
  * one tier, second caller (DESIGN.md §6/§11) — the `modal` slot attributes
  * carry the reduced-transparency, no-backdrop-filter and forced-colors
- * fallbacks in `styles/global.css`. It veils the working area only: the lane,
- * whose field is the palette's query, stays above it (its own z-index), and the
- * sheet rises over this veil from inside that lane. Its box is the working
- * area's own row — the panes *and* the rail — which the working-area grid
- * places it in (`routes/workspace.module.css`), so it needs no offsets. */
+ * fallbacks in `styles/global.css`. It veils the views and the rail's whole
+ * height: the lane, whose field is the palette's query, stays above it (its own
+ * z-index), and the sheet rises over this veil from inside that lane. Its box is
+ * the working area's whole grid — the views, the lane's own cell and the rail —
+ * which the working-area grid places it in (`routes/workspace.module.css`), so
+ * it needs no offsets. */
 .veil {
-  /* Positioned so its z-index applies: the working-area grid places it in the
-   * panes' row, and the rail follows it in the DOM, so the layer order must be
+  /* Positioned so its z-index applies: the working-area grid places it over the
+   * grid, and the rail follows it in the DOM, so the layer order must be
    * explicit (the lane's own z-index keeps its sheet above this). */
   position: relative;
   z-index: var(--clay-z-modal, 40);

@@ -15,6 +15,12 @@ import { AgentLane } from "./AgentLane";
 import { AgentView } from "../coding-agent/AgentView";
 import { createAgentSession, type AgentSessionModule } from "../agent/state";
 import type { ComposerPalette } from "../coding-agent/Composer";
+import {
+  SduiRegion,
+  WORKSPACE_SIDE_SIZE,
+  hostRailRegionId,
+} from "../sdui/renderer";
+import type { IntentSender } from "../sdui/actions";
 import { PaneTree, effortChordOf } from "./PaneTree";
 import { tabUncommitted, type ShellTabState } from "./tab-store";
 import { detached } from "../lib/detached";
@@ -26,11 +32,6 @@ import styles from "./workspace-panes.module.css";
 const PackageWorkspace = lazy(async () => {
   const module = await import("../packages/PackageWorkspace");
   return { default: module.PackageWorkspace };
-});
-
-const CommandCentre = lazy(async () => {
-  const module = await import("../command-centre/CommandCentre");
-  return { default: module.CommandCentre };
 });
 
 /**
@@ -128,7 +129,10 @@ function TabPanes({
       request: () => workspace.dispatchServerCommand("controlCenter.open"),
       query: (filter, scope) => workspace.menuQuery(filter, scope),
       move: (delta) => workspace.menuMove(delta),
-      activate: () => workspace.menuActivate(),
+      activate: (secondary) => workspace.menuActivate(secondary),
+      // One stage back, and the session is what answers whether there is one
+      // behind it (a stage's first step dismisses the sheet).
+      back: () => workspace.menuBackspace(),
       cancel: () => workspace.menuCancel(),
     }),
     [paletteMenu, workspace],
@@ -139,6 +143,20 @@ function TabPanes({
   // half mounts the first time it is shown — its session must not start for a
   // tab the user only edits.
   const agentMounted = runtime.agentMounted || tab?.view === "agent";
+  // The workspace sidebar is the tree's token-sized region, and the shell — not
+  // the tree — owns the box it lands in (DESIGN.md §5/§12): it renders that
+  // region as the working area's own left rail, so it keeps the full height
+  // beside the lane, and the pane's tree is rendered without it.
+  const sdui = runtime.ui.sdui;
+  const sideRegionId = sdui
+    ? hostRailRegionId(sdui, WORKSPACE_SIDE_SIZE)
+    : null;
+  const sendToPane = useCallback<IntentSender>(
+    (payload) =>
+      runtime.panes.get(runtime.tree.activePaneId)?.session.request(payload) ??
+      Promise.resolve(),
+    [runtime],
+  );
   const panes = (
     <PaneTree
       runtime={runtime}
@@ -173,13 +191,10 @@ function TabPanes({
         <PackageWorkspace
           sdui={runtime.ui.sdui}
           packageUi={runtime.ui.packageUi}
-          send={(payload) =>
-            runtime.panes
-              .get(runtime.tree.activePaneId)
-              ?.session.request(payload) ?? Promise.resolve()
-          }
+          send={sendToPane}
           editorSlot={panes}
           settingsOpen={runtime.settingsOpen}
+          omittedRegions={sideRegionId != null ? [sideRegionId] : undefined}
         />
       </Suspense>
     ) : (
@@ -193,6 +208,21 @@ function TabPanes({
   const fieldMenuOpen = laneVisible && (paletteMenu !== null || mentionsOpen);
   return (
     <>
+      {/* The workspace sidebar (the tree's `dimension.sidebar.default` region)
+          is the working area's left rail: column 1, spanning the working area's
+          rows, so it — like the inspector rail — keeps the full height and the
+          lane's hairline stops at its edge (DESIGN.md §12). It belongs to the
+          workspace view only: the agent view has no files rail, and the lane
+          then spans the pane's whole width. */}
+      <div
+        className={styles.side}
+        data-panes="side"
+        hidden={!workspaceActive || sdui == null || sideRegionId == null}
+      >
+        {sdui != null && sideRegionId != null ? (
+          <SduiRegion state={sdui} send={sendToPane} regionId={sideRegionId} />
+        ) : null}
+      </div>
       <div className={styles.viewArea} data-panes="view-area">
         <div
           className={styles.viewSlot}
@@ -266,21 +296,13 @@ export function WorkspacePanes({
   }
   const tab =
     snapshot.tabs.find((entry) => entry.clientId === runtime.clientId) ?? null;
-  // A command-menu session (`centered`: pickers, package menus) is a window
-  // overlay of its own; the palette origin is drawn by the lane instead (plan
-  // 124), so only the centred origins reach `CommandCentre`.
-  const centredMenu =
-    runtime.menu && runtime.menu.origin !== "commandPalette"
-      ? runtime.menu
-      : null;
+  // Plan 125: this host draws exactly one transient surface — the lane's
+  // composer palette. The retired `centered` origin has no projection here any
+  // more, and the package origins (`contextMenu`/`menuBar`) are the package UI
+  // renderer's own overlays, not the shell's.
   return (
     <div className={styles.host} data-testid="workspace-panes">
       <TabPanes runtime={runtime} tab={tab} workspace={workspace} />
-      {centredMenu && (
-        <Suspense fallback={null}>
-          <CommandCentre workspace={workspace} />
-        </Suspense>
-      )}
       <ClayModal
         title="Unsaved changes"
         open={pending != null}

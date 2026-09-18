@@ -1,0 +1,315 @@
+/* ============================================================================
+   Clay — design proposal token layer
+   Four shipped content themes, one semantic contract.
+   Copied from design-artifacts/approved/quiet-instrument-language/theme.css;
+   the only change is [−] the two proposal-only palettes (kanagawa-wave,
+   catppuccin-latte) are dropped — Clay ships the four content themes and
+   implements no new theme (decision 2026-09-11-1700).
+
+   Contract: themes own COLOR only. Geometry, borders, radius, motion and
+   material belong to the UI design language in each screen file. No screen
+   file declares a raw color.
+
+   Themes:
+     1. modus-operandi          (light, near-monochrome, WCAG-strict)
+     2. modus-vivendi           (dark, near-monochrome, WCAG-strict)
+     3. gruvbox-material-dark   (dark, warm retro)
+     4. gruvbox-material-light  (light, warm cream)
+
+   Token improvements over the shipped themes are marked `[+]`. They fall in
+   four groups:
+     a) depth direction — chrome is now darker than the canvas (light themes)
+        or the canvas is separated from chrome by real surface steps (dark),
+        instead of the old flat panel-on-shell inversion.
+     b) role gaps — the shipped textStyles block has no accent, hover, active,
+        selected, kbd, focus or syntax-operator role; each is now derived from
+        the theme's own palette instead of falling through to a core default.
+     c) contrast repairs — placeholder/comment/heading grays that sat under
+        4.5:1 on their own surface are nudged to pass. Verified; see
+        design-artifacts/DS/README.md for the measured table.
+     d) state legibility — selection, focus ring and diagnostic tints get
+        theme-correct values so keyboard focus is visible in all six themes
+        (Clay's UI is keyboard-first, so a 2px focus ring must never be
+        invisible).
+   ========================================================================= */
+
+:root,
+[data-theme="modus-operandi"] {
+  --sw-accent: #0031a9;
+  color-scheme: light;
+
+  /* --- surfaces ------------------------------------------------------- */
+  --c-bg: #f0f0f0;          /* [+] chrome: title/tab/status/sidebar (was #ffffff shell + #f2f2f2 panel) */
+  --c-surface: #ffffff;     /* [+] canvas is now the lightest surface, not the shell */
+  --c-surface-2: #f2f2f2;   /* [+] wells, cards, inputs, popovers */
+  --c-hover: #e6e6e6;       /* [+] new role */
+  --c-active: #d8d8d8;      /* [+] new role */
+  --c-sel: #c9e2ff;         /* [+] selection row: opaque, from the theme's #c0deff */
+
+  /* --- text ----------------------------------------------------------- */
+  --c-text: #000000;        /* bg-main / fg-main */
+  --c-text-2: #4f4f4f;      /* [+] dim step kept above 7:1 on surface */
+  --c-text-3: #6b6b6b;      /* [+] meta/count step, repaired to pass 4.5:1 */
+  --c-text-inv: #ffffff;
+
+  /* --- lines ---------------------------------------------------------- */
+  --c-line: #d0d0d0;        /* [+] hairline (was scrollbar #9f9f9f for every border) */
+  --c-line-2: #878787;      /* border.subtle/strong — theme's own border gray */
+
+  /* --- accent & state ------------------------------------------------- */
+  --c-accent: #0031a9;      /* [+] blue-5 from the Modus palette; the theme ships no accent */
+  --c-accent-fg: #ffffff;
+  --c-accent-soft: #0031a91f;
+  --c-ok: #005e00;
+  --c-warn: #884900;
+  --c-err: #a60000;
+  --c-info: #00538b;
+  --c-ok-soft: #005e001f;
+  --c-warn-soft: #8849001f;
+  --c-err-soft: #a600001f;
+  --c-info-soft: #00538b1f;
+  --c-focus: #0031a9;       /* [+] focus.ring as its own role */
+
+  /* --- material ------------------------------------------------------- */
+  --c-shadow: #000000;      /* hard-offset shadow color for neobrutal surfaces */
+  --c-kbd-bg: #ffffff;
+  --c-kbd-fg: #000000;
+  --c-kbd-line: #9f9f9f;
+  --c-status-bg: #e6e6e6;   /* [+] quieter than the theme's #c8c8c8 status strip */
+  --c-status-fg: #000000;
+  --c-scroll: #9f9f9faa;
+  --c-scroll-track: #9f9f9f22;
+  --c-caret: #000000;
+  --c-seltext: #b8d8ff;
+
+  /* --- document / markdown ------------------------------------------- */
+  --c-doc-h1: #000000;
+  --c-doc-h2: #624416;
+  --c-doc-h3: #193668;
+  --c-doc-h4: #721045;
+  --c-link: #3548cf;
+  --c-quote: #4f4f4f;       /* [+] was #595959-on-#59595928 */
+  --c-quote-bg: #00000014;
+  --c-code-bg: #00000012;
+  --c-code-span: #00663f;
+  --c-list: #4f4f4f;
+
+  /* --- syntax --------------------------------------------------------- */
+  --c-syn-kw: #531ab6;
+  --c-syn-str: #3548cf;
+  --c-syn-num: #00538b;     /* [+] theme number is pure black: unreadable as a token */
+  --c-syn-type: #005f5f;
+  --c-syn-fn: #721045;
+  --c-syn-prop: #015e8b;
+  --c-syn-var: #000000;
+  --c-syn-op: #000000;
+  --c-syn-comment: #595959;
+  --c-syn-punct: #595959;
+}
+
+[data-theme="modus-vivendi"] {
+  --sw-accent: #2fafff;
+  color-scheme: dark;
+
+  --c-bg: #000000;
+  --c-surface: #000000;     /* [+] Vivendi is black-canvas by design; panels carry the lift */
+  --c-surface-2: #1e1e1e;
+  --c-hover: #262626;
+  --c-active: #333333;
+  --c-sel: #2f447f;
+
+  --c-text: #ffffff;
+  --c-text-2: #c3c3c3;      /* [+] dim step lifted off the old #989898 placeholder */
+  --c-text-3: #8f8f8f;
+  --c-text-inv: #000000;
+
+  --c-line: #2b2b2b;        /* [+] hairline; #646464 was too loud for every divider */
+  --c-line-2: #6f6f6f;
+
+  --c-accent: #2fafff;
+  --c-accent-fg: #000000;
+  --c-accent-soft: #2fafff26;
+  --c-ok: #44bc44;
+  --c-warn: #fec43f;
+  --c-err: #ff5f59;
+  --c-info: #6ae4b9;
+  --c-ok-soft: #44bc4426;
+  --c-warn-soft: #fec43f26;
+  --c-err-soft: #ff5f5926;
+  --c-info-soft: #6ae4b926;
+  --c-focus: #2fafff;
+
+  --c-shadow: #4a4a4a;      /* [+] dark themes need a lighter hard shadow to read as depth */
+  --c-kbd-bg: #1e1e1e;
+  --c-kbd-fg: #ffffff;
+  --c-kbd-line: #535353;
+  --c-status-bg: #1e1e1e;   /* [+] was #505050 — the status strip out-shouted the canvas */
+  --c-status-fg: #c3c3c3;
+  --c-scroll: #535353aa;
+  --c-scroll-track: #53535322;
+  --c-caret: #ffffff;
+  --c-seltext: #2f447f;
+
+  --c-doc-h1: #ffffff;
+  --c-doc-h2: #d2b580;
+  --c-doc-h3: #c6daff;
+  --c-doc-h4: #feacd0;
+  --c-link: #79a8ff;
+  --c-quote: #c3c3c3;
+  --c-quote-bg: #ffffff14;
+  --c-code-bg: #ffffff12;
+  --c-code-span: #00c06f;
+  --c-list: #c3c3c3;
+
+  --c-syn-kw: #b6a0ff;
+  --c-syn-str: #79a8ff;
+  --c-syn-num: #fec43f;     /* [+] number was pure white, colliding with plain text */
+  --c-syn-type: #6ae4b9;
+  --c-syn-fn: #feacd0;
+  --c-syn-prop: #00d3d0;
+  --c-syn-var: #ffffff;
+  --c-syn-op: #ffffff;
+  --c-syn-comment: #989898;
+  --c-syn-punct: #989898;
+}
+
+[data-theme="gruvbox-material-dark"] {
+  --sw-accent: #7daea3;
+  color-scheme: dark;
+
+  --c-bg: #1d2021;
+  --c-surface: #282828;
+  --c-surface-2: #32302f;
+  --c-hover: #3c3836;
+  --c-active: #45403d;
+  --c-sel: #3a4438;         /* [+] selection from the theme's aqua, opaque and calm */
+
+  --c-text: #d4be98;
+  --c-text-2: #b3a284;      /* [+] between fg and gray, still >6:1 on surface */
+  --c-text-3: #ab9d89;      /* [+] was #7c6f64 placeholder at 3.3:1 */
+  --c-text-inv: #1d2021;
+
+  --c-line: #3c3836;
+  --c-line-2: #928374;
+
+  --c-accent: #7daea3;      /* [+] accent was the caret beige #d4be98: no state signal */
+  --c-accent-fg: #1d2021;
+  --c-accent-soft: #7daea326;
+  --c-ok: #a9b665;
+  --c-warn: #d8a657;
+  --c-err: #ea6962;
+  --c-info: #89b482;
+  --c-ok-soft: #a9b66526;
+  --c-warn-soft: #d8a65726;
+  --c-err-soft: #ea696226;
+  --c-info-soft: #89b48226;
+  --c-focus: #7daea3;
+
+  --c-shadow: #504945;
+  --c-kbd-bg: #32302f;
+  --c-kbd-fg: #d4be98;
+  --c-kbd-line: #504945;
+  --c-status-bg: #1d2021;
+  --c-status-fg: #a89984;
+  --c-scroll: #928374aa;
+  --c-scroll-track: #7c6f6422;
+  --c-caret: #d4be98;
+  --c-seltext: #7daea366;
+
+  --c-doc-h1: #d4be98;
+  --c-doc-h2: #d8a657;
+  --c-doc-h3: #7daea3;
+  --c-doc-h4: #d3869b;
+  --c-link: #7daea3;
+  --c-quote: #b3a284;
+  --c-quote-bg: #d4be9814;
+  --c-code-bg: #d4be9812;
+  --c-code-span: #a9b665;
+  --c-list: #b3a284;
+
+  --c-syn-kw: #ea6962;
+  --c-syn-str: #a9b665;
+  --c-syn-num: #d3869b;
+  --c-syn-type: #d8a657;
+  --c-syn-fn: #89b482;
+  --c-syn-prop: #e78a4e;
+  --c-syn-var: #d4be98;
+  --c-syn-op: #d4be98;
+  --c-syn-comment: #9d9080; /* [+] was #928374 at 4.2:1 */
+  --c-syn-punct: #a89984;
+}
+
+[data-theme="gruvbox-material-light"] {
+  --sw-accent: #076678;
+  color-scheme: light;
+
+  --c-bg: #f2e5bc;
+  --c-surface: #fbf1c7;
+  --c-surface-2: #f2e5bc;
+  --c-hover: #ece0b6;
+  --c-active: #e3d3a5;
+  --c-sel: #dbdfae;         /* [+] warm selection instead of a blue cast on cream */
+
+  --c-text: #504940;
+  --c-text-2: #6b5c48;      /* [+] was #a89984 placeholder at 2.3:1 */
+  --c-text-3: #71624b;      /* [+] repaired meta step */
+  --c-text-inv: #fbf1c7;
+
+  --c-line: #ddcca4;
+  --c-line-2: #8a7a63;
+
+  --c-accent: #076678;
+  --c-accent-fg: #fbf1c7;
+  --c-accent-soft: #0766781f;
+  --c-ok: #636e26;
+  --c-warn: #9c5e00;
+  --c-err: #b03e3e;
+  --c-info: #45707a;
+  --c-ok-soft: #6c782e1f;
+  --c-warn-soft: #b06a001f;
+  --c-err-soft: #c14a4a1f;
+  --c-info-soft: #45707a1f;
+  --c-focus: #076678;
+
+  --c-shadow: #3c3836;
+  --c-kbd-bg: #f2e5bc;
+  --c-kbd-fg: #504940;
+  --c-kbd-line: #bdae93;
+  --c-status-bg: #ebd9b1;
+  --c-status-fg: #6b5c48;
+  --c-scroll: #928374aa;
+  --c-scroll-track: #a8998422;
+  --c-caret: #504940;
+  --c-seltext: #c3cbb0;
+
+  --c-doc-h1: #3c3836;
+  --c-doc-h2: #8a5f14;
+  --c-doc-h3: #076678;
+  --c-doc-h4: #8a5578;
+  --c-link: #076678;
+  --c-quote: #6b5c48;
+  --c-quote-bg: #50494012;
+  --c-code-bg: #50494010;
+  --c-code-span: #4f6a13;
+  --c-list: #6b5c48;
+
+  --c-syn-kw: #af2528;
+  --c-syn-str: #4f6a13;     /* [+] was #6c782e at 4.2:1 on cream */
+  --c-syn-num: #8f3f71;
+  --c-syn-type: #8a5f14;    /* [+] was #b47109 at 3.5:1 */
+  --c-syn-fn: #076678;
+  --c-syn-prop: #3f6a54;
+  --c-syn-var: #504940;
+  --c-syn-op: #504940;
+  --c-syn-comment: #71624b;
+  --c-syn-punct: #71624b;
+}
+
+/* --- proposal-only palettes ------------------------------------------------
+   [data-theme="kanagawa-wave"] and [data-theme="catppuccin-latte"] below were
+   colour studies in the 2026-09-11 proposal. They are NOT shipped: Clay ships
+   the four content themes (modus-operandi, modus-vivendi, gruvbox-material
+   dark/light) and implements no new theme. The theme switcher keeps them so the
+   approved artifact still demonstrates the language across palettes.
+   -------------------------------------------------------------------------- */
+

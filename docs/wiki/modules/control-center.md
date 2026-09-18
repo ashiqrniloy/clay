@@ -5,6 +5,9 @@ server-owned session kind on the transient-menu round trip. Phase 24.2:
 command execution mode — generation-stamped live catalogue, shared fuzzy
 matching, typed activation with the client shell bridge, and a default
 `Ctrl+X Ctrl+O` sequence binding (Plan 124; pre-Plan-124 `Ctrl+X Ctrl+P`).
+Plan 125: this catalogue is one `mode=catalogue` session of the single composer
+palette — the window-centered projection is retired and the pickers that used to
+stay centered are palette stages too.
 
 ## What it is
 
@@ -12,7 +15,10 @@ The Control Center is a server-owned transient menu that lists executable comman
 
 ## Source files
 
-- `frontend/src/command-centre/{CommandPalette,CommandCentre}.tsx`: palette and centered non-palette projections.
+- `frontend/src/command-centre/{CommandPalette.tsx,CommandPalette.test.tsx}`: the
+  one palette sheet (all six modes, stage keys, shielded stage, foot) and its tests.
+  `CommandCentre.tsx`/`CommandCentre.test.tsx` were deleted in plan 125 together
+  with the centered projection.
 - `frontend/src/coding-agent/{Composer,Composer.test.tsx}`: composer query/focus and tests.
 - `frontend/src/shell/{AgentLane,WorkspacePanes,workspace-controller}.tsx`: lane host, veil, per-tab menu routing.
 - `src/server/control_center.rs`: `ControlCenter` state, command-to-item projection, fuzzy query scoring, persisted selection, and typed activation.
@@ -50,8 +56,48 @@ editor, and built-in commands.
 The palette sheet is a child of `ClayTextField`'s menu slot, exactly the width
 of the composer and 6px above it. `WorkspacePanes` renders the modal veil over
 the panes and inspector rail at z-index 40, while the lane remains interactive
-at z-index 41. Centered `CommandCentre` rendering is retained for picker and
-package-dialog origins only.
+at z-index 41. The palette's root draws the plan-125 **halo**
+(`commandCentre.default.root.rest`: two zero-offset `text.primary` layers,
+`0 0 14px -2px` at 14% and `0 0 3px 0` at 8%) instead of a drop shadow; ordinary
+popovers keep their own shadow recipe, and `src/shell/design_system.rs` ships the
+matching `Elevation::Halo` fallback.
+
+## Plan 125: one session, six modes
+
+Plan 125 retired the centered projection, so every transient Clay session — the
+catalogue, the Path Browser, and all four Agent Picker stages — is now **one**
+session rendered by **one** sheet. Protocol v32 adds the bounded optional
+`mode` (≤16 chars) to `TransientMenuSnapshotData`; the server sets it
+(`src/server/connection/menus.rs::open_command_centre_session` +
+`src/server/agent_picker.rs`), and `CommandPalette` is a pure function of it.
+An absent or unknown spelling draws as the catalogue only when it *is* the
+catalogue, otherwise as a picker — a session from an older daemon never renders
+as something else.
+
+| `mode` | Session | Query source | Foot (`↵` verb) |
+|---|---|---|---|
+| `catalogue` | this page's catalogue | composer field, `/` sigil kept | `↵ run` · `Esc close` |
+| `path` | Path Browser (24.3) | composer field, `/` sigil kept | `↵ run` · `Esc close` |
+| `picker` | Agent Picker list, model list, session list | composer field, no sigil | `↵ choose` · `Esc/Alt+← back` · `Alt+↵ resume`/`delete` on a session row |
+| `secret` | provider credential | **in-sheet shielded field** | `↵ store` · `Esc/Alt+← back` |
+| `url` | provider endpoint / OAuth URL | composer field | `↵ save` · `Esc/Alt+← back` |
+| `oauth` | device-code poll | rows carry the code/URI | `↵ run` · `Esc/Alt+← back` |
+
+The stage-specific keys are server-side semantics, not client shortcuts:
+`MenuBackspace` ascends the picker flow (`AgentPicker::ascend`) and the session
+closes at its flow entry (the server's `MenuEdit { close }` makes the connection
+push `TransientMenuClosed`); `MenuActivate` with `secondary: true` is the row's
+declared secondary action (session deletion), advertised through the row's
+`bindings` field. In a picker stage `Esc`/`Alt+←` are forwarded as that same back
+intent (`menuBackspace`); in `catalogue` and `path` mode the same keys cancel the
+session, because there is no stage behind them and the composer keeps its draft.
+
+The `secret` stage is the one place the composer is not the input: the sheet
+renders its own `ClayTextField type="password"` (plus `autoComplete="off"` and
+`spellCheck={false}`), disables the composer field so a credential can never
+reach the persisted composer draft, and the server masks what it receives
+(`merge_secret_query`) and stores it only through `PutSecret` →
+`host.put_credential`. Focus returns to the composer at the end of the flow.
 
 ## How it works
 
@@ -67,9 +113,9 @@ package-dialog origins only.
 3. **Filter**. `ControlCenter::session` scores every item against the query with the shared bounded fuzzy subsequence matcher (`src/shell/fuzzy.rs`), then sorts by score descending, label, then ID (source order when the query is empty). Ranking rewards word boundaries, consecutive matches, and earlier positions; queries longer than 256 chars score `None`; deterministic ties keep the list stable. No registry re-consultation and no package JavaScript runs per query.
 4. **Render**. `WorkspacePanes` routes `CommandPalette`-origin snapshots to
    the composer's `ComposerPalette`; `CommandPalette` paints the bounded sheet
-   in the field's menu slot. The veil is a separate working-area grid item.
-   Non-palette origins continue through `CommandCentre`'s centered modal
-   projection.
+   in the field's menu slot and switches on the session's `mode` (catalogue,
+   path, picker, secret, url, oauth). The veil is a separate working-area grid
+   item. Every session kind renders here; there is no second, centered renderer.
 5. **Activate**. `ControlCenter::selected_activation(target)` produces a typed `ServerMenuActivation`: `Command(CommandExecutionRequest)` for server/package commands, or `ShellClientCommand(command_id)` for `ClientUiCommand` items. On `MenuActivate`, the connection cancels the session first (pushing `TransientMenuClosed`), then dispatches: command activations go through the shared `execute_command_intent` dispatcher with a live aggregated registry built by `CommandRegistry::from_snapshots([trusted, third_party])` (later source wins; built-ins are omitted because the executor falls back to the built-in table); shell activations go out as the narrow `ServerMessage::ShellClientCommandRequest { command_id }` frame, which the client re-parses deny-by-default via `ShellClientCommand::from_command_id` and routes through `apply_shell_client_command` (tab commands, dirty-close gate, pane commands included).
 
 ## Phase 24.1: Server-owned round trip
@@ -152,13 +198,16 @@ The Control Center also surfaces two built-in mode-discovery commands for diagno
 - Exactly one catalogue snapshot per menu open and one bounded fuzzy scan per query; no registry rebuild and no package JavaScript on query/paint paths.
 - No package JavaScript, command side effects, or synchronous IPC run in Masonry paint/layout/pointer/key/text handlers.
 - The composer palette does not consume editor fixed-slot geometry; its veil
-  occupies only the working-area grid row and the lane occupies the full-width
-  shell row below it. Editor-region and caret hit-testing remain unchanged.
+  occupies the working-area grid (`grid-area: 1 / 1 / -1 / -1`: the panes, the
+  lane's cell and the rail's full height) and the lane occupies the pane's own
+  row below the views (`grid-column: 1`, plan 125), so the rail keeps the
+  working area's height. Editor-region and caret hit-testing remain unchanged.
 
 ## Tests
 
 - `src/server/control_center.rs`: `opening_control_center_lists_all_executable_commands`, `control_center_includes_built_in_commands`, `filtering_matches_label_id_binding_and_provenance`, `selected_command_produces_command_activation`, `selected_shell_client_item_produces_shell_activation`, `empty_filtered_session_rejects_activation`, `client_first_command_is_not_executable_from_control_center`, `shell_client_catalogue_entries_are_visible_and_parser_allowlisted`, `item_detail_includes_key_binding_and_provenance`, `catalogue_snapshot_is_not_rebuilt_for_query_updates`
-- `src/server/menu_sessions.rs`: high-bit ids, replace, query filter, selection wrap, typed activation, cancel, projection, `cancel_active`, adversarial ordering, `stale_generation_cannot_activate_a_catalogue_item`
+- `src/server/menu_sessions.rs`: high-bit ids, replace, query filter, selection wrap, typed activation, cancel, projection, `cancel_active`, adversarial ordering, `stale_generation_cannot_activate_a_catalogue_item`, `picker_backspace_walks_the_flow_and_closes_at_its_entry`, `no_session_constructor_produces_the_retired_centered_origin`
+- `src/server/agent_picker.rs`: `every_picker_stage_is_a_palette_session_with_its_mode`, `stage_back_derives_the_previous_stage_and_drops_the_secret`, `flow_entry_is_the_picker_list_alone`, `secret_is_not_in_snapshot_query_or_labels`
 - `src/server/mod.rs`: `src/server/tests.rs::live_command_catalogue_contains_builtins_and_exact_shell_surface`, `command_catalogue_merges_loaded_packages_with_exact_provenance`
 - `src/server/connection/tests.rs`: `control_center_opens_filters_activates_and_cancels`, `control_center_shell_activation_sends_shell_command_request`, `control_center_lists_and_activates_loaded_package_commands`, `runtime_generation_replacement_cancels_open_control_center`, `tab_switch_cancels_the_active_server_menu_session`, `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`
 - `src/shell/fuzzy.rs`: subsequence vs substring, word-boundary and consecutive bonuses, case-insensitivity, Unicode safety, empty-query and over-long-query behavior
@@ -189,5 +238,7 @@ cargo test --lib shell::fuzzy --quiet
 - `docs/reference/clay-js-api/commands/server-register-command.md`
 - `docs/reference/clay-js-api/keybindings/bind-key.md`
 - [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md) — current palette/veil projection
+- [Retired Centered Command Centre Surface](centered-command-centre-surface.md) — why the second origin is gone and what survives on the wire
 - `plans/082-Phase24.2-Command-Execution-Mode.md`
 - `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`
+- `plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`

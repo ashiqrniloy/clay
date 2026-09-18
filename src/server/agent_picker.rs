@@ -1,7 +1,10 @@
 //! Command Centre session kind for agent/provider/model/setup/session pickers.
 //!
-//! Reuses the shared fuzzy matcher and centered origin. Secret steps keep the
-//! real query server-side and project bullets so snapshots/a11y never see it.
+//! Reuses the shared fuzzy matcher and the composer palette's origin: every
+//! stage is a `CommandPalette` session whose `mode` tells the sheet how to draw
+//! it (plan 125; the window-centered origin it once used is retired). Secret
+//! steps keep the real query server-side and project bullets so snapshots/a11y
+//! never see it.
 
 use crate::{
     protocol::AgentPickerKind,
@@ -47,6 +50,32 @@ enum Stage {
     Secret,
     Url,
     Oauth,
+}
+
+impl Stage {
+    /// Plan 125: the palette's presentation mode for this stage. One closed
+    /// vocabulary for the whole sheet — a picker list, the three input stages
+    /// and the OAuth device flow — so the client lays the sheet out from server
+    /// data alone and never infers a stage from the prompt text.
+    fn mode(self) -> &'static str {
+        match self {
+            Stage::Secret => "secret",
+            Stage::Url => "url",
+            Stage::Oauth => "oauth",
+            Stage::List | Stage::AuthMethods => "picker",
+        }
+    }
+
+    /// Plan 125 (task-1 gap G3): one stage back, derived from the stage rather
+    /// than a stored trail. The input stages return to the sign-in method list,
+    /// which returns to the picker list; the list itself is the floor.
+    fn previous(self) -> Option<Self> {
+        match self {
+            Stage::List => None,
+            Stage::AuthMethods => Some(Stage::List),
+            Stage::Secret | Stage::Url | Stage::Oauth => Some(Stage::AuthMethods),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -149,9 +178,44 @@ impl AgentPicker {
         self.session()
     }
 
+    /// Phase 24.3 / plan 125: Backspace pops one query character; on an empty
+    /// filter it ascends one stage (the path browser's rule for its own trail).
+    /// The ascent is derived from the current stage and the kind, so no stage
+    /// trail is stored, and the stage's value — a secret in `Secret` — is
+    /// cleared on the way out.
+    /// Semantic Backspace (plan 125): one stage back. The picker's filter is
+    /// typed into the field that owns the session, so its characters are
+    /// deleted by the field itself (every keystroke rides `menuQueryUpdate`);
+    /// this intent only ever means "leave this stage", and the filter leaves
+    /// with it — the flow's own entry is the floor ([`Self::at_flow_entry`]).
     pub(crate) fn backspace(&mut self) -> TransientMenuSession {
-        self.query.pop();
+        self.ascend();
         self.session()
+    }
+
+    /// Is the flow's entry showing — the picker list itself? `ProviderSetup`'s
+    /// list is not an entry: the plain provider list sits behind it, so it
+    /// ascends instead. One step back from an entry leaves the flow, which is
+    /// the connection's cue to close the session. A typed filter does not make
+    /// a deeper stage of an entry: leaving the list leaves it whole (the
+    /// approved step-back rule — one press per stage).
+    pub(crate) fn at_flow_entry(&self) -> bool {
+        self.stage == Stage::List && self.kind != AgentPickerKind::ProviderSetup
+    }
+
+    /// One stage back: `Stage::previous` first, and at the list's own floor a
+    /// `ProviderSetup` flow unwinds into the provider list it started from (the
+    /// flow's entry, which is the plain `Provider` picker).
+    fn ascend(&mut self) {
+        if let Some(previous) = self.stage.previous() {
+            self.stage = previous;
+        } else if self.kind == AgentPickerKind::ProviderSetup {
+            self.kind = AgentPickerKind::Provider;
+        } else {
+            return;
+        }
+        self.query.clear();
+        self.selected_index = 0;
     }
 
     pub(crate) fn move_selection(&mut self, delta: i64) -> TransientMenuSession {
@@ -208,7 +272,13 @@ impl AgentPicker {
             .with_items(items)
             .with_selected_index(self.selected_index)
             .with_query(query)
-            .with_origin(TransientMenuOrigin::Centered)
+            // Plan 125: the picker is the composer's palette too — one sheet
+            // for every transient flow — with the stage carried as a bounded
+            // presentation mode instead of originating a window-centered
+            // surface. `secret` is claimed by `Stage::Secret` alone, which is
+            // also the only stage whose echoed query is masked.
+            .with_origin(TransientMenuOrigin::CommandPalette)
+            .with_mode(self.stage.mode())
     }
 
     pub(crate) fn activate(&mut self, secondary: bool) -> Result<AgentPickerActivate, String> {
@@ -487,7 +557,13 @@ impl AgentPicker {
                     } else {
                         session.updated_at_label.clone()
                     };
+                    // The row states the action only its own kind has: `Alt+↵`
+                    // deletes this session instead of resuming it (the sheet's
+                    // secondary activation, plan 125). The binding is the row's
+                    // affordance, spelled the way the sheet's chip and foot
+                    // show it; the verb is the client's.
                     item(&format!("session:{}", session.id), &label, &detail)
+                        .with_bindings(vec![SESSION_SECONDARY_BINDING.to_string()])
                 })
                 .collect(),
             AgentPickerKind::SessionSearch => {
@@ -612,6 +688,12 @@ fn auth_label(kind: &str) -> String {
         _ => "API key".to_string(),
     }
 }
+
+/// The chord a session list declares on its rows for the activation that
+/// deletes rather than resumes (`TransientMenuActivationData::Secondary`).
+/// Spelled for display: the sheet renders it as the row's chip and names the
+/// verb itself (`delete`).
+const SESSION_SECONDARY_BINDING: &str = "Alt+↵";
 
 fn item(id: &str, label: &str, detail: &str) -> TransientMenuItem {
     TransientMenuItem::new(id, label, TransientMenuAction::new(id))
@@ -774,6 +856,191 @@ mod tests {
                 assert_eq!(secret, "sk-secret-value")
             }
             other => panic!("expected put, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_picker_stage_is_a_palette_session_with_its_mode() {
+        // Plan 125: stage → mode is the closed vocabulary one sheet renders
+        // from, and `secret` has exactly one claimant.
+        for (stage, expected) in [
+            (Stage::List, "picker"),
+            (Stage::AuthMethods, "picker"),
+            (Stage::Secret, "secret"),
+            (Stage::Url, "url"),
+            (Stage::Oauth, "oauth"),
+        ] {
+            assert_eq!(stage.mode(), expected, "{stage:?}");
+        }
+        assert_eq!(
+            [
+                Stage::List,
+                Stage::AuthMethods,
+                Stage::Secret,
+                Stage::Url,
+                Stage::Oauth,
+            ]
+            .into_iter()
+            .filter(|stage| stage.mode() == "secret")
+            .count(),
+            1,
+            "only Stage::Secret may claim the shielded mode"
+        );
+
+        // Stage-less kinds are picker lists on the composer palette.
+        for kind in [
+            AgentPickerKind::Provider,
+            AgentPickerKind::Model,
+            AgentPickerKind::Agent,
+            AgentPickerKind::Session,
+            AgentPickerKind::SessionSearch,
+            AgentPickerKind::ProviderSetup,
+        ] {
+            let session = AgentPicker::open(1, kind, inventory(), Vec::new()).session();
+            assert_eq!(
+                session.origin(),
+                TransientMenuOrigin::CommandPalette,
+                "{kind:?}"
+            );
+            assert_eq!(session.mode(), Some("picker"), "{kind:?}");
+        }
+
+        // anthropic has one auth method, so the flow lands in `secret` directly.
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.activate(false).unwrap();
+        assert_eq!(picker.session().mode(), Some("secret"));
+
+        // openai has two: api_key (list → secret) then url.
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.move_selection(1);
+        picker.activate(false).unwrap();
+        assert_eq!(picker.session().mode(), Some("picker"), "auth methods");
+        picker.move_selection(1);
+        picker.activate(false).unwrap();
+        assert_eq!(picker.session().mode(), Some("url"));
+
+        // The OAuth device flow is the last mode, on the same origin.
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.enter_oauth(
+            "login-1".into(),
+            "ABCD-EFGH".into(),
+            "https://example.test/auth".into(),
+        );
+        let session = picker.session();
+        assert_eq!(session.origin(), TransientMenuOrigin::CommandPalette);
+        assert_eq!(session.mode(), Some("oauth"));
+    }
+
+    #[test]
+    fn stage_back_derives_the_previous_stage_and_drops_the_secret() {
+        // The rule is derived from the stage, never stored.
+        for (stage, previous) in [
+            (Stage::List, None),
+            (Stage::AuthMethods, Some(Stage::List)),
+            (Stage::Secret, Some(Stage::AuthMethods)),
+            (Stage::Url, Some(Stage::AuthMethods)),
+            (Stage::Oauth, Some(Stage::AuthMethods)),
+        ] {
+            assert_eq!(stage.previous(), previous, "{stage:?}");
+        }
+
+        let mut picker =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        picker.activate(false).unwrap(); // anthropic → api_key → Secret
+        assert_eq!(picker.session().mode(), Some("secret"));
+        picker.set_query("a");
+        assert_eq!(picker.query(), "a");
+        // Backspace is stage-back, not character deletion: the field that owns
+        // the session deletes its own characters, so the typed filter leaves
+        // with the stage it belonged to — and a value never rides the ascent.
+        let ascended = picker.backspace();
+        assert_eq!(ascended.mode(), Some("picker"), "auth methods");
+        assert!(ascended.query().is_empty(), "no value rides the ascent");
+        picker.backspace();
+        assert_eq!(picker.session().mode(), Some("picker"), "provider list");
+        assert_eq!(picker.kind(), AgentPickerKind::ProviderSetup);
+        // The setup flow's list unwinds to the provider picker, which is the
+        // flow's entry: `at_flow_entry` is what tells the connection to close
+        // the sheet instead of ascending again.
+        assert!(
+            !picker.at_flow_entry(),
+            "the setup list has the provider list behind it"
+        );
+        picker.backspace();
+        assert_eq!(picker.kind(), AgentPickerKind::Provider);
+        assert_eq!(picker.session().mode(), Some("picker"));
+        assert!(picker.at_flow_entry(), "the provider list is the entry");
+        // A filter narrows the entry's rows, it does not make a deeper stage:
+        // leaving the list leaves it whole (one press per stage).
+        picker.set_query("anth");
+        assert!(picker.at_flow_entry(), "a filter is still the same stage");
+    }
+
+    #[test]
+    fn flow_entry_is_the_picker_list_alone() {
+        // Every kind entered directly shows its own list as the flow's entry;
+        // the setup flow's list is one step in, and a typed filter is not an
+        // entry either (the row set is filtered, the stage is not left yet).
+        for kind in [
+            AgentPickerKind::Provider,
+            AgentPickerKind::Model,
+            AgentPickerKind::Agent,
+            AgentPickerKind::Session,
+            AgentPickerKind::SessionSearch,
+        ] {
+            let picker = AgentPicker::open(1, kind, inventory(), Vec::new());
+            assert!(picker.at_flow_entry(), "{kind:?}");
+        }
+        let setup = AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        assert!(!setup.at_flow_entry(), "ProviderSetup starts one step in");
+        let mut filtered = AgentPicker::open(1, AgentPickerKind::Model, inventory(), Vec::new());
+        filtered.set_query("gpt");
+        assert!(
+            filtered.at_flow_entry(),
+            "filtering a list does not deepen the flow"
+        );
+        let mut secret =
+            AgentPicker::open(1, AgentPickerKind::ProviderSetup, inventory(), Vec::new());
+        secret.activate(false).unwrap(); // anthropic → Secret
+        assert_eq!(secret.session().mode(), Some("secret"));
+        assert!(
+            !secret.at_flow_entry(),
+            "an input stage has the method list behind it"
+        );
+    }
+
+    #[test]
+    fn session_rows_declare_the_delete_binding_and_others_do_not() {
+        // The sheet states a secondary action because the row carries it: only
+        // the session list has one (delete instead of resume), so only those
+        // rows declare the chord the foot names.
+        let sessions = AgentPicker::open(1, AgentPickerKind::Session, inventory(), Vec::new());
+        let items = sessions.session().items().to_vec();
+        assert!(!items.is_empty(), "the inventory carries sessions");
+        for item in &items {
+            assert_eq!(
+                item.bindings,
+                vec![SESSION_SECONDARY_BINDING.to_string()],
+                "every session row states its delete chord"
+            );
+        }
+        for kind in [
+            AgentPickerKind::Provider,
+            AgentPickerKind::Model,
+            AgentPickerKind::Agent,
+        ] {
+            let picker = AgentPicker::open(1, kind, inventory(), Vec::new());
+            assert!(
+                picker
+                    .session()
+                    .items()
+                    .iter()
+                    .all(|item| item.bindings.is_empty()),
+                "{kind:?} rows claim no secondary action"
+            );
         }
     }
 

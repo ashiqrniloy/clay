@@ -6,21 +6,23 @@
 // `layout.json` by the workspace controller — the store itself stays
 // dependency-free so the titlebar, the chords, the rail, the lane and the
 // agent panel all read one owner instead of threading props.
+//
+// Each surface owns its state: one `createVisibility()` call per surface, with
+// the listeners and the per-tab map created inside the factory (sharing them
+// made the rail, the inspector and the lane one store — plan 125 defect D9).
 
-const listeners = new Set<() => void>();
-
-/** tab clientId → visible. Absent means visible (what a tab starts with). */
 /** Tab key for a surface rendered outside a tab (the DEV fixtures): it behaves
  *  like one more tab, so a toggle there still works and is never persisted. */
 const DEFAULT_KEY = "";
-const visibleByTab = new Map<string, boolean>();
-let activeTab: string = DEFAULT_KEY;
-
-function notify(): void {
-  for (const listener of [...listeners]) listener();
-}
 
 function createVisibility() {
+  // tab clientId → visible. Absent means visible (what a tab starts with).
+  const visibleByTab = new Map<string, boolean>();
+  const listeners = new Set<() => void>();
+  let activeTab: string = DEFAULT_KEY;
+  const notify = (): void => {
+    for (const listener of [...listeners]) listener();
+  };
   const isVisible = (): boolean => visibleByTab.get(activeTab) ?? true;
   const setVisible = (next: boolean): void => {
     if (isVisible() === next) return;

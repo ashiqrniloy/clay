@@ -102,8 +102,9 @@ or `role="img"`, Plan 112); toast/notification → internal overlay + timer on
 | Welcome entry surface | React page composition | Heading hierarchy + Group/Status semantics preserved; Open File/Folder route through existing command intents |
 | Transient menu (prompt/item list) | React Aria `Menu`/`ComboBox`/`Autocomplete` by origin | Combobox/listbox patterns; sanitized labels pass through unchanged |
 | Inline completion pop-up | CodeMirror autocompletion extension DOM (internal) | CM listbox semantics; 8-row cap kept |
-| Command Centre (centered) | `frontend/src/command-centre/CommandCentre.tsx`: React Aria `Dialog` + bounded scrollable `ListBox` | Dialog/focus restoration, server-owned selection/query, live result count; package-inert |
-| Path browser | Same Command Centre projection with semantic backspace and secondary activation | Server-held entry activation and browse-to-grant contract unchanged |
+| Command Centre (centered) | Retired by plan 125 — `frontend/src/command-centre/CommandCentre.tsx` was deleted; every session (catalogue, path, picker stages) now renders in the composer-anchored palette below | The retired `Dialog`/focus-restoration contract is historical; server-owned selection/query and the live result count carry over |
+| Composer palette (catalogue, path, and picker stages) | `frontend/src/command-centre/CommandPalette.tsx`: bounded scrollable listbox inside the composer field's shell, `list.default.row.*`/`seg.default.*` over `commandCentre.*`, veiled by `modal.scrim`, halo shadow, shielded in-sheet field for the `secret` stage | Focus stays in the composer field that holds the query (the `secret` stage is the exception: its masked field takes focus), server-owned selection/query/stage state, live result count, package-inert |
+| Path browser | Same palette projection with semantic backspace and secondary activation | Server-held entry activation and browse-to-grant contract unchanged |
 | File browser | React Aria `Tree` + TanStack Virtual rows | Treeitem nesting, selection/focus model from server snapshot |
 | Window tab bar | React Aria `Tabs` (`TabList`/`Tab`) + scrollable strip | `tab`/`tablist` semantics; close glyph is labelled nested button; shrink-to-fit + scroll offset contract preserved |
 | `paint_divider` | `<hr>`/separator element or resize handle | `separator` role |

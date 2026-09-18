@@ -2413,6 +2413,71 @@ fn plan118_core_fallbacks_match_the_shipped_language() {
     );
 }
 
+/// Plan 125: the composer palette and the `@` mentions menu carry the `halo`
+/// (DESIGN.md §6) — one even, zero-offset glow stated on the two existing keys,
+/// with no key added — while the surfaces that have nothing veiled behind them
+/// (`popover`, `overlay`) keep their cast shadows.
+#[test]
+fn plan125_palette_and_mentions_take_the_halo_not_a_drop_shadow() {
+    use clay::shell::design_system::resolve_design_system;
+
+    let declaration = design_instrument_declaration();
+    let resolved = resolve_design_system(&declaration, None).expect("shipped system resolves");
+
+    /// DESIGN.md §6: `{x, y, blur, spread, opacity}` per layer, text.primary.
+    const HALO: &[(f64, f64, f64, f64, f64)] =
+        &[(0.0, 0.0, 14.0, -2.0, 0.14), (0.0, 0.0, 3.0, 0.0, 0.08)];
+
+    let layers = |key: &str| {
+        let recipe = resolved
+            .recipes
+            .iter()
+            .find(|(recipe_key, _)| recipe_key.to_key_string() == key)
+            .map(|(_, recipe)| recipe)
+            .unwrap_or_else(|| panic!("`{key}` is not a shipped recipe"));
+        recipe
+            .shadow
+            .iter()
+            .map(|layer| (layer.x, layer.y, layer.blur, layer.spread, layer.opacity))
+            .collect::<Vec<_>>()
+    };
+
+    for key in ["commandCentre.default.root.rest", "menu.default.root.rest"] {
+        let got = layers(key);
+        assert_eq!(
+            got,
+            HALO.to_vec(),
+            "`{key}` must carry DESIGN.md §6's halo (even ink, zero offset)"
+        );
+        assert!(
+            got.iter()
+                .all(|(x, _, blur, _, _)| *x == 0.0 && *blur > 0.0),
+            "`{key}` halo layers are zero-offset and keep a visible blur (§14.1)"
+        );
+    }
+    assert_eq!(
+        layers("commandCentre.default.root.rest"),
+        layers("menu.default.root.rest"),
+        "the palette and the mentions menu state one halo value, not two"
+    );
+
+    // Nothing veiled sits behind these: they keep the cast shadows.
+    assert_eq!(
+        layers("popover.default.root.rest").first().map(|l| l.1),
+        Some(14.0)
+    );
+    assert_eq!(
+        layers("modal.default.dialog.rest").first().map(|l| l.1),
+        Some(24.0)
+    );
+
+    assert_eq!(
+        declaration.recipes.len(),
+        165,
+        "the halo is a value: no recipe key is added or removed"
+    );
+}
+
 /// Plan 118 task 16: the static `--clay-ds-*` block in `styles/tokens.css` is the
 /// pre-bootstrap projection of the same recipes. Every variable it states must equal
 /// what the shipped package resolves for that key, or the activation swap repaints.

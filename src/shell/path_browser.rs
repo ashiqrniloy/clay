@@ -314,7 +314,10 @@ impl PathBrowserSession {
         let prompt = format!("Browse · {}", self.canonical_dir.display());
         let mut session = TransientMenuSession::new(session_id, prompt)
             .with_query(&self.input)
-            .with_origin(TransientMenuOrigin::CommandPalette);
+            // Plan 125: `path` is the palette's directory mode — rows plus the
+            // stage line that names the directory being browsed.
+            .with_origin(TransientMenuOrigin::CommandPalette)
+            .with_mode("path");
         if let Some(message) = &self.error {
             // Items stay suppressed while a listing error is pending.
             return session.with_empty_status(message);
@@ -612,6 +615,9 @@ mod tests {
         // Only README.md contains "md" in order.
         session.set_input("/a/md");
         let menu = session.menu_session(TransientMenuSessionId(1));
+        // Plan 125: the palette's `path` mode rides this session too, error
+        // branch included.
+        assert_eq!(menu.mode(), Some("path"));
         let labels: Vec<&str> = menu
             .items()
             .iter()
@@ -623,6 +629,7 @@ mod tests {
         session.set_input("/a/zzz");
         let menu = session.menu_session(TransientMenuSessionId(2));
         assert!(menu.items().is_empty());
+        assert_eq!(menu.mode(), Some("path"));
         assert_eq!(
             menu.status(),
             &crate::shell::transient_menu::TransientMenuStatus::Empty {

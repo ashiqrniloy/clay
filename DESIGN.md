@@ -147,7 +147,7 @@ host CSS + typed dimension tokens):
 | Control height (button, field) | 30px | 28px |
 | Small control (icon button) | 28px | 26px |
 | Chip height / kbd height | 22 / 18px | 20 / 16px |
-| Sidebar width | 244px (224px ≤1240px) | — (the workspace sidebar is the SDUI region the server sizes by token: `dimension.sidebar.default` / `.compact`) |
+| Sidebar width | 244px (224px ≤1240px) | — (the workspace sidebar is the SDUI region the server sizes by token: `dimension.sidebar.default` / `.compact`; the **shell** places that region as the working area's left rail, §12 — a tree names the size, never the box) |
 | Right rail / inspector width | 340px (312px ≤1240px) | — |
 | Sheet width | 700px (880px wide variant) | — |
 | Command palette width | the composer box's own width (it is anchored to that box, §12 — the centered overlay token `dimension.overlay.centered.width` does not apply to it) | — |
@@ -175,9 +175,9 @@ Text is never stretched edge to edge in a wide window.
 | Panel / plane ("veil") | `surface.panel` | 0.55 | 1px `border.hairline` | 12 | none |
 | Inset well (field, composer, stat block) | `surface.control` | 1.0 | 1px `border.hairline` | 12 | none |
 | Row / tab (rest) | transparent | — | none | 8 | none |
-| Popover, dropdown, menu | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 | pop shadow |
+| Popover, dropdown, menu | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 | pop shadow (the composer's `/` and `@` menus take the **halo**) |
 | Sheet, palette, modal | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay shadow |
-| Bottom-anchored sheet (the composer's palette) | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay shadow (rises from its own edge, §7) |
+| Bottom-anchored sheet (the composer's palette) | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | **halo** (rises from its own edge, §7) |
 | Scrim | `surface.scrim` | 0.5 (`opacity.scrim`) | none | — | none, `backdropBlur: 3` |
 | Toast | `surface.panel` | 0.88 | 1px `border.hairline` | pill | pop shadow, `backdropBlur: 8` |
 
@@ -188,6 +188,16 @@ opacity):
   (the approved artifact draws `-20`; the recipe schema bounds spread at ±16, so the
   package uses the nearest legal step and the host keeps the artifact's softer edge)
 - `pop` = `[{0, 14, blur 34, spread -14, text.primary @0.34}, {0, 1, blur 3, spread -1, text.primary @0.16}]`
+- `halo` = `[{0, 0, blur 14, spread -2, text.primary @0.14}, {0, 0, blur 3, spread 0, text.primary @0.08}]`
+  — the composer palette's and the `@` mentions menu's elevation (plan 125,
+  2026-09-18: "remove the drop shadow, replace with a subtle halo"). Both sit
+  over the shared veil, where a directional shadow reads as a hole punched in
+  the scrim: the ink is even on every side — a glow, not a cast — and the 1px
+  `border.hairline` stays the boundary. Both layers are zero-offset, so it is
+  not the retired hard offset shadow (§14.1). It is a **value** on the two
+  existing keys (`commandCentre.default.root.rest`, `menu.default.root.rest`),
+  not a new key: the 165-key set is unchanged. `popover.root` — with nothing
+  veiled behind it — keeps `pop`.
 - static surfaces and rows: **no shadow at all**
 
 **Blur** is permitted only on the overlay scrim (3px) and toast (8px). The
@@ -270,7 +280,8 @@ State is a fill change plus, where needed, one shape signal. Exactly one.
 `outlineStyle: solid`.
 
 **Accent halo** (a shell that owns the boundary — text fields, the textarea
-composer, and the composer box the command palette answers to): a zero-blur,
+composer, the composer box the command palette answers to, and the palette's own
+well when a stage owns one, §12): a zero-blur,
 3px-spread shadow layer in
 `accent.primary` at 15%
 (`shadow: [{x:0, y:0, blur:0, spread:3, colorRole: accent.primary, opacity:0.15}]`)
@@ -485,17 +496,22 @@ case — a host slot with no shipped recipe — is marked `†` in
   same treatment over the **working area only**, the lane itself staying above
   it, because the lane's field is the menu's own input. No second scrim key:
   one recipe, one tier (3px), two callers.
-- `commandCentre.root` — radius 16, overlay shadow, opaque overlay fill; rows
+- `commandCentre.root` — radius 16, `halo` (§6), opaque overlay fill; rows
   are `list` rows and a selected row is the accent @0.15 fill. In the shell it
-  is the composer's palette: it spans the composer box's own width, sits 6px
+  is the composer's palette, and **the only transient selection or input surface
+  in the app** (§12): it spans the lane's inner width (the composer box it
+  answers to), sits 6px
   above that box, caps at `min(52vh, 420px)` and scrolls internally, and it
   owns **no input** — the field below it is the query, so the sheet draws no
   well and no ring of its own (§9 halo belongs to the composer box) and its
   head echoes the query; the boundary in focus is the box's, not the sheet's
-  (§14.4); `commandCentre.empty` — the bare centred empty
+  (§14.4). One stage is the deliberate exception: the shielded credential is a
+  field *inside* the sheet (§12), so there the sheet's own well is the boundary
+  and the box behind it is not. `commandCentre.empty` — the bare centred empty
   state; `commandCentre.status` — the foot's key-hint row. A menu session
   (`contextMenu`/`menuBar`) takes `popover.root` instead — radius 12, pop
-  shadow, content-sized.
+  shadow, content-sized; the composer's own `/` and `@` menus are the field's,
+  wear `menu.*`, and take the `halo` with the palette.
 - `tooltip.default.root.rest` — `surface.overlay`, radius 8, 1px hairline,
   pop shadow, `padding: spacing.tooltip`, `typography.body`,
   `transitionDuration: 150` (`motion.fast`; the 100 this section first stated
@@ -562,13 +578,23 @@ as implemented governs, and `approved/agent-lane-palette/` is the approved
 drawing of the shell's chrome.
 
 **The lane is the shell's one bottom section.** Every tab draws one persistent
-agent lane at the bottom of the working area — the working area's own chrome
-strip (§6/§11), so it sits below both views and their rails (the workspace
-sidebar and the agent inspector end at its top edge, and the lane's hairline is
-the boundary between them) — and it is the same lane in both views: it mounts
+agent lane at the bottom of the working area — the **view pane's** own chrome
+strip (§6/§11): the lane spans the middle pane only and never sits over a rail,
+while both rails (the workspace sidebar and the agent inspector) keep the working
+area's full height, so the lane's hairline stops at their inner edges instead of
+ending them at its top. The workspace sidebar is a **rail of this grid**, not a
+column inside the pane: the SDUI tree carries its region and names the host token
+that sizes it (`dimension.sidebar.default`, §5), and the **shell** — which owns
+every box (§8) — renders that region in the working area's left track, so the
+sidebar's own content runs through the lane's row to the status bar. A tree
+therefore never places it, and a hidden one takes no width at all. A hidden rail's
+width goes back to the lane, so with both rails hidden the lane is the working
+area's whole width again (below 1000px the rails are drawers over the content, so
+the lane keeps the pane's full width throughout) — and it is the same lane in both
+views: it mounts
 once per tab beside the two view slots, so switching views never remounts it and
-never moves the draft, the run or the pickers. Top to
-bottom: the approval strip when a tool is suspended (warning-toned text, Allow
+never moves the draft, the run or the pickers. Top to bottom: the approval strip
+when a tool is suspended (warning-toned text, Allow
 and Deny, `alertdialog`, focus moved in and handed back), the **composer box**
 (the field's row, then the tab's own agent controls as one toolbar row inside
 that box — agent-type picker, model, reasoning effort, context meter — then the
@@ -588,10 +614,39 @@ each row's chord as chips and scope chips (`All · Session · Shell · Files`) t
 filter it — both read from the server's own item fields (a row states no scope it
 was not tagged with, and the sheet renders no control it cannot fill). The palette
 owns no input and no output zone of its own — it is the field's menu, spanning
-the composer box's own width 6px above it — and it rises from its own edge (§7)
+the **lane's inner width** (the composer box it answers to) 6px above it, so it
+follows the lane 1:1 as the rails toggle and can never cross into a rail.
+Reading "the lane's width" as the lane's **outer** edges instead would move the
+anchor from the field to the lane and widen the sheet 18px each side — that is a
+re-approval of the field-anchored geometry (§11), not a tweak. It rises from its
+own edge (§7)
 over the shared veil: the `/` palette and the `@` mentions menu are the same
-gesture on the same field, so they share one veil, and the lane stays above it.
+gesture on the same field, so they share one veil, and the lane stays above it
+(the veil covers the views *and* the rails' full height; the lane is above it at
+z 41 over 40).
 `controlCenter.openPath` keeps its own chord and stays a palette row.
+
+**One surface for every picker.** The same sheet is the shell's only transient
+selection and input surface, from the catalogue to the deepest picker stage: the
+agent-type picker, provider setup, the sign-in method, the credential, a base
+URL, the OAuth device flow, the model list and the session picker are palette
+sessions, never window-centred modals (§14.14). Each stage carries its own
+**prompt line** (the sheet's micro-label), its result rows, and a **mode-aware
+foot** — `↑↓` navigate, `↵ run|choose|resume|store|save`, `esc` close or back one
+stage, `alt+←` back, `alt+↵` delete on a session row, and the live result count
+at the foot's start, as `<output aria-live="polite">`. Back one stage is derived
+from the session's own stage, not a trail on the wire. A stage's filter is the
+same field; the catalogue's `/` sigil belongs to the catalogue alone, and a stage
+whose field owns the value (or whose filter is empty) shows no query echo — a
+prompt and a query are never drawn twice.
+
+**A credential is never typed into the composer.** The secret stage owns a
+shielded field *inside the sheet* (`type="password"`, §9/§14.4) — the one
+exception to "the palette owns no input" — so the characters never reach the
+composer's draft or the lane's persisted state, the snapshot echoes the server's
+bullet mask rather than the value, and the sheet, not the box behind it, is that
+stage's boundary. The value leaves through the host's credential path alone
+(§13.11).
 
 A tab's record — what the shell owns and what persistence round-trips — is
 **the folder it has picked** (empty while nothing has been picked: the launcher's
@@ -748,6 +803,12 @@ never scroll the canvas, and overlays never nest more than one level
    the composer box's). The palette is a `listbox` the field names through
    `aria-controls`/`aria-activedescendant`; the veil is never a modal barrier
    over the input it serves, and `esc` returns focus to the field it came from.
+11. A credential is never echoed. Where a palette stage owns its own input (the
+   shielded secret, §12) the typed characters are never rendered — the field
+   masks, and the snapshot echoes the server's bullet mask rather than the value
+   — and are never written into the composer's draft or the lane's persisted
+   state; the value leaves through the host's credential path alone. A stage
+   that needs no input shows no echo at all.
 
 ## 14. Retired patterns (do not reintroduce)
 
@@ -756,7 +817,9 @@ never scroll the canvas, and overlays never nest more than one level
 3. Borders wider than 1px on controls, rows, or panels. State marks are a fill
    step and a text/role change — never an added 2px edge (see §14.13).
 4. Two competing border weights on one surface (frame + inner divider + state
-   border). One boundary per surface.
+   border). One boundary per surface — the palette's shielded stage (§12) is not
+   a violation: while that stage is up the composer box behind the sheet is not
+   its boundary, the sheet's own well is, and the box carries no focus state.
 5. Backdrop blur on canvas, gutter, scroll, panels, or rows.
 6. Accent used as decoration (panel edges, headings, non-state icons).
 7. Gradients, inner-highlight rims, film grain, and textured backgrounds.
@@ -781,11 +844,22 @@ never scroll the canvas, and overlays never nest more than one level
     second surface and *is* the palette. A centred palette is a modal, and a
     modal competes with the field it answers to. (The `modal.dialog` recipe
     keeps its callers — the app's own dialogs — and its scrim is now shared with
-    the composer's menus; what is retired is the centred *command* sheet.)
+    the composer's menus; what is retired is the centred *command* sheet, extended
+    by plan 125 to the whole centred *selection* family: the agent-type picker,
+    provider setup, the sign-in method, the model list, the session picker and
+    the package overlay menus all open in the composer's palette, because every
+    one of them is a list the field above it queries. The recipe is not retired,
+    only its use as this family's container.)
 15. A second blinking dot for the run. The window mark's dot and the working
     bars are the run's motion (§7/§9); a tab's own marker, the lane's foot and
     the status bar state it without motion, so a busy window never shows two
     blinking dots in one titlebar row.
+16. A drop shadow under the composer's palette or its `@` mentions menu. Both
+    sit over the shared veil, where a directional shadow reads as a hole in the
+    scrim: they take the `halo` (§6) on the same 1px hairline, with zero-offset
+    layers only. `popover.root` — nothing veiled behind it — keeps `pop`. The
+    halo is a **value** on `commandCentre.default.root.rest` and
+    `menu.default.root.rest`; no key is added.
 
 ## 15. Review checklist
 
@@ -808,6 +882,12 @@ Use this in every UI task, plan acceptance, and visual review:
 - [ ] Palette chips (scope and per-row chords) are read from the server's item
       fields — a row states no scope it was not tagged with, renders no chord it
       does not have, and the filter it selects is the session's own.
+- [ ] The palette and the `@` menu carry the `halo` (zero-offset layers, no drop
+      shadow) and the veil is up exactly while one of them is.
+- [ ] Every picker stage is the composer's palette, not a centred sheet, and a
+      credential is typed into the sheet's own shielded field — never the draft.
+- [ ] The lane is the view pane's strip: a visible rail ends it, no rail lets it
+      span the working area, and no rail is cut short by it.
 - [ ] Run state appears once (the window mark's dot, the working bars); nothing
       else pulses, and the lane's foot states the environment only.
 - [ ] No retired pattern from §14 present.
@@ -826,9 +906,17 @@ the shell's lane (`frontend/src/shell/AgentLane.tsx`), which mounts once per tab
 below the two view slots. Sentences below that describe the agent header, the
 view's own composer, or the window-centred command sheet are plan 118's record —
 plan 124's §6/§7/§9/§11/§12/§13/§14 above supersede them (the lane landed in its
-task 6, the palette session in task 7, the lane-anchored sheet in task 8; the
-palette's scope/chord item fields are the one piece still scheduled), and the key
-set stays exactly as counted below — the lane and the palette add no recipe key.*
+task 6, the palette session in task 7, the lane-anchored sheet in task 8, the
+palette's scope/chord item fields in task 9). **Plan 125 (2026-09-18) amends four
+things in the chapters above and nothing else: the lane is the view pane's strip
+— the rails keep the working area's full height (§12); the centred command sheet
+is retired for the whole centred selection family, so every picker stage is a
+composer-palette session, with the shielded secret stage as its one owned input
+(§12/§13.11/§14.14); the palette's and the `@` menu's shadow is the `halo` (§6,
+§14.16); and the sheet's width is the lane's inner width, the outer-edge reading
+being a re-approval (§12).** The key set stays exactly as counted below — the
+lane, the palette and the halo add no recipe key, the halo is two changed
+values.*
 
 - **Package:** `@clay/design-instrument`, `displayName: "Quiet Instrument"`,
   `schemaVersion: 1`, no `extends`, inert data only, zero permissions, no
@@ -1008,13 +1096,18 @@ set stays exactly as counted below — the lane and the palette add no recipe ke
   narrowing 3 → 1 with the count following, 0px horizontal overflow.
 - **Overlay family (shipped, plan 118's command-centre/overlay task):** the
   command palette is one opaque elevated sheet (`commandCentre.root`: r16,
-  hairline, overlay shadow) with a head (search glyph, the server's prompt as a
+  hairline, `halo` — plan 125's value, §6) with a head (search glyph, the
+  server's prompt as a
   micro-label, the query input), the scrolling results as `list` rows, an empty
   state, and a foot of `keyHint` rows plus the live result count
-  (`commandCentre.status`). One ring per surface (§14.4): the sheet's boundary
-  turns accent and takes the halo on focus, and the input draws none. The same
+  (`commandCentre.status`). One ring per surface (§14.4): the field under the
+  sheet keeps the ring and the composer box's accent halo, and the sheet — which
+  owns no input — draws neither; the shielded stage's own well (§12) is the one
+  place the sheet is the boundary. The same
   component renders a menu session (`contextMenu`/`menuBar`) as a narrower
-  `popover.root` surface (r12, pop shadow) under its own prompt. The modal is a
+  `popover.root` surface (r12, pop shadow) under its own prompt, while the
+  composer's own `/` and `@` menus wear `menu.*` and take the same `halo` as the
+  palette they share a veil with. The modal is a
   sheet: head (title + close) and actions foot separated by the divider
   hairline, cancel leading and the primary action trailing, with a scrolling
   body; `flush` hands the surface and the head to its content (the palette). The

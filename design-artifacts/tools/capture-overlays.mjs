@@ -168,10 +168,12 @@ const HELPERS = `
 
 const MEASURE_PALETTE = `(() => {
   ${HELPERS}
-  const sheet = document.querySelector('[data-testid="command-centre"]');
+  // Plan 125: the shell's one transient surface is the composer's palette
+  // (data-testid="command-palette"), not the retired window sheet.
+  const sheet = document.querySelector('[data-testid="command-palette"]');
   const input = sheet?.querySelector("input");
-  const results = sheet?.querySelector('[class*="results"]');
-  const head = sheet?.querySelector('[class*="head"]');
+  const results = sheet?.querySelector('[class*="palList"]');
+  const head = sheet?.querySelector('[class*="palHead"]');
   const foot = sheet?.querySelector('[class*="foot"]');
   const rows = [...(sheet?.querySelectorAll('[role="option"]') ?? [])];
   const kbds = [...(sheet?.querySelectorAll("kbd") ?? [])];
@@ -211,6 +213,12 @@ const MEASURE_PALETTE = `(() => {
       borderColor: focused?.borderTopColor,
       ringExpected: cs(sheet)?.borderTopColor,
       sheetHalo: focused?.boxShadow === "none" ? "none" : "present",
+      // The sheet declares no focus state of its own: the composer box it
+      // answers to is the boundary (plan 124), so focusing anything inside it
+      // must leave its border and shadow untouched.
+      ringStable:
+        s?.boxShadow === focused?.boxShadow &&
+        s?.borderTopColor === focused?.borderTopColor,
       inputOutline: active?.outlineStyle,
       accent: getComputedStyle(document.documentElement)
         .getPropertyValue("--clay-accent-primary")
@@ -269,7 +277,7 @@ const MEASURE_TOOLTIP = `(() => {
 const REDUCED_MOTION = `(() => {
   ${HELPERS}
   const dialog = document.querySelector('[role="dialog"]');
-  const sheet = document.querySelector('[data-testid="command-centre"]');
+  const sheet = document.querySelector('[data-testid="command-palette"]');
   return {
     dialogTransition: cs(dialog)?.transitionDuration ?? null,
     dialogTransform: cs(dialog)?.transform ?? null,
@@ -450,14 +458,7 @@ async function main() {
       expression: MEASURE_PALETTE,
       theme,
     });
-    // 4. A menu origin: the popover surface.
-    await scene(cdp, report, {
-      name: "palette-menu",
-      url: "?fixture=command-centre-menu",
-      expression: MEASURE_PALETTE,
-      theme,
-    });
-    // 5. The modal sheet: head, scrolling body, hairline actions foot.
+    // 4. The modal sheet: head, scrolling body, hairline actions foot.
     await scene(cdp, report, {
       name: "modal",
       url: "?fixture=controls",
@@ -542,7 +543,7 @@ function rgb(value) {
         `${run.theme}@${run.width}: head/foot hairlines ${run.headBorderBottom}/${run.footBorderTop}`,
       );
     if (run.resultsOverflow !== "auto")
-      failures.push(`${run.theme}@${run.width}: results overflow ${run.resultsOverflow}`);
+      failures.push(`${run.theme}@${run.width}: row-list overflow ${run.resultsOverflow}`);
     if (run.rows < 1) failures.push(`${run.theme}@${run.width}: no rows`);
     if (run.rowRadius !== 8)
       failures.push(`${run.theme}@${run.width}: row radius ${run.rowRadius}`);
@@ -553,13 +554,9 @@ function rgb(value) {
     if (run.scopeControls !== 0)
       failures.push(`${run.theme}@${run.width}: fabricated scopes ${run.scopeControls}`);
     if (run.heading) failures.push(`${run.theme}@${run.width}: palette paints a second head`);
-    if (run.focusRing.inputOutline !== "none")
-      failures.push(`${run.theme}@${run.width}: input draws its own ring`);
-    if (run.focusRing.sheetHalo !== "present")
-      failures.push(`${run.theme}@${run.width}: no accent halo on focus`);
-    if (rgb(run.focusRing.borderColor) !== rgb(run.focusRing.accent))
+    if (!run.focusRing.ringStable)
       failures.push(
-        `${run.theme}@${run.width}: focus boundary ${run.focusRing.borderColor} != accent ${run.focusRing.accent}`,
+        `${run.theme}@${run.width}: the sheet drew a ring of its own (the composer box is the boundary)`,
       );
   }
   const empty = report.matrix.find((r) => r.scene === "palette-empty");
@@ -567,20 +564,12 @@ function rgb(value) {
     failures.push("empty scene: no empty message");
   if (empty?.listPresent) failures.push("empty scene: renders a list");
   for (const run of palette) {
-    if (run.promptLabel !== "Command Centre")
+    if (run.promptLabel !== "Commands")
       failures.push(`${run.theme}@${run.width}: prompt label ${run.promptLabel}`);
   }
   const path = report.matrix.find((r) => r.scene === "palette-path");
   if (path?.promptLabel !== "Browse workspace")
     failures.push(`path scope: prompt label ${path?.promptLabel}`);
-  for (const run of report.matrix.filter((r) => r.scene === "palette-menu")) {
-    if (run.radius !== 12)
-      failures.push(`${run.theme}: menu radius ${run.radius}`);
-    if (run.promptLabel !== "Session actions")
-      failures.push(`${run.theme}: menu prompt ${run.promptLabel}`);
-    if (!run.sheet || run.sheet.w >= 640)
-      failures.push(`${run.theme}: menu is palette-sized ${JSON.stringify(run.sheet)}`);
-  }
   for (const run of report.matrix.filter((r) => r.scene === "modal")) {
     if (!run.dialog) failures.push(`${run.theme}: modal did not open`);
     if (run.radius !== 16) failures.push(`${run.theme}: dialog radius ${run.radius}`);

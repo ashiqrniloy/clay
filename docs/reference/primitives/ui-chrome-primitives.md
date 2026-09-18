@@ -79,7 +79,7 @@ Phase 28 extends editor data without adding package-facing chrome primitives:
 
 Plan 112 realized this contract in the React client: `ClayIcon` renders bounded pack geometry with the bundled Regular subset as zero-config fallback, `ClayIconButton` composes icon + tooltip + required accessible name, and `theme.setIconPack` activates user-selected packs. See [Icon Packs](../icon-packs.md) and the [React UI catalog mapping](../development/react-ui-catalog-mapping.md).
 | `paint_tooltip_shell` | Tooltip background/border | `surface.tooltip`, `text.tooltip`, `border.hairline`, `dimension.border.hairline`, `radius.sm`, `elevation.overlay`, `z.tooltip`, `spacing.tooltip`, `typography.body` | `tooltip` |
-| `paint_scrim` (Phase 24.4) | Full-window dim behind centered Command Centre | `surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop |
+| `paint_scrim` (Phase 24.4, re-scoped by plans 124/125) | Dim behind the composer palette and the `@` mentions menu — over the working area and the inspector rail's full height, never over the agent lane that holds the query. The retired centered sheet shared the primitive | `surface.scrim`, `opacity.scrim` | modal `Dialog` backdrop (Clay-internal; no package-facing surface) |
 | `tab_card_chrome` (Phase 22.3) | Tab card background/text with interaction states and selection | `list_row_fill_color`/`disabled_text_color` state mapping, `surface.list`, `surface.selected`, `surface.hover`, `surface.active`, `text.disabled`, `opacity.disabled` | informational `Tab` under the shell `TabList` (virtual node, not a widget) |
 
 ## State-color helpers (Phase 20.4)
@@ -101,7 +101,7 @@ All three are token-driven (resolved theme color/opacity tables) and apply `opac
 - **Sidebar chrome**: panel chrome styling on the SDUI sidebar surface.
 - **Package fixed panel chrome**: same panel chrome applied to projected package panels.
 - **Package overlay chrome**: tooltip/popover chrome on transient overlays.
-- **Centered Command Centre backdrop**: one translucent scrim behind the modal dialog; no blur, filter, or offscreen pass.
+- **Composer palette backdrop**: one translucent scrim behind the palette and mentions menus, composited with the recipe's `backdropBlur: 3`, over the working area and rail only. The retired centered sheet's modal `Dialog` backdrop used the same fill (plan 125).
 
 ### Editor chrome routing
 
@@ -146,7 +146,7 @@ See [Creating Clay Packages](../packages/creating-packages.md#ui-chrome-conforma
 - Primitives are deterministic and allocation-free in paint paths.
 - No per-frame theme re-resolution; tokens are cached in `ResolvedUiTheme`.
 - No layout mutation during paint.
-- Centered Command Centre paint is one token-driven scrim fill plus the bounded retained overlay subtree; width/scrim tokens resolve before paint and are cached.
+- Composer palette paint is one token-driven scrim fill plus the bounded result sheet (the halo's two zero-offset layers are recipe values, not painted chrome); scrim tokens resolve before paint and are cached. The retired centered sheet painted the same way minus the sheet (plan 125).
 - No backdrop blur, filter, or offscreen render target.
 - No package JavaScript in paint/layout/pointer/scroll/keypress/text-event handlers.
 

@@ -723,16 +723,24 @@ and bridge tests above).
 <= 1 ms (P95, advisory) per pane paint and per tab switch remains the pinned
 Phase 22.6 budget row.
 
-### Phase 24.4 centered overlay guards (deterministic)
+### Composer palette guards (deterministic, plans 124/125)
 
-The centered Command Centre surface keeps paint/layout work independent of
-document size: one token-driven full-window scrim fill plus the existing
-bounded overlay subtree. The React Command Centre modal keeps one scrim, one
-window-level host, window-bounded geometry, and no
-blur/offscreen/filter/IPC/IO work in the render path; open/close cycles reuse
-the mounted dialog without orphan roots (`frontend/src/command-centre`
-component tests). The pre-cutover `centered_overlay_baselines` Criterion group
-was removed with `window_baselines`.
+The composer palette keeps paint/layout work independent of catalogue size and
+of the active stage: one token-driven scrim fill over the working area plus the
+bounded result sheet (256-item cap, bounded height with internal scrolling). The
+sheet renders server-owned inert state only, and the composer field is *not* a
+second host: the palette is a sibling inside the field shell, so opening it does
+not remount the lane or the pane. The render path adds no
+blur/offscreen/filter/IPC/IO work beyond the composited scrim's `backdropBlur: 3`
+and the halo's two zero-offset shadow layers; open/close cycles reuse the mounted
+sheet without orphan roots (`frontend/src/command-centre` component tests). The
+per-keystroke budget is the server round trip that already existed (one
+`menuQueryUpdate` frame per edit, unchanged by plan 125). The retired centered
+sheet's Phase 24.4 guards are recorded in
+[accessibility.md](accessibility.md#composer-palette-and-mentions-menu-plans-124125):
+the pre-cutover `centered_overlay_baselines` Criterion group was removed with
+`window_baselines`, and `dimension.overlay.centered.width` now only sizes package
+`modal` dialogs.
 
 ## Plan 087 focused UI regression coverage
 

@@ -1075,6 +1075,44 @@ mod tests {
     }
 
     #[test]
+    fn builtin_picker_commands_stay_inert_command_ids() {
+        // Plan 125 task 13: the six picker command IDs are built-in server-first
+        // intents that open a Clay-owned palette session through the user-intent
+        // lane. Executing one through the command boundary resolves the built-in
+        // and accepts it, but opens nothing by itself: no session, no rows, no
+        // credential stage, and the same ServerFirst policy as the palette open
+        // command.
+        let registry = CommandRegistry::new();
+        let executor = CommandExecutor::new();
+        for command_id in [
+            OPEN_AGENT_PICKER_COMMAND_ID,
+            OPEN_PROVIDER_PICKER_COMMAND_ID,
+            OPEN_MODEL_PICKER_COMMAND_ID,
+            OPEN_PROVIDER_SETUP_COMMAND_ID,
+            OPEN_SESSION_PICKER_COMMAND_ID,
+            OPEN_SESSION_SEARCH_PICKER_COMMAND_ID,
+        ] {
+            let result = executor
+                .execute(
+                    &registry,
+                    CommandExecutionRequest {
+                        command_id: command_id.to_string(),
+                        arguments: Value::Null,
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!("picker command {command_id} must stay executable: {error:?}")
+                });
+            assert_eq!(result.command_id, command_id);
+            assert_eq!(result.routing_policy, RoutingPolicy::ServerFirst);
+            assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        }
+    }
+
+    #[test]
     fn registered_server_command_executes_with_typed_result() {
         let manifest = package_manifest();
         let mut registry = CommandRegistry::new();

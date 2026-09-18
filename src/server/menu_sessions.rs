@@ -89,11 +89,12 @@ impl ServerMenuSessions {
         (snapshot, replaced_id)
     }
 
-    /// Opens a new Path Browser session (Phase 24.3's second kind) seeded
-    /// with a caller-resolved canonical starting directory and its initial
-    /// bounded listing already installed. Mirrors [`Self::open_control_center`]
-    /// exactly: one active session per connection, replaced id reported by
-    /// the caller as `TransientMenuClosed` before the new snapshot.
+    /// Opens a new Agent Picker session (the agent/provider/model/setup/session
+    /// flows) with the caller's inventory already installed. Mirrors
+    /// [`Self::open_control_center`] exactly: one active session per connection,
+    /// replaced id reported by the caller as `TransientMenuClosed` before the
+    /// new snapshot. The session is a `CommandPalette` composer-palette session
+    /// whose `mode` names its stage (plan 125).
     pub(crate) fn open_agent_picker(
         &mut self,
         kind: crate::protocol::AgentPickerKind,
@@ -171,11 +172,14 @@ pub(crate) enum ServerMenuActivateOutcome {
 /// Result of an edit intent: the projected snapshot plus an optional relist
 /// target. Only the Path Browser arm ever produces a relist (its directory
 /// prefix changed); the connection runs the bounded listing, installs the
-/// page, and re-projects.
+/// page, and re-projects. `close` reports that the intent finished the flow
+/// (plan 125: a picker's step back from its first stage), which the connection
+/// answers with the session-closed message the client already dismisses on.
 #[derive(Debug)]
 pub(crate) struct MenuEdit {
     pub(crate) snapshot: TransientMenuSession,
     pub(crate) relist: Option<std::path::PathBuf>,
+    pub(crate) close: bool,
 }
 
 /// One active server menu session. Kind dispatch is an enum (closed set):
@@ -248,6 +252,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::ControlCenter(center) => MenuEdit {
                 snapshot: center.set_query(query),
                 relist: None,
+                close: false,
             },
             // Phase 24.3: full-value path input replacement. A `FilterOnly`
             // transition scores the installed entries locally with no
@@ -262,11 +267,13 @@ impl ServerMenuSession {
                 MenuEdit {
                     snapshot: session.menu_session(TransientMenuSessionId(self.session_id)),
                     relist,
+                    close: false,
                 }
             }
             ServerMenuSessionKind::AgentPicker(picker) => MenuEdit {
                 snapshot: picker.set_query(query),
                 relist: None,
+                close: false,
             },
         }
     }
@@ -303,6 +310,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::ControlCenter(center) => MenuEdit {
                 snapshot: center.backspace(),
                 relist: None,
+                close: false,
             },
             ServerMenuSessionKind::PathBrowser(session) => {
                 let transition = session.backspace();
@@ -313,12 +321,25 @@ impl ServerMenuSession {
                 MenuEdit {
                     snapshot: session.menu_session(TransientMenuSessionId(self.session_id)),
                     relist,
+                    close: false,
                 }
             }
-            ServerMenuSessionKind::AgentPicker(picker) => MenuEdit {
-                snapshot: picker.backspace(),
-                relist: None,
-            },
+            // Plan 125: the picker's backspace is stage-back, and the flow's
+            // own entry has nothing behind it — that is where the sheet closes
+            // instead (the approved `Esc` at the first stage).
+            ServerMenuSessionKind::AgentPicker(picker) => {
+                let close = picker.at_flow_entry();
+                let snapshot = if close {
+                    picker.session()
+                } else {
+                    picker.backspace()
+                };
+                MenuEdit {
+                    snapshot,
+                    relist: None,
+                    close,
+                }
+            }
         }
     }
 
@@ -444,7 +465,7 @@ impl ServerMenuSession {
 /// Inert display data only: no actions, paths, or authority fields cross the
 /// wire; activation is by opaque session id.
 pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> TransientMenuSnapshotData {
-    TransientMenuSnapshotData::new(
+    let snapshot = TransientMenuSnapshotData::new(
         session.session_id().0,
         session.prompt(),
         session.query(),
@@ -493,7 +514,14 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
             TransientMenuOrigin::MenuBar => TransientMenuOriginData::MenuBar,
             TransientMenuOrigin::Centered => TransientMenuOriginData::Centered,
         },
-    )
+    );
+    // Plan 125: the session's presentation mode rides the snapshot so one
+    // `CommandPalette` sheet can render every stage (catalogue, path, picker,
+    // secret, url, oauth). Absent (no mode set) decodes as the catalogue.
+    match session.mode() {
+        Some(mode) => snapshot.with_mode(mode.to_string()),
+        None => snapshot,
+    }
 }
 
 #[cfg(test)]
@@ -954,6 +982,92 @@ mod tests {
         assert_eq!(
             store.get_mut(id).unwrap().backspace().snapshot.query(),
             "markdo"
+        );
+    }
+
+    #[test]
+    fn picker_backspace_walks_the_flow_and_closes_at_its_entry() {
+        // Plan 125: a picker stage's `back()` is stage-back, and the *entry* is
+        // what closes the sheet — the connection answers `close` with the
+        // session-closed message, so `Esc` never has to guess how deep the
+        // flow is.
+        let mut store = ServerMenuSessions::new();
+        let inventory = crate::server::agent::AgentPickerInventory::default();
+        let (snapshot, _) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::Provider,
+            inventory.clone(),
+            Vec::new(),
+            1,
+        );
+        let id = snapshot.session_id;
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(edit.close, "the provider list is the flow's entry");
+        assert_eq!(edit.snapshot.mode(), Some("picker"));
+
+        // A `ProviderSetup` list is one step in: it walks back to the flow's
+        // entry instead of closing, and only *that* stage closes.
+        let mut inventory = inventory;
+        inventory
+            .providers
+            .push(crate::server::agent::AgentPickerProvider {
+                id: "anthropic".to_string(),
+                configured: true,
+                auth: vec![crate::server::agent::AgentPickerAuth {
+                    kind: "api_key".to_string(),
+                    name: "API key".to_string(),
+                    credential_name: "apiKey".to_string(),
+                }],
+            });
+        let (snapshot, replaced) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::ProviderSetup,
+            inventory,
+            Vec::new(),
+            1,
+        );
+        assert_eq!(replaced, Some(id), "one session per connection");
+        let id = snapshot.session_id;
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(
+            !edit.close,
+            "the setup list has the provider list behind it"
+        );
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(
+            edit.close,
+            "unwound to the provider list, which is the entry"
+        );
+        assert_eq!(edit.snapshot.mode(), Some("picker"));
+    }
+
+    #[test]
+    fn no_session_constructor_produces_the_retired_centered_origin() {
+        // Plan 125: the window sheet is gone, so the store that owns every live
+        // session must never hand the client a `Centered` origin again — the
+        // wire variant stays decodable for older peers, nothing produces it.
+        let mut store = ServerMenuSessions::new();
+        let registry = registry_with_commands();
+        let (snapshot, _) = store.open_control_center(&catalogue_for_registry(&registry), 1);
+        assert_eq!(
+            snapshot.origin,
+            crate::protocol::TransientMenuOriginData::CommandPalette
+        );
+        let mut inventory = crate::server::agent::AgentPickerInventory::default();
+        inventory
+            .providers
+            .push(crate::server::agent::AgentPickerProvider {
+                id: "anthropic".to_string(),
+                configured: false,
+                auth: Vec::new(),
+            });
+        let (snapshot, _) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::ProviderSetup,
+            inventory,
+            Vec::new(),
+            1,
+        );
+        assert_eq!(
+            snapshot.origin,
+            crate::protocol::TransientMenuOriginData::CommandPalette
         );
     }
 

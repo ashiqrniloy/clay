@@ -14,6 +14,7 @@ export function paletteStub(
     query: vi.fn(),
     move: vi.fn(),
     activate: vi.fn(),
+    back: vi.fn(),
     cancel: vi.fn(),
     ...overrides,
   };

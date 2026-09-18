@@ -394,6 +394,12 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 // distinct second strokes: Ctrl+X Ctrl+P toggles the lane, Ctrl+X Ctrl+O
 // opens the palette, Ctrl+X Ctrl+F opens the Path Browser. Visibility
 // persists per tab; the command is client-local and grants no authority.
+//
+// Plan 125: every agent picker command stays a row in this same composer-anchored
+// `/` palette. Picker stages (provider, auth, secret, URL, OAuth, and sessions)
+// are Clay-owned; they have no picker key bindings or configuration properties,
+// and the shielded secret field never becomes init.js or composer-draft state.
+// This canonical config intentionally declares no picker command binding.
 
 // Path Browser (Phase 24.3): built-in server-first command
 // controlCenter.openPath ships with the Phase 24.5 sequence default

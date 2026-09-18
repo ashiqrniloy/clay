@@ -1,0 +1,61 @@
+# Plan 126 rail fix — execution record (Linux, 2026-09-18)
+#
+# Subject: the user's decision on plan 125's D7 — the lane must not span the
+# sidebars; the workspace sidebar and the inspector rail keep the working area's
+# full height and the lane spans the middle pane only.
+
+## Deterministic layer (browser fixture + CDP)
+
+npm run dev                                   # vite, http://localhost:1420 (the tool reads CLAY_DEV_URL)
+CLAY_DEV_URL=http://localhost:1420 \
+CLAY_REVIEW_OUT=code-reviews/screenshots/2026-09-18-plan126-rails \
+  node design-artifacts/tools/capture-sidebar.mjs
+# -> sidebar: 3/3 widths pass   (report.json in the same directory)
+# 1500: rail x0 w244 y40..922; lane x244..1160; inspector x1160..1500 y40..922
+# 1024: rail x0 w224;          lane x224..712;  inspector x712..1024 w312
+#  900: rail fixed drawer w224; lane x0..900 (pane's full width); inspector fixed drawer
+# every width: rail bottom == working-area bottom; lane.x == rail.right; lane.right == inspector.x
+
+## Live layer (real Linux build, isolated review root)
+
+cd frontend && npm run build
+cargo build -p clay-desktop --bin clay-desktop
+scripts/capture-ui-review.sh --fixture ui-review-workspace \
+  --output test-plan/artifacts/126-rails/live-1500 --size 1500x950
+# -> UI review captured (screenshot.png, accessibility.txt, metadata.txt, review.status)
+# Visual: the sidebar runs from the titlebar to the status bar; the lane's strip
+# starts at the sidebar's inner edge and ends at the inspector rail.
+
+# AT-SPI extents of the same state (dumped while the app was up, via the harness's
+# own wait step so the isolation is the harness's):
+scripts/capture-ui-review.sh --fixture ui-review-workspace \
+  --output test-plan/artifacts/126-rails/live-1500-ax --size 1500x950 \
+  --drive '[{"wait": 45000}]' &
+python3 test-plan/artifacts/125-palette/atspi.py dump clay-desktop \
+  > test-plan/artifacts/126-rails/live-1500/accessibility-extents.txt
+# Observations (screen coordinates; the working area starts at 26,70 and is 1500x1104):
+#   footer            Agent lane            270,946,916x200   -> x 270..1186 (starts at the sidebar's inner edge, ends at the inspector's left edge)
+#   landmark          Document outline      1186,110,340x1036 -> bottom 1146 == the lane's bottom == the working area's content bottom
+#   list box          Server-driven items    26,194,243x919   -> the sidebar's own listing
+#   panel             (sidebar foot)         26,1113,243x10   -> sidebar content continues *through* the lane's row (946..1146)
+#   button            Hide file browser     237,110,32x32     -> the file browser head sits in the rail's column
+# Pre-fix (plan 125 D7 run): footer Agent lane 26,946 + 940 -> the lane covered the sidebar column.
+
+## Narrow legs
+
+scripts/capture-ui-review.sh --fixture ui-review-workspace \
+  --output test-plan/artifacts/126-rails/live-1024 --size 1024x800
+# -> captured, but the compositor kept the window partly off-screen: the PNG is a
+#    sliver, not measurable evidence (recorded as a ceiling, not a pass).
+scripts/capture-ui-review.sh --fixture ui-review-workspace \
+  --output test-plan/artifacts/126-rails/live-900 --size 900x700
+# -> UNRESOLVED: the portal screenshot did not complete inside the harness timeout.
+# The narrow legs (<=1240 token step, <=1000 drawers, lane at the pane's full
+# width) are carried by the deterministic layer (900 leg above) and the CSS/DOM
+# tests in frontend/src/test/workspace-composition.test.tsx.
+
+## Automated
+
+cd frontend && npm run typecheck && npm test     # 497/497
+node design-artifacts/tools/verify-component-conformance.mjs   # 18/18
+npm run check:budget                              # shell 176.9/180 kB, total 399.9/404 kB

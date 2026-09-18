@@ -23,7 +23,11 @@ import {
 
 import { ClayDropdown, ClayText } from "../components";
 import { ApprovalStrip } from "../coding-agent/ApprovalStrip";
-import { Composer, type EffortChord } from "../coding-agent/Composer";
+import {
+  Composer,
+  defaultAgentType,
+  type EffortChord,
+} from "../coding-agent/Composer";
 import { useAgentSurfaceState } from "../coding-agent/surface-state";
 import { agentLabel } from "../coding-agent/transcript-model";
 import { agentCommandPayload, type AgentSessionModule } from "../agent/state";
@@ -163,6 +167,18 @@ export function AgentLane({
     onPickAgent(sessionAgent);
   }, [agentType, onPickAgent, sessionAgent]);
 
+  // Plan 125: a fresh tab works out of the box — a tab with no agent adopts
+  // the default type as soon as the server's listing arrives (`coding-agent`
+  // when listed, else the first listed type). A resumed session that already
+  // names its agent wins (the adoption effect above is the stronger claim), an
+  // agent the user picked is never replaced, and an empty listing leaves the
+  // tab agent-less with its field still typable.
+  useEffect(() => {
+    if (!onPickAgent || agentType !== null || sessionAgent) return;
+    const fallback = defaultAgentType(agentEntries);
+    if (fallback) onPickAgent(fallback);
+  }, [agentEntries, agentType, onPickAgent, sessionAgent]);
+
   // The menu never lists an agent the server did not list; a tab whose agent
   // is gone (deleted folder) still shows its own row so the state is visible.
   // With no agent at all the picker itself is the offer: the placeholder row
@@ -291,7 +307,9 @@ export function AgentLane({
   // The foot states the *environment*, plus the one reason nothing would send.
   // Never a run cue (DESIGN.md §12).
   const laneNote = !currentAgent
-    ? "no agent on this tab · the lane keeps its place"
+    ? agentEntries.length === 0
+      ? "no agent types listed · nothing would send"
+      : "no agent on this tab · pick one to send"
     : !configured
       ? "no provider configured · Settings → Providers"
       : "";

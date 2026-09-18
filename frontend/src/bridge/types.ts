@@ -229,6 +229,21 @@ export interface TransientMenuSnapshotDto {
   selectedIndex: number;
   status: "active" | { empty: { message: string } };
   focusPolicy: "modal" | "modeless";
+  /**
+   * Plan 125: the session's presentation mode, from the server's closed
+   * vocabulary — `catalogue` (rows only), `path` (the directory mode),
+   * `picker` (a picker stage), `secret` (the shielded field), `url`, `oauth`.
+   * It picks the sheet's stage layout; the client never infers a stage from the
+   * origin or the prompt. Absent = `catalogue`.
+   */
+  mode?: string | null;
+  /**
+   * `centered` is the retired window sheet's origin (plan 125): the wire value
+   * stays decodable for older peers, but no producer sends it and this shell
+   * draws no surface for it — every session it *does* send is the composer
+   * palette (`commandPalette`) or a package overlay origin
+   * (`contextMenu`/`menuBar`, drawn by the package UI renderer).
+   */
   origin: "commandPalette" | "contextMenu" | "menuBar" | "centered";
 }
 

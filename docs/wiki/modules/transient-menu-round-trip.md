@@ -16,8 +16,10 @@ the session, filters on query updates, moves selection, and executes the
 selected item. The client renders server-pushed bounded snapshots and only
 forwards keystrokes. The proving session kind is the Control Center
 (`controlCenter.open`); path mode (24.3) and Plan 124's composer-anchored
-palette build on the same transport. Centered remains only a presentation
-origin for picker/package sessions.
+palette build on the same transport. Plan 125 removed the second presentation
+origin: `TransientMenuOriginData::Centered` survives on the wire for older
+decoders, but no constructor emits it and the host maps it onto the bottom
+anchor, so every session is a stage of the one palette.
 
 ## Source files
 
@@ -25,7 +27,8 @@ origin for picker/package sessions.
   `TransientMenuItemData`, `TransientMenuStatusData`,
   `TransientMenuFocusPolicyData`, `TransientMenuOriginData` (rkyv-archived,
   inert display data only, no action payloads); protocol v31 adds row
-  `group`/`bindings`/`scope` fields.
+  `group`/`bindings`/`scope` fields, and v32 the optional bounded `mode`
+  (absent decodes as the catalogue).
 - `src/protocol/mod.rs`: `ClientMessage` variants `MenuQueryUpdate`,
   `MenuSelectionMove {delta}`, `MenuActivate`, `MenuCancel`; boxed
   `ServerMessage` variants `TransientMenuSnapshot(Box<TransientMenuSnapshotData>)`
@@ -220,15 +223,19 @@ The sheet is full composer width and bottom-anchored 6px above the field. A
 single modal scrim is a working-area grid item over panes and the inspector
 rail, while the lane is above it and stays interactive. `Esc`/cancel and lane
 hiding remove the session and its veil together; the server's closed message
-remains authoritative. Centered `CommandCentre` rendering survives only for
-non-palette picker/package origins.
+remains authoritative. Plan 125 deleted the last non-palette origin
+(`CommandCentre`), so every session — catalogue, path, and each picker stage —
+renders through `CommandPalette`, keyed by the server's `mode`. `MenuBackspace`
+ascends a picker flow (server-side `MenuEdit { close }` closes the session at
+its flow entry), `MenuActivate { secondary: true }` runs the row's declared
+secondary action, and the v32 `mode` also selects the foot's verb.
 
 ## Performance and budgets
 
 - One bounded snapshot per keystroke (~70 KiB worst case, under the 1 MiB
   frame cap); the `encode_decode_max_transient_menu_snapshot` baseline
-  guards the ceiling. Protocol v31 adds row metadata without a separate
-  palette protocol or diff stream.
+  guards the ceiling. Protocol v31 adds row metadata and v32 the session `mode`
+  without a separate palette protocol or diff stream.
 - One catalogue snapshot per menu open (not per keystroke) and one bounded
   fuzzy scan per query; open latency is one snapshot merge + one projection.
 - Phase 24.5 adds advisory latency constants (`src/perf/budgets.rs`) —

@@ -126,8 +126,12 @@ The sheet is a child of the field's `menu` slot, full field width, 6px above
 the field, and capped at `min(52vh, 420px)`. The working-area grid owns one
 modal veil over panes and the inspector rail; the lane stays above it and
 interactive. Hiding the lane removes the palette session's veil as well, so
-there is no stranded scrim. Centered `CommandCentre` remains valid for
-non-palette picker/package sessions.
+there is no stranded scrim. Plan 125 completed this consolidation: there is no
+second, centered renderer left. Every session kind — catalogue, path, and the
+four picker stages — renders in this one sheet, and the server's bounded `mode`
+(protocol v32: `catalogue`, `path`, `picker`, `secret`, `url`, `oauth`) tells the
+client which presentation to paint (see [Control Center](control-center.md) for
+the stage table and keys).
 
 ## Plan 087: caret-adjacent completion projection
 
@@ -143,11 +147,12 @@ anchor through `EditorWidget` to `PackageOverlayHost`.
 helper. It clamps the popup to the active pane, prefers below-caret placement
 then above-caret placement, limits width to 480 logical pixels, and limits the
 visible list to eight rows. The shared retained `SduiScrollViewport` wraps menu
-lists (including centered Command Centre lists), and the selected row supplies a
-bounded scroll target during reconciliation. Completion items have no command
-action targets; their existing local accept payload remains the only activation
-path. Centered command/path sessions retain their centered modal layer and
-focus-restoration behavior.
+lists (including the palette's picker-stage lists), and the selected row supplies a
+bounded scroll target during reconciliation. Completion items have no command action targets; their existing local accept
+payload remains the only activation path. Server-owned sessions (catalogue, path,
+picker stages) all layer through the composer-owned `CommandPalette`; only the
+`secret` stage draws a field of its own, and it disables the composer while it is
+open so no credential can reach the persisted draft.
 
 ## Tests
 

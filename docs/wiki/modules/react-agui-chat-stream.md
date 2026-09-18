@@ -31,7 +31,7 @@ Rust.
 | `Event::Tool` / `Permission` / `Overflow` | inert `CUSTOM` events (`clay.toolPhase`, `clay.permissionRequest`, `clay.overflow`) — display-only, no execution surface                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `Event::Finished`                         | `RUN_FINISHED {result: {usage}}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `Event::Error`                            | `RUN_ERROR {message}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `Picker`                                  | dropped (pickers are Command Centre domain)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `Picker`                                  | dropped (pickers are the palette's own stage domain — plan 125 routes them through `/` stages, not AG-UI)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `CredentialAck` / `Diagnostic`            | `CUSTOM clay.credentialAck` / `clay.diagnostic` (no secret fields exist on these variants)                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `AgentRpc`                                | `CUSTOM clay.agentRpc { code, result }` — `result_json` is parsed into a JSON object so the Context / Memory tabs can apply it (`typeof result === "object"`). A non-JSON payload stays a string and is ignored.                                                                                                                                                                                                                                                                                                                                 |
 
@@ -128,15 +128,23 @@ keeps streaming into it.
 - Editor input never waits on agent work: the stream is asynchronous channel
   delivery and nothing in the composer or editor hot paths blocks on it.
 
-### Plan 124 shell composition
+### Plan 124/125 shell composition
 
 `AgentLane` is mounted as shell chrome for every tab, regardless of whether
 its agent view is active. Its `Composer` supplies the field used by both `/`
-command/path palette sessions and `@` mentions. The palette is not an AG-UI
+command/path/picker palette sessions and `@` mentions. The palette is not an AG-UI
 message: it is a server-owned `TransientMenuSnapshot` rendered by
 `CommandPalette` in the field's menu slot. `WorkspacePanes` supplies the
 `ComposerPalette` callbacks and owns the row-1 veil, leaving the lane at the
 higher stacking level so query input stays interactive.
+
+Plan 125 moved the agent's own pickers into that surface: the agent-type picker,
+the provider setup flow (provider → auth method → credential/URL → OAuth), the
+model list, and the session list are palette stages (`mode` = `picker`, `secret`,
+`url`, `oauth`), so none of them is an AG-UI event or a second dialog. A tab with
+no agent adopts the server's default type when the listing arrives, and the
+composer stays typable in the agent-less and no-provider states, so `/model`,
+`/resume`, and `/` are reachable before an agent is attached.
 
 A run still uses the same `TauriClayAgent` and tab-bound session. The lane
 reports busy state to the shell, renders Stop only while streaming, and keeps

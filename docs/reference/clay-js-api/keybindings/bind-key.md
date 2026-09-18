@@ -251,6 +251,49 @@ bindKey("Ctrl+X Ctrl+O", "controlCenter.open", { scope: "global" });
 - Listing, activation, and palette inclusion confer no filesystem, network, process, shell, extension loading, AI mutation, workspace, package, WASM, raw-op, native-widget, or client-side-JavaScript authority. Packages cannot open, populate, filter, intercept, or drive this session.
 - Lookup tags: `control-center`, `command-palette`, `composer`, `transient-menu`, `keybindings`, `shell`.
 
+## Plan 125 picker command IDs
+
+Plan 125 renders every agent picker on the composer's `/` palette and keeps the six
+picker command IDs as fixed Clay-owned built-in server-first command IDs. They stay
+palette rows (and package UI action targets) rather than callable facades:
+no `clay:agent` export, no op wrapper, no inventory entry, no custom property, and no
+permission. The IDs are unchanged from the phase that introduced them.
+
+| Stable ID | User-facing name | Palette stage | JS facade | Default binding | Custom properties | Permissions |
+|---|---|---|---|---|---|---|
+| `agent.clientOpenAgentPicker` | Choose Agent | picker | none — palette row / UI action target | none | none | none |
+| `agent.clientOpenProviderPicker` | Choose Provider | picker | none | none | none | none |
+| `agent.clientOpenModelPicker` | Choose Model | picker | none | none | none | none |
+| `agent.clientOpenProviderSetup` | Configure Provider | provider setup (then the `secret` / `url` / `oauth` stages) | none | none | none | none |
+| `agent.clientOpenSessionPicker` | Resume Session | picker | none | none | none | none |
+| `agent.clientOpenSessionSearchPicker` | Search Sessions | picker | none | none | none | none |
+
+- The IDs, display names, and stage kinds come from the built-in table
+  (`src/server/command_execution.rs::builtin_commands!` → `BUILTIN_SERVER_COMMAND_IDS`,
+  provenance `clay`, `RoutingPolicy::ServerFirst`, no permissions) and
+  `src/server/agent_picker.rs::picker_kind_for_command`.
+- Activation enqueues an inert command intent that `CommandExecutor` validates before
+  `src/server/connection/runtime.rs` hands it to
+  `src/server/connection/menus.rs::open_command_centre_session`, which opens the
+  Clay-owned `AgentPicker` session as a `TransientMenuOrigin::CommandPalette` sheet.
+  Calling the id through `clay:commands.serverExecuteCommand` resolves the built-in but
+  performs no session work: sessions open only on a user command intent from the client.
+- The session — prompt, query, rows, stage trail, and the shielded secret stage — is
+  Clay-owned internal state with no Clay JS facade, `Deno.core.ops` op, or inventory
+  entry (see the Phase 18.8 boundary in
+  [`commands/server-register-command.md`](../commands/server-register-command.md)).
+- These IDs are **not** `bindKey` targets today:
+  `src/server/ops/keybindings.rs::is_runtime_bindable_command` is an explicit allowlist,
+  and the picker family is reached through the palette (`/model`, `/resume`, …) and the
+  agent lane's own controls. Shipping chords for picker stages is a deliberate
+  follow-up, not an inferred default.
+- Package UI contributions may name these IDs as **action targets** (the
+  `CLIENT_DIALOG_ACTIONS` allowlist in `src/server/ui.rs`, used by
+  `@clay/coding-agent` for its model/session picker rows) because they are built-in Clay
+  commands rather than package-registered ones. That route is inert: the package
+  triggers a Clay-owned session, gains no session/stage/query/credential access, and
+  cannot open, populate, filter, or intercept the palette.
+
 ## Phase 28 editor commands
 
 These built-in editor command IDs are valid `bindKey` targets:
@@ -269,7 +312,7 @@ remain behavior-manifest data.
 ## Options
 
 - `key` (`string`): Key chord or space-separated multi-stroke sequence, for example `"Ctrl+I"` or `"Ctrl+X Ctrl+P"`.
-- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in shell/palette command ids `"shell.toggleAgentLane"`, `"controlCenter.open"`, and `"controlCenter.openPath"`, the workspace server-first command ids `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, the built-in `UiReactivePriority` completion command id `"completion.trigger"`, or the package-contributed coding-agent command id `"coding-agent.clientCycleEffort"`; future extension commands must be registered and permissioned before they can be bound.
+- `command` (`string`): Stable, documented Clay command/API ID to invoke, for example `"editor.serverInsertText"`, `"documents.clientOpenFileDialog"`, `"documents.serverSaveDocument"`, `"documents.serverReloadDocument"`, `"workspace.clientOpenFolderDialog"`, `"editor.clientCopySelection"`, `"editor.clientCutSelection"`, `"editor.clientPasteClipboard"`, `"editor.clientUndo"`, `"editor.clientRedo"`, `"editor.clientShowOpenDocuments"`, `"editor.clientRequestResync"`, `"editor.clientDismissRecovery"`, the built-in shell/palette command ids `"shell.toggleAgentLane"`, `"controlCenter.open"`, and `"controlCenter.openPath"` (the agent picker stages — `"agent.clientOpenModelPicker"`, `"agent.clientOpenProviderSetup"`, and the rest of that family — are palette rows and UI action targets rather than `bindKey` targets today; see [Plan 125 picker command IDs](#plan-125-picker-command-ids)), the workspace server-first command ids `"workspace.openFuzzyFile"`, `"workspace.toggleFileBrowser"`, the built-in `UiReactivePriority` completion command id `"completion.trigger"`, or the package-contributed coding-agent command id `"coding-agent.clientCycleEffort"`; future extension commands must be registered and permissioned before they can be bound.
 - `scope` (`"global" | "editor"`): Binding scope; defaults to `"editor"`.
 - `when` (`string`): Optional future condition expression for context-sensitive bindings; conditions are metadata for server-owned manifest routing, not executable client JavaScript.
 

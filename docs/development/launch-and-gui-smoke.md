@@ -147,7 +147,7 @@ fixtures live under
 | `ui-review-recovery` | Connects normally, stops only its private server, then captures `Disconnected`/recovery status. |
 | `ui-review-large-typography` | Applies `theme.setTypography` with UI 24/document 20–21 before the client handshake; captures the bounded large-type shell. |
 | `ui-review-completion` | Loads `@clay/rust` and binds `Ctrl+Space`; focus editor, trigger completion, then press Enter in the terminal to capture. |
-| `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; open the centered Command Centre, then press Enter in the terminal to capture. |
+| `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; opens `controlCenter.open` — since plan 124/125 the composer palette (catalogue mode) rather than the retired centered sheet — then press Enter in the terminal to capture. |
 | `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
 
 `--example-config` boots the review against a copy of the canonical

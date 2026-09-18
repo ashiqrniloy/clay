@@ -209,7 +209,9 @@ describe("Ctrl+X Ctrl+O opens the Control Center (plan 117 follow-up)", () => {
       await user.keyboard("{Control>}x");
       await user.keyboard("{Control>}o");
     });
-    // The chord dispatches the intent; the snapshot arrives as an envelope.
+    // The chord dispatches the intent; the snapshot arrives as an envelope and
+    // the lane draws it (plan 125: every session is the composer's palette — a
+    // `centered` snapshot has no renderer any more).
     ws.handleEnvelope({
       kind: "event",
       data: {
@@ -217,7 +219,7 @@ describe("Ctrl+X Ctrl+O opens the Control Center (plan 117 follow-up)", () => {
         data: {
           sessionId: 1,
           generationId: 1,
-          prompt: "Command Centre",
+          prompt: "Commands",
           query: "",
           items: [
             {
@@ -229,11 +231,12 @@ describe("Ctrl+X Ctrl+O opens the Control Center (plan 117 follow-up)", () => {
           selectedIndex: 0,
           status: "active",
           focusPolicy: "modal",
-          origin: "centered",
+          origin: "commandPalette",
+          mode: "catalogue",
         },
       },
     } as never);
-    expect(await screen.findByRole("dialog")).toBeDefined();
+    expect(await screen.findByTestId("command-palette")).toBeDefined();
   });
 
   it("editor chord keymap fires inside CodeMirror despite Control keydown noise", async () => {

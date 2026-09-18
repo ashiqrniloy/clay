@@ -29,7 +29,8 @@
 use crate::perf::budgets::{
     TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_BINDING_CHARS,
     TRANSIENT_MENU_MAX_BINDINGS, TRANSIENT_MENU_MAX_DETAIL_CHARS, TRANSIENT_MENU_MAX_ITEMS,
-    TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS, TRANSIENT_MENU_MAX_SCOPE_CHARS,
+    TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_MODE_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS,
+    TRANSIENT_MENU_MAX_SCOPE_CHARS,
 };
 
 /// Char-count truncation shared by every bounded snapshot field.
@@ -153,11 +154,15 @@ pub enum TransientMenuFocusPolicyData {
 }
 
 /// Mirrors `TransientMenuOrigin` (shell layer): selects the overlay anchor
-/// (`Bottom`/`Pointer`/`Main`) or, Phase 24.4, the window-centered surface
-/// (`Centered`). Additive: `CommandPalette` remains the compatibility spelling
-/// for the bottom origin, which plan 124 task 7 uses for the composer's `/`
-/// palette (command catalogue and its path mode) while `Centered` keeps the
-/// window-level menu sessions (pickers, package menus).
+/// (`Bottom`/`Pointer`/`Main`). `CommandPalette` is the bottom origin the
+/// composer's `/` palette uses (the command catalogue, its path mode, and, since
+/// plan 125, every picker stage).
+///
+/// `Centered` is **retired**: Phase 24.4 added it for the window-centered
+/// Command Centre sheet, and plan 125 removed its last producer (the agent
+/// picker became a `CommandPalette` session with a presentation mode). The
+/// variant stays on the wire so older peers decode, and no constructor produces
+/// it.
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -227,13 +232,23 @@ pub struct TransientMenuSnapshotData {
     pub status: TransientMenuStatusData,
     pub focus_policy: TransientMenuFocusPolicyData,
     pub origin: TransientMenuOriginData,
+    /// Plan 125: the session's presentation mode — the closed, server-owned
+    /// vocabulary `catalogue` | `path` | `picker` | `secret` | `url` |
+    /// `oauth`. It selects *how* one `CommandPalette` sheet renders a session
+    /// (list + field echo, a stage line, a shielded field) without the client
+    /// inferring anything from the origin, the prompt text, or the rows.
+    /// `None` means "no mode on the wire": absent decodes as the catalogue for
+    /// `CommandPalette` snapshots, so a v31 server and a v32 client stay
+    /// compatible in both directions.
+    pub mode: Option<String>,
 }
 
 impl TransientMenuSnapshotData {
     /// Build a snapshot, clamping every bounded field to the shared menu
     /// budgets (`TRANSIENT_MENU_MAX_QUERY_CHARS`/`_LABEL_CHARS` for
     /// prompt/query, `_ITEMS` for the list). The server build and the
-    /// defensive client parse both route through this constructor.
+    /// defensive client parse both route through this constructor. `mode`
+    /// defaults absent; set it with [`Self::with_mode`].
     #[allow(clippy::too_many_arguments)] // one positional arg per DTO field; mirrors the wire shape
     pub fn new(
         session_id: u64,
@@ -259,7 +274,15 @@ impl TransientMenuSnapshotData {
             },
             focus_policy,
             origin,
+            mode: None,
         }
+    }
+
+    /// Set the session's presentation mode, clamped to
+    /// `TRANSIENT_MENU_MAX_MODE_CHARS`.
+    pub fn with_mode(mut self, mode: impl Into<String>) -> Self {
+        self.mode = Some(truncate(&mode.into(), TRANSIENT_MENU_MAX_MODE_CHARS));
+        self
     }
 }
 
@@ -461,6 +484,49 @@ mod tests {
             TransientMenuStatusData::Empty {
                 message: "x".repeat(TRANSIENT_MENU_MAX_DETAIL_CHARS),
             }
+        );
+        // Plan 125: the presentation mode is bounded like the scope tag.
+        let snapshot = snapshot.with_mode(long);
+        assert_eq!(
+            snapshot.mode.as_ref().unwrap().chars().count(),
+            TRANSIENT_MENU_MAX_MODE_CHARS
+        );
+    }
+
+    #[test]
+    fn palette_mode_round_trips_and_tolerates_absence() {
+        let codec = codec();
+        // Present: survives both codecs, like every other bounded field.
+        let snapshot = sample_snapshot().with_mode("secret");
+        let message =
+            crate::protocol::ServerMessage::TransientMenuSnapshot(Box::new(snapshot.clone()));
+        let frame = codec.encode_server_message(&message).unwrap();
+        assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TransientMenuSnapshotData>(&json).unwrap(),
+            snapshot
+        );
+        assert_eq!(snapshot.mode.as_deref(), Some("secret"));
+
+        // Absent (a v31 server): decodes as `None`, which the client reads as
+        // the catalogue — the additive field stays optional in both directions.
+        let absent = sample_snapshot();
+        let message =
+            crate::protocol::ServerMessage::TransientMenuSnapshot(Box::new(absent.clone()));
+        let frame = codec.encode_server_message(&message).unwrap();
+        let restored = codec.decode_server_message(&frame).unwrap();
+        assert_eq!(restored, message);
+        let crate::protocol::ServerMessage::TransientMenuSnapshot(restored) = restored else {
+            panic!("unexpected message variant");
+        };
+        assert_eq!(restored.mode, None);
+        let json = serde_json::to_string(&absent).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TransientMenuSnapshotData>(&json)
+                .unwrap()
+                .mode,
+            None
         );
     }
 

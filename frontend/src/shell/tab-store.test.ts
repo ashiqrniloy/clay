@@ -68,6 +68,10 @@ describe("tab store", () => {
       agent: { type: "coding-agent", configRoot: "/tmp/a" },
     });
     expect(state.tabs[0]?.label).toBe("coding-agent");
+    // Plan 125: the landing is a function of the workspace alone, so an
+    // auto-attached agent never takes a folder-less tab's launcher away.
+    expect(tabUncommitted(state.tabs[0] as ShellTabState)).toBe(true);
+    state = patchTab(state, 7, { workspaceRoot: "/tmp/notes" });
     expect(tabUncommitted(state.tabs[0] as ShellTabState)).toBe(false);
   });
 

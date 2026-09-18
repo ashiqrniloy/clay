@@ -16,12 +16,17 @@ export function PackageWorkspace({
   send,
   editorSlot,
   settingsOpen = false,
+  omittedRegions,
 }: {
   sdui: SduiState | null;
   packageUi: PackageUiSnapshot | null;
   send: IntentSender;
   editorSlot: ReactNode;
   settingsOpen?: boolean;
+  /** Tree regions the host already placed in its own box (the shell renders the
+   *  workspace sidebar's region as the working-area rail): the tree keeps their
+   *  data, and drawing them here too would duplicate them. */
+  omittedRegions?: readonly number[];
 }) {
   const settings = packageUi?.panels.find(
     (panel) => panel.provenance.packageName === "@clay/settings",
@@ -43,7 +48,12 @@ export function PackageWorkspace({
     ) : null;
   };
   const main = sdui ? (
-    <SduiRenderer state={sdui} send={send} editorSlot={editorSlot} />
+    <SduiRenderer
+      state={sdui}
+      send={send}
+      editorSlot={editorSlot}
+      omittedRegions={omittedRegions}
+    />
   ) : (
     editorSlot
   );

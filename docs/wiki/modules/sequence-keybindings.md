@@ -36,8 +36,9 @@ Rust capability was added (pinned by
    any malformed stroke reject the whole bind (`keybindings.invalid_key`).
    `"Space"` is the literal space key in the grammar, so whitespace splitting
    is unambiguous. The result becomes `KeyBindingRule.sequence:
-   Vec<KeyStroke>` — already the archived protocol shape, so
-   `PROTOCOL_VERSION` stays 17 and the rkyv archive round-trips unchanged
+   Vec<KeyStroke>` — the archived keybinding shape stays unchanged; the
+   current protocol pin is 31 because later palette fields are additive, and
+   the rkyv archive round-trips unchanged
    (`multi_stroke_key_binding_rules_round_trip_the_archive_identically` in
    `tests/window_management_protocol.rs`). Parsing never runs on the
    keypress hot path; `key_sequence_string` serializes sequences for
@@ -128,18 +129,18 @@ automatically because every bind publishes through `validate_manifest`.
 Cross-context prefixes and divergent rules sharing a common prefix stay
 valid: the pending-chord matcher resolves them by the next stroke. No
 default manifest contains prefix collisions — the two new defaults
-(`Ctrl+X Ctrl+P`, `Ctrl+X Ctrl+F`) both start with `Ctrl+X`, which no
-single-stroke default uses, and diverge at the second stroke
+(`Ctrl+X Ctrl+P`, `Ctrl+X Ctrl+O`, `Ctrl+X Ctrl+F`) all start with `Ctrl+X`,
+which no single-stroke default uses, and diverge at the second stroke
 (`default_keymaps_are_prefix_collision_free`).
 
 ## Defaults, budgets, and guards
 
 - **Sequence defaults** (`src/protocol/mod.rs`, `default_keymaps`):
-  `controlCenter.open` = `Ctrl+X Ctrl+P`, `controlCenter.openPath` =
-  `Ctrl+X Ctrl+F` (both `Global`, `ServerFirst`, command IDs and routing
-  policies unchanged; pre-24.5 the temporary defaults were `Ctrl+Shift+P` /
-  `Ctrl+Alt+P`). Built via the `KeyBindingRule::global_server_first_sequence`
-  constructor.
+  `shell.toggleAgentLane` = `Ctrl+X Ctrl+P`, `controlCenter.open` =
+  `Ctrl+X Ctrl+O`, and `controlCenter.openPath` = `Ctrl+X Ctrl+F` (all
+  `Global`; server-first for the server commands and client-UI for the lane;
+  command IDs and routing policies stay unchanged). Built via the
+  `KeyBindingRule::global_server_first_sequence` constructor where applicable.
 - **Advisory budgets** (`src/perf/budgets.rs`, Phase 21 promotion rule —
   no wall-clock CI gate): `COMMAND_CENTRE_OPEN_P95_BUDGET_MS = 50`,
   `COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS = 4`,
@@ -174,8 +175,9 @@ and authority record: `docs/development/performance.md` (Phase 24.5).
 ## Extension guidance
 
 - Bind any space-separated sequence: `bindKey("g g", "workspace.refresh")`
-  or `bindKey("Ctrl+X Ctrl+P", "controlCenter.open")`; single-stroke chords
-  keep the fast path (immediate dispatch, no pending hold).
+  or `bindKey("Ctrl+X Ctrl+O", "controlCenter.open")`; single-stroke chords
+  keep the fast path (immediate dispatch, no pending hold). The shipped
+  `Ctrl+X Ctrl+P` sequence toggles the per-tab agent lane.
 - A same-scope strict prefix is rejected at bind time
   (`keybindings.bind_failed`, diagnostic names the colliding rule) — bind
   the longer chord first or use divergent second strokes.

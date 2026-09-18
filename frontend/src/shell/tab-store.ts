@@ -63,9 +63,13 @@ export function tabTitle(
     : `${root} — one tab, two views`;
 }
 
-/** A tab that has picked nothing yet: the launcher is its landing. */
+/** A tab that has picked no workspace yet: the launcher is its landing.
+ *  Plan 125: the agent is *not* part of this — a folder-less tab has adopted
+ *  the default agent by the time its listing arrives, and the landing must
+ *  survive that (it is how the folder gets picked). The agent stays a
+ *  per-tab identity, not a commitment about where the editor is. */
 export function tabUncommitted(tab: ShellTabState): boolean {
-  return !tab.workspaceRoot && !tab.agent;
+  return !tab.workspaceRoot;
 }
 
 export function emptyTabs(): TabSnapshot {

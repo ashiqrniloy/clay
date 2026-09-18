@@ -19,11 +19,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEventHandler,
   type ReactNode,
 } from "react";
 import { ClayIconButton, ClayKbd, ClayTextField } from "../components";
 import {
   CommandPalette,
+  paletteModeOf,
+  type PaletteMode,
   type PaletteScope,
 } from "../command-centre/CommandPalette";
 import type { TransientMenuSnapshotDto } from "../bridge/types";
@@ -99,9 +102,10 @@ export function mentionTokenOf(
   };
 }
 
-/** The `/` palette the field drives (plan 124). The session (and its item list)
- *  belongs to the server; everything here is the field's side of it: the open
- *  state, the filter it holds, and the intents a keystroke turns into. */
+/** The `/` palette the field drives (plan 124; plan 125 made one sheet of the
+ *  catalogue and every picker stage). The session (and its item list) belongs
+ *  to the server; everything here is the field's side of it: the open state,
+ *  the filter it holds, and the intents a keystroke turns into. */
 export interface ComposerPalette {
   /** The open palette session (`origin === "commandPalette"`), else null. */
   menu: TransientMenuSnapshotDto | null;
@@ -114,10 +118,32 @@ export interface ComposerPalette {
   query: (filter: string, scope: PaletteScope) => void;
   /** Move the session's selection by `delta` (`↑↓`). */
   move: (delta: number) => void;
-  /** Run the selected row. */
-  activate: () => void;
+  /** Run the selected row; `secondary` activates the row's other action (a
+   *  session row deletes instead of resuming). */
+  activate: (secondary?: boolean) => void;
+  /** Semantic Backspace: one stage back. The session closes when it has nothing
+   *  behind it (plan 125 — `Esc` at a stage's first step dismisses the sheet). */
+  back: () => void;
   /** Dismiss the session (the draft stays; the next keystroke reopens it). */
   cancel: () => void;
+}
+
+/**
+ * Plan 125: the agent an agent-less tab adopts as soon as the server's listing
+ * arrives — the coding agent when it is listed (`coding-agent`, its data-root
+ * name; `coding` for a shortened install), else whatever the server listed
+ * first, else nothing (the tab stays agent-less and the field stays typable).
+ * The listing is the server's validated vocabulary, so the client never invents
+ * a type.
+ */
+export function defaultAgentType(
+  entries: readonly { name: string }[],
+): string | null {
+  for (const preferred of ["coding-agent", "coding"]) {
+    const match = entries.find((entry) => entry.name === preferred);
+    if (match) return match.name;
+  }
+  return entries[0]?.name ?? null;
 }
 
 /** The palette's filter: the field's text after the `/` sigil. */
@@ -126,8 +152,11 @@ export function paletteFilter(draft: string): string {
 }
 
 export interface ComposerProps {
-  /** The tab runs no agent: the field is inert and the box offers the agent
-   *  picker (`Attach an agent`). A missing *provider* never disables it. */
+  /** The tab runs no agent: the box offers the agent picker (`Attach an
+   *  agent`) and hides the model/effort controls. The field stays typable —
+   *  the draft is the user's, and a submit with nothing to send it to is what
+   *  the lane's foot explains (plan 125) — exactly as a missing *provider*
+   *  never disables it either. */
   agentless: boolean;
   /** A run is in flight: the composer is the steering lane and Stop replaces
    *  the empty trailing slot. */
@@ -190,6 +219,21 @@ export function Composer({
   const paletteSession = palette.menu;
   const paletteOpen = paletteSession !== null;
   const paletteSessionId = paletteSession?.sessionId ?? null;
+  // Plan 125: the session's mode decides which of the sheet's vocabularies is
+  // live. The catalogue — and the path browser, whose query is what follows the
+  // same sigil — is reached through the field's `/`. A picker stage's filter is
+  // the field's text as it stands, and one stage (`secret`) owns its own
+  // shielded input instead, so the field is not its transport.
+  const paletteMode: PaletteMode | null = paletteSession
+    ? paletteModeOf(paletteSession)
+    : null;
+  const sigilMode =
+    paletteMode === null ||
+    paletteMode === "catalogue" ||
+    paletteMode === "path";
+  const stageOpen = paletteMode !== null && !sigilMode;
+  const shieldOpen = paletteMode === "secret";
+  const paletteQuery = sigilMode ? paletteFilter(draft) : draft;
 
   // Plan 124: the palette's filter lives in this field, so the catch-up send
   // happens when the session *appears* — a trigger-opened session or a pasted
@@ -203,34 +247,51 @@ export function Composer({
   // per session rather than a send per render.
   const paletteIntents = useRef(palette);
   paletteIntents.current = palette;
-  // The chip is per *session*: a new session (a fresh open, and the catalogue
-  // swapping for its path mode) starts on `All`, which is also the scope the
-  // server starts it with, so the segment never shows a filter the session is
-  // not applying.
+  // The chip (and the field's filter) is per *session*: a new session (a fresh
+  // open, the catalogue swapping for a picker stage, the catalogue for its path
+  // mode) starts on `All`, which is also the scope the server starts it with,
+  // so the segment never shows a filter the session is not applying. A session
+  // whose field carries a sigil is seeded from the draft (a trigger-opened
+  // session or a pasted `/query` is ahead of the one-shot open intent); a stage
+  // starts empty on the server too, so the field is cleared rather than seeded
+  // with text the session never received.
   useEffect(() => {
     if (paletteSessionId === null) return;
     setPaletteScope("all");
-    paletteIntents.current.query(paletteFilter(draftRef.current), "all");
-  }, [paletteSessionId]);
+    if (sigilMode)
+      paletteIntents.current.query(paletteFilter(draftRef.current), "all");
+    else setDraft("");
+  }, [paletteSessionId, sigilMode]);
 
   // The trigger and the `Ctrl+X Ctrl+O` chord open the palette on the field's
   // behalf: the field is the query, so it takes the sigil and the focus
   // (DESIGN.md §12 — the trigger puts the field in query mode). The artifact
   // seeds `/` even over a draft; a `/`-led draft is already in query mode.
   useEffect(() => {
-    if (!paletteOpen || draftRef.current.startsWith("/")) return;
+    if (!paletteOpen || !sigilMode || draftRef.current.startsWith("/")) return;
     setDraft("/");
     setCompletionDismissed(false);
     formRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-  }, [paletteOpen]);
+  }, [paletteOpen, sigilMode]);
+
+  // The shielded stage's control is the sheet's own field, so the focus follows
+  // it: the composer's field is disabled for that stage, and the credential is
+  // typed where it is shielded (§12/§13).
+  useEffect(() => {
+    if (!shieldOpen) return;
+    formRef.current
+      ?.querySelector<HTMLInputElement>('input[type="password"]')
+      ?.focus();
+  }, [shieldOpen, paletteSessionId]);
 
   // Plan 117 @-mentions: a trailing `@token` in the draft opens the merged
   // dropdown — the session's skill catalog plus the workspace file cache
   // (both server-known; filter is client-side). `@skill:x` / `@file:x`
-  // narrow to one section; a bare token filters both.
+  // narrow to one section; a bare token filters both. A picker stage's text is
+  // its filter, not a prompt, so no mention list opens over it.
   const mentionToken = useMemo(
-    () => (completionDismissed ? null : mentionTokenOf(draft)),
-    [completionDismissed, draft],
+    () => (completionDismissed || stageOpen ? null : mentionTokenOf(draft)),
+    [completionDismissed, draft, stageOpen],
   );
   const mentionMatches = useMemo(() => {
     if (!mentionToken) return null;
@@ -340,21 +401,35 @@ export function Composer({
         }
         return;
       }
+      if (paletteOpen && event.key === "Enter" && event.altKey) {
+        // `Alt+↵` is the selected row's secondary action (a session row deletes
+        // instead of resuming); the primary path stays the field's submit.
+        event.preventDefault();
+        paletteIntents.current.activate(true);
+        return;
+      }
       if (paletteOpen) {
         // The palette owns the field's keys while it is up: `↑↓` move the
-        // session's selection and `Esc` dismisses, all against the session the
-        // server holds (DESIGN.md §12). `↵` is the submit path below.
+        // session's selection, `Esc`/`Alt+←` walk it back, all against the
+        // session the server holds (DESIGN.md §12). `↵` is the submit path
+        // below.
         if (event.key === "ArrowDown") {
           event.preventDefault();
           paletteIntents.current.move(1);
         } else if (event.key === "ArrowUp") {
           event.preventDefault();
           paletteIntents.current.move(-1);
-        } else if (event.key === "Escape") {
+        } else if (
+          event.key === "Escape" ||
+          (event.altKey && event.key === "ArrowLeft")
+        ) {
           event.preventDefault();
-          // The draft survives dismissal (the artifact's Esc); the session is
-          // what closes, and the next keystroke reopens it.
-          paletteIntents.current.cancel();
+          // A stage walks back one step, and the session is what answers
+          // whether anything is behind it: the sheet closes at a stage's first
+          // step (plan 125). The catalogue and the path browser dismiss, which
+          // is where their drafts survive for the next keystroke.
+          if (stageOpen) paletteIntents.current.back();
+          else paletteIntents.current.cancel();
         }
         return;
       }
@@ -383,10 +458,28 @@ export function Composer({
       shownEffort,
       onEffortChange,
       paletteOpen,
+      stageOpen,
       mentionMatches,
       completionIndex,
       embedMention,
     ],
+  );
+
+  // The shield is the focused control of its stage, so the stage's keys belong
+  // to it: `↵` runs the selected row (Store API key) and everything else is the
+  // routing the field does — one handler, two inputs.
+  const onShieldKeyDown: KeyboardEventHandler<
+    HTMLInputElement | HTMLTextAreaElement
+  > = useCallback(
+    (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        paletteIntents.current.activate(event.altKey);
+        return;
+      }
+      onComposerKeyDown(event);
+    },
+    [onComposerKeyDown],
   );
 
   // A submit with the palette open runs the highlighted row instead of sending
@@ -405,13 +498,16 @@ export function Composer({
       }
       // Nothing to run: a typed built-in still has a path, so the text goes to
       // the lane (which intercepts `/model`, `/resume`) and the session closes.
-      if (paletteOpen) paletteIntents.current.cancel();
+      // A stage has no such path — its text is a filter, and `↵` on an empty
+      // list is not a dismissal.
+      if (paletteOpen && !stageOpen) paletteIntents.current.cancel();
+      if (paletteOpen && stageOpen) return;
       if (!onSubmit(value)) return;
       setDraft("");
       setCompletionIndex(0);
       setCompletionDismissed(true);
     },
-    [onSubmit, paletteOpen, paletteSession],
+    [onSubmit, paletteOpen, paletteSession, stageOpen],
   );
 
   return (
@@ -467,31 +563,50 @@ export function Composer({
         label="Message"
         value={draft}
         onChange={(value) => {
+          // The one stage whose input is the sheet's shield never reaches the
+          // draft: text typed here (or pasted) is dropped, because the draft is
+          // persisted layout state and a credential must not be in it (§13).
+          if (shieldOpen) return;
           setDraft(value);
           setCompletionIndex(0);
           setCompletionDismissed(false);
-          // Plan 124: a `/`-led draft *is* the palette's query — the first
-          // slash opens the session, later keystrokes filter it, and losing the
-          // slash closes it (the artifact's own live-state rule).
-          if (value.startsWith("/")) {
-            if (!paletteOpen) paletteIntents.current.request();
-            else
-              paletteIntents.current.query(paletteFilter(value), paletteScope);
-          } else if (paletteOpen) {
-            paletteIntents.current.cancel();
+          // Plan 124/125: the field's text *is* the session's filter. The
+          // catalogue (and the path browser) is reached through the `/` sigil —
+          // the first slash opens the session, later keystrokes filter it, and
+          // losing the slash closes it (the artifact's own live-state rule). A
+          // picker stage's filter carries no sigil and never closes the stage.
+          if (sigilMode) {
+            if (value.startsWith("/")) {
+              if (!paletteOpen) paletteIntents.current.request();
+              else
+                paletteIntents.current.query(
+                  paletteFilter(value),
+                  paletteScope,
+                );
+            } else if (paletteOpen) {
+              paletteIntents.current.cancel();
+            }
+            return;
           }
+          if (paletteOpen) paletteIntents.current.query(value, "all");
         }}
         multiline
         autoGrow
         variant="composer"
         placeholder={
           agentless
-            ? "Attach an agent to this tab to send a prompt"
-            : streaming
-              ? "Steer the agent, or wait"
-              : "Ask, or type / or @"
+            ? "Type a prompt — attach an agent to send it"
+            : shieldOpen
+              ? "Type the credential in the sheet"
+              : streaming
+                ? "Steer the agent, or wait"
+                : "Ask, or type / or @"
         }
-        disabled={agentless}
+        // Plan 125: no state makes the field inert. The draft is the user's,
+        // and what would send it (agent, provider) is the lane's foot's
+        // business; only the shielded credential stage moves the input into
+        // the sheet.
+        disabled={shieldOpen}
         onKeyDown={onComposerKeyDown}
         onSubmit={onComposerSubmit}
         toolbar={toolbar}
@@ -501,14 +616,22 @@ export function Composer({
           paletteSession ? (
             <CommandPalette
               menu={paletteSession}
-              query={paletteFilter(draft)}
+              query={paletteQuery}
               scope={paletteScope}
+              onSecret={(value) =>
+                // The shield's characters, one intent each: the session owns
+                // them (masked on the wire) and the draft never sees them.
+                paletteIntents.current.query(value, "all")
+              }
+              onKeyDown={onShieldKeyDown}
               onScope={(next) => {
                 // Same filter, new chip: the server re-filters and re-selects
                 // inside the scope, so the rows below always match the segment.
                 setPaletteScope(next);
                 paletteIntents.current.query(
-                  paletteFilter(draftRef.current),
+                  sigilMode
+                    ? paletteFilter(draftRef.current)
+                    : draftRef.current,
                   next,
                 );
               }}

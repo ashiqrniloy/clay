@@ -1,0 +1,17 @@
+fixture=ui-review-workspace
+config_source=tests/fixtures/configuration/ui-review-workspace/init.js
+window_requested_size=1500x950
+theme=fixture-default
+appearance=fixture-default
+drive_steps=[{"wait": 50000}]
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_viewport=1500x1104
+window_frame=1552x1203
+screenshot=1500x1151
+window_resize_note=requested 1500x950, compositor kept 1500x1151
+window_viewport=900x1104
+window_frame=952x1203
+screenshot=944x1151

@@ -1,0 +1,5 @@
+clay server listening on <isolated-root>/review.sock
+clay: package discovery failed (package manager error: failed to spawn `npm`: No such file or directory (os error 2)); store packages stay unloaded
+[agent] book.json write failed: No such file or directory (os error 2)
+agent_registration_lines=13
+configuration_failed_lines=0

@@ -460,7 +460,7 @@ describe("AgentLane composer", () => {
     }
   });
 
-  it("offers the agent picker and keeps the field inert with no agent", async () => {
+  it("offers the agent picker and keeps the field typable with no agent", async () => {
     const { store } = mount(createAgentSession({}), {
       agentType: null,
       onPickAgent: () => undefined,
@@ -468,14 +468,16 @@ describe("AgentLane composer", () => {
     const release = store.start();
     try {
       seedState({ provider: "mock", model: "mini" });
-      const field = screen.getByLabelText("Message");
-      expect(field).toBeDisabled();
+      // Plan 125: the agent-less tab types too — the foot says what would send
+      // it, and the submit keeps the draft when nothing can.
+      const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+      expect(field).toBeEnabled();
       expect(field).toHaveProperty(
         "placeholder",
-        "Attach an agent to this tab to send a prompt",
+        "Type a prompt — attach an agent to send it",
       );
       expect(
-        screen.getByText("no agent on this tab · the lane keeps its place"),
+        screen.getByText("no agent types listed · nothing would send"),
       ).toBeInTheDocument();
       // The box's own controls row offers the agent picker only.
       const trigger = document.querySelector<HTMLButtonElement>(

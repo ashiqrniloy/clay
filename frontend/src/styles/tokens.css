@@ -250,10 +250,9 @@
   --clay-ds-command-centre-default-root-rest-gap: var(--clay-spacing-xs);
   --clay-ds-command-centre-default-root-rest-padding: var(--clay-spacing-sm);
   --clay-ds-command-centre-default-root-rest-shadow:
-    0px 24px 60px -16px
-      color-mix(in srgb, var(--clay-text-primary) 42%, transparent),
-    0px 2px 10px -4px
-      color-mix(in srgb, var(--clay-text-primary) 22%, transparent);
+    0px 0px 14px -2px
+      color-mix(in srgb, var(--clay-text-primary) 14%, transparent),
+    0px 0px 3px 0px color-mix(in srgb, var(--clay-text-primary) 8%, transparent);
   --clay-ds-command-centre-default-root-rest-text-color: var(
     --clay-text-primary
   );
@@ -510,10 +509,9 @@
   --clay-ds-menu-default-root-rest-border-width: 1px;
   --clay-ds-menu-default-root-rest-padding: var(--clay-spacing-xxs);
   --clay-ds-menu-default-root-rest-shadow:
-    0px 14px 34px -14px
-      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
-    0px 1px 3px -1px
-      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
+    0px 0px 14px -2px
+      color-mix(in srgb, var(--clay-text-primary) 14%, transparent),
+    0px 0px 3px 0px color-mix(in srgb, var(--clay-text-primary) 8%, transparent);
   --clay-ds-modal-default-dialog-rest-background-color: var(
     --clay-surface-overlay
   );
@@ -611,26 +609,6 @@
       color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
     0px 1px 3px -1px
       color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
-  --clay-ds-popover-default-root-rest-background-color: var(
-    --clay-surface-overlay
-  );
-  --clay-ds-popover-default-root-rest-border-color: var(--clay-border-hairline);
-  --clay-ds-popover-default-root-rest-border-radius: 12px;
-  --clay-ds-popover-default-root-rest-border-style: solid;
-  --clay-ds-popover-default-root-rest-border-width: 1px;
-  --clay-ds-popover-default-root-rest-shadow:
-    0px 14px 34px -14px
-      color-mix(in srgb, var(--clay-text-primary) 34%, transparent),
-    0px 1px 3px -1px
-      color-mix(in srgb, var(--clay-text-primary) 16%, transparent);
-  --clay-ds-popover-default-root-rest-text-color: var(--clay-text-primary);
-  --clay-ds-popover-default-root-rest-transition-duration: 240ms;
-  --clay-ds-popover-default-root-rest-transition-timing: cubic-bezier(
-    0.2,
-    0.8,
-    0.2,
-    1
-  );
   --clay-ds-portal-default-root-rest-background-color: transparent;
   --clay-ds-portal-default-root-rest-border-width: 0px;
   --clay-ds-scroll-default-root-rest-background-color: transparent;

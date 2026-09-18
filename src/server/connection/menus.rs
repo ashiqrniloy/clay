@@ -243,10 +243,20 @@ where
             .await?;
         return Ok(());
     };
-    let (snapshot, relist) = {
+    let (snapshot, relist, close) = {
         let edit = session.backspace();
-        (edit.snapshot, edit.relist)
+        (edit.snapshot, edit.relist, edit.close)
     };
+    // Plan 125: the intent finished the flow (a picker stepping back from its
+    // first stage). The session is gone, and the client dismisses the sheet on
+    // the same message it dismisses any closed session with.
+    if close {
+        menu_sessions.cancel(session_id);
+        codec
+            .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })
+            .await?;
+        return Ok(());
+    }
     let snapshot = match relist {
         Some(target) => match path_browser_relist(menu_sessions, session_id, target).await {
             Some(snapshot) => snapshot,

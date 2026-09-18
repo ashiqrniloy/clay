@@ -1,6 +1,6 @@
 /* The agent lane (plan 124): the shell's one bottom section, mounted once per
- * tab beside the two view slots. Chrome, not a panel — it inherits the canvas
- * and draws one hairline on its inner edge (DESIGN.md §6/§11/§12). */
+ * tab beside the two view slots. Chrome, not a panel — it paints the canvas
+ * itself and draws one hairline on its inner edge (DESIGN.md §6/§11/§12). */
 
 .lane {
   position: relative;
@@ -9,7 +9,11 @@
    * that veil from inside this lane (§6/§12). */
   z-index: 41;
   flex: none;
-  background: inherit;
+  /* The canvas, painted rather than inherited: the veil is placed over the
+   * lane's own cell too (workspace.module.css), so a transparent strip would
+   * show the scrim through the chrome and blur the canvas behind it — the lane
+   * *paints over* that veil (plan 125 review, defect D8). */
+  background: var(--clay-ds-shell-default-root-rest-background-color);
   border-top-width: var(--clay-ds-shell-default-footer-rest-border-width);
   border-top-style: var(--clay-ds-shell-default-footer-rest-border-style);
   border-top-color: var(--clay-ds-shell-default-footer-rest-border-color);

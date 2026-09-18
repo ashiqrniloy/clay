@@ -2020,6 +2020,13 @@ fn plan124_agent_lane_and_composer_palette_authoring_contracts_are_pinned() {
     // keep saying so, and the boundary must not lose the two facts package
     // authors act on: a package reaches the palette by registering a command,
     // and listing is routing-policy-filtered with no authority granted.
+    //
+    // Plan 125 task 11 extends the same pin (per that plan's chosen approach:
+    // one contract test for these surfaces, not a parallel one): the palette is
+    // the only transient selection surface, every picker stage rides it behind a
+    // bounded mode, the shielded secret stage is Clay-owned, the halo replaces
+    // the drop shadow on the palette and mentions menus, and no package-facing
+    // or Clay-internal anchor vocabulary keeps a centered option.
     let guide = read("docs/reference/packages/creating-packages.md");
     for marker in [
         "### Plan 124 authoring contract: the persistent agent lane and the composer's `/` palette",
@@ -2070,10 +2077,79 @@ fn plan124_agent_lane_and_composer_palette_authoring_contracts_are_pinned() {
         );
     }
 
+    // Plan 125: the guide states that the palette is the single transient
+    // selection surface, that packages cannot open or drive it, and that the
+    // shielded stage is Clay-owned; the retired centered projection must stay
+    // retired (the anchor vocabulary offers no centered option, and the wire
+    // value is decode-only).
+    for marker in [
+        "### Plan 125 authoring contract: one palette for every picker, and the halo",
+        "**The composer palette is the only transient selection surface.**",
+        "packages cannot open or drive the palette",
+        "The shielded stage is Clay-owned, and only Clay-owned.",
+        "PackageOverlayAnchor` in `src/shell/package_ui.rs`",
+        "retired by Plan 125",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md must keep the Plan 125 authoring-contract marker {marker:?}"
+        );
+    }
+
+    let ui_components = read("docs/reference/ui-components.md");
+    for marker in [
+        "### Plan 125 continuation: one sheet for every picker, and the halo",
+        "composer-anchored palette is the only transient selection surface",
+        "typed into a `type=\"password\"` field inside the sheet",
+        "cannot claim the shielded stage",
+    ] {
+        assert!(
+            ui_components.contains(marker),
+            "docs/reference/ui-components.md must record the Plan 125 boundary {marker:?}"
+        );
+    }
+
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    for marker in [
+        "the composer's `/` palette (the only transient selection surface since plan 125",
+        "the shielded `secret` field",
+        "the halo instead of a drop shadow",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "the component catalog must keep the Plan 125 palette/stage contract {marker:?}"
+        );
+    }
+
+    let tokens_md = read(".agents/skills/clay-execution/references/tokens.md");
+    for marker in [
+        "the **halo** (two zero-offset layers from `text.primary`",
+        "the palette sheet is exactly as wide as the composer box it answers to and reads no width token",
+    ] {
+        assert!(
+            tokens_md.contains(marker),
+            "tokens.md must keep the Plan 125 halo/geometry value domain {marker:?}"
+        );
+    }
+
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    for marker in [
+        "Plan 125 completes it:",
+        "the palette is the *only* transient selection surface",
+    ] {
+        assert!(
+            strategy.contains(marker),
+            "shell-layout-strategy.md must keep the Plan 125 shell-vocabulary marker {marker:?}"
+        );
+    }
+
     let index = read("docs/index.md");
     assert!(
         index.contains("plan 124 agent-lane and composer `/` palette boundary")
-            && index.contains("Plan 124 agent-lane and composer `/` palette contract"),
-        "docs/index.md must index the Plan 124 lane/palette authoring contract"
+            && index.contains("Plan 124 agent-lane and composer `/` palette contract")
+            && index.contains(
+                "the composer palette is the only transient selection surface since plan 125"
+            ),
+        "docs/index.md must index the Plan 124/125 lane/palette authoring contract"
     );
 }

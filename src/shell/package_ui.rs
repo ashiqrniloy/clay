@@ -96,8 +96,9 @@ pub(crate) struct MenuA11y {
     pub(crate) prompt: String,
     pub(crate) items: Vec<MenuA11yItem>,
     pub(crate) status: Option<String>,
-    /// Phase 24.4: centered Command Centre surfaces expose one stable polite
-    /// result-count status node, separate from empty-state detail text.
+    /// Phase 24.4: the composer's palette exposes one stable polite
+    /// result-count status node, separate from empty-state detail text (plan
+    /// 125 moved the counted origin off the retired centered sheet).
     pub(crate) result_count: Option<String>,
 }
 
@@ -118,10 +119,6 @@ pub(crate) enum PackageOverlayAnchor {
     Bottom,
     /// Clay-native completion surface anchored to the active caret.
     Completion,
-    /// Phase 24.4: window-centered Command Centre surface. Clay-internal only:
-    /// `parse` never produces it (packages keep the four documented anchors),
-    /// and it is not part of `VALID_OVERLAY_ANCHORS` on the server.
-    Centered,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -594,7 +591,10 @@ impl TransientPackageOverlay {
                 }
                 _ => None,
             },
-            result_count: (session.origin() == TransientMenuOrigin::Centered)
+            // Plan 125: the counted origin is the composer's palette. The
+            // retired `Centered` sheet owned the only other counted surface,
+            // and every session now reaches the palette origin.
+            result_count: (session.origin() == TransientMenuOrigin::CommandPalette)
                 .then(|| crate::sanitize::menu_result_count(session.items().len())),
         };
         // Phase 20.5: anchor selected by surface origin.
@@ -603,9 +603,10 @@ impl TransientPackageOverlay {
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
             TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
             TransientMenuOrigin::Completion => PackageOverlayAnchor::Completion,
-            // Phase 24.4: command/path mode request the window-centered
-            // surface; the host routes it to the window-level overlay layer.
-            TransientMenuOrigin::Centered => PackageOverlayAnchor::Centered,
+            // Plan 125: the retired window sheet's origin. No producer sends
+            // it and no anchor centers it any more; an older peer's snapshot
+            // still projects (bottom-anchored, uncounted) instead of panicking.
+            TransientMenuOrigin::Centered => PackageOverlayAnchor::Bottom,
         };
         let prompt_id = format!("menu.{}.prompt", session.session_id().0);
         let query_id = format!("menu.{}.query", session.session_id().0);
@@ -801,25 +802,12 @@ impl PackageOverlayAnchor {
     }
 
     pub(crate) fn rect(self, working_area: Rect, main_rect: Rect) -> Rect {
-        self.rect_with_centered_width(working_area, main_rect, 640.0)
-    }
-
-    /// Resolve geometry with the cached centered-surface width. The centered
-    /// anchor uses window bounds; other anchors preserve their existing
-    /// pane-local geometry.
-    pub(crate) fn rect_with_centered_width(
-        self,
-        working_area: Rect,
-        main_rect: Rect,
-        centered_width: f64,
-    ) -> Rect {
         match self {
             Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
             Self::Bottom => bottom_rect(main_rect),
             Self::Completion => main_rect,
             Self::WorkingArea | Self::ActivePane => working_area,
-            Self::Centered => centered_rect(working_area, centered_width, 220.0),
         }
     }
 }
@@ -1224,31 +1212,42 @@ mod tests {
     }
 
     #[test]
-    fn centered_menu_projection_uses_window_geometry_and_stays_internal() {
-        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Control Center")
+    fn the_retired_centered_origin_still_projects_without_a_centered_anchor() {
+        // Plan 125 retired the window sheet: the wire value stays decodable and
+        // the projection must not panic on it, but no anchor centers it — the
+        // palette owns the counted, bottom-anchored surface now.
+        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Session actions")
             .with_origin(TransientMenuOrigin::Centered);
         let overlay = TransientPackageOverlay::from_menu_session(&session);
-        assert_eq!(overlay.anchor, PackageOverlayAnchor::Centered);
+        assert_eq!(
+            overlay.anchor,
+            PackageOverlayAnchor::Bottom,
+            "the retired origin falls in with the palette's bottom anchor"
+        );
+        assert!(
+            overlay.menu_a11y.as_ref().unwrap().result_count.is_none(),
+            "no producer counts results for the retired origin"
+        );
         assert_eq!(
             PackageOverlayAnchor::parse("centered"),
             PackageOverlayAnchor::WorkingArea,
-            "package parsing cannot request the internal centered anchor"
+            "package parsing cannot request a Clay-internal anchor"
         );
 
-        let window = Rect::new(0.0, 0.0, 900.0, 600.0);
+        // The palette origin is the one the sheet uses and the one the count
+        // belongs to.
+        let palette = TransientMenuSession::new(TransientMenuSessionId(9), "Commands")
+            .with_origin(TransientMenuOrigin::CommandPalette)
+            .with_items(vec![crate::shell::transient_menu::TransientMenuItem::new(
+                "shell.toggleAgentLane",
+                "Toggle Agent Lane",
+                crate::shell::transient_menu::TransientMenuAction::new("shell.toggleAgentLane"),
+            )]);
+        let overlay = TransientPackageOverlay::from_menu_session(&palette);
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(
-            overlay
-                .anchor
-                .rect_with_centered_width(window, Rect::ZERO, 640.0),
-            Rect::new(130.0, 190.0, 770.0, 410.0)
-        );
-        assert_eq!(
-            overlay.anchor.rect_with_centered_width(
-                Rect::new(0.0, 0.0, 300.0, 200.0),
-                Rect::ZERO,
-                640.0
-            ),
-            Rect::new(0.0, 0.0, 300.0, 200.0)
+            overlay.menu_a11y.as_ref().unwrap().result_count.as_deref(),
+            Some("1 result")
         );
     }
 

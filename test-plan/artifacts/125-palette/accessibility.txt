@@ -1,0 +1,101 @@
+# Plan 125 launch test — accessibility tree evidence (live, canonical config)
+
+Raw dumps: `screenshots/01-rest.ax.txt` … `05-lane-restored-palette.ax.txt`
+(`depth | role | selected | states | name | text | extents | app`, AT-SPI via
+pyatspi, screen coordinates). Line numbers below are from those files.
+
+## 01 rest — lane, composer controls, workspace, shell hints
+
+```
+12|entry|-|visible|Filter files||26,150,220x36            # sidebar filter
+12|list item|-|visible|notes.md||26,194,244x35            # server-listed workspace file
+10|footer|-|visible|Agent lane||26,946,1160x200           # the persistent lane strip
+11|form|-|visible|||26,947,1160x175                       # composer form (one boundary)
+12|entry|-|visible|Message||53,966,1106x48                # the field itself (empty draft)
+12|combo box|-|visible|Coding Agent Agent type||53,1026,98x34      # agent type
+12|combo box|-|visible|Configure a provider Model||154,1026,170x34 # model (no provider)
+11|section|-|visible|Session environment||26,1122,1160x24 # lane foot
+8|button|-|visible|hide lane Ctrl X P||803,1144,162x33
+8|button|-|visible|palette Ctrl X O||978,1144,147x33
+8|button|-|visible|files Ctrl B||1138,1144,109x33
+8|button|-|visible|hide outline Ctrl I||1260,1144,164x33
+8|button|-|visible|filter /||1437,1144,78x33
+```
+
+The lane is one landmark (`footer "Agent lane"`) holding the form (field +
+toolbar), the hint row, and the `Session environment` foot; the shell's five
+hint buttons expose their shipping chords (`Ctrl X P` lane toggle, `Ctrl X O`
+palette, `Ctrl B` files, `Ctrl I` outline, `/` filter) as accessible names.
+
+## 02 palette open (titlebar trigger) — the sheet, its query, its rows
+
+```
+12|dialog|-|visible|Commands||44,531,1124x420             # the one bottom-anchored sheet
+13|panel|-|visible|Scope||1020,544,136x29
+14|toggle button|-|visible|All||1025,549,21x19
+14|toggle button|-|visible|Session||1045,549,45x19
+14|toggle button|-|visible|Shell||1089,549,32x19
+14|toggle button|-|visible|Files||1120,549,31x19
+13|list box|-|visible|Commands||45,586,1122x306
+14|status bar|-|visible|95 results|95 results|57,912,78x18
+12|entry|-|focused,visible|Message|/|53,966,1106x48       # query lives in the composer
+14|list item|selected|visible|/branch server-first — @clay/coding-agent@0.1.0||57,598,1098x32
+14|list item|-|visible|Choose Agent server-first — built-in||57,1401,1098x32
+14|list item|-|visible|Choose Model server-first — built-in||57,1433,1098x32
+14|list item|-|visible|Configure Provider server-first — built-in||57,1707,1098x32
+14|list item|-|visible|Toggle TypeScript Line Comment server-first — @clay/typescript@0.1.0||57,4011,1098x32
+```
+
+96 `list item`s = 95 palette rows + the sidebar file. Row names carry the
+label, the routing policy, and the provenance (`@clay/coding-agent@0.1.0`
+package rows ⇒ the canonical config loaded its packages); the selected row is
+exposed as `selected`. The sheet is a `dialog` named by the session prompt
+(`Commands`), the results count is a `status bar` with text, and the scope chips
+are a `panel "Scope"` of four named `toggle button`s — the palette's own
+fields, not client-invented ones. The query stays in `entry "Message"`
+(`focused`, value `/`), i.e. the palette has no focus trap and no input of its
+own (except the shielded `secret` stage, which the fixture layer covers).
+
+## 03 hint re-open / 04 lane hidden / 05 lane restored
+
+* 03 (`03-palette-via-hint.ax.txt`) is byte-identical to 02 in the tree
+  summary: the status-bar `palette` hint runs the same command as the titlebar
+  trigger and `Ctrl+X Ctrl+O`, so the sheet keeps its geometry (`44,531
+  1124x420`, `95 results`, `entry "Message" = /`).
+* 04 (`04-lane-hidden-palette-gone.ax.txt`) has **0** `Agent lane`/`Commands`
+  nodes; the lane hint flips back to `button "lane Ctrl X P"`, so hiding the
+  lane removes the strip **and** the sheet and its veil (plan 125 defect D6).
+* 05 (`05-lane-restored-palette.ax.txt`) restores `footer "Agent lane"`,
+  `dialog "Commands" 44,531 1124x420`, `95 results`, and the retained draft
+  `entry "Message" (/)`.
+
+## Host ceilings (unchanged since plans 124/125; not app defects)
+
+1. **No input synthesis.** `computer_use_linux_get_app_state` reports
+   `can_send_development_input: false` (no XDG RemoteDesktop portal, no wtype,
+   no xdotool, `ydotoold` socket missing), so no chord and no pointer click can
+   be injected: `Ctrl+X Ctrl+O` is exercised through the status-bar `palette`
+   hint, which dispatches the same `controlCenter.open` client command, and the
+   keymap itself is pinned by `cargo test --test protocol
+   example_config_control_center_chord` (Global `Ctrl+X Ctrl+O` for
+   `controlCenter.open`, `Ctrl+X Ctrl+P` for `shell.toggleAgentLane`).
+2. **No composer typing.** `entry "Message"` exposes no `EditableText` over the
+   accessibility bus (`get_editable_text_iface()` → `None`; WebKitGTK keeps the
+   editable interface on the web-content process), so the `/` query is seeded by
+   the trigger, not typed.
+3. **Palette rows are not activatable.** Rows are `list item`s whose only
+   reported action is the WebKit stub `':'`; invoking it does nothing. So a
+   picker row cannot be activated live, and the picker stages
+   (`Configure Provider` → provider → auth method → `secret` → URL → OAuth) are
+   verified in the fixture layer (`design-artifacts/tools/capture-lane-palette.mjs`,
+   291 checks) and by `src/server/agent_picker.rs` tests; this is recorded as a
+   ceiling, not a pass.
+4. **The no-provider model trigger is inert.** `combo box "Configure a
+   provider Model"` ignores `do_action` while the enabled `combo box "Coding
+   Agent Agent type"` opens the lane's own client-side popover — consistent with
+   the disabled-dropdown design for the no-provider state (the palette's
+   `Configure Provider` row, which needs Enter, is the live entry point).
+
+`client.log` carries only WebKitGTK's `impl_GetExtents: assertion
+'ATK_IS_COMPONENT (user_data)'` CRITICALs, which appear when extents are
+queried over AT-SPI (they also appear in the plan 124/125 review logs).

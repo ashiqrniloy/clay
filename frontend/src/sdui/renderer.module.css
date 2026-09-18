@@ -27,9 +27,12 @@
   flex: 0 0 var(--clay-dimension-sidebar-default, 244px);
 }
 
-/* A region the server sized by token (plan 118 task E1): the workspace sidebar
- * is 244px, 224px at ≤1240px (DESIGN.md §5). The host owns both the token
- * mapping and the values; an unknown token falls back to the row's flex share. */
+/* A region the server sizes by token (`data-clay-size` — plan 118 task E1). The
+ * shell places the workspace sidebar's region itself (its own left rail, full
+ * height beside the lane: `shell/workspace-panes.module.css`, DESIGN.md §12),
+ * so the region does not render in this row there; a host that renders the tree
+ * whole — the DEV fixtures — still gets the approved width. The host owns both
+ * the token mapping and the values. */
 .row > .stack[data-clay-size="dimension.sidebar.default"] {
   flex: 0 0 var(--clay-dimension-sidebar-default, 244px);
 }

@@ -331,39 +331,108 @@ describe("workspace composition (plan 118: shell and Workspace page)", () => {
     ).not.toMatch(/@keyframes|animation:/);
   });
 
-  it("mounts the tab's lane as the working area's own full-width chrome row", () => {
-    // Plan 124 visual review: the lane is chrome, not a pane — it spans the
-    // working area below the panes *and* the rail, so both end at its top edge,
-    // and the field's veil covers that same row while the lane's own z-index
-    // keeps its sheet above the veil (DESIGN.md §6/§12).
+  it("keeps the lane in the view pane's column and both rails at full height", () => {
+    // Plan 125 (superseding plan 124's D1 full-width rule): the lane is the
+    // *view pane's* chrome strip — the pane's own column, second row — so both
+    // rails run the working area's full height, a hidden rail gives its width
+    // back to the pane, and the field inside the lane anchors the palette to
+    // the pane's width (DESIGN.md §6/§12). Plan 126 removed the last exception:
+    // the workspace sidebar is a rail of this grid too, not a column inside the
+    // pane, so the lane stops at *its* edge as well.
     const view = readRepo("frontend/src/routes/workspace.module.css");
     const panes = readRepo("frontend/src/shell/workspace-panes.module.css");
     const lane = readRepo("frontend/src/shell/agent-lane.module.css");
-    // Two rows: panes beside the rail, then the lane; the route wrapper and the
-    // panes host pass through so the tab's own lane can be a grid item.
+    // Three tracks: files rail · pane · inspector rail, and two rows: the views
+    // above the lane in the pane's column. The route wrapper and the panes host
+    // pass through so the tab's own lane can be a grid item.
     expect(view).toMatch(/grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto/);
+    expect(view).toMatch(
+      /grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+var\(--rail-inspector\)/,
+    );
+    expect(view).toMatch(
+      /--rail-inspector:\s*var\(--clay-dimension-rail-width/,
+    );
+    expect(view).toMatch(
+      /--rail-files:\s*var\(--clay-dimension-sidebar-default/,
+    );
     expect(view).toMatch(/\.viewMain\s*{\s*display:\s*contents/);
     expect(panes).toMatch(/\.host\s*{\s*display:\s*contents/);
+    // The lane stops at both rails' inner edges: the pane's column only, never a
+    // full-row span across a rail.
     expect(view).toMatch(
-      /\.view\s*\[data-clay-ds="shell\.default\.footer\.rest"\]\s*{[^}]*grid-column:\s*1\s*\/\s*-1[^}]*grid-row:\s*2/s,
+      /\.view\s*\[data-clay-ds="shell\.default\.footer\.rest"\]\s*{[^}]*grid-column:\s*2;[^}]*grid-row:\s*2;/s,
     );
-    // The rail keeps column 2 of the first row, so its height stops at the lane.
-    expect(view).toMatch(/\.rail\s*{[^}]*grid-column:\s*2[^}]*grid-row:\s*1/s);
-    // The veil is the working area's row (panes + rail), and the lane sits
-    // above it: its field is the palette's query and its sheet rises over it.
+    expect(view).not.toMatch(
+      /\[data-clay-ds="shell\.default\.footer\.rest"\][^}]*grid-column:\s*1\s*\/\s*-1/s,
+    );
+    // Both rails span both rows, so neither ends at the lane's hairline: the
+    // files rail in column 1 (its box is the shell's, sized by its own token),
+    // the inspector in column 3.
     expect(view).toMatch(
-      /\.view\s*\[data-panes="veil"\]\s*{[^}]*grid-area:\s*1\s*\/\s*1\s*\/\s*2\s*\/\s*-1/s,
+      /\.view\s*\[data-panes="side"\]\s*{[^}]*grid-column:\s*1;[^}]*grid-row:\s*1\s*\/\s*-1/s,
+    );
+    expect(view).toMatch(
+      /\.rail\s*{[^}]*grid-column:\s*3[^}]*grid-row:\s*1\s*\/\s*-1/s,
+    );
+    expect(panes).toMatch(
+      /\.side\s*{[^}]*width:\s*var\(--rail-files[^}]*background:\s*var\(--clay-ds-shell-default-working-area-rest-background-color\)/s,
+    );
+    // The veil covers the views, the lane's own cell and both rails' whole
+    // height; the lane sits above it, so its field — the palette's query —
+    // never dims.
+    expect(view).toMatch(
+      /\.view\s*\[data-panes="veil"\]\s*{[^}]*grid-area:\s*1\s*\/\s*1\s*\/\s*-1\s*\/\s*-1/s,
     );
     expect(view).toMatch(/\.view\s*{[^}]*isolation:\s*isolate/s);
     expect(panes).toMatch(/z-index:\s*var\(--clay-z-modal,\s*40\)/);
     expect(lane).toMatch(/\.lane\s*{[^}]*z-index:\s*41/s);
+    // …and it paints its own canvas, so the veil it sits above cannot show
+    // through the chrome strip (plan 125 review, defect D8: `inherit` left the
+    // lane transparent and the sheet's scrim dimmed the whole strip).
+    expect(lane).toMatch(
+      /\.lane\s*{[^}]*background:\s*var\(--clay-ds-shell-default-root-rest-background-color\)/s,
+    );
+    expect(lane).not.toMatch(/background:\s*inherit/);
   });
 
-  it("keeps the sidebar a flush region and the rail a transient drawer when narrow", () => {
+  it("places every grid item explicitly, so a hidden rail cannot move the lane", () => {
+    // A rail leaves the grid when it is hidden and the flow when it is the
+    // narrow fixed drawer, so nothing may rely on auto-placement: an item that
+    // left the flow would otherwise slide the view area and the lane into its
+    // track (found in the plan-125 prototype, where the lane collapsed to 0px).
+    const view = readRepo("frontend/src/routes/workspace.module.css");
+    for (const placement of [
+      /\.view\s*\[data-panes="side"\]\s*{[^}]*grid-column:\s*1;[^}]*grid-row:\s*1\s*\/\s*-1/s,
+      /\.view\s*\[data-panes="view-area"\]\s*{[^}]*grid-column:\s*2;[^}]*grid-row:\s*1;/s,
+      /\.view\s*\[data-clay-ds="shell\.default\.footer\.rest"\]\s*{[^}]*grid-column:\s*2;[^}]*grid-row:\s*2;/s,
+      /\.view\s*\[data-panes="veil"\]\s*{[^}]*grid-area:\s*1\s*\/\s*1\s*\/\s*-1\s*\/\s*-1/s,
+      /\.rail\s*{[^}]*grid-column:\s*3[^}]*grid-row:\s*1\s*\/\s*-1/s,
+    ]) {
+      expect(view).toMatch(placement);
+    }
+    expect(view).not.toMatch(/grid-auto-flow/);
+    // Collapsing the inspector drops its track, so the pane (and the lane in
+    // row 2 of it) widens without moving in the DOM; the files rail's track is
+    // `auto`, so a rail that is not rendered already takes no width.
+    expect(view).toMatch(
+      /\.view\[data-rail="collapsed"\]\s*{\s*--rail-inspector:\s*0px/s,
+    );
+    expect(view).toMatch(/grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/);
+  });
+
+  it("keeps the rails flush regions and makes both transient drawers when narrow", () => {
     const workspace = readRepo("frontend/src/routes/workspace.module.css");
-    // Narrow windows: the rail leaves the flow instead of crushing the measure.
+    // Below 1000px both rails leave the flow instead of crushing the measure,
+    // and the pane is the working area's only track (DESIGN.md §12: the lane
+    // keeps the pane's full width throughout).
     expect(workspace).toMatch(
       /@media \(max-width: 1000px\)[\s\S]*\.rail\s*{[^}]*position: fixed/,
+    );
+    expect(workspace).toMatch(
+      /@media \(max-width: 1000px\)[\s\S]*\[data-panes="side"\]\s*{[^}]*position: fixed/,
+    );
+    expect(workspace).toMatch(
+      /@media \(max-width: 1000px\)[\s\S]*\.view\s*\[data-panes="view-area"\],\s*\.view\s*\[data-clay-ds="shell\.default\.footer\.rest"\]\s*{\s*grid-column:\s*1;/,
     );
     // The workspace host paints the sidebar region (fileBrowser + divider); the
     // SDUI tree no longer wraps it in a panel.

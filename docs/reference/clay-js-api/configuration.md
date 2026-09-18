@@ -640,7 +640,7 @@ Phase 20.1 expanded the typed token catalog from five domains to ten and added u
 
 - **Typed token catalog**: five new domains (`dimension`, `elevation`, `motion-duration`, `z-level`, `density`) joined the lexical five (`color-role`, `spacing`, `radius`, `typography`, `opacity`) in `ThemeTokenType`. The core fallback catalog grew from ~21 to 61 tokens additively; no legacy token was renamed or repurposed.
 - **Typography hierarchy**: seven semantic `UiTextVariant` tokens (`typography.body`, `typography.title`, `typography.status`, `typography.display`, `typography.section`, `typography.detail`, `typography.caption`) with user-owned `UiTypographyHierarchy` scale ratios, delivered atomically through the existing [`theme.setTypography`](theme/set-typography.md) API via an optional `hierarchy` object. Omission preserves Clay defaults; partial hierarchies are rejected atomically.
-- **Typed UI design-token overrides**: `ActiveTheme` gained a `design_tokens` field carrying validated typed UI overrides (dimension, elevation, motion-duration, z-level, density, color-role, spacing, radius, opacity) from `clay.contributions.designTokens`. These are validated server-side against core token types and domain bounds, then resolved client-side into `ResolvedUiTheme` — a cached registry serving paint/layout hot paths with no per-frame parsing or IPC. Phase 24.4 adds three core tokens overridable the same way: `surface.scrim`, `opacity.scrim`, and `dimension.overlay.centered.width` (the centered Command Centre surface is Clay-internal; only its token values are customizable, and invalid types/values fail closed before install).
+- **Typed UI design-token overrides**: `ActiveTheme` gained a `design_tokens` field carrying validated typed UI overrides (dimension, elevation, motion-duration, z-level, density, color-role, spacing, radius, opacity) from `clay.contributions.designTokens`. These are validated server-side against core token types and domain bounds, then resolved client-side into `ResolvedUiTheme` — a cached registry serving paint/layout hot paths with no per-frame parsing or IPC. Phase 24.4 adds three core tokens overridable the same way: `surface.scrim`, `opacity.scrim`, and `dimension.overlay.centered.width` (the surfaces they served are Clay-internal; only the token values are customizable, and invalid types/values fail closed before install). Plan 125 retired the centered Command Centre sheet: `surface.scrim`/`opacity.scrim` now dim behind the composer palette and the `@` mentions menu, and `dimension.overlay.centered.width` sizes package `modal` dialogs — the palette sheet is exactly as wide as the composer box and reads no width token, and its halo is a design-system recipe value rather than a token.
 - **Token-backed panel/sidebar/density defaults**: the legacy hardcoded panel/sidebar dimension constants and density default moved behind typed tokens (`dimension.sidebar.default`, `dimension.panel.side.*`, `dimension.panel.vertical.*`, `density.default`), resolved through `ResolvedUiTheme::panel_defaults()` and `ResolvedUiTheme::density()`. Dimension ordering is validated with fallback to Clay constants on invalid order; density scales only the token-owned UI spacing rhythm (Phase 20.4 component uplift), never panel dimensions or document typography.
 
 ### Configuration surfaces
@@ -840,6 +840,44 @@ Hidden/ad hoc configuration keys that are rejected by policy and are not valid u
 Package command/action registration through [`commands.serverRegisterCommand`](commands/server-register-command.md) declares routing policy, permissions, key bindings, custom properties, and lookup tags at package-load time; it does not grant execution authority. Command execution authority is re-validated per activation through `CommandExecutor` and never granted by registration, menu inclusion, or configuration. Packages may declare commands and expose them in transient menus; they cannot execute commands directly from UI callbacks, bypass command permission/provenance validation, run command handlers in the Rust client, or grant themselves filesystem, network, shell, AI mutation, WASM, workspace mutation, package-manager, package installation, package enable/disable, native widget, raw-op, or client-side JavaScript authority.
 
 Configuration evaluation remains startup, package-load, reload, or explicit setting-change work only. Command registration, action validation, transient menu filtering over installed bounded metadata, and command-id binding through `bindKey` are load/configuration/update-time work. Activating a selected command enqueues a server-first `CommandExecution` request; ordinary keypress routing, client paint/layout, pointer, scroll, text-event handling, edit acknowledgement, and decoration rendering paths do not execute configuration JavaScript, wait on IPC, recompute package action defaults from user code, or run command handlers. This review adds no filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, raw-op, client-side JavaScript, executable callback, or command-authority grant.
+
+## Plan 125 composer palette and picker configuration review
+
+Plan 125 adds no new global configuration key, package option, or `clay:configuration` API.
+Every agent picker stage is a Clay-owned `TransientMenuOrigin::CommandPalette` session
+inside the existing composer palette; palette placement, stage navigation, query state,
+row contents, and the shielded secret field are not configurable from `init.js`.
+
+The user-visible configuration surface remains the existing keybinding API:
+
+```js
+import { bindKey, unbindKey } from "clay:keybindings";
+
+// The shipped lane and palette chords remain independently overrideable.
+unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
+bindKey("Alt+L", "shell.toggleAgentLane", { scope: "global" });
+unbindKey("Ctrl+X Ctrl+O", { scope: "global" });
+bindKey("Alt+X", "controlCenter.open", { scope: "global" });
+```
+
+`shell.toggleAgentLane` has `custom_properties = []`; it names only a bounded client UI
+command. Its `laneVisible` value is Clay-owned per-tab layout state in `layout.json`
+(absent means visible), not a global setting and not an `init.js` property. The six
+picker ids (`agent.clientOpenAgentPicker`, `agent.clientOpenProviderPicker`,
+`agent.clientOpenModelPicker`, `agent.clientOpenProviderSetup`,
+`agent.clientOpenSessionPicker`, and `agent.clientOpenSessionSearchPicker`) remain
+palette rows and package-UI action targets, not `bindKey` targets or public JS facades.
+They have no configuration properties, permissions, or credential/session access.
+
+Configuration can override the lane and palette launch chords, and can inspect them with
+`listKeyBindings("global")`; it cannot open, style, position, filter, dismiss, populate,
+or intercept the palette, choose a picker stage, overwrite another tab's lane state, or
+access the shielded secret stage. Hidden/ad hoc keys such as
+`agentLane.defaultVisibility`, `palette.mode`, `palette.maxItems`,
+`agentPicker.provider`, and `agentPicker.session` remain rejected. Configuration
+continues to grant no filesystem, network, shell, extension-loading, AI-mutation,
+workspace, package, raw-op, native-widget, or client-side JavaScript authority, and no
+work is added to configuration evaluation or keypress-to-paint paths.
 
 ## Phase 18.11 completion provider configuration review
 

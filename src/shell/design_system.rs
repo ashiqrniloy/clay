@@ -1453,14 +1453,16 @@ const MOTION_FAST: f64 = 150.0;
 const MOTION_ENTER: f64 = 240.0;
 const MOTION_NONE: f64 = 0.0;
 
-/// The two approved soft elevation stacks (DESIGN.md §6). Static regions get
+/// The three approved soft elevation stacks (DESIGN.md §6). Static regions get
 /// neither: a region that never floats must not look pressable (§14 bans hard
-/// offset shadows outright).
+/// offset shadows outright). `Halo` is the composer palette's and the `@`
+/// mentions menu's even, zero-offset glow over the shared veil (plan 125).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Elevation {
     Flat,
     Pop,
     Overlay,
+    Halo,
 }
 
 fn elevation_stack(elevation: Elevation) -> Vec<ShadowLayer> {
@@ -1474,6 +1476,10 @@ fn elevation_stack(elevation: Elevation) -> Vec<ShadowLayer> {
         Elevation::Overlay => &[
             (0.0, 24.0, 60.0, -16.0, "text.primary", 0.42),
             (0.0, 2.0, 10.0, -4.0, "text.primary", 0.22),
+        ],
+        Elevation::Halo => &[
+            (0.0, 0.0, 14.0, -2.0, "text.primary", 0.14),
+            (0.0, 0.0, 3.0, 0.0, "text.primary", 0.08),
         ],
     };
     layers
@@ -1543,7 +1549,7 @@ const FALLBACK_SURFACES: &[FallbackKind] = &[
     FallbackKind { component: "tabBar", fill: "transparent", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_FLUSH, padding: Some("spacing.xs"), gap: Some("spacing.xxs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
     FallbackKind { component: "paneSplitTree", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
     FallbackKind { component: "statusBar", fill: "transparent", text: "text.muted", border: "border.hairline", border_width: 1.0, radius: RADIUS_FLUSH, padding: Some("spacing.xxs"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
-    FallbackKind { component: "commandCentre", fill: "surface.overlay", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_SURFACE, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_ENTER, timing: TransitionTiming::SpringSnappy, elevation: Elevation::Overlay },
+    FallbackKind { component: "commandCentre", fill: "surface.overlay", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_SURFACE, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 1.0, motion: MOTION_ENTER, timing: TransitionTiming::SpringSnappy, elevation: Elevation::Halo },
     FallbackKind { component: "fileBrowser", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_FLUSH, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
     FallbackKind { component: "settingsPanel", fill: "surface.panel", text: "text.primary", border: "border.hairline", border_width: 1.0, radius: RADIUS_PANEL, padding: Some("spacing.sm"), gap: Some("spacing.xs"), background_opacity: 0.55, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },
     FallbackKind { component: "chatPanel", fill: "transparent", text: "text.primary", border: "transparent", border_width: 0.0, radius: RADIUS_PANEL, padding: None, gap: None, background_opacity: 1.0, motion: MOTION_NONE, timing: TransitionTiming::Linear, elevation: Elevation::Flat },

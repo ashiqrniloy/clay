@@ -90,7 +90,15 @@ pub use textobjects::*;
 /// and its `bindings` (the per-row chord chips), and `MenuQueryUpdate` carries
 /// the chip the client selected, so the server filters and selects over the
 /// scoped item set.
-pub const PROTOCOL_VERSION: u32 = 31;
+/// Version 32 (plan 125) adds `TransientMenuSnapshotData.mode`: the bounded,
+/// closed presentation vocabulary (`catalogue` | `path` | `picker` | `secret` |
+/// `url` | `oauth`) that tells one `CommandPalette` sheet how to render its
+/// session — a stage line, a shielded field for `secret` — now that pickers are
+/// `CommandPalette` sessions too. Absent decodes as the catalogue. Plan 125 also
+/// retires `TransientMenuOriginData::Centered` as a *produced* value: the
+/// variant stays on the wire (older peers must decode), no constructor emits it,
+/// and the shell's projection falls it in with the palette's bottom anchor.
+pub const PROTOCOL_VERSION: u32 = 32;
 
 pub type PerformanceTraceId = u64;
 

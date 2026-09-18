@@ -236,6 +236,112 @@ describe("Composer", () => {
     expect(palette.activate).toHaveBeenCalledTimes(1);
   });
 
+  it("walks a stage back with Esc and Alt+Left, and cancels only the catalogue", () => {
+    // Plan 125: `Esc` is the shell's own "one step back". A stage walks back
+    // through the server (`menuBackspace`), which closes the session itself
+    // when the flow is at its entry; the catalogue closes locally as before.
+    const palette = paletteStub({ menu: paletteMenu([], { mode: "picker" }) });
+    mount({ palette });
+    const field = screen.getByLabelText("Message");
+    fireEvent.keyDown(field, { key: "Escape" });
+    expect(palette.back).toHaveBeenCalledTimes(1);
+    expect(palette.cancel).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: "ArrowLeft", altKey: true });
+    expect(palette.back).toHaveBeenCalledTimes(2);
+    expect(palette.cancel).not.toHaveBeenCalled();
+  });
+
+  it("leaves a stage's filter sigil-free and does not close on an empty field", () => {
+    // A stage is not a catalogue: its filter needs no `/`, and emptying the
+    // field is clearing the filter, not leaving the flow (the sheet stays).
+    const palette = paletteStub({ menu: paletteMenu([], { mode: "picker" }) });
+    mount({ palette });
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(field.value).toBe("");
+    expect(palette.query).not.toHaveBeenCalled();
+    fireEvent.change(field, { target: { value: "anth" } });
+    expect(palette.query).toHaveBeenLastCalledWith("anth", "all");
+    fireEvent.change(field, { target: { value: "" } });
+    expect(palette.query).toHaveBeenLastCalledWith("", "all");
+    expect(palette.cancel).not.toHaveBeenCalled();
+  });
+
+  it("runs a row's secondary action on Alt+Enter", () => {
+    const palette = paletteStub({
+      menu: paletteMenu(paletteItems, { mode: "picker" }),
+    });
+    mount({ palette });
+    const field = screen.getByLabelText("Message");
+    fireEvent.keyDown(field, { key: "Enter", altKey: true });
+    expect(palette.activate).toHaveBeenCalledWith(true);
+    expect(palette.activate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Enter on an empty stage from dismissing the session", () => {
+    // A fresh stage has no rows yet and its filter is not a command name: the
+    // lane must not read the submit as a prompt.
+    const palette = paletteStub({
+      menu: paletteMenu([], { mode: "secret" }),
+    });
+    const props = mount({ palette });
+    const field = screen.getByLabelText("Message");
+    fireEvent.submit(field.closest("form") as HTMLFormElement);
+    expect(palette.cancel).not.toHaveBeenCalled();
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("types the credential in the sheet's shield, never in the lane's draft", () => {
+    // Security (plan 125): while the shielded stage is up, the composer is not
+    // a field for that value — even a paste aimed at it is dropped, and what
+    // the shield carries goes straight to the session's query.
+    const palette = paletteStub({
+      menu: paletteMenu(
+        [
+          {
+            id: "store_secret",
+            label: "Store API key",
+            detail: null,
+            accessibilityLabel: "Store API key",
+          },
+        ],
+        { mode: "secret", prompt: "API key (hidden)" },
+      ),
+    });
+    mount({ palette });
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(field.disabled).toBe(true);
+    fireEvent.change(field, { target: { value: "pasted-secret" } });
+    expect(field.value).toBe("");
+    expect(palette.query).not.toHaveBeenCalled();
+  });
+
+  it("sends the shield's keystrokes as the session's query", () => {
+    const palette = paletteStub({
+      menu: paletteMenu([], { mode: "secret", prompt: "API key (hidden)" }),
+    });
+    mount({ palette });
+    const shield = screen.getByLabelText("API key (hidden)", {
+      selector: "input",
+    });
+    expect(document.activeElement).toBe(shield);
+    fireEvent.change(shield, { target: { value: "sk-1" } });
+    expect(palette.query).toHaveBeenLastCalledWith("sk-1", "all");
+    // The shield's keys are the sheet's keys: arrows move, Esc walks back.
+    fireEvent.keyDown(shield, { key: "ArrowDown" });
+    expect(palette.move).toHaveBeenCalledWith(1);
+    fireEvent.keyDown(shield, { key: "Escape" });
+    expect(palette.back).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the @ menu while a stage is up", () => {
+    // Two menus cannot share the field: a stage owns it, so mentions stay shut.
+    const palette = paletteStub({ menu: paletteMenu([], { mode: "picker" }) });
+    mount({ palette, skills: [{ name: "wiki" }] });
+    const field = screen.getByLabelText("Message");
+    fireEvent.change(field, { target: { value: "@" } });
+    expect(screen.queryByRole("listbox", { name: "Mentions" })).toBeNull();
+  });
+
   it("states what each mention row is: the skill's description, the file's directory", () => {
     mount({
       skills: [{ name: "wiki", description: "repo context graph" }],
@@ -347,22 +453,37 @@ describe("Composer", () => {
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
   });
 
-  it("keeps the field typeable with no provider and inert with no agent", () => {
-    // Plan 124 review: a missing provider never blocks typing — the lane's foot
-    // states why nothing will send. A tab with no agent at all is the one case
-    // where the field is inert.
+  it("keeps the field typeable with no provider and with no agent", () => {
+    // Plan 124 review, extended by plan 125: neither a missing provider nor a
+    // missing agent blocks typing — the draft is the user's, the lane's foot
+    // states why nothing would send, and a refused submit keeps the text.
     mount({ agentless: false });
     const field = screen.getByLabelText("Message");
     expect(field).toHaveProperty("placeholder", "Ask, or type / or @");
     expect(field).toBeEnabled();
     cleanup();
     mount({ agentless: true });
-    const inert = screen.getByLabelText("Message");
-    expect(inert).toHaveProperty(
+    const bare = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(bare).toHaveProperty(
       "placeholder",
-      "Attach an agent to this tab to send a prompt",
+      "Type a prompt — attach an agent to send it",
     );
-    expect(inert).toBeDisabled();
+    expect(bare).toBeEnabled();
+    // Typing lands, and a refused submit (nothing to send to) keeps it.
+    fireEvent.change(bare, { target: { value: "hello" } });
+    expect(bare.value).toBe("hello");
+    cleanup();
+    const refused = mount({
+      agentless: true,
+      onSubmit: vi.fn(() => false),
+    });
+    const refusedField = screen.getByLabelText(
+      "Message",
+    ) as HTMLTextAreaElement;
+    fireEvent.change(refusedField, { target: { value: "keep me" } });
+    fireEvent.submit(refusedField.closest("form") as HTMLFormElement);
+    expect(refused.onSubmit).toHaveBeenCalledWith("keep me");
+    expect(refusedField.value).toBe("keep me");
   });
 
   it("renders the lane's agent-control toolbar inside the field shell", () => {

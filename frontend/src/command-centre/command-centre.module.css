@@ -1,18 +1,16 @@
-/* Command centre: the one global palette and the transient menus the shell
- * opens through the same session (`origin`). The palette is a single elevated
- * sheet — `commandCentre.default.root.rest`: opaque overlay fill, 1px hairline,
- * r16, overlay shadow, 240ms spring entrance — with a head (search), the
- * scrolling results, and a foot of key hints; the menu origins take the
- * narrower `popover.default.root.rest` surface instead (the approved
- * command-centre and overlays compositions).
+/* Command centre: the shell's one transient selection surface — the composer's
+ * `/` palette (`commandCentre.default.root.rest`: opaque overlay fill, 1px
+ * hairline, r16, halo shadow, 240ms spring entrance) — with a head (the field's
+ * echo), the scrolling rows, and a foot of key hints.
  *
- * Plan 124 split the palette in two by where its query lives. A window-centred
- * session (`centered`: pickers, package menus) keeps its own input and is drawn
- * by `CommandCentre` as the centred sheet. The composer's `/` palette (and its
- * path mode) has the lane's field for a query, so `CommandPalette` draws it as
- * the *menu of that box*: the composer form is the positioning context, the
- * sheet spans the box and rises from its own edge 6px above it, and the head
- * echoes the field rather than offering a second well (DESIGN.md §5/§7/§11/§12).
+ * Plan 124 anchored it: the composer's `/` palette (and its path mode) has the
+ * lane's field for a query, so `CommandPalette` draws it as the *menu of that
+ * box* — the composer form is the positioning context, the sheet spans the box
+ * and rises from its own edge 6px above it, and the head echoes the field rather
+ * than offering a second well (DESIGN.md §5/§7/§11/§12). Plan 125 retired the
+ * window-centred sheet that used to live here: every picker stage renders on
+ * this same surface, and one stage (the shielded credential) owns a field inside
+ * it (`.stageField`).
  *
  * Layout is host-owned; every appearance value is a `--clay-ds-*` recipe or a
  * `--clay-*` theme role. Retired patterns are absent by construction: no
@@ -20,75 +18,6 @@
  * anything static. The empty state consumes the family's key exactly as the
  * approved artifact does — bare, centred text inside the sheet, not a bordered
  * box inside a bordered box. */
-
-.surface {
-  display: flex;
-  flex-direction: column;
-  width: min(var(--clay-dimension-overlay-centered-width, 640px), 90vw);
-  /* Bounded: the list scrolls, the sheet never grows past the window. */
-  max-height: min(68vh, var(--clay-dimension-overlay-centered-width, 640px));
-  overflow: hidden;
-
-  border-width: var(--clay-ds-command-centre-default-root-rest-border-width);
-  border-style: var(--clay-ds-command-centre-default-root-rest-border-style);
-  border-color: var(--clay-ds-command-centre-default-root-rest-border-color);
-  border-radius: var(--clay-ds-command-centre-default-root-rest-border-radius);
-  background: var(--clay-ds-command-centre-default-root-rest-background-color);
-  color: var(--clay-ds-command-centre-default-root-rest-text-color);
-  box-shadow: var(--clay-ds-command-centre-default-root-rest-shadow, none);
-  transition:
-    opacity var(--clay-ds-command-centre-default-root-rest-transition-duration)
-      var(--clay-ds-command-centre-default-root-rest-transition-timing),
-    transform
-      var(--clay-ds-command-centre-default-root-rest-transition-duration)
-      var(--clay-ds-command-centre-default-root-rest-transition-timing);
-}
-
-/* A menu session is the same component on the popover surface: r12, pop
- * shadow, content-sized (the approved context-menu cell). */
-.menu {
-  width: fit-content;
-  min-width: 220px;
-  max-width: min(90vw, var(--clay-dimension-overlay-centered-width, 640px));
-  border-width: var(--clay-ds-popover-default-root-rest-border-width);
-  border-style: var(--clay-ds-popover-default-root-rest-border-style);
-  border-color: var(--clay-ds-popover-default-root-rest-border-color);
-  border-radius: var(--clay-ds-popover-default-root-rest-border-radius);
-  background: var(--clay-ds-popover-default-root-rest-background-color);
-  color: var(--clay-ds-popover-default-root-rest-text-color);
-  box-shadow: var(--clay-ds-popover-default-root-rest-shadow);
-  transition:
-    opacity var(--clay-ds-popover-default-root-rest-transition-duration)
-      var(--clay-ds-popover-default-root-rest-transition-timing),
-    transform var(--clay-ds-popover-default-root-rest-transition-duration)
-      var(--clay-ds-popover-default-root-rest-transition-timing);
-}
-
-/* One ring per surface (§14.4): the sheet is the shell, so the sheet shows the
- * focus state and the input inside it draws none — boundary turns accent and
- * takes the accent halo, exactly like the shipped composer well and the
- * approved screens' `.input-shell:focus-within`. */
-.surface:focus-within {
-  border-color: var(--clay-accent-primary);
-  box-shadow:
-    var(--clay-ds-command-centre-default-root-rest-shadow, none),
-    0 0 0 3px color-mix(in srgb, var(--clay-accent-primary) 15%, transparent);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  gap: var(--clay-ds-command-centre-default-root-rest-gap);
-  /* Trailing space for the sheet's close affordance, which floats here. */
-  padding: var(--clay-ds-command-centre-default-root-rest-padding);
-  padding-inline-end: calc(
-    var(--clay-dimension-target-min, 32px) +
-      var(--clay-ds-command-centre-default-root-rest-padding)
-  );
-  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
-    var(--clay-ds-divider-default-root-rest-border-style)
-    var(--clay-ds-divider-default-root-rest-border-color);
-}
 
 .searchIcon {
   display: inline-flex;
@@ -107,28 +36,6 @@
   color: var(--clay-text-muted);
 }
 
-.input {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--clay-text-primary);
-  font-family: inherit;
-  font-size: var(--clay-text-body-size);
-  line-height: var(--clay-text-body-line-height);
-  outline: none;
-}
-
-.input::placeholder {
-  color: var(--clay-text-muted);
-}
-
-.results {
-  min-height: 0;
-  overflow: auto;
-  padding: var(--clay-ds-command-centre-default-root-rest-padding);
-}
-
 /* The empty state is the family's key on the approved artifact's bare shape
  * (the recipe declares a hairline the artifact does not paint). */
 .empty {
@@ -141,8 +48,7 @@
   text-align: center;
 }
 
-.emptyHint,
-.hintKeys {
+.emptyHint {
   display: inline-flex;
   align-items: center;
   gap: var(--clay-ds-key-hint-default-keys-rest-gap);
@@ -240,7 +146,9 @@
 }
 
 /* The field's echo, not an input: mono like the composer's value, ellipsised
- * when the query runs long, with the `/` sigil painted by the sign itself. */
+ * when the query runs long, with the `/` sigil painted by the sign itself. The
+ * sigil belongs to the catalogue and to the path browser (whose query *is* what
+ * follows it); a picker stage's filter is typed without one (plan 125). */
 .palQuery {
   flex: 1;
   min-width: 0;
@@ -253,14 +161,26 @@
   white-space: nowrap;
 }
 
-.palQuery::before {
+.palette[data-mode="catalogue"] .palQuery::before,
+.palette[data-mode="path"] .palQuery::before {
   content: "/";
   color: var(--clay-accent-primary);
 }
 
 .palQuery[data-empty="true"],
-.palQuery[data-empty="true"]::before {
+.palette[data-mode="catalogue"] .palQuery[data-empty="true"]::before {
   color: var(--clay-text-muted);
+}
+
+/* The one stage that owns an input (plan 125): the shielded credential. It
+ * replaces the composer field for that stage — the sheet, not the box behind
+ * it, is the boundary — and it is the shipped `textInput` composition, so the
+ * well is the same one every other field on this surface uses. */
+.stageField {
+  padding: var(--clay-ds-command-centre-default-root-rest-padding);
+  border-bottom: var(--clay-ds-divider-default-root-rest-border-width)
+    var(--clay-ds-divider-default-root-rest-border-style)
+    var(--clay-ds-divider-default-root-rest-border-color);
 }
 
 .palList {
@@ -271,8 +191,8 @@
   padding: var(--clay-ds-command-centre-default-root-rest-padding);
 }
 
-/* One row language with the centred sheet: `list` rows, title then the
- * server's detail line; the selected row is the fill (no accent bar, §14). */
+/* One row language for every session (`list` rows): title, then the server's
+ * detail line; the selected row is the fill (no accent bar, §14). */
 .palRow {
   display: flex;
   align-items: baseline;

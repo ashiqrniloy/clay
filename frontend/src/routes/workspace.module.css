@@ -22,12 +22,24 @@
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--clay-dimension-rail-width, 340px);
-  /* Two rows: the two views beside the rail, then the tab's lane as the row
-   * below both (DESIGN.md §12 — the lane is the working area's own chrome
-   * strip, so the sidebar *and* the rail end at its top edge and it spans the
-   * full working-area width). */
+  /* The workspace sidebar is the host's own left rail — the tree's
+   * `dimension.sidebar.default` region is drawn in it, not inside the pane —
+   * so the working area is three tracks: files rail · view pane · inspector
+   * rail. The pane's track is the lane's column, so the lane can never cross
+   * into either rail (DESIGN.md §12). The files track is `auto`: the rail's own
+   * width (the host dimension token) sizes it, and a hidden rail (which does
+   * not render) collapses it to 0. */
+  grid-template-columns: auto minmax(0, 1fr) var(--rail-inspector);
+  /* The pane's two rows: the views above, the tab's lane as the pane's own
+   * chrome strip below. Both rails span them, so they run the working area's
+   * full height and the lane's hairline stops at their inner edges instead of
+   * ending them at its top (DESIGN.md §12, plan 125). */
   grid-template-rows: minmax(0, 1fr) auto;
+  /* The host geometry tokens the tracks resolve from (§5): the inspector rail
+   * and the files rail's drawer width are host-owned; the files rail itself is
+   * sized by its own token in `shell/workspace-panes.module.css`. */
+  --rail-inspector: var(--clay-dimension-rail-width, 340px);
+  --rail-files: var(--clay-dimension-sidebar-default, 244px);
   /* Backdrop root for the field's veil and the stacking context the lane's
    * z-index climbs in: the blur must sample the working area, never the lane
    * the spec leaves above it (DESIGN.md §6). */
@@ -36,32 +48,47 @@
 }
 
 /* The route's wrapper and the panes host are layout-transparent (each states
- * `display: contents` in its own sheet): the views, the rail and the lane keep
- * their own boxes and are this grid's items, which is what lets the lane —
- * owned by the tab, not by the route — take the full-width row. Every item is
- * placed explicitly, so the row the lane takes is not a matter of DOM order. */
+ * `display: contents` in its own sheet): the sidebar rail, the views, the veil
+ * and the lane keep their own boxes and are this grid's items, which is what
+ * lets the lane — owned by the tab, not by the route — hold the pane's second
+ * row. Every item is placed explicitly, so neither the row the lane takes nor
+ * the column the views take depends on DOM order, and a rail that leaves the
+ * grid (hidden) or the flow (the narrow fixed drawer) cannot slide another item
+ * into its track. */
 .viewMain {
   display: contents;
 }
 
-.view [data-panes="view-area"] {
+/* The files rail: the pane's sibling, spanning both rows (DESIGN.md §12). */
+.view [data-panes="side"] {
   grid-column: 1;
+  grid-row: 1 / -1;
+}
+
+.view [data-panes="view-area"] {
+  grid-column: 2;
   grid-row: 1;
 }
 
-/* The field's menus veil the working area's own row: the panes *and* the rail,
- * never the lane below (§6). It shares the cell with the panes and paints above
- * them (the lane's own z-index keeps its sheet above this). */
+/* The field's menus veil the views and the rail's whole height — the rail's
+ * lower part included, which the lane leaves visible beside it — and it also
+ * covers the lane's own cell, which the lane paints over (DESIGN.md §6/§12). It
+ * shares the cell with the views and paints above them (the lane's z-index
+ * keeps its sheet above this). */
 .view [data-panes="veil"] {
-  grid-area: 1 / 1 / 2 / -1;
+  grid-area: 1 / 1 / -1 / -1;
 }
 
+/* The lane is the view pane's strip: the pane's column only, under the views.
+ * It can never cross into a rail's column — not the inspector's, not the
+ * workspace sidebar's — so it follows both rails as they toggle and the field
+ * inside it anchors the palette to the pane's width. */
 .view [data-clay-ds="shell.default.footer.rest"] {
-  grid-column: 1 / -1;
+  grid-column: 2;
   grid-row: 2;
 }
 .view[data-rail="collapsed"] {
-  grid-template-columns: minmax(0, 1fr);
+  --rail-inspector: 0px;
 }
 
 .editor {
@@ -72,10 +99,11 @@
 /* ---------- right rail -------------------------------------------------- */
 
 .rail {
-  /* Column 2, beside the views and above the lane (§12: it ends at the lane's
-   * top edge). */
-  grid-column: 2;
-  grid-row: 1;
+  /* Column 3, spanning both rows: the rail runs the working area's full height
+   * beside the pane and the lane (§12: the lane is the pane's strip, so nothing
+   * ends the rail early). */
+  grid-column: 3;
+  grid-row: 1 / -1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -219,19 +247,30 @@
 }
 
 /* Mid-width windows keep a narrower rail so the measure survives (DESIGN.md §5:
- * 340px, 312px ≤1240px). */
+ * 340px, 312px ≤1240px) — and a narrower sidebar (244px, 224px ≤1240px). */
 @media (max-width: 1240px) {
   .view {
-    grid-template-columns: minmax(0, 1fr) 312px;
+    --rail-inspector: 312px;
+    --rail-files: var(--clay-dimension-sidebar-compact, 224px);
   }
 }
 
-/* Narrow windows: the rail becomes a right-hand drawer so the editor keeps its
- * measure instead of being crushed by a second column (approved narrow rule). */
+/* Narrow windows: both rails become fixed drawers so the editor keeps its
+ * measure instead of being crushed by two columns (approved narrow rule).
+ * Each leaves the flow here, so the grid is the pane's track alone and the lane
+ * stays in it (row 2) — the pane's full width, the drawers painting over it
+ * when open (DESIGN.md §12). */
 @media (max-width: 1000px) {
   .view,
   .view[data-rail="collapsed"] {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* One track here: both rails have left the flow, so the pane is the whole
+   * working area and the lane keeps its full width (DESIGN.md §12). */
+  .view [data-panes="view-area"],
+  .view [data-clay-ds="shell.default.footer.rest"] {
+    grid-column: 1;
   }
 
   .rail {
@@ -243,6 +282,20 @@
     width: min(340px, 92vw);
     /* Opaque: a drawer sits over document text, so legibility wins over the
      * veil fill (§6 sidebar/rail are 1.0; the pop shadow carries the lift). */
+    background: var(--clay-surface-main);
+    box-shadow: var(--clay-ds-panel-transient-root-rest-shadow);
+  }
+}
+
+/* The files rail is a drawer on the same rule, from the other edge. */
+@media (max-width: 1000px) {
+  .view [data-panes="side"] {
+    position: fixed;
+    z-index: 40;
+    top: var(--clay-dimension-titlebar-height, 40px);
+    left: 0;
+    bottom: var(--clay-dimension-statusbar-height, 28px);
+    width: min(var(--rail-files, 244px), 92vw);
     background: var(--clay-surface-main);
     box-shadow: var(--clay-ds-panel-transient-root-rest-shadow);
   }

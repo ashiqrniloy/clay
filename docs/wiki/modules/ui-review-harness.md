@@ -8,6 +8,8 @@
   fixtures: the shell states, the design-system/theme runs, the icon runs, and
   `ui-review-workspace` / `ui-review-coding-agent` / `ui-review-launcher`)
 - `frontend/src/routes/fixture.tsx` (Plan 098 document-transfer fixture routes)
+- `design-artifacts/tools/{capture-agent-lane,capture-lane-palette}.mjs`
+- `test-plan/artifacts/124-agent-lane/` (Plan 124 live evidence)
 - `tests/manual_smoke_docs.rs` — command/fixture documentation drift guard
 - `docs/development/launch-and-gui-smoke.md` — harness documentation
 - `docs/development/ui-observability.md` — observability entry point
@@ -15,7 +17,7 @@
 
 ## Overview
 
-Plan 087 adds one documented command that launches isolated, fixed-size Linux GUI fixtures for repeatable state capture. The harness exists because `smoke-gui` mode forces a smoke endpoint and applies no window restore or HOME/XDG isolation, so it cannot represent normal end-user entry states (welcome, restored documents, completion, Command Centre). The harness is a review workflow, not a CI golden-image system: screenshots are review artifacts, and GPU pixel snapshots stay deferred (Masonry's `TestHarness` is CPU-only and not production-renderer faithful).
+Plan 087 adds one documented command that launches isolated, fixed-size Linux GUI fixtures for repeatable state capture. The harness exists because `smoke-gui` mode forces a smoke endpoint and applies no window restore or HOME/XDG isolation, so it cannot represent normal end-user entry states (welcome, restored documents, completion, or the legacy `ui-review-command-centre` fixture — the composer-anchored `/` palette since Plan 125). The Plan 124 lane/palette review uses dedicated capture tools and a real Tauri build; its evidence is documented below. The harness is a review workflow, not a CI golden-image system: screenshots are review artifacts, and GPU pixel snapshots stay deferred (Masonry's `TestHarness` is CPU-only and not production-renderer faithful).
 
 ## How It Works
 
@@ -32,7 +34,7 @@ Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`), `
 3. Spawns `clay server <socket>` (no `--config-fixture`; that flag is bypassed because fixtures depend on the watcher path) from the private fixture workspace, then `clay client <socket>`. The workspace cwd keeps bootstrap document IDs aligned with the loading SDUI binding. Fixture `init.js` is copied before launch, and the script touches it only after the client shell/handshake is observable so the runtime snapshot is delivered through the live connection.
 4. Polls an embedded python3 GI-Atspi probe for the named state, then records `metadata.txt`, `instructions.md`, `accessibility.txt`, `screenshot.png`, and `review.status` into `--output`. The loading fixture additionally waits for exact `Loading review` / `Loading workspace…` fields in the delivered `RuntimeStateSnapshot` and writes `runtime-tree.txt`; it does not pass on a welcome-only tree.
 
-Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reason (`UNRESOLVED`) when the fixture state cannot be reached or the desktop accessibility bus is missing — never a false pass. Interactive TTY states (completion, Command Centre) are recorded `UNRESOLVED` off a TTY with their reasons. The default welcome capture is structural: it proves names, roles, bounds, and status text, but does not exercise mouse hit-testing or keyboard shortcuts; those paths are covered by the RenderRoot regressions `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` in `src/masonry_editor.rs`.
+Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reason (`UNRESOLVED`) when the fixture state cannot be reached or the desktop accessibility bus is missing — never a false pass. Interactive TTY states (completion, the Control Center palette) are recorded `UNRESOLVED` off a TTY with their reasons. The default welcome capture is structural: it proves names, roles, bounds, and status text, but does not exercise mouse hit-testing or keyboard shortcuts; those paths are covered by the RenderRoot regressions `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` in `src/masonry_editor.rs`.
 
 ### Fixtures
 
@@ -44,7 +46,7 @@ Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reaso
 | `ui-review-recovery`            | empty comment                                                                                                  | disconnected/reconnect-guidance state                               |
 | `ui-review-large-typography`    | `setTypography` with UI 24 and document 20/21                                                                  | bounded large-type shell                                            |
 | `ui-review-completion`          | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
-| `ui-review-command-centre`      | `controlCenter.open` on `Ctrl+Alt+P` (single-stroke fixture override; not the shipped `Ctrl+X Ctrl+P` default) | centered Command Centre (interactive)                               |
+| `ui-review-command-centre`      | legacy single-stroke `controlCenter.open` fixture override (not shipped defaults) | composer-anchored `/` palette, catalogue mode (interactive)          |
 | `ui-review-rust`                | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
 | `ui-review-design-system`       | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Dark                                       | Shipped design system active (Plan 118)                             |
 | `ui-review-design-system-light` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Light                                      | Cross-theme color authority verification (Plan 118)                 |
@@ -63,11 +65,12 @@ a mismatched pair can never be captured as a pass.
 `--drive` executes AT-SPI steps (`click`, `focus`, `type`, `clear`, `wait`)
 before the capture, which reaches palette/menu/modal/rail states without input
 synthesis. Every step is verified against the live AT-SPI tree; a step that
-cannot be applied records `UNRESOLVED` with its reason — never a pass. Two
-limits found in practice: a launcher `list item` does not select on AT-SPI
-`click`, and the Control Center `entry` exposes no
-`org.a11y.atspi.EditableText`, so palette **filtering** cannot be typed into from
-AT-SPI on this stack.
+cannot be applied records `UNRESOLVED` with its reason — never a pass. Limits
+found in practice (re-confirmed in the Plan 125 review): the composer field
+exposes no reachable `org.a11y.atspi.EditableText`, so a palette query cannot be
+typed from AT-SPI on this stack; palette rows are `list item` nodes without a
+usable action, so row activation cannot be driven either; and a launcher
+`list item` does not select on AT-SPI `click`.
 
 A PASS capture also writes a bounded, root-redacted `server.diagnostics.txt`
 (diagnostic/configuration/generation lines plus `configuration_failed_lines` and
@@ -98,8 +101,9 @@ scripts/capture-ui-review.sh --fixture ui-review-coding-agent \
 ```
 
 The retained AT-SPI dump exposes `landmark "Coding Agent"`,
-`log "Transcript"`, `entry "Message"`, `button "Send"`, and
-`page tab list "Agent detail"`. Evidence:
+`log "Transcript"`, `entry "Message"`, and `page tab list "Agent detail"`.
+The current lane has no Send button: Enter is the submit path and Stop appears
+only while streaming. Evidence:
 `code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/`. Interactive
 keyboard work that the harness cannot synthesize was driven through the
 browser-fixture route instead (`/?fixture=coding-agent&state=…`, keyboard and
@@ -113,6 +117,29 @@ rerun recipe, and the bundle-ceiling decision). The live two-tab leg ran a real
 driving the composer from the desktop stayed impossible on this host because
 `ydotool` cannot open `/dev/uinput` and the portal keyboard grant is
 interactive — recorded in that folder's `review-log.md` §4, not waived.
+
+### Plan 124 persistent agent lane and `/` palette review (2026-09-17)
+
+The Plan 124 review used the real Linux Tauri build against an isolated copy of
+`examples/config/`, with window-cropped captures and AT-SPI restricted to the
+Clay application subtree. The authoritative artifacts are
+`test-plan/artifacts/124-agent-lane/`: rest state, palette-open state, scope
+state, lane-hidden/recovery state, accessibility dump, geometry measurements,
+launch/drive log, and sanitized server diagnostics. The review confirmed the
+lane at that time, the inspector ending at its top edge, the composer-width
+palette with a 6px gap and 420px cap, the pane/rail veil, and removal of the
+veil when the lane hides. Plan 125 supersedes that lane/rail reading: the lane
+is the view pane's strip (`grid-column: 1`) and the rail runs the working
+area's full height, with the veil covering it.
+
+The host could not synthesize keyboard or pointer input, and WebKitGTK exposed
+neither reachable `EditableText` for the composer nor actions for palette rows.
+Therefore chord strokes, free-text filtering, Enter/Escape/Shift+Tab,
+prompt submission, and row activation remain `UNRESOLVED` live; frontend and
+server tests cover those paths. This is a host ceiling, not a screenshot pass.
+The lane/palette capture tools are separate from the legacy fixture harness:
+`design-artifacts/tools/capture-agent-lane.mjs` and
+`design-artifacts/tools/capture-lane-palette.mjs`.
 
 ### Plan 099 Tauri/React editor review
 
@@ -360,6 +387,30 @@ querying it.` It is the bootstrap placeholder diagnostic
   retention because unrelated desktop context can be visible.
 - The drift guard `plan087_ui_review_harness_command_and_prerequisites_are_documented` in `tests/manual_smoke_docs.rs` (protocol suite) re-asserts the documented commands, the fixture `init.js` files, and script safety markers, and forbids `cargo run -- smoke-gui` as a review substitute. The plan-118 additions are pinned in `plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`: the shipped system captures, the removed-specifier rejection, `--example-config` refusal for a mismatched fixture, and the `--help` text.
 
+### Plan 125 single palette surface review (2026-09-18)
+
+The Plan 125 review ran the same two layers. The deterministic layer is
+`design-artifacts/tools/capture-lane-palette.mjs` (291 checks) against the DEV
+fixture route with the palette's picker stages seeded
+(`?fixture=command-centre&stage=providers|auth|secret|url|oauth|models|sessions`,
+rows mirroring `src/server/agent_picker.rs`): it asserts the per-mode sheet,
+prompt and foot verb, the halo's normalized box-shadow shape, the 420 px cap with
+internal scrolling, and the `secret` stage's privacy (shielded field, composer
+disabled, no plaintext in rendered text or a non-shielded attribute, AT-SPI value
+masked). The live layer is `test-plan/artifacts/125-palette/` — launch log,
+accessibility dumps, geometry and halo pixel measurements, the corrected
+lane-hidden state, and `rail-independence.ax.txt`.
+
+Findings recorded there: the sheet is the composer field's own width (1124 px at
+1500 px; 676 px narrow) with a 6 px gap, the veil covers sidebar/pane/rail while
+the lane, composer, and status bar stay undimmed (the lane's strip had to become
+opaque — defect D8), the halo is additive on both sides with no dark band, and
+toggling the lane no longer collapses the inspector rail (defect D9, found while
+executing the manual test plan and fixed in `frontend/src/shell/layout-state.ts`).
+One deviation stays open: the lane still reaches the workspace sidebar's column
+(module 13 S47 / defect D7). Typing a query, `Enter`/`Alt+↵`/`Esc`, and row
+activation remain `UNRESOLVED` live for the host-ceiling reasons above.
+
 ## Related
 
 - [Design Artifact Gate](design-artifact-gate.md) — the prototype/approved-artifact contract and the prototype-set + component-conformance tools
@@ -368,5 +419,5 @@ querying it.` It is the bootstrap placeholder diagnostic
 - [docs/development/ui-observability.md](../../development/ui-observability.md) — observability entry point
 - [Masonry Shell Runtime](../archive/masonry-shell.md) — shell/chrome hosting the states the harness captures
 - [Pane Document Views](../archive/pane-document-views.md) — welcome entry state and completion projection
-- [Command Centre Surface (Centered Origin)](centered-command-centre-surface.md) — the centered modal the harness captures
+- [Command Centre Surface (Centered Origin)](centered-command-centre-surface.md) — why the centered modal is gone (the harness captures the composer palette)
 - [test-plan/index.md](../../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)

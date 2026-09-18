@@ -2089,6 +2089,140 @@ fn plan124_agent_lane_api_and_palette_command_are_documented() {
 }
 
 #[test]
+fn plan125_palette_picker_command_ids_are_stable_audited_and_documented() {
+    // Plan 125 task 13: the six picker command IDs moved onto the composer
+    // palette without changing an ID, gaining a facade, or gaining an
+    // inventory entry. This pins the audit trail: ids, display names, and the
+    // picker-kind mapping in Rust; the palette listing; the package UI action
+    // allowlist; the docs; and the absence of any callable JS surface.
+    let root = repository_root();
+    let registry = ClayJsApiRegistry::from_generated().expect("load generated registry");
+    let command_execution = std::fs::read_to_string(root.join("src/server/command_execution.rs"))
+        .expect("read command execution source");
+    let agent_picker = std::fs::read_to_string(root.join("src/server/agent_picker.rs"))
+        .expect("read agent picker source");
+    let ui_contributions =
+        std::fs::read_to_string(root.join("src/server/ui.rs")).expect("read ui source");
+    let keybindings_source = std::fs::read_to_string(root.join("src/server/ops/keybindings.rs"))
+        .expect("read keybinding ops");
+    let agent_facade =
+        std::fs::read_to_string(root.join("runtime/js/agent.js")).expect("read agent facade");
+    let bind_key =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/keybindings/bind-key.md"))
+            .expect("read bindKey API doc");
+    let command_doc = std::fs::read_to_string(
+        root.join("docs/reference/clay-js-api/commands/server-register-command.md"),
+    )
+    .expect("read command registration API doc");
+
+    let expected = [
+        (
+            "agent.clientOpenAgentPicker",
+            "Choose Agent",
+            "agent_picker::picker_kind_for_command",
+        ),
+        (
+            "agent.clientOpenProviderPicker",
+            "Choose Provider",
+            "picker_kind_for_command",
+        ),
+        (
+            "agent.clientOpenModelPicker",
+            "Choose Model",
+            "picker_kind_for_command",
+        ),
+        (
+            "agent.clientOpenProviderSetup",
+            "Configure Provider",
+            "picker_kind_for_command",
+        ),
+        (
+            "agent.clientOpenSessionPicker",
+            "Resume Session",
+            "picker_kind_for_command",
+        ),
+        (
+            "agent.clientOpenSessionSearchPicker",
+            "Search Sessions",
+            "picker_kind_for_command",
+        ),
+    ];
+
+    for (id, display_name, _) in expected {
+        assert!(
+            command_execution.contains(&format!("\"{id}\"")),
+            "built-in command table must keep the stable picker ID {id}"
+        );
+        assert!(
+            command_execution.contains(&format!("\"{id}\", \"{display_name}\"")),
+            "built-in command table must keep the picker ID {id} paired with {display_name:?}"
+        );
+        assert!(
+            agent_picker.contains(&format!("\"{id}\"")),
+            "{id} must map onto a picker kind"
+        );
+        assert!(
+            ui_contributions.contains(&format!("\"{id}\"")),
+            "{id} must stay a package UI action target (CLIENT_DIALOG_ACTIONS)"
+        );
+        assert!(
+            bind_key.contains(&format!("`{id}`")),
+            "bindKey docs must list the picker command ID {id}"
+        );
+        // No callable facade and no inventory/registry entry: the palette
+        // session stays Clay-owned internal state.
+        assert!(
+            registry.by_id(id).is_none(),
+            "{id} must not become a generated public registry entry"
+        );
+        assert!(
+            !agent_facade.contains("clientOpen"),
+            "clay:agent must not grow a picker-opening facade"
+        );
+    }
+
+    for marker in [
+        "## Plan 125 picker command IDs",
+        "| `agent.clientOpenAgentPicker` | Choose Agent |",
+        "| `agent.clientOpenProviderSetup` | Configure Provider |",
+        "Palette stage",
+        "no `clay:agent` export",
+        "no session work: sessions open only on a user command intent from the client",
+        "not** `bindKey` targets today",
+        "CLIENT_DIALOG_ACTIONS",
+        "shielded secret stage",
+        "gains no session/stage/query/credential access",
+    ] {
+        assert!(
+            bind_key.contains(marker),
+            "bindKey docs must document Plan 125 picker marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "**Agent picker stages**",
+        "built-in server-first picker commands",
+        "picker_kind_for_command",
+        "performs no session work",
+        "shielded secret stage",
+    ] {
+        assert!(
+            command_doc.contains(marker),
+            "server-register-command docs must document Plan 125 picker marker {marker:?}"
+        );
+    }
+
+    // Binding a picker ID is a deliberate, separate decision: the runtime
+    // bindable allowlist does not contain the family today.
+    for (id, _, _) in expected {
+        assert!(
+            !keybindings_source.contains(&format!("\"{id}\"")),
+            "{id} bindability changed; update the Plan 125 docs and this pin deliberately"
+        );
+    }
+}
+
+#[test]
 fn plan124_configuration_contract_uses_existing_keybinding_api() {
     let root = repository_root();
     let config = std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
@@ -2125,6 +2259,84 @@ fn plan124_configuration_contract_uses_existing_keybinding_api() {
             .take_while(|line| !line.starts_with("[[api]]"))
             .any(|line| line.trim() == "custom_properties = []"),
         "lane command must declare no hidden configuration properties"
+    );
+}
+
+#[test]
+fn plan125_configuration_contract_keeps_picker_flows_palette_owned() {
+    let root = repository_root();
+    let configuration =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration API contract");
+    let section = configuration
+        .split_once("## Plan 125 composer palette and picker configuration review")
+        .and_then(|(_, rest)| rest.split_once("\n## "))
+        .map(|(section, _)| section)
+        .expect("Plan 125 configuration section must be present");
+
+    for marker in [
+        "adds no new global configuration key, package option, or `clay:configuration` API",
+        "TransientMenuOrigin::CommandPalette",
+        "`shell.toggleAgentLane`",
+        "controlCenter.open",
+        "Ctrl+X Ctrl+P",
+        "Ctrl+X Ctrl+O",
+        "`laneVisible`",
+        "per-tab layout state",
+        "custom_properties = []",
+        "`agent.clientOpenAgentPicker`",
+        "`agent.clientOpenProviderPicker`",
+        "`agent.clientOpenModelPicker`",
+        "`agent.clientOpenProviderSetup`",
+        "`agent.clientOpenSessionPicker`",
+        "`agent.clientOpenSessionSearchPicker`",
+        "not `bindKey` targets or public JS facades",
+        "shielded secret stage",
+        "listKeyBindings(\"global\")",
+        "agentLane.defaultVisibility",
+        "palette.mode",
+        "agentPicker.provider",
+        "agentPicker.session",
+    ] {
+        assert!(
+            section.contains(marker),
+            "Plan 125 configuration docs must document marker {marker:?}"
+        );
+    }
+
+    let example = std::fs::read_to_string(root.join("examples/config/init.js"))
+        .expect("read canonical example configuration");
+    for marker in [
+        "\"Ctrl+X Ctrl+P\": \"shell.toggleAgentLane\"",
+        "\"Ctrl+X Ctrl+O\": \"controlCenter.open\"",
+        "unbindKey(\"Ctrl+X Ctrl+P\", { scope: \"global\" })",
+        "bindKey(\"Alt+L\", \"shell.toggleAgentLane\", { scope: \"global\" })",
+        "unbindKey(\"Ctrl+X Ctrl+O\", { scope: \"global\" })",
+        "bindKey(\"Alt+X\", \"controlCenter.open\", { scope: \"global\" })",
+        "Plan 125: every agent picker command stays a row",
+        "no picker key bindings or configuration properties",
+        "shielded secret field never becomes init.js or composer-draft state",
+        "intentionally declares no picker command binding",
+    ] {
+        assert!(
+            example.contains(marker),
+            "canonical config must retain Plan 125 marker {marker:?}"
+        );
+    }
+
+    let inventory =
+        std::fs::read_to_string(root.join("docs/reference/clay-js-api/api-inventory.toml"))
+            .expect("read API inventory");
+    let lane_start = inventory
+        .find("id = \"shell.toggleAgentLane\"")
+        .expect("lane command must remain in API inventory");
+    let lane_entry = &inventory[lane_start..];
+    assert!(
+        lane_entry
+            .lines()
+            .take_while(|line| !line.starts_with("[[api]]"))
+            .any(|line| line.trim() == "custom_properties = []"),
+        "lane command must keep empty custom-property metadata"
     );
 }
 

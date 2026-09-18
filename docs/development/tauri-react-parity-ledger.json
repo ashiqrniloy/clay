@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-17T00:00:00Z",
+  "updated": "2026-09-18T00:00:00Z",
   "native_client_frozen": true,
   "status_vocabulary": [
     "pending",
@@ -994,7 +994,16 @@
             "K96",
             "K97",
             "K98",
-            "K99"
+            "K99",
+            "K100",
+            "K101",
+            "K102",
+            "K103",
+            "K104",
+            "K105",
+            "K106",
+            "K107",
+            "K108"
           ]
         }
       ],
@@ -1100,7 +1109,9 @@
             "M4",
             "M5",
             "M6",
-            "M7"
+            "M7",
+            "Q39",
+            "Q40"
           ]
         }
       ],
@@ -1118,7 +1129,7 @@
         "ViewportRenderPatch"
       ],
       "verified_automated": "tests/performance_budgets.rs::tauri_react_bundle_budgets_are_documented + frontend check:budget",
-      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build — boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
+      "verified_manual": "test-plan/11-performance.md execution records and phase UI review evidence; Q38 (2026-09-01): modulepreload parallel load verified on the post-split build \u2014 boot capture code-reviews/screenshots/2026-09-01-plan105-manual/default/, check:budget 153.4/180 + 359.7/400 kB gzip"
     },
     {
       "capability_id": "platform.windows",
@@ -1244,7 +1255,8 @@
             "S46",
             "S47",
             "S48",
-            "S49"
+            "S49",
+            "S50"
           ]
         }
       ],
@@ -1383,7 +1395,9 @@
             "T79",
             "T80",
             "T81",
-            "T82"
+            "T82",
+            "T83",
+            "T84"
           ]
         }
       ],
@@ -1557,7 +1571,9 @@
             "A19",
             "A20",
             "A21",
-            "A22"
+            "A22",
+            "A23",
+            "A24"
           ]
         }
       ],
@@ -1695,7 +1711,11 @@
             "C61",
             "C62",
             "C63",
-            "C64"
+            "C64",
+            "C65",
+            "C66",
+            "C67",
+            "C68"
           ]
         }
       ],

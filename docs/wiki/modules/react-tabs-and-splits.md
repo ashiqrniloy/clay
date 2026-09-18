@@ -73,7 +73,7 @@ cd frontend && npx vitest run src/shell
 cargo test -p clay-desktop --all-targets
 ```
 
-## Plan 124: tab-owned agent lane state
+## Plan 124/125: tab-owned agent lane state
 
 The agent lane is not window-global. The `agentLane` store in `frontend/src/shell/layout-state.ts` is read by the active tab's `AgentLane`; its toggle is routed
 as `shell.toggleAgentLane` and `workspace-controller.ts` subscribes it to the
@@ -92,12 +92,23 @@ both `AgentLane` and `AgentView`; tab close disposes it. This prevents view
 switches from creating duplicate stores or losing a running transcript, while
 keeping tabs isolated.
 
+Plan 125 added the default-agent behaviour on top of that ownership: a tab with
+no agent adopts the server's default type (`coding-agent` first, then `coding`,
+else the first listed) once the agent listing arrives, provided the session has
+not already selected one — so a fresh tab is usable without a manual pick, and
+re-picking or a session agent is never overwritten. Because that adoption makes a
+folder-less tab look "committed", `tabUncommitted` in
+`frontend/src/shell/tab-store.ts` now depends only on the absence of
+`workspaceRoot`, which keeps the launcher landing on a folder-less tab instead of
+letting a default agent suppress it.
+
 Tests: `src/shell/layout_persist.rs::tab_visibility_round_trips_and_defaults_to_visible`,
 `frontend/src/shell/tab-store.test.ts`,
 `frontend/src/shell/workspace-controller.test.ts`,
 `frontend/src/shell/WorkspacePanes.test.tsx`, and
 `frontend/src/shell/AgentLane.test.tsx`. The manual live evidence is in
-`test-plan/artifacts/124-agent-lane/`.
+`test-plan/artifacts/124-agent-lane/`; Plan 125's default-agent and folder-less
+landing checks are module 14 T83–T84 in `test-plan/index.md`.
 
 ## Related
 

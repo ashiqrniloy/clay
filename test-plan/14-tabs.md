@@ -445,6 +445,16 @@ Deep references: `DESIGN.md` §12, `frontend/src/shell/persist.ts`, `src/shell/l
 | T81 | Hide the lane in one tab, switch to the other tab, quit the client, and relaunch; also relaunch after a hostile/truncated `layout.json` (module 14 window-state steps) | The persisted layout carries `laneVisible` per tab, so the hidden state comes back with that tab while the other tab stays visible; a truncated/invalid layout file falls back to the visible default without losing the other tabs' fields (fail-closed restore, unchanged by this plan). Automated: `frontend/src/shell/tab-store.test.ts`, `frontend/src/shell/workspace-controller.test.ts`, `src/shell/layout_persist.rs` tests |
 | T82 | With the lane visible, switch tabs and close one; inspect the tab list and the session list in the accessibility tree | Tab activation/close never remounts the lane's session (the store is per tab runtime, disposed only when the tab closes) and the lane is not part of the tab list traversal; the tab list still announces activate/create/close as before. Automated: `WorkspacePanes.test.tsx` (one store per tab runtime), tab a11y tests |
 
+## Plan 125 steps (default agent + typable lane, 2026-09-18)
+
+Deep references: `DESIGN.md` §12, `plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`,
+`frontend/src/coding-agent/Composer.tsx`, `frontend/src/shell/tab-store.ts`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T83 | Open a tab with a workspace but no agent and watch the lane's agent picker; then create a second tab and switch back | The tab **adopts the default agent type** as soon as the server's agent listing lands (preference order `coding-agent`, then `coding`, else the first listed type): the picker shows that type, its model/effort/token controls appear, and the tab's title becomes the agent's name (`workspace agent`-style label in the tab strip). The adoption is per tab and happens once — a tab that already carries an agent is left alone, no extra pick is made, and switching tabs never copies one tab's agent onto another. On a tab with **no** agent types listed the picker offers `Attach an agent` and the field stays typable. Automated: `WorkspacePanes.test.tsx` (adopts the default agent for a tab with none, once the listing lands; leaves an already-attached tab alone), `AgentLane.test.tsx` (offers the agent picker and keeps the field typable with no agent), `Composer.test.tsx` |
+| T84 | On a tab with no workspace root, check the landing; then adopt an agent (or reload) and check it again | A folder-less tab keeps the launcher landing even after the default agent is auto-attached: "uncommitted" depends only on the **workspace root**, never on agent attachment, so the landing is not swallowed by adoption. Opening a folder commits the tab as before. Automated: `frontend/src/shell/tab-store.test.ts` (agent-only tab is uncommitted; the round trip keeps the agent half), `WorkspacePanes.test.tsx` (keeps the launcher landing when the default agent auto-attaches) |
+
 ## Plan 124 execution record (Linux, 2026-09-17)
 
 | Step | Result | Evidence |
@@ -462,3 +472,14 @@ that tab on this host, so the diagnostic is a bootstrap-race observation in a
 sequence no human produces. A plain `New tab` immediately afterwards produced
 zero diagnostics in the same tab's accessibility dump. The bridge `busy`/bootstrap path is untouched by plan
 124.
+
+## Plan 125 execution record (Linux, 2026-09-18)
+
+| Step | Result | Evidence |
+|---|---|---|
+| T83 (default agent adoption) | PASS live + PASS automated | Live (canonical config, fresh build, isolated root): the first tab came up with the lane already showing `Coding Agent` in the agent-type picker and its tab label reading `workspace agent` — no user pick — while the model trigger stayed the disabled `Configure a provider` row (no provider configured). A second tab behaved the same and the first tab's state was untouched. Automated: `WorkspacePanes.test.tsx` (adopts the default agent for a tab with none, once the listing lands; leaves an already-attached tab alone, no extra pick), `AgentLane.test.tsx` (hands the picked type to the tab), `Composer.test.tsx`. Evidence: `test-plan/artifacts/125-palette/screenshots/01-rest.ax.txt` (`combo box Coding Agent Agent type`, `page tab … workspace agent`). |
+| T84 (folder-less tab keeps the landing) | PASS live + PASS automated | Live: tab creation on the review root never suppressed the empty-tab landing path; on a folder-less tab the landing stays up after auto-adoption (recorded during the plan-125 task-12/15 sessions), and opening a folder commits the tab. Automated: `frontend/src/shell/tab-store.test.ts` (`tabUncommitted` keys on the workspace root only; agent-only tabs stay uncommitted), `WorkspacePanes.test.tsx` (keeps the launcher landing when the default agent auto-attaches). |
+
+The per-tab lane rules from plan 124 (T79–T82) were re-run in the same session
+and still hold: hiding the lane on one tab left the new tab's lane visible, and
+the hidden lane's draft survived the hide/show round trip.

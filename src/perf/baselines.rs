@@ -308,7 +308,8 @@ pub fn encode_decode_sdui_snapshot() -> usize {
 }
 
 /// Phase 24.1: worst-case server-owned transient-menu snapshot (max items ×
-/// max label/detail/accessibility/query strings) must encode/decode and stay
+/// max label/detail/accessibility/query strings, plus the palette's row fields
+/// and the session's presentation mode) must encode/decode and stay
 /// far under the 1 MiB frame cap. The DTO clamps at construction, so the
 /// worst case is bounded by `TRANSIENT_MENU_MAX_*`; this asserts the wire
 /// size stays small enough that per-keystroke snapshot pushes on local IPC
@@ -349,7 +350,9 @@ pub fn encode_decode_max_transient_menu_snapshot() -> usize {
         TransientMenuStatusData::Active,
         TransientMenuFocusPolicyData::Modal,
         TransientMenuOriginData::CommandPalette,
-    );
+    )
+    // Plan 125: and the session's presentation mode.
+    .with_mode("x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_MODE_CHARS));
     let codec = Codec::default();
     let message = ServerMessage::TransientMenuSnapshot(Box::new(snapshot));
     let frame = codec

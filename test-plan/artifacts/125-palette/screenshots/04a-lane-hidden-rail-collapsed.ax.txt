@@ -1,0 +1,64 @@
+depth|role|selected|states|name|text|extents|app
+0|application|-||clay-desktop||-1,-1,-1x-1|CLAY-DESKTOP
+1|frame|-|visible|Clay||0,0,1552x1203|CLAY-DESKTOP
+2|panel|-|visible|||26,23,1500x47|CLAY-DESKTOP
+3|panel|-|visible|||26,23,1500x47|CLAY-DESKTOP
+4|filler|-|visible|||1406,23,114x46|CLAY-DESKTOP
+5|separator|-||||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible|Minimise||1406,31,34x30|CLAY-DESKTOP
+5|button|-|visible|Maximise||1446,31,34x30|CLAY-DESKTOP
+5|button|-|visible|Close||1486,31,34x30|CLAY-DESKTOP
+4|filler|-|visible|||741,37,69x17|CLAY-DESKTOP
+5|label|-|visible|Clay||741,37,69x17|CLAY-DESKTOP
+5|label|-||||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible|||26,70,1500x1104|CLAY-DESKTOP
+3|filler|-||||26,70,1500x1104|CLAY-DESKTOP
+4|filler|-||||26,70,1500x1104|CLAY-DESKTOP
+5|scroll pane|-||||26,70,1500x1104|CLAY-DESKTOP
+6|document web|-|visible|Clay||26,70,1500x1104|CLAY-DESKTOP
+7|landmark|-|visible|||26,70,1500x40|CLAY-DESKTOP
+8|section|-|visible|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible|Application controls||1372,73,142x33|CLAY-DESKTOP
+9|button|-|visible|Control Center||1372,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible|Tab view||1408,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible|Workspace||1413,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible|Agent||1473,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible|Clay workspace||26,110,1500x1036|CLAY-DESKTOP
+8|section|-|visible|||26,110,1500x1036|CLAY-DESKTOP
+9|section|-|visible|||26,110,1500x1036|CLAY-DESKTOP
+10|landmark|-|visible|||26,110,1500x1010|CLAY-DESKTOP
+11|button|-|visible|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible|Server-driven items||26,194,244x893|CLAY-DESKTOP
+12|list item|-|visible|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible|||26,1087,244x10|CLAY-DESKTOP
+11|section|-|visible|||154,1095,23x25|CLAY-DESKTOP
+12|section|-|visible|||159,1100,13x15|CLAY-DESKTOP
+11|section|-|visible|||180,1100,32x15|CLAY-DESKTOP
+11|section|-|visible|||219,1095,19x25|CLAY-DESKTOP
+12|section|-|visible|||224,1100,9x15|CLAY-DESKTOP
+11|section|-|visible|||241,1100,30x15|CLAY-DESKTOP
+11|landmark|-|visible|Pane 1||270,110,1256x1010|CLAY-DESKTOP
+12|panel|-|visible|Empty tab||270,110,1256x1010|CLAY-DESKTOP
+13|button|-|visible|Open file||811,615,75x34|CLAY-DESKTOP
+13|button|-|visible|Open folder||893,615,92x34|CLAY-DESKTOP
+10|footer|-|visible|Package status||26,1120,1500x26|CLAY-DESKTOP
+11|status bar|-|visible|||26,1120,1500x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,1120,1500x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,1120,1500x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,1120,1500x10|CLAY-DESKTOP
+7|landmark|-|visible|||26,1146,1500x28|CLAY-DESKTOP
+8|section|-|visible|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible|||111,1145,743x31|CLAY-DESKTOP
+8|button|-|visible|lane Ctrl X P||881,1144,123x33|CLAY-DESKTOP
+8|button|-|visible|palette Ctrl X O||1017,1144,147x33|CLAY-DESKTOP
+8|button|-|visible|files Ctrl B||1177,1144,109x33|CLAY-DESKTOP
+8|button|-|visible|outline Ctrl I||1299,1144,125x33|CLAY-DESKTOP
+8|button|-|visible|filter /||1437,1144,78x33|CLAY-DESKTOP

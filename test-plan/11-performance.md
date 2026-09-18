@@ -24,7 +24,6 @@ EOF
 
 ## Feel checks
 
-| # | Action | Expected |
 **Plan 124 note (2026-09-17).** Every Q-step that says "Command Centre" /
 "centered" refers to the command/path surface, which is now the
 composer-anchored `/` palette (bottom sheet at the composer's width, one veil
@@ -32,6 +31,15 @@ over panes + rail; chord `Ctrl+X Ctrl+O`). The feel/containment criteria are
 unchanged, and `Ctrl+X Ctrl+P` now toggles the agent lane instead — its toggle
 is a pure layout change with no palette work.
 
+**Plan 125 note (2026-09-18).** The centered projection is retired (see module
+10 K100–K108), so `centered_overlay_baselines` and the "centered panel"
+wording below are historical: the shipped transient surface is the one palette
+sheet, whose elevation is a **halo** (two zero-offset `text.primary` glow
+layers) rather than a drop shadow, and whose stages (picker/credential/URL/
+OAuth) reuse the same sheet rect instead of opening new chrome. Q10, Q13 and
+Q31 keep their budgets against that surface; Q39 and Q40 are the new checks.
+
+| # | Action | Expected |
 |---|--------|----------|
 | Q1 | Open `big.txt` (~12 MB) | Opens without hang; status/version settles |
 | Q2 | Type at top, middle (jump via Ctrl+G equivalent or scroll), bottom | Keystroke-to-paint feels immediate; no IPC wait |
@@ -60,7 +68,7 @@ bench group, `pane_paint_baselines` + `tab_switch_baselines`).
 |---|--------|----------|
 | Q8 | `cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2` | Advisory numbers only (linear in pane count, sub-microsecond on dev hardware) — NO wall-clock pass/fail; deterministic guards are automated (linear pane-chrome geometry, no tab-switch document reserialization, 4-pane decoration aggregate ≤ 32768 B) |
 | Q9 | 4-pane window, 2 tabs each at 4 panes; rapid `Ctrl+Tab` + `Ctrl+\\` + `Ctrl+Alt+W` while typing | No perceptible stall; pane/decoration work stays bounded — pane count is the only driver (per-pane paint is O(1) placeholder/chrome fills, never document-size work) |
-| Q10 | Centered Command Centre surface (Phase 24.4): open command/path mode, type a filter, resize the window (incl. below 640 px wide), then close — repeat with 4 panes and 2 tabs | One centered panel + one full-window scrim appear immediately with no visible duplicate overlay per pane/tab; width clamps smoothly to the window with no reflow of the dimmed editor behind; close restores instantly; no blur-related jank (no backdrop filter runs). Automated cross-references: `centered_overlay_work_is_bounded_and_scrim_is_single_pass`, `centered_scrim_routes_through_token_driven_primitive_without_blur` (ui_primitive_conformance), `centered_layer_theme_switch_keeps_layer_and_updates_surface_geometry`, `centered_layer_repeated_open_close_cycles_leave_no_orphan_layers` — guards are not replacements for this visual check |
+| Q10 | Palette surface (Phase 24.4 surface, plan-125 anchoring): open command/path mode, type a filter, resize the window (incl. below 640 px wide), then close — repeat with 4 panes and 2 tabs | One sheet + one veil appear immediately with no visible duplicate overlay per pane/tab; the sheet keeps the composer's width as the window narrows (no 640-px clamp, no reflow of the dimmed editor behind); close restores instantly; no blur-related jank beyond the one `modal.scrim` backdrop pass. Automated cross-references: `centered_overlay_work_is_bounded_and_scrim_is_single_pass`, `centered_scrim_routes_through_token_driven_primitive_without_blur` (ui_primitive_conformance), `centered_layer_theme_switch_keeps_layer_and_updates_surface_geometry`, `centered_layer_repeated_open_close_cycles_leave_no_orphan_layers` — guards are not replacements for this visual check (the historical centered-era row keeps its budget against the palette sheet) |
 
 ## Plan 087 completion feel steps
 
@@ -68,7 +76,7 @@ bench group, `pane_paint_baselines` + `tab_switch_baselines`).
 |---|--------|----------|
 | Q11 | Trigger completion in a document with many provider items (e.g. 16 markdown items) | Popup appears immediately with ≤ 8 visible rows and ≤ 480 logical px width (`COMPLETION_MAX_VISIBLE_ROWS` / `COMPLETION_MAX_WIDTH_PX`); typing/filtering stays responsive; no per-frame layout/paint cost from the popup (geometry is a pure function of caret + item count) |
 | Q12 | Scroll the popup with the mouse wheel or selection movement on a long list | Scroll stays inside the popup shell; no editor text scrolls; feel is immediate (advisory; see `completion_*_baselines` bench groups in `benches/window_baselines.rs`) |
-| Q13 | Command Centre with 60+ entries: open, filter to a short list, scroll, close | Filter/scroll feel stays immediate and bounded (advisory; `centered_overlay_baselines` + `completion_filter_baselines`); known visual containment follow-up `P1-087-UI-1` is tracked in the plan, not silently waived |
+| Q13 | Palette with 60+ entries: open, filter to a short list, scroll, close | Filter/scroll feel stays immediate and bounded (advisory; `centered_overlay_baselines` is the historical centered group, `command_centre_open_baselines` + `completion_filter_baselines` cover the shipped surface); known visual containment follow-up `P1-087-UI-1` is tracked in the plan, not silently waived |
 | Q14 | Repeat Q11–Q13 while `Pending edits` > 0 or typing rapidly | No perceptible stall; completion/menu work never blocks the edit queue |
 
 ## Plan 088 responsive/performance steps
@@ -80,6 +88,13 @@ bench group, `pane_paint_baselines` + `tab_switch_baselines`).
 | Q17 | Compare 1× and representative 2× logical-window layout with completion/centered surfaces | Layout uses logical bounds; completion/centered widths/rows remain capped; overlay work stays one bounded projection/scrim |
 | Q18 | Reload theme/typography while idle, then type/scroll immediately | Cached resolution installs once; no visible paint/input stall or duplicate layout churn; ordinary edits remain local-optimistic |
 | Q19 | Repeat completion/Command Centre and pane/tab switching with pending edits | Results stay responsive; no IPC, JavaScript, document serialization, or file work enters paint/text-event paths |
+
+## Plan 125 feel steps (palette elevation + stage flows)
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q39 | Open the palette and the `@` mentions menu over a busy editor, then close both (repeat in all four themes) | Both surfaces carry the **halo**, not a drop shadow: a zero-offset, symmetric glow around the border with no dark band on one side (live numbers: rows above the sheet's top border rise `39→42→46→48→51` against a veiled background of 38–39, rows below it are 53/50/47 over the lane's 40; the sheet interior stays darker than the veiled canvas). Standard popovers keep their own drop-shadow recipe; the halo is a value change, not new elevation chrome, so no extra layer or blur pass is introduced. Automated: `tests/package_ui_conformance.rs::plan125_palette_and_mentions_take_the_halo_not_a_drop_shadow`, `src/shell/design_system.rs` `Elevation::Halo` fallback, `design-artifacts/tools/capture-lane-palette.mjs` (normalized box-shadow assertions) |
+| Q40 | From the palette, step through a picker flow (list → provider → auth method → credential → URL), then cancel | Each stage swaps rows/prompt **in the same sheet** with no re-anchor, no remount, and no new veil/backdrop pass; the credential stage disables the composer field and focuses the in-sheet shield without a focus jump; cancelling closes in one step and leaves no orphan layer, no stuck draft, and no console warning. Feel stays immediate (the advisory budgets above), and the stage's own rows remain bounded. Automated: `CommandPalette.test.tsx` (stage rendering, shield lifecycle), `Composer.test.tsx` (stage keys, shield send), `WorkspacePanes.test.tsx` (one sheet, one veil), fixture tool scenes `providers`/`auth`/`secret`/`url`/`oauth` |
 
 ## Plan 088 task 12 Linux execution record (2026-08-15)
 
@@ -180,7 +195,7 @@ No performance budget was raised. Wide/narrow/large-type screenshots are under `
 
 | # | Action | Expected |
 |---|--------|----------|
-| Q31 | Open/filter a 256-item Command Centre or Path Browser snapshot repeatedly | Existing 50 ms open / 4 ms filter advisory budgets remain; React performs no fuzzy/filesystem/package work and native bounded scrolling stays responsive |
+| Q31 | Open/filter a 256-item palette or Path Browser snapshot repeatedly | Existing 50 ms open / 4 ms filter advisory budgets remain; React performs no fuzzy/filesystem/package work and native bounded scrolling stays smooth (collections protocol-capped at 256, no frontend scorer). Stage flows reuse the same sheet: a stage change is one snapshot, never a second surface or a remount (plan 125) |
 | Q32 | Trigger configuration reload, theme/appearance switch, and typography apply while typing | CodeMirror local edit/paint remains wait-free; configuration and preference work stays server-side and atomic; one runtime snapshot updates derived UI state |
 | Q33 | Build production frontend after command/settings chunks land | Startup shell stays below 180 kB gzip, total below 404 kB gzip; command/settings code remains behind lazy workspace/package chunks |
 
@@ -327,3 +342,22 @@ No performance budget was raised: the debug test budget now scales with input si
 | Check | Result | Evidence |
 |---|---|---|
 | Q38 | PASS | Task 9 build evidence (`docs/development/performance.md`): index raw 517.98 → 468.84 kB (≈148.7 kB gzip), rollup warning cleared; `codemirror` chunk (361.65 kB raw / 117.80 kB gzip) loads in parallel via modulepreload (2 requests, no waterfall); `npm run check:budget` gates shell 153.4 kB/≤180 kB and total 359.7 kB/≤400 kB gzip; all frontend tests green. The documented trade-off (startup gzip up ~101 kB because the eager shell already imported a codemirror slice; editor-open bytes drop equally) is recorded there. The 2026-09-01 launch-gate capture `code-reviews/screenshots/2026-09-01-plan105-manual/default/` boots this exact split build with the welcome state rendering normally — no startup regression observed. |
+
+## Plan 125 execution record (Linux, 2026-09-18)
+
+Live run on the canonical config in an isolated root (captures + numbers in
+`test-plan/artifacts/125-palette/`), plus the fixture tool and the suites named
+in the rows.
+
+| Step | Result | Evidence |
+|---|---|---|
+| Q10 (palette surface, resize/narrow) | PASS live (1500 px + 1024 px) / PASS structural | Live: one sheet + one veil, no duplicate overlay; at 1024 px the sheet still matched the composer box (`1124x420` at 1500 px; width tracked the box at the narrow width) with the 6px gap and the 420 px cap unchanged, and closing restored instantly (`01-rest.png` … `05-lane-restored-palette.png`). Resize-under-load and the 640-px clamp question are historical (the sheet has no centered width token since plan 125); the multi-pane/per-tab duplicate guard stays in `ui_primitive_conformance`. |
+| Q13 (60+ entries, filter/scroll) | PASS live (open + scroll bounds) + PASS structural | Live: the sheet opened with `95 results` and an internal list box of 306 px inside the 420 px sheet (the remainder scrolls inside the sheet, nothing overflows the window). Filter feel is the advisory budget below; the query path itself could not be typed on this host (ceiling). |
+| Q31 (256-item snapshot repetition) | PASS structural (unchanged) | No frontend scorer/listing exists; collections stay protocol-capped at 256, and a stage change is one snapshot (see Q40). The 50 ms/4 ms advisory budgets are unchanged by this plan and were not re-benched here. |
+| Q39 (halo, not a drop shadow) | PASS live (numeric) + PASS automated | Live, `python3 launch-check.py …` (`geometry-halo.txt`): above the sheet's top border the pixels rise `39→42→46→48→51` over rows 525–530 against a veiled background of 38–39 and a rest canvas of 40 (i.e. brighter than the un-veiled canvas at the edge); below the bottom border rows 951–953 read 53/50/47 over the lane's 40 — symmetric, **zero offset**, no dark band, and the sheet interior (29,32,33) stays darker than the veiled canvas. Recipe/conformance: `plan125_palette_and_mentions_take_the_halo_not_a_drop_shadow`, `Elevation::Halo` fallback, and the fixture tool's normalized box-shadow assertions. |
+| Q40 (stage transitions, same sheet) | PASS fixture + PASS automated / UNRESOLVED live | The fixture scenes (`providers`/`auth`/`secret`/`url`/`oauth`) step through the flow in one sheet with one veil; `CommandPalette.test.tsx` + `Composer.test.tsx` pin the stage swap, the shield lifecycle, and the focus return; `WorkspacePanes.test.tsx` pins one sheet/veil and no centred fallback. Live stage navigation is blocked by the host ceiling (no row activation), which is recorded rather than assumed. |
+
+**Ceilings.** No keyboard/pointer synthesis on this host, so the typed-query and
+row-activation legs of Q13/Q31/Q40 remain UNRESOLVED live; the numbers that are
+claimed (geometry, veil deltas, halo profile, scroll bounds) come from pixel
+probes on window-cropped captures. Wall-clock budgets stay advisory as always.

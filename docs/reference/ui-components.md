@@ -47,16 +47,27 @@ are cataloged here so package authors do not mistake them for extension points:
   caret/IME projection with an 8 visible-row and 480 logical-pixel cap,
   retained scrolling, stale/empty/error dismissal, and sanitized status/a11y
   data. Completion is not a package overlay anchor or component kind.
-- **Command Centre/Path Browser:** the command and path sessions are the
-  composer's own `/` palette since plan 124 (`TransientMenuOrigin::CommandPalette`:
-  the sheet is the field's menu, 6 logical pixels above the box, as wide as the
-  box, with the working-area veil behind it). `TransientMenuOrigin::Centered`
-  remains a Clay-owned modal window-level surface using the token-backed
-  centered width (640 logical-pixel default) for the agent picker and package UI
-  dialogs, with retained result scrolling and a single scrim. Package commands
-  may be listed behind `/` but packages cannot open, drive, configure, or
-  intercept either session. `centered` and `commandPalette` are not package
-  anchors.
+- **Command palette and picker stages (one composer-anchored surface):** since
+  plan 125 the composer-anchored palette is the only transient selection surface
+  (`TransientMenuOrigin::CommandPalette`). The sheet is the field's menu, 6
+  logical pixels above the box and as wide as the box, veiled by the
+  `modal.scrim` recipe over the working area through the inspector rail's full
+  height while the agent lane — which holds the query — stays interactive above
+  it, and it carries the design language's halo instead of a drop shadow. The
+  session's `mode` field (protocol v32) selects what the sheet renders:
+  `catalogue` (the generation-stamped command catalogue, opened by `/`),
+  `path` (the Path Browser, also `/`), and the picker stages `picker`,
+  `secret`, `url`, and `oauth` (no sigil). The `secret` stage is shielded — the
+  credential is typed into a `type="password"` field inside the sheet, masked in
+  the server's snapshot, and delivered only through the host's credential path,
+  so it never reaches the composer's draft or the persistence layer.
+  `TransientMenuOrigin::Centered` and its window-level sheet are **retired** by
+  plan 125: the wire value still decodes for older frames and the core
+  token `dimension.overlay.centered.width` still sizes package `modal`
+  dialogs, but no live producer emits `centered` and it was never a package
+  anchor. Package commands may be listed behind `/` but packages cannot open,
+  drive, filter, configure, or intercept a palette session, cannot request the
+  veil, and cannot claim the shielded stage.
 - **Package overlays:** package declarations remain limited to
   `working-area`, `active-pane`, `main`, and `pointer`; no package JavaScript
   runs in paint/layout/input paths. Package-authored transient-menu labels are
@@ -76,8 +87,9 @@ records the boundaries that are easiest to confuse with package extension
 points:
 
 - Clay owns the working area, pane/split tree, fixed slots, tab bar, status
-  chrome, the persistent agent lane, the composer's `/` palette, core welcome
-  fallback, file browser, completion projection, and centered overlays. The
+  chrome, the persistent agent lane, the composer palette (the single transient
+  selection surface since plan 125, which retired the centered sheet), core
+  welcome fallback, file browser, and completion projection. The
   loaded empty-tab landing is package pane-content
   (whatever package contributes the empty-tab landing). Packages contribute inert component trees, action
   intents, input/state metadata, and typed semantic tokens only.
@@ -90,7 +102,8 @@ points:
   containment, and active user typography propagation remain Clay-native
   layout/render responsibilities. Package overlays remain limited to
   `working-area`, `active-pane`, `main`, and `pointer`; `completion` and
-  `centered` are internal origins.
+  `centered` are internal origins — `completion` live, `centered` decode-only
+  since plan 125 retired it — and neither is a package anchor.
 - Existing typed tokens and cached `ResolvedUiTheme`/typography metrics are
   reused. Packages cannot declare breakpoints, concrete fonts/sizes, raw
   CSS/colors, native widgets, renderer callbacks, client JavaScript, or direct
@@ -138,7 +151,7 @@ The persistent agent lane and the palette it answers to add no package-facing
 kind, style variable, token, overlay anchor, manifest field, permission, or JS
 API. Recorded here because both are easy to mistake for extension points:
 
-- **Agent lane** (`frontend/src/shell/AgentLane.tsx`): the working area's own
+- **Agent lane** (`frontend/src/shell/AgentLane.tsx`): the view pane's own
   bottom chrome row — approval strip, composer box (prompt field plus the tab's
   agent-type/model/effort controls), hint row, session-environment foot — shared
   by the Workspace and Agent views of the same tab, toggled by
@@ -146,6 +159,10 @@ API. Recorded here because both are easy to mistake for extension points:
   not a `PanelContribution` slot, a `ComponentKind`, a `TransientMenuOrigin`, or
   an `OverlayAnchor`; the pane `bottom` slot still composes inside its pane,
   above the lane. Clay-owned presentation over the documented agent session APIs.
+  Plan 125 confined it to the view pane; plan 126 made the workspace sidebar a rail of the same working-area grid (the tree's token-sized region is host-placed, so the sidebar runs the full height beside the lane): the workspace sidebar (a split panel of
+  the working area) and the inspector rail (a grid column) both run the full
+  working-area height, and the lane stops at the rail's inner edge, taking the
+  full width only while the rail is collapsed.
 - **`/` palette** (`frontend/src/command-centre/CommandPalette.tsx`): the
   generation-stamped command catalogue drawn as the composer field's own menu
   (`TransientMenuOrigin::CommandPalette`), 6 logical pixels above the box and as
@@ -155,6 +172,37 @@ API. Recorded here because both are easy to mistake for extension points:
   commands appear automatically, routing-policy-filtered, with no authority.
   `commandPalette` is not a package anchor, and no package API opens or drives
   the session.
+
+### Plan 125 continuation: one sheet for every picker, and the halo
+
+Plan 125 finishes the boundary plan 124 opened: the retired centered sheet's
+hosts move onto the palette, and no package-facing vocabulary grows a centered
+option.
+
+- **Every picker is a palette session.** The agent picker's list, provider
+  setup, auth-method, secret, URL, and OAuth stages are the same
+  `TransientMenuSession` round trip as the catalogue, distinguished by the
+  session's `mode` (protocol v32: `catalogue`, `path`, `picker`, `secret`,
+  `url`, `oauth`, bounded to 16 characters). The server renders the rows, the
+  prompts, and the flow (backspace on an empty query ascends a stage and closes
+  the session at its entry), so a package sees exactly the same surface it
+  already saw: none.
+- **The shielded stage is Clay's, and only Clay's.** `secret` mode is the one
+  stage whose input lives inside the sheet (`type="password"`, composer field
+  disabled); the value is masked in every snapshot, flushed on `Enter`, and
+  transmitted only through the host credential path. No package can request,
+  style, or claim that stage, and no package API can read its value.
+- **The halo replaces the drop shadow** on the palette and the `@` mentions
+  menu: two zero-offset layers derived from `text.primary` (`0 0 14px -2px` at
+  14% and `0 0 3px 0` at 8%), with the border retained. Standard dropdowns and
+  other popovers keep their `shadow.pop` recipe; the halo covers only these two
+  surfaces (`DESIGN.md` §6).
+- **Package UI dialogs, `modal`, and the token.** `PackageOverlayAnchor` gains
+  no option: `package_ui.rs` no longer has a centered anchor at all, and the
+  remaining internal anchor for package overlays is the work-area/bottom shape.
+  `dimension.overlay.centered.width` stays a core theme token for package
+  `modal` dialogs (it sizes their `max-width`), not for any Clay transient
+  surface.
 
 Complete package-facing explanation:
 [Creating Clay Packages — Plan 124 authoring contract](packages/creating-packages.md#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette)
@@ -193,4 +241,4 @@ Agents and plan documents that touch app UI must follow the create-plan UI requi
 1. Reuse cataloged components, primitives, style variables, and tokens first; a custom component outside the catalog requires explicit justification.
 2. New components, primitives, tokens, and style variables are additive-only and token-driven (no raw colors, CSS, concrete font families, or point sizes).
 3. Every new component ships state-complete (all applicable `InteractionState` variants styled from tokens), accessible, and conformant with the Quiet Instrument binding in `DESIGN.md` §11 and the retired patterns in §14.
-4. Update `DESIGN.md` when design-language values or per-surface rules change; update the component catalog, the token catalog when token entries change, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Plan 087 also records Clay-owned welcome/completion/centered surfaces and keeps them out of package-facing anchor enums. Documentation drift fails `cargo test`.
+4. Update `DESIGN.md` when design-language values or per-surface rules change; update the component catalog, the token catalog when token entries change, `docs/reference/packages/creating-packages.md`, and the documentation-drift tests in the same change. Plans 087, 124, and 125 record the Clay-owned welcome, completion, agent-lane, and composer-palette surfaces and keep them out of package-facing anchor enums — with the centered transient surface retired outright, exactly one transient selection surface exists. Documentation drift fails `cargo test`.

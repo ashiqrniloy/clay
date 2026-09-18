@@ -192,7 +192,10 @@ impl ControlCenter {
             // Plan 124 task 7: the composer's palette, not a window sheet. The
             // Bottom anchor is the shipped plumbing (`PackageOverlayAnchor::
             // Bottom`); the client anchors it to the lane's composer box.
+            // Plan 125: `catalogue` is the plain list shape (scope chips and
+            // chord chips), the mode that means "nothing but rows".
             .with_origin(TransientMenuOrigin::CommandPalette)
+            .with_mode("catalogue")
     }
 
     /// The `All` chip (`scope == None`) shows every row; a scope chip shows the
@@ -696,6 +699,8 @@ mod tests {
         let mut center = ControlCenter::open(&registry, 9);
         let opened = center.session();
         assert_eq!(opened.origin(), TransientMenuOrigin::CommandPalette);
+        // Plan 125: the catalogue's plain-list mode (rows, no stage line).
+        assert_eq!(opened.mode(), Some("catalogue"));
         assert_eq!(opened.prompt(), "Commands");
         assert_eq!(opened.query(), "");
         let ids = |session: &TransientMenuSession| -> Vec<String> {

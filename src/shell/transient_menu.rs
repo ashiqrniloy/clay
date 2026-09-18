@@ -52,6 +52,10 @@ pub struct TransientMenuSession {
     focus_policy: TransientMenuFocusPolicy,
     /// Phase 20.5: surface origin (command palette, context menu, menu bar).
     origin: TransientMenuOrigin,
+    /// Plan 125: the session's presentation mode (see
+    /// `protocol::TransientMenuSnapshotData::mode`). `None` = the catalogue,
+    /// which is also what an absent wire field means.
+    mode: Option<String>,
     /// Clay-native caret bounds for completion projection. Stored as fixed
     /// point so the session remains `Eq` without making geometry user-facing.
     completion_anchor: Option<CompletionAnchor>,
@@ -119,10 +123,13 @@ pub(crate) enum TransientMenuOrigin {
     ContextMenu,
     /// Main-area-anchored menu bar dropdown.
     MenuBar,
-    /// Phase 24.4: window-centered menu sessions (pickers, package menus)
-    /// hosted in a window-level overlay layer with a scrim backdrop. Plan 124
-    /// task 7 moved the command catalogue and the path browser out of this set:
-    /// they are the composer's palette, anchored to the lane (`CommandPalette`).
+    /// Phase 24.4: window-centered menu sessions, hosted in a window-level
+    /// overlay layer with a scrim backdrop. Plan 124 task 7 moved the command
+    /// catalogue and the path browser out of this set: they are the composer's
+    /// palette, anchored to the lane (`CommandPalette`). Plan 125 retired its
+    /// last live producer — the agent picker is a `CommandPalette` session with
+    /// a `mode` now — so no session is produced with this origin; the wire value
+    /// stays decodable and the package UI layer keeps its own anchor mapping.
     Centered,
 }
 
@@ -176,6 +183,7 @@ impl TransientMenuSession {
             },
             focus_policy: TransientMenuFocusPolicy::Modal,
             origin: TransientMenuOrigin::CommandPalette,
+            mode: None,
             completion_anchor: None,
         }
     }
@@ -211,6 +219,11 @@ impl TransientMenuSession {
     /// Phase 20.5: surface origin for this session.
     pub(crate) fn origin(&self) -> TransientMenuOrigin {
         self.origin
+    }
+
+    /// Plan 125: the session's presentation mode; `None` = the catalogue.
+    pub(crate) fn mode(&self) -> Option<&str> {
+        self.mode.as_deref()
     }
 
     /// Phase 24.1: hydrate an inert protocol snapshot into a display session.
@@ -261,6 +274,9 @@ impl TransientMenuSession {
         .with_query(&snapshot.query)
         .with_focus_policy(focus_policy)
         .with_origin(origin);
+        if let Some(mode) = &snapshot.mode {
+            session = session.with_mode(mode.clone());
+        }
         if let Some(message) = status {
             session = session.with_empty_status(message);
         }
@@ -276,6 +292,16 @@ impl TransientMenuSession {
     /// Phase 20.5: set the surface origin (command palette, context menu, menu bar).
     pub(crate) fn with_origin(mut self, origin: TransientMenuOrigin) -> Self {
         self.origin = origin;
+        self
+    }
+
+    /// Plan 125: set the presentation mode, clamped to
+    /// `TRANSIENT_MENU_MAX_MODE_CHARS`.
+    pub(crate) fn with_mode(mut self, mode: impl Into<String>) -> Self {
+        self.mode = Some(truncate(
+            &mode.into(),
+            crate::perf::budgets::TRANSIENT_MENU_MAX_MODE_CHARS,
+        ));
         self
     }
 

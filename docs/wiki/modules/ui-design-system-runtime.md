@@ -122,7 +122,7 @@ themes declare the same thirteen theme-side roles as typed `designTokens`
   - `borderRadius`: `5.0px` (chips/kbd/badges), `8.0px` (controls/rows/tabs), `12.0px` (panels/popovers), `16.0px` (window/sheets/modals), `9999.0px` (pills). No `0px`.
   - `borderWidth`: `1.0px` hairline everywhere; 2px state marks rendered as inset shadow layers.
   - `backgroundOpacity`: `0.55` veil planes (`surface.panel`), `0.15` accent-tinted selected fills, `0.92` primary-button hover.
-  - `shadow`: two transient recipes only — `overlay` (`0 24px 60px -20px` @0.42 + `0 2px 10px -4px` @0.22) and `pop` (`0 14px 34px -14px` @0.34 + `0 1px 3px -1px` @0.16); no shadow on static surfaces.
+  - `shadow`: two transient recipes plus the palette's halo — `overlay` (`0 24px 60px -20px` @0.42 + `0 2px 10px -4px` @0.22), `pop` (`0 14px 34px -14px` @0.34 + `0 1px 3px -1px` @0.16), and `halo` (`0 0 14px -2px` @0.14 + `0 0 3px 0` @0.08, plan 125) on `commandCentre.default.root.rest` and `menu.default.root.rest` — the composer palette and its `@` mentions menu; no shadow on static surfaces.
   - `backdropBlur`: `0.0px` except the overlay scrim (3px) and toast (8px).
   - `transitionDuration`: `150.0ms` state changes, `240.0ms` surface entrances, `620.0ms` keyboard-focus pulse.
   - `transformPreset`: `press-shift-down` on buttons only; no hover lift.

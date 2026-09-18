@@ -26,6 +26,11 @@ export interface ClayTextFieldProps {
   placeholder?: string;
   validationState?: ValidationState;
   disabled?: boolean;
+  /** The control's type: `password` shields the value (plan 125 — the palette's
+   *  secret stage is the only caller). Single-line only; a shielded field also
+   *  declares `autocomplete="off"` and `spellcheck="false"`, because neither
+   *  belongs on a credential. */
+  type?: "text" | "password";
   /** Multiline composer variant (catalog gap; generic kind lands later). */
   multiline?: boolean;
   /** Multiline auto-grow: height follows content up to the CSS max-height. */
@@ -70,6 +75,7 @@ export function ClayTextField({
   placeholder,
   validationState = "none",
   disabled = false,
+  type = "text",
   multiline = false,
   autoGrow = false,
   variant = "default",
@@ -118,71 +124,74 @@ export function ClayTextField({
     <div className={styles.fieldSlot}>
       <RACTextField
         className={`${styles.field} ${variant === "composer" ? styles.composer : ""}`}
-      value={value}
-      onChange={onChange}
-      isDisabled={disabled}
-      isInvalid={validationState === "error"}
-      aria-describedby={describedBy}
-      {...recipeAttributes("textInput", "field")}
-    >
-      <Label
-        className={labelHidden ? styles.labelHidden : styles.label}
-        {...recipeAttributes("textInput", "label")}
+        value={value}
+        onChange={onChange}
+        isDisabled={disabled}
+        isInvalid={validationState === "error"}
+        aria-describedby={describedBy}
+        {...recipeAttributes("textInput", "field")}
       >
-        {label}
-      </Label>
-      {multiline ? (
-        <TextArea
-          ref={areaRef}
-          className={`${styles.input} ${roleClass} ${validationClass} ${
-            autoGrow ? styles.autoGrow : ""
-          }`}
-          placeholder={placeholder}
-          rows={3}
-          autoFocus={autoFocus}
-          {...recipeAttributes("textInput", "input")}
-          onKeyDown={(event) => {
-            onKeyDown?.(event);
-            if (event.defaultPrevented) return;
-            if (event.key === "Enter" && !event.shiftKey && onSubmit) {
-              event.preventDefault();
-              onSubmit(value);
-            }
-          }}
-        />
-      ) : (
-        <Input
-          className={`${styles.input} ${roleClass} ${validationClass}`}
-          placeholder={placeholder}
-          autoFocus={autoFocus}
-          {...recipeAttributes("textInput", "input")}
-          onKeyDown={(event) => {
-            onKeyDown?.(event);
-            if (!event.defaultPrevented && event.key === "Enter")
-              onSubmit?.(value);
-          }}
-        />
-      )}
-      {endContent}
-      {toolbar ? <span className={styles.toolbar}>{toolbar}</span> : null}
-      {description && (
-        <span
-          id={descriptionId}
-          className={styles.description}
-          {...recipeAttributes("textInput", "description")}
+        <Label
+          className={labelHidden ? styles.labelHidden : styles.label}
+          {...recipeAttributes("textInput", "label")}
         >
-          {description}
-        </span>
-      )}
-      {errorMessage && (
-        <span
-          id={errorId}
-          className={styles.error}
-          {...recipeAttributes("textInput", "error")}
-        >
-          {errorMessage}
-        </span>
-      )}
+          {label}
+        </Label>
+        {multiline ? (
+          <TextArea
+            ref={areaRef}
+            className={`${styles.input} ${roleClass} ${validationClass} ${
+              autoGrow ? styles.autoGrow : ""
+            }`}
+            placeholder={placeholder}
+            rows={3}
+            autoFocus={autoFocus}
+            {...recipeAttributes("textInput", "input")}
+            onKeyDown={(event) => {
+              onKeyDown?.(event);
+              if (event.defaultPrevented) return;
+              if (event.key === "Enter" && !event.shiftKey && onSubmit) {
+                event.preventDefault();
+                onSubmit(value);
+              }
+            }}
+          />
+        ) : (
+          <Input
+            className={`${styles.input} ${roleClass} ${validationClass}`}
+            type={type}
+            autoComplete={type === "password" ? "off" : undefined}
+            spellCheck={type === "password" ? false : undefined}
+            placeholder={placeholder}
+            autoFocus={autoFocus}
+            {...recipeAttributes("textInput", "input")}
+            onKeyDown={(event) => {
+              onKeyDown?.(event);
+              if (!event.defaultPrevented && event.key === "Enter")
+                onSubmit?.(value);
+            }}
+          />
+        )}
+        {endContent}
+        {toolbar ? <span className={styles.toolbar}>{toolbar}</span> : null}
+        {description && (
+          <span
+            id={descriptionId}
+            className={styles.description}
+            {...recipeAttributes("textInput", "description")}
+          >
+            {description}
+          </span>
+        )}
+        {errorMessage && (
+          <span
+            id={errorId}
+            className={styles.error}
+            {...recipeAttributes("textInput", "error")}
+          >
+            {errorMessage}
+          </span>
+        )}
       </RACTextField>
       {menu}
     </div>

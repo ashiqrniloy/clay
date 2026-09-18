@@ -273,6 +273,11 @@ pub const TRANSIENT_MENU_MAX_SCOPE_CHARS: usize = 16;
 pub const TRANSIENT_MENU_MAX_BINDINGS: usize = 4;
 /// `Ctrl+Shift+Alt+ArrowUp` is 22; 32 leaves room for a future modifier key.
 pub const TRANSIENT_MENU_MAX_BINDING_CHARS: usize = 32;
+/// Plan 125: a palette session's presentation mode — one of `catalogue`,
+/// `path`, `picker`, `secret`, `url`, `oauth`. A short, closed, server-owned
+/// word like the scope tag: the client picks a stage layout from it and never
+/// infers one from the origin or the prompt text.
+pub const TRANSIENT_MENU_MAX_MODE_CHARS: usize = 16;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;

@@ -1,0 +1,74 @@
+# Plan 125 launch-test geometry, veil, halo, theme (live, canonical config)
+
+Captures: screenshots/01-rest.png (lane, no palette) and
+screenshots/02-palette-titlebar.png (palette open via the titlebar trigger).
+Both 1500x1151 window crops taken at frame origin 8,39; AX extents map to
+crop rows/columns with offset (8,23) — verified against the sheet's border
+rows below.
+
+$ python3 launch-check.py screenshots/01-rest.png screenshots/02-palette-titlebar.png 8,23
+
+geometry
+  sheet (AX)                    44,531 1124x420
+  height cap 420                OK
+  width vs lane inner (1124)  MATCH
+  gap above field shell (y 957)  6px -> 6px OK
+  entry Message (AX)            53,966 1106x48
+
+region means (rest | palette open | delta)
+  sidebar (60,300 180x340)           (40, 40, 40) | (37, 39, 39) | -1.7
+  pane (420,300 480x220)             (40, 40, 40) | (34, 36, 36) | -4.7
+  rail (1200,300 240x340)            (41, 41, 41) | (35, 37, 36) | -5.0
+  lane foot strip (700,1124 400x18)  (40, 40, 40) | (40, 40, 40) | +0.0
+  composer box (60,990 540x10)       (50, 48, 47) | (50, 48, 47) | +0.0
+  status bar (300,1148 600x12)       (59, 57, 53) | (59, 57, 53) | +0.0
+
+halo profile across the sheet's top border (probe x 600; border row 531)
+  AX y | open | rest | open-rest
+   524 | (38, 40, 39) | (40, 40, 40) | -1.0
+   525 | (39, 41, 40) | (40, 40, 40) | +0.0
+   526 | (42, 42, 41) | (40, 40, 40) | +1.7
+   527 | (42, 43, 42) | (40, 40, 40) | +2.3
+   528 | (46, 46, 44) | (40, 40, 40) | +5.3
+   529 | (48, 47, 44) | (40, 40, 40) | +6.3
+   530 | (51, 49, 46) | (40, 40, 40) | +8.7
+   531 | (69, 66, 62) | (40, 40, 40) | +25.7
+   532 | (29, 32, 33) | (40, 40, 40) | -8.7
+
+below the sheet's bottom edge (border row 950; a drop shadow would darken)
+    2px below: open (50, 48, 47) (lum  48.3)
+    4px below: open (57, 64, 61) (lum  60.7)
+    8px below: open (52, 49, 48) (lum  49.7)
+   12px below: open (51, 49, 48) (lum  49.3)
+
+canvas: rest (40, 40, 40) vs gruvbox-material-dark shellBg (40, 40, 40) -> MATCH
+        veiled (palette open) (34, 36, 36) -> delta -4.7
+
+## Border-row scan at x=600 (the 6px gap and the halo, row by row)
+
+AX y | rest | open | note
+ 524 | (40, 40, 40) | (38, 40, 39) | 
+ 525 | (40, 40, 40) | (39, 41, 40) | 
+ 526 | (40, 40, 40) | (42, 42, 41) | 
+ 527 | (40, 40, 40) | (42, 43, 42) | 
+ 528 | (40, 40, 40) | (46, 46, 44) | 
+ 529 | (40, 40, 40) | (48, 47, 44) | 
+ 530 | (40, 40, 40) | (51, 49, 46) | 
+ 531 | (40, 40, 40) | (69, 66, 62) | 
+ 532 | (40, 40, 40) | (29, 32, 33) | 
+ 944 | (40, 40, 40) | (29, 32, 33) | 
+ 945 | (40, 40, 40) | (29, 32, 33) | 
+ 946 | (76, 71, 66) | (29, 32, 33) | lane top hairline (rest)
+ 947 | (40, 40, 40) | (29, 32, 33) | 
+ 948 | (40, 40, 40) | (29, 32, 33) | 
+ 949 | (40, 40, 40) | (29, 32, 33) | 
+ 950 | (40, 40, 40) | (69, 66, 62) | sheet bottom border (open)
+ 951 | (40, 40, 40) | (53, 51, 49) | halo below the sheet / lane background
+ 952 | (40, 40, 40) | (50, 48, 47) | 
+ 953 | (40, 40, 40) | (47, 46, 45) | 
+ 954 | (40, 40, 40) | (57, 64, 61) | halo tail
+ 955 | (40, 40, 40) | (57, 64, 61) | 
+ 956 | (40, 40, 40) | (56, 63, 60) | 
+ 957 | (83, 77, 71) | (126, 174, 162) | field shell top border (+focus ring when the composer holds the query)
+ 958 | (50, 48, 47) | (52, 49, 48) | field shell fill
+ 959 | (50, 48, 47) | (52, 50, 48) | 

@@ -277,15 +277,19 @@ export const COMPONENT_CSS_OWNERSHIP: Record<string, string[]> = {
     "command-centre/command-centre.module.css",
   ],
   menu: [
-    // The command palette; the agent composer's completion menus paint the
-    // same family from the coding-agent surface (Plan 118 task 22 will move
-    // the palette onto it too).
-    "command-centre/command-centre.module.css",
+    // The agent composer's `@` mentions dropdown. The palette that used to
+    // paint this family from the command-centre module was the retired
+    // window-centred sheet (plan 125): the composer's `/` palette paints
+    // `commandCentre.*` instead. (Plan 118 task 22 will move the mentions
+    // dropdown onto `menu.default.root.rest` under the halo.)
     "coding-agent/coding-agent.module.css",
   ],
   popover: [
+    // No host surface paints `popover.default.root.rest` since plan 125
+    // retired the window-centred menu origin that had the only consumer; the
+    // controls module is where a popover-shaped root belongs, and the key is
+    // recorded in the adoption backlog until one returns.
     "components/controls.module.css",
-    "command-centre/command-centre.module.css",
   ],
   modal: [
     "components/modal.module.css",

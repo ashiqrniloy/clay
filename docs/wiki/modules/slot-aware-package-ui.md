@@ -147,19 +147,25 @@ serverRegisterPanelContribution(manifest, {
 - Historical Phase 18.3 boundary: User-visible layout overrides, default-slot overrides, persisted panel visibility, durable workspace/document state mutation, and user theme-token remapping remain planned APIs until they get facade/op/docs/registry/tests.
 - Phase 18.4 update: user-visible layout overrides, package default-slot/default-visibility overrides, input/action defaults, package option records, and user theme-token remap records are now runtime-backed through documented `serverSetLayoutOverride` and `setPackageOption` validators. Durable workspace/document state-value mutation, pane selector APIs, multi-panel ordering, and overlay z-order remain planned until they get facade/op/docs/registry/tests.
 
-## Phase 24.4 internal centered surface boundary
+## Plan 124/125 menu and overlay boundary
 
-The built-in Command Centre now projects command/path menu sessions through an
-internal `PackageOverlayAnchor::Centered` and a driver-owned window-level
-`PackageOverlayHost`. This is not a package contribution anchor: package
-registration continues to accept only `working-area`, `active-pane`, `main`, and
-`pointer`, and parsing `centered` falls back closed to the normal working-area
-anchor. Packages cannot paint the scrim, request the root layer, drive the
-server-owned menu session, or obtain Path Browser authority.
+Command and path sessions no longer project through a centered package overlay.
+They use the server's `TransientMenuOrigin::CommandPalette` and the React
+`CommandPalette` child of the agent lane's `ClayTextField` menu slot. The host
+renders its full-width sheet and working-area veil; package registration still
+accepts only `working-area`, `active-pane`, `main`, and `pointer`.
 
-Centered paint reuses the generic `paint_scrim` and `paint_tooltip_shell`
-primitives with cached typed theme tokens; package overlays remain on the
-existing local host and stacking/anchor behavior is unchanged.
+Plan 125 closed the last gap: the picker sessions that previously kept the
+centered origin are palette stages too, so the centered renderer is deleted.
+`PackageOverlayAnchor::Centered` is gone and
+`PackageOverlayAnchor::parse("centered")` still falls back closed to
+`WorkingArea`; `TransientMenuOriginData::Centered` stays a wire variant for older
+decoders and maps to `PackageOverlayAnchor::Bottom`, so no package can reach a
+window-level layer. Packages cannot paint either scrim, request the halo or the
+palette's sheet, drive a server-owned menu session, or reach the `secret`
+stage's shielded field (a Clay-owned stage that never persists into the composer
+draft). All menu snapshots remain bounded inert data; all command/path/picker
+authority stays in the server session and executor.
 
 ## Plan 088 catalog and authoring-contract maintenance
 
@@ -167,7 +173,7 @@ Plan 088's catalog update is documentation and validation maintenance, not a
 new package surface. The authoritative component/token catalogs record that
 Tasks 3–7 consume existing kinds and typed tokens only. The package guide and
 UI navigation page repeat the boundary for authors: Clay owns shell geometry,
-responsive slot yielding, tab/status/file-browser/welcome/completion/centered
+responsive slot yielding, tab/status/file-browser/welcome/completion/palette
 surfaces, focus containment, and path sanitization; packages provide inert
 validated declarations and semantic tokens.
 
@@ -177,7 +183,8 @@ bounded flex space in a panel; `PackageModalDismiss` carries only its declared
 inert action intent; `statusItem` and disabled controls retain AccessKit
 semantics. These are host guarantees, not package APIs. Package overlays remain
 limited to `working-area`, `active-pane`, `main`, and `pointer`; `completion`
-and `centered` stay internal.
+and the retired `centered` spelling stay Clay-internal, and the client palette is
+not an anchor at all.
 
 The parity gate is `tests/primitives_docs.rs::plan088_ui_catalog_and_package_authoring_contract_are_consistent`, alongside the existing component/token drift and package-boundary tests. It must fail when catalog markers, package-guide limits, UI navigation links, or the exact package anchor contract drift from source/docs.
 

@@ -14,7 +14,6 @@ import {
   ClayTextField,
 } from "../components";
 import { lazy, Suspense } from "react";
-import { CommandCentre } from "../command-centre/CommandCentre";
 import { createDocumentSession } from "../editor/sync/session";
 import { WorkspaceView } from "./workspace";
 import { createWorkspace } from "../shell/workspace-controller";
@@ -58,8 +57,9 @@ const ClayEditor = lazy(async () => {
   return { default: module.ClayEditor };
 });
 
-import type { BootstrapDto } from "../bridge/types";
+import type { BootstrapDto, TransientMenuItemDto } from "../bridge/types";
 import styles from "./fixture.module.css";
+import panesStyles from "../shell/workspace-panes.module.css";
 
 /**
  * Deterministic visual states for the UI review harness and component tests.
@@ -100,9 +100,6 @@ export function FixtureRoute() {
   }
   if (fixtureId === "path-browser") {
     return <CommandCentreFixture pathMode />;
-  }
-  if (fixtureId === "command-centre-menu") {
-    return <CommandCentreFixture menuMode />;
   }
   if (fixtureId === "coding-agent") {
     return <CodingAgentFixture />;
@@ -332,14 +329,17 @@ function WorkspaceSidebarFixture() {
     return created;
   }, []);
   return (
-    <div
-      className={styles.fixture}
-      data-fixture="workspace-sidebar"
-      style={{ height: "100%" }}
-    >
-      <Suspense fallback={<ClayText variant="status">Loading panes…</ClayText>}>
-        <WorkspacePanes workspace={workspace} />
-      </Suspense>
+    <div className={styles.packageFixture} data-fixture="workspace-sidebar">
+      {/* The fixture renders the app's own working-area composition, not a
+          second shell: `WorkspaceView` draws the grid and `WorkspacePanes`
+          places the sidebar rail, the views, the lane and the veil in it. */}
+      <WorkspaceView session={null}>
+        <Suspense
+          fallback={<ClayText variant="status">Loading panes…</ClayText>}
+        >
+          <WorkspacePanes workspace={workspace} />
+        </Suspense>
+      </WorkspaceView>
     </div>
   );
 }
@@ -372,18 +372,185 @@ const IDLE_PALETTE: ComposerPalette = {
   query: () => undefined,
   move: () => undefined,
   activate: () => undefined,
+  back: () => undefined,
   cancel: () => undefined,
 };
+
+/**
+ * The picker stages the server's Agent Picker produces (plan 125): each one is
+ * a `commandPalette` session whose *mode* decides how the sheet renders
+ * (protocol v32). The rows, prompts, and modes below mirror
+ * `src/server/agent_picker.rs` verbatim, so the fixture draws the shipped
+ * `CommandPalette` for the stage the live daemon would send.
+ */
+type PaletteStageId =
+  "providers" | "auth" | "secret" | "url" | "oauth" | "models" | "sessions";
+
+interface PaletteStageSeed {
+  prompt: string;
+  mode?: string;
+  items: TransientMenuItemDto[];
+  query?: string;
+}
+
+/** One `Model` picker with more rows than the sheet can hold, so the fixture
+ *  pins the height cap and internal scrolling against a real catalogue size
+ *  (`TRANSIENT_MENU_MAX_ITEMS` is 256; 40 rows already overflow the sheet). */
+function modelStageRows(count: number): TransientMenuItemDto[] {
+  return Array.from({ length: count }, (_unused, index) => ({
+    id: `model:mock/model-${index + 1}`,
+    label: `Mock Model ${index + 1}`,
+    detail: "mock",
+    accessibilityLabel: `Mock Model ${index + 1} mock`,
+  }));
+}
+
+function paletteStage(stage: PaletteStageId): PaletteStageSeed {
+  if (stage === "providers") {
+    return {
+      prompt: "Configure provider",
+      mode: "picker",
+      items: [
+        {
+          id: "provider:mock",
+          label: "Mock Provider",
+          detail: "mock",
+          accessibilityLabel: "Mock Provider mock",
+        },
+        {
+          id: "provider:anthropic",
+          label: "Anthropic",
+          detail: "anthropic",
+          accessibilityLabel: "Anthropic anthropic",
+        },
+        {
+          id: "configure",
+          label: "Configure provider…",
+          detail: "API key, OAuth, or base URL",
+          accessibilityLabel: "Configure provider… API key, OAuth, or base URL",
+        },
+      ],
+    };
+  }
+  if (stage === "auth") {
+    return {
+      prompt: "Choose sign-in method",
+      mode: "picker",
+      items: [
+        {
+          id: "auth:api_key",
+          label: "API key",
+          detail: "api_key",
+          accessibilityLabel: "API key api_key",
+        },
+        {
+          id: "auth:oauth",
+          label: "OAuth",
+          detail: "oauth",
+          accessibilityLabel: "OAuth oauth",
+        },
+        {
+          id: "auth:url",
+          label: "API base URL",
+          detail: "url",
+          accessibilityLabel: "API base URL url",
+        },
+      ],
+    };
+  }
+  if (stage === "secret") {
+    return {
+      prompt: "API key (hidden)",
+      mode: "secret",
+      items: [
+        {
+          id: "store_secret",
+          label: "Store API key",
+          detail: "Value is hidden. Enter stores it.",
+          accessibilityLabel: "Store API key Value is hidden. Enter stores it.",
+        },
+      ],
+    };
+  }
+  if (stage === "url") {
+    return {
+      prompt: "API base URL",
+      mode: "url",
+      items: [
+        {
+          id: "store_url",
+          label: "Save base URL",
+          detail: "OpenAI-compatible endpoint",
+          accessibilityLabel: "Save base URL OpenAI-compatible endpoint",
+        },
+      ],
+    };
+  }
+  if (stage === "oauth") {
+    return {
+      prompt: "Authorize provider",
+      mode: "oauth",
+      items: [
+        {
+          id: "poll_oauth",
+          label: "Device code WDJB-MJHT",
+          detail: "https://example.test/device",
+          accessibilityLabel:
+            "Device code WDJB-MJHT https://example.test/device",
+        },
+        {
+          id: "open_oauth_url",
+          label: "Open in browser",
+          detail: "https://example.test/device",
+          accessibilityLabel:
+            "Open the authorization URL in the default browser",
+        },
+        {
+          id: "copy_oauth_url",
+          label: "Copy URL",
+          detail: "https://example.test/device",
+          accessibilityLabel: "Copy the authorization URL to the clipboard",
+        },
+      ],
+    };
+  }
+  if (stage === "models") {
+    return { prompt: "Models", mode: "picker", items: modelStageRows(40) };
+  }
+  return {
+    prompt: "Sessions",
+    mode: "picker",
+    items: [
+      {
+        id: "session:1",
+        label: "How does the resume list",
+        detail: "2026-09-10 22:17",
+        // The row states what only its own kind does: `Alt+↵` deletes this
+        // session instead of resuming it (the sheet's secondary activation).
+        bindings: ["Alt+↵"],
+        accessibilityLabel: "How does the resume list 2026-09-10 22:17",
+      },
+      {
+        id: "session:2",
+        label: "Untitled session",
+        detail: "2026-09-10 22:15",
+        bindings: ["Alt+↵"],
+        accessibilityLabel: "Untitled session 2026-09-10 22:15",
+      },
+    ],
+  };
+}
 
 function CommandCentreFixture({
   empty = false,
   pathMode = false,
-  menuMode = false,
 }: {
   empty?: boolean;
   pathMode?: boolean;
-  menuMode?: boolean;
 }) {
+  const [params] = useSearchParams();
+  const stageParam = params.get("stage") as PaletteStageId | null;
+  const stage = stageParam ? paletteStage(stageParam) : null;
   const workspace = useMemo(() => {
     const created = createWorkspace({ send: async () => undefined });
     created.installBootstrap(fixtureBootstrap);
@@ -396,36 +563,21 @@ function CommandCentreFixture({
           kind: "transientMenuSnapshot",
           data: {
             sessionId: "9223372036854775809" as never,
-            prompt: menuMode
-              ? "Session actions"
-              : pathMode
-                ? "Browse workspace"
-                : "Commands",
-            query: menuMode ? "" : pathMode ? "workspace/" : "",
+            prompt:
+              stage?.prompt ?? (pathMode ? "Browse workspace" : "Commands"),
+            query: stage?.query ?? (pathMode ? "workspace/" : ""),
             selectedIndex: 0,
             status: empty
               ? { empty: { message: "No commands match this query" } }
               : "active",
             focusPolicy: "modal",
-            // Plan 124: the catalogue and the path browser are the composer's
-            // palette (the lane draws them); only pickers and package menus are
-            // window-centred.
-            origin: menuMode ? "contextMenu" : "commandPalette",
-            items: menuMode
-              ? [
-                  {
-                    id: "coding-agent.fork",
-                    label: "Fork Session",
-                    detail: "coding-agent.fork",
-                    accessibilityLabel: "Fork Session",
-                  },
-                  {
-                    id: "coding-agent.tree",
-                    label: "Session Branch Tree",
-                    detail: "coding-agent.tree",
-                    accessibilityLabel: "Session Branch Tree",
-                  },
-                ]
+            // Plan 125: the catalogue and the path browser are the composer's
+            // palette, and so is every picker stage — this fixture draws the
+            // lane's own sheet, never a window-centred one.
+            origin: "commandPalette",
+            ...(stage?.mode ? { mode: stage.mode } : {}),
+            items: stage
+              ? stage.items
               : empty
                 ? []
                 : pathMode
@@ -474,7 +626,7 @@ function CommandCentreFixture({
       },
     });
     return created;
-  }, [empty, pathMode, menuMode]);
+  }, [empty, pathMode, stage]);
   // The palette's intents are the fixture workspace's own (the sheet is the
   // field's menu, so the lane drives the session): the fixture opens the
   // session itself and lets query/move/activate/cancel reach the stub send.
@@ -487,7 +639,8 @@ function CommandCentreFixture({
       request: () => undefined,
       query: (filter, scope) => workspace.menuQuery(filter, scope),
       move: (delta) => workspace.menuMove(delta),
-      activate: () => workspace.menuActivate(),
+      activate: (secondary) => workspace.menuActivate(secondary),
+      back: () => workspace.menuBackspace(),
       cancel: () => workspace.menuCancel(),
     }),
     [workspace],
@@ -496,20 +649,16 @@ function CommandCentreFixture({
   storeRef.current ??= createAgentSession({});
   return (
     <div
-      className={`${styles.fixture} ${menuMode ? "" : styles.paletteFixture}`}
+      className={`${styles.fixture} ${styles.paletteFixture}`}
       data-fixture="command-centre"
     >
-      {menuMode ? (
-        <CommandCentre workspace={workspace} />
-      ) : (
-        <AgentLaneLazy
-          store={storeRef.current}
-          uiVersion={4}
-          workspaceRoot="/tmp/project"
-          agentType="coding-agent"
-          palette={palette}
-        />
-      )}
+      <AgentLaneLazy
+        store={storeRef.current}
+        uiVersion={4}
+        workspaceRoot="/tmp/project"
+        agentType="coding-agent"
+        palette={palette}
+      />
     </div>
   );
 }
@@ -847,19 +996,25 @@ function PackageUiFixture({
       data-fixture={settingsOpen ? "settings" : "package-ui"}
     >
       <WorkspaceView session={session}>
-        <PackageWorkspace
-          sdui={sdui}
-          packageUi={packageFixtureSnapshot}
-          settingsOpen={settingsOpen}
-          send={async () => undefined}
-          editorSlot={
-            <Suspense
-              fallback={<ClayText variant="status">Loading editor…</ClayText>}
-            >
-              <ClayEditor session={session} />
-            </Suspense>
-          }
-        />
+        {/* The working-area grid places its items explicitly (routes/workspace
+            .module.css), so the panes ride the same view-area slot the real
+            shell's `WorkspacePanes` uses; the fixtures render the tree whole,
+            so the sidebar region keeps the renderer's fallback width. */}
+        <div className={panesStyles.viewArea} data-panes="view-area">
+          <PackageWorkspace
+            sdui={sdui}
+            packageUi={packageFixtureSnapshot}
+            settingsOpen={settingsOpen}
+            send={async () => undefined}
+            editorSlot={
+              <Suspense
+                fallback={<ClayText variant="status">Loading editor…</ClayText>}
+              >
+                <ClayEditor session={session} />
+              </Suspense>
+            }
+          />
+        </div>
       </WorkspaceView>
     </div>
   );

@@ -129,6 +129,12 @@ installed entries, a persisted `selected_index`, and a sticky
   “No matches for {filter}”, same overlay composition and tokens as the
   Control Center (the same `CommandPalette` bottom sheet, full composer-field
   width, 6px above the field, with the working-area veil and lane above it).
+  Plan 125 makes the path session an explicit palette **mode**: the server
+  stamps `mode = "path"` on the snapshot, the sheet keeps the `/` sigil visible
+  while it is open, its foot verb is `open`, and `Esc`/`Alt+←` cancel the session
+  (`Esc` walks a *stage* back instead — path mode is not a stage). A backspace
+  against an empty filter is not a dismissal at all: the session ascends to the
+  parent directory (`MenuBackspace` → `PathBrowserTransition::Relist`).
 
 ## Built-in user-browse listing primitive
 
@@ -162,11 +168,14 @@ reachable only from the built-in session):
 - `MenuBackspace` is a new semantic intent beside `MenuQueryUpdate`
   (dedicated backspace rather than a full query update); `MenuActivate`
   carries a bounded `Primary`/`Secondary` activation kind (Enter/Tab vs
-  Alt+Enter). `PROTOCOL_VERSION` bumped once (15 → 16). No path-specific
-  wire variants and no filesystem paths/actions cross the wire; activation
-  resolves server-side from installed entries, failing closed on unknown/
-  stale session ids and unknown enum data. Control Center behavior is
-  byte-for-byte equivalent.
+  Alt+Enter). The current protocol pin is 32; Plan 124 adds palette row
+  `group`/`bindings` metadata and query `scope`, and plan 125 the optional
+  bounded session `mode` (`catalogue`/`path`/`picker`/`secret`/`url`/`oauth`)
+  — none of them path-specific wire variants. No filesystem paths/actions cross
+  the wire; activation resolves server-side from installed entries, failing
+  closed on unknown/stale session ids and unknown enum data. Command and path
+  sessions share the `CommandPalette` shell surface and the same session store,
+  but retain separate server-owned item sets.
 - Client: `dispatch_server_menu_key` pops the mirrored
   `server_query_buffer` and sends `MenuBackspace`; Enter/Tab enqueue
   `MenuActivate Primary`, Alt+Enter `MenuActivate Secondary`; every other

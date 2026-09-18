@@ -93,10 +93,7 @@ export function WorkspaceRoute({
   }
 
   return (
-    <WorkspaceView
-      session={railSession}
-      showRail={activeTab?.view !== "agent"}
-    >
+    <WorkspaceView session={railSession} showRail={activeTab?.view !== "agent"}>
       <Suspense
         fallback={
           <div className={`${styles.workspace} ${styles.stack}`} role="status">

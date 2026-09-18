@@ -1,0 +1,86 @@
+/* ===========================================================================
+   Prototype chrome — the frame the migration pages are reviewed in.
+
+   Not a design decision, and not part of the migration: the app itself is what
+   the frame contains. The strip at the top carries the theme switcher, the
+   density/motion switches and the wide/narrow width toggle every page needs for
+   review; the frame around the app keeps the app at a real window size so a
+   page cannot silently reflow into the review chrome. The surround colour is
+   derived from the theme so the frame reads as a window rather than a card.
+   ========================================================================= */
+
+body.proto {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--c-bg) 90%, var(--c-text));
+}
+
+.proto-bar {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--c-bg) 94%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.proto-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.proto-id h1 { font: 600 var(--fs-md) / 1 var(--font-ui); letter-spacing: -0.01em; white-space: nowrap; }
+.proto-note { font: 400 var(--fs-xs) / 1.45 var(--font-ui); color: var(--c-text-3); max-width: 54ch; }
+
+.proto-nav { display: flex; align-items: center; gap: 1px; flex-wrap: wrap; }
+.proto-link {
+  border: 0;
+  background: transparent;
+  padding: 4px 7px;
+  border-radius: var(--r-xs);
+  color: var(--c-text-3);
+  font: 400 var(--fs-xs) / 1.4 var(--font-ui);
+  text-decoration: none;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.proto-link:hover { background: var(--c-hover); color: var(--c-text); }
+.proto-link[aria-current='page'] { background: var(--c-accent-soft); color: var(--c-accent); }
+
+.proto-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+
+.proto-stage { flex: 1; min-height: 0; padding: 16px; display: flex; justify-content: center; }
+
+.proto-frame {
+  width: 100%;
+  max-width: 1500px;
+  height: min(880px, calc(100vh - 110px));
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-lg);
+  background: var(--c-bg);
+  box-shadow: var(--shadow-overlay);
+}
+
+:root[data-frame='narrow'] .proto-frame { max-width: 1024px; }
+
+/* The app fills the frame and keeps its own scroll containers. `.win` is a
+   three-row grid (title bar / working area / status bar) sized to the viewport
+   in the approved CSS: inside the frame it takes the frame's height instead,
+   and a page that uses it must supply all three rows. */
+.proto-frame > .win, .proto-frame > .app { flex: 1; min-height: 0; }
+.proto-frame > .win { height: 100%; max-height: none; }
+.proto-frame .win { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.proto-frame > .app > * { min-height: 0; }
+
+/* `hidden` must win over a component's own display, without `!important` */
+[data-scene][hidden], .proto-frame [hidden] { display: none; }
+
+@media (max-width: 1180px) {
+  .proto-note { display: none; }
+}

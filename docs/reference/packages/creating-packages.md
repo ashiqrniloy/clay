@@ -112,7 +112,7 @@ Phase 18.2 has implemented internally:
 - Internal `WorkingAreaLayout` state for one working area, layout version, active/root pane, and editor component binding.
 - Internal `PaneSplitTree` state for the one-leaf default plus generic horizontal/vertical split topology with bounded split ratios and deterministic validation.
 - Internal `PaneSlotLayout` state with mandatory `main` plus optional fixed `left`, `right`, `top`, and `bottom` slots, including finite sizing, min/max clamp, visibility, collapse, and user-resize fields.
-- A stable-ID React SDUI projection (`frontend/src/sdui`) placed in Clay-owned left-slot geometry, plus structural shell observability that omits document text, native handles, raw action authority, raw CSS, raw ops, renderer callbacks, and executable package code. SDUI kinds render as catalog components (label/button/list/editor-view); reconciliation reuses surviving DOM so local state survives updates.
+- A stable-ID React SDUI projection (`frontend/src/sdui`) placed in Clay-owned left-slot geometry — the shell draws the tree's token-sized sidebar region as the working area's own left rail (plan 126) — plus structural shell observability that omits document text, native handles, raw action authority, raw CSS, raw ops, renderer callbacks, and executable package code. SDUI kinds render as catalog components (label/button/list/editor-view); reconciliation reuses surviving DOM so local state survives updates.
 
 Phase 18.3 now adds runtime-backed public APIs for package-owned slot UI contributions:
 
@@ -652,7 +652,7 @@ Each leaf pane has these slots:
 
 ### Current Phase 18.3 runtime behavior
 
-Clay now launches through an internal native shell root that contains the editor as the `main` component of a pane. Internally, the shell can represent one leaf pane or generic horizontal/vertical splits, and each leaf pane computes slot geometry from a mandatory `main` slot plus optional fixed `left`, `right`, `top`, and `bottom` slots. The current SDUI sidebar uses a Clay-owned left-slot bridge so existing status/SDUI behavior keeps working.
+Clay now launches through an internal native shell root that contains the editor as the `main` component of a pane. Internally, the shell can represent one leaf pane or generic horizontal/vertical splits, and each leaf pane computes slot geometry from a mandatory `main` slot plus optional fixed `left`, `right`, `top`, and `bottom` slots. The current SDUI sidebar uses a Clay-owned left-slot bridge so existing status/SDUI behavior keeps working; the shell renders that region in its own working-area rail (plan 126), so the region's box is host geometry, not a package layout decision.
 
 Phase 18.3 adds runtime-backed package contribution registration for fixed panels, component trees, transient overlays, and package theme tokens. Package code may register those declarations through `clay:ui` facade functions in the server runtime. Clay validates them, preserves provenance, composes accepted fixed panels through `PaneSlotLayout`, renders transient overlays without consuming fixed slot geometry, and routes UI actions only as registered command intents.
 
@@ -690,30 +690,32 @@ Phase 24.2 extends the boundary with the live command catalogue: any validated r
 
 This boundary follows from the trust-domain rule for commands: menu activation routes to command intents, and command authority is the unified user-authorized package model ([package security](../primitives/package-security.md)). Menu snapshots are bounded protocol data governed by the `TRANSIENT_MENU_*` budgets — not SDUI payloads — so the [UI component conformance rules](../ui-components.md) and the [transient menu family](../primitives/shell-layout-strategy.md) contract apply unchanged.
 
-### Centered Command Centre surface (Phase 24.4)
+### Centered Command Centre surface (Phase 24.4, retired by Plan 125)
 
 Phase 24.4 mounted command and path sessions in an internal
 `TransientMenuOrigin::Centered`, one Clay-owned window-level retained overlay
-above the shell: the host paints the token-driven `surface.scrim`/`opacity.scrim`
-backdrop and uses `dimension.overlay.centered.width`; it provides modal
-Dialog/Menu/MenuItem/Status accessibility and contains input on the originating
+above the shell: the host painted the token-driven `surface.scrim`/`opacity.scrim`
+backdrop and used `dimension.overlay.centered.width`; it provided modal
+Dialog/Menu/MenuItem/Status accessibility and contained input on the originating
 pane. Plan 124 re-anchored the command and path sessions onto the composer's own
 field (`TransientMenuOrigin::CommandPalette`, see
 [the Plan 124 authoring contract](#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette)),
-so `Centered` now hosts the agent picker and package UI dialogs. This is a
-presentation change only: command/path authority, grants, activation, and
-server-owned snapshots remain unchanged.
+and plan 125 moved the remaining centered host — the agent picker's stage flow —
+onto that same palette, then deleted the projection outright. **No Clay surface
+is centered any more**: the wire value still decodes for older frames and
+`dimension.overlay.centered.width` still sizes package `modal` dialogs, but no
+live producer emits `centered` and no host renders a window-level transient
+sheet.
 
 Packages cannot request the centered anchor, paint or configure the scrim,
 mount root layers, intercept menu input, open/drive the built-in menu sessions,
 or obtain Path Browser authority. Supported package overlay anchors remain
 `working-area`, `active-pane`, `main`, and `pointer`; `centered` is not part of
-the package `OverlayAnchor` type or manifest validation. The centered host uses
-one scrim fill and no blur/filter/offscreen pass; package JavaScript never runs
-in its paint/layout/input paths. Its default centered result surface is 640
-logical pixels wide and 220 logical pixels high before available-window
-clamping; the retained result list is scrollable and modal input remains
-Clay-owned.
+the package `OverlayAnchor` type or manifest validation — and since plan 125 the
+Clay-internal anchor vocabulary has no centered option left at all
+(`PackageOverlayAnchor` in `src/shell/package_ui.rs` offers the work-area and
+bottom shapes only). Package JavaScript never runs in a transient surface's
+paint/layout/input paths.
 
 ### Plan 124 authoring contract: the persistent agent lane and the composer's `/` palette
 
@@ -727,12 +729,14 @@ commands through the same validated `clay:ui`/`commands` facades, with the same
 provenance, budgets, and precedence rules.
 
 **The lane is Clay-owned shell chrome, not a package extension point.** It is the
-working area's own bottom row — present in every tab, in both views, spanning the
-full working area width so the workspace sidebar and the inspector rail end at
-its top edge — and it hosts the tab's agent session: the optional approval strip,
-the composer box (the prompt field plus that tab's agent-type/model/effort
-controls), the hint row, and the session-environment foot. Packages cannot claim,
-replace, hide, or contribute UI to it:
+view pane's own bottom row — present in every tab, in both views — and it hosts
+the tab's agent session: the optional approval strip, the composer box (the
+prompt field plus that tab's agent-type/model/effort controls), the hint row,
+and the session-environment foot. Plan 125 confined it to the view pane: the
+workspace sidebar and the inspector rail run the full working-area height and
+the lane stops at the rail's inner edge (it takes the full width only while the
+rail is collapsed). Packages cannot claim, replace, hide, or contribute UI to
+it:
 
 - There is no lane `PanelContribution` slot. Package-facing slots remain the leaf
   pane's mandatory `main` plus its optional `left`/`right`/`top`/`bottom`; a
@@ -777,6 +781,45 @@ Packages cannot bind or issue them — binding is a user configuration-time API
 [Configuration](#configuration)) — and neither command grants filesystem, network,
 or process authority.
 
+### Plan 125 authoring contract: one palette for every picker, and the halo
+
+Plan 125 completes the boundary above. It adds no package-facing surface either:
+no `ComponentKind`, typed style variable, token, overlay anchor, manifest field,
+permission, or JS API, and no new design-system recipe key.
+
+**The composer palette is the only transient selection surface.** The centered
+sheet is gone (see
+[the retired Phase 24.4 section](#centered-command-centre-surface-phase-244-retired-by-plan-125)),
+and every picker Clay owns — the agent picker's list, provider setup,
+auth-method, secret, URL, and OAuth stages — is now a `TransientMenuSession` on
+the same composer-attached sheet as the command catalogue, distinguished by the
+session's bounded `mode` field (protocol v32: `catalogue`, `path`, `picker`,
+`secret`, `url`, `oauth`). The surface's shape is fixed by Clay: the sheet sits
+6 logical pixels above the composer box and is exactly as wide as it, the veil
+is the `modal.scrim` recipe over the working area through the inspector rail's
+full height while the agent lane stays interactive above it, and the sheet's
+shadow is the design language's **halo** rather than a drop shadow. No package
+can request or style the veil, request the halo for its own surfaces, mount root
+layers, or intercept menu input: packages cannot open or drive the palette, and
+the foot's mode-aware verbs, the stage prompts, the `Alt+↵` secondary
+activation, and the `Esc`/`Alt+←` stage-back keys are Clay-owned presentation
+over server-owned session state.
+
+**The shielded stage is Clay-owned, and only Clay-owned.** The `secret` stage is
+the single stage whose input lives inside the sheet: a `type="password"` field
+whose value is masked in every snapshot the server sends, flushed on `Enter`, and
+delivered only through the host's credential path (`host.put_credential`). The
+composer field is disabled while it is open, so a credential can never reach the
+composer's draft or the client's persisted layout state. There is no package API
+for the shielded stage, no way for a package to declare one, and no package
+surface that receives its value; the accessibility tree exposes the field's
+name and role only.
+
+**Package dialogs are unaffected.** `modal` remains the Clay-owned focus-trapped
+package dialog and still consumes `dimension.overlay.centered.width` for its
+`max-width`; package overlays remain limited to `working-area`, `active-pane`,
+`main`, and `pointer`. Context-menu and menu-bar projections are unchanged.
+
 ### Plan 087 package-facing contract: entry, completion, and bounded built-ins
 
 Plan 087 changes Clay's native presentation and accessibility plumbing without
@@ -808,14 +851,17 @@ token, manifest field, or JS API, and no package-facing `Completion` or
   blocking empty panel. Package JavaScript never runs in this projection's
   paint/layout/input paths.
 - **Command Centre and Path Browser:** these built-in server sessions remain
-  Clay-owned. The centered host uses the cached
-  `dimension.overlay.centered.width` token (640 logical-pixel default), a
-  bounded 220-pixel default surface height, one token-driven scrim, retained
-  scrolling for long result lists, and modal Dialog/Menu/Status accessibility.
-  Package commands may appear in the catalogue, but packages cannot open,
-  populate, filter, intercept, configure, or receive the session's paths or
-  menu intents. The centered anchor is Clay-internal and is not part of the
-  package `OverlayAnchor` type or manifest validation.
+  Clay-owned and, since plans 124/125, are drawn on the composer's own sheet
+  (`TransientMenuOrigin::CommandPalette`, see
+  [the Plan 125 authoring contract](#plan-125-authoring-contract-one-palette-for-every-picker-and-the-halo)).
+  The sheet is exactly as wide as the composer box, veiled by the token-driven
+  `surface.scrim`/`opacity.scrim` recipe over the working area (with the agent
+  lane — the session's query holder — above the veil), scrolls long result
+  lists, and carries the halo shadow. Package commands may appear in the
+  catalogue, but packages cannot open, populate, filter, intercept, configure,
+  or receive the session's paths or menu intents. The `commandPalette` origin is
+  Clay-internal and is not part of the package `OverlayAnchor` type or manifest
+  validation.
 - **Transient-menu accessibility labels:** package-authored item labels are
   normalized once when Clay constructs `MenuA11y` through
   `compose_menu_item_accessibility_label`. Control characters and path
@@ -1674,14 +1720,16 @@ validated data through the documented facades.
 **Clay owns shell and layout.** Packages cannot create client widgets, mutate
 the working area or pane/split tree, own fixed-slot geometry, contribute tab or
 pane chrome, replace the core `WelcomeWidget` fallback / file-browser / status
-surfaces, or open/drive the Clay-owned completion and centered Command Centre
-surfaces. Native file/folder dialogs and the tab bar stay host-owned. The
+surfaces, or open/drive the Clay-owned completion projection and composer
+palette (the single transient selection surface since plan 125, which retired
+the centered sheet). Native file/folder dialogs and the tab bar stay host-owned. The
 loaded empty-tab landing is package-owned (the launcher package or a user-approved
 replacement). Fixed package panels
 compose into Clay's mandatory `main` slot plus optional `left`, `right`, `top`,
 and `bottom` slots; transient package overlays remain limited to
 `working-area`, `active-pane`, `main`, and `pointer`. `completion` and `centered`
-are internal origins, and `table` remains reserved.
+are internal origins (plan 125 retires `centered`: decode-only, no live
+producer), and `table` remains reserved.
 
 **Existing components compose the changed surfaces.** A bounded package panel
 may use `panel` + `scroll` + existing `collapse`, `dropdown`, `textInput`,
@@ -2216,7 +2264,7 @@ Performance rule remains: package UI/layout declaration, validation, panel regis
 Anti-patterns for Phase 18.5:
 - Do not publish a default fixed panel from the package load path; optional panels start hidden.
 - Do not hard-code a side panel position or width; let the shell compose `PaneSlotLayout` from the declared `slot` and user overrides.
-- Do not use the SDUI `publishTree` left-slot surface as a user-facing panel authoring pattern; it is a Clay-owned internal retained sidebar, not a package slot API.
+- Do not use the SDUI `publishTree` left-slot surface as a user-facing panel authoring pattern; it is a Clay-owned internal retained sidebar, not a package slot API — and the shell, not the tree, places it (the working area's left rail, plan 126).
 - Do not add Markdown-specific Rust shell/layout/input/state/config branches.
 - Do not present `serverLoadPackage(packageJson)` as the ordinary end-user load path.
 
@@ -3453,14 +3501,14 @@ Do not:
 - Do filesystem/network/shell/AI/WASM work without an approved permissioned API.
 - Add Markdown-specific Rust UI/layout branches for package behavior.
 - Publish a default fixed panel from the package load path; optional panels should start with `defaultVisibility: "hidden"`.
-- Use the SDUI `publishTree` left-slot surface as a user-facing panel authoring pattern; it is a Clay-owned internal retained sidebar, not a package slot API.
+- Use the SDUI `publishTree` left-slot surface as a user-facing panel authoring pattern; it is a Clay-owned internal retained sidebar, not a package slot API — the shell places it in the working area's left rail (plan 126).
 - Hard-code a side panel position or width; let the shell compose `PaneSlotLayout` from the declared `slot` and user overrides.
 - Treat smoke fixtures as user-facing setup instructions.
 - Treat planned working-area/split-tree/slot-layout/state/override `clay:ui` snippets or planned configuration helpers as callable runtime code before public API docs, docs-index links, generated registry entries, and backing ops ship. In current Phase 18.4 wording, this means planned working-area/split-tree/direct pane-slot/state-value mutation snippets, package enable/disable helpers, or any undocumented configuration helper.
 - Execute commands from UI callbacks or transient menu items without routing through the server-owned `CommandExecution` path.
 - Bypass command permission/provenance validation from package code.
 - Treat a transient menu session as a fixed bottom panel or as a generic `TransientOverlayContribution` that owns dynamic query state.
-- Request or declare the Clay-internal `centered` or `Completion` overlay anchors, caret-native bounds, or a completion-specific widget.
+- Request or declare the Clay-internal `commandPalette`/`centered` (retired) or `Completion` overlay anchors, caret-native bounds, a completion-specific widget, the palette's veil or halo, or the shielded secret stage.
 - Treat package-authored accessibility labels as a path/HTML escape hatch; Clay sanitizes and bounds them before accessibility publication.
 - Treat the core `WelcomeWidget` fallback, native file/folder dialogs, tab bar, or Command Centre as package-owned UI or dialog authority. The loaded empty-tab landing is package-owned via `ui.paneContents`; replace the landing package, not those host surfaces.
 - Treat the Clay-owned file browser as a package-owned panel, package workspace-root provider, package marker/ignore-rule extension point, raw directory-listing API, or custom client widget.

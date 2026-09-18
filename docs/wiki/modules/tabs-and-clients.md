@@ -716,3 +716,33 @@ rejected-close fix:
   `accepted_close_still_ends_connection` (`src/server/connection/tests.rs`);
   alias allowlist + `validate_command_id` gate coverage
   (`src/server/ops/keybindings.rs`).
+
+## Plan 124: per-tab lane visibility and agent-store lifetime
+
+The persistent agent lane is tab state, not window state. The client-local
+`agentLane` store in `frontend/src/shell/layout-state.ts` is subscribed by the
+active tab's `AgentLane`; its `shell.toggleAgentLane` command flips visibility
+without advancing the server runtime generation. The same store subscription
+feeds the debounced `layout.json` writer alongside rail and inspector
+visibility.
+
+`PersistedTab.laneVisible` is optional for backward compatibility and defaults
+to `true`. Restore records rail, inspector, and lane visibility by client id
+while rebuilding tabs, then restores the values after all mounts exist. Hiding
+uses the HTML `hidden` state, so the lane leaves paint and accessibility while
+its composer draft and controls remain alive. Opening the `/` palette makes the
+lane visible again because its composer is the palette's query owner.
+
+`WorkspacePanes` creates/adopts one `AgentSessionModule` per `TabRuntime` before
+either workspace view is shown, runs the store bootstrap (`listSessions`,
+`requestBinding`, `setUiVersion`), and makes that store the shared owner for `AgentLane` and `AgentView`.
+Closing the tab disposes it. This preserves a streaming transcript
+across view switches without introducing a process-global agent store or
+cross-tab routing.
+
+Tests: `src/shell/layout_persist.rs::tab_visibility_round_trips_and_defaults_to_visible`,
+`frontend/src/shell/tab-store.test.ts`,
+`frontend/src/shell/workspace-controller.test.ts`,
+`frontend/src/shell/WorkspacePanes.test.tsx`, and
+`frontend/src/shell/AgentLane.test.tsx`. Live geometry and persistence evidence
+is recorded in `test-plan/artifacts/124-agent-lane/`.

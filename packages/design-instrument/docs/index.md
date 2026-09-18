@@ -14,7 +14,9 @@ colour values, no typography values, no CSS, no JavaScript and no permissions.
 One plane: the canvas is the only surface, and everything else is a hairline zone
 on it or a veil over it. Two elevations: **veil** (a panel at `surface.panel` @0.55
 with no shadow) and **overlay** (a popover/sheet at `surface.overlay` with the pop
-or overlay shadow). Accent is reserved for state — selection, focus, the running
+or overlay shadow). One soft elevation sits between them: the composer's palette
+and its `@` mentions menu take the `halo` (§4) instead of a cast shadow, because
+they sit over the shared veil. Accent is reserved for state — selection, focus, the running
 indicator — never decoration. Typography carries structure, so containers stay
 unpainted. Motion is meaningful: 150ms for a state change, 240ms for a surface
 entering, 620ms for a keyboard focus announcement.
@@ -62,8 +64,10 @@ for its numbers.
 | Panel / plane (veil) | `surface.panel` | 0.55 | 1px `border.hairline` | 12 | none |
 | Inset well (field, composer) | `surface.control` | 1.0 | 1px `border.hairline` | 8 single-line, 12 composer | none |
 | Row / tab (rest) | transparent | — | none | 8 (rows), pill (tabs) | none |
-| Popover / dropdown / menu / tooltip | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 (tooltip 8) | pop |
-| Sheet / palette / modal | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay |
+| Popover / dropdown / tooltip | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 (tooltip 8) | pop |
+| Composer menus (`/`, `@`) | `surface.overlay` | 1.0 | 1px `border.hairline` | 12 | halo |
+| Sheet / modal | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | overlay |
+| Composer palette (bottom-anchored) | `surface.overlay` | 1.0 | 1px `border.hairline` | 16 | halo |
 | Scrim | `surface.scrim` | 0.5 | none | — | none, `backdropBlur: 3` |
 | Toast | `surface.panel` | 0.88 | 1px `border.hairline` | pill | pop, `backdropBlur: 8` |
 
@@ -71,6 +75,12 @@ Shadows are structured layers in the ink role — no literals:
 
 - `overlay` = `[{0,24,60,-20, text.primary @0.42}, {0,2,10,-4, text.primary @0.22}]`
 - `pop` = `[{0,14,34,-14, text.primary @0.34}, {0,1,3,-1, text.primary @0.16}]`
+- `halo` = `[{0,0,14,-2, text.primary @0.14}, {0,0,3,0, text.primary @0.08}]` —
+  the composer palette's and the `@` mentions menu's elevation (plan 125): even
+  ink on every side, on the same 1px hairline, because a directional shadow over
+  the shared veil would read as a hole punched in the scrim. It is a changed
+  **value** on `commandCentre.default.root.rest` and `menu.default.root.rest`,
+  not a new key — the set stays at 165.
 - accent halo (fields/composers on focus) = `[{0,0,0,+3, accent.primary @0.15}]`
 
 States follow `DESIGN.md` §9: hover is a `surface.hover` fill (and

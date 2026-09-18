@@ -87,6 +87,14 @@ veil) and the plan-124 execution record in `test-plan/index.md`. F30's
 "one centered Spotlight-style panel dims full window" is the historical
 geometry.
 
+**Plan 125 note (2026-09-18).** The path session is now a **mode of the one
+palette session** (`mode=path`) rather than its own surface family: the sheet,
+its width, its 6px gap and its veil come from the composer box (module 10
+K100/K106), the `/` sigil stays visible only in `catalogue` and `path` modes,
+and the same `Esc` cancels it. The picker stages (provider, model, session) ride
+the same sheet without the sigil. Nothing in the path workflow below changes
+otherwise, and the centered projection it replaced is deleted (module 10 K107).
+
 Built-in server-first browse workflow (`controlCenter.openPath`, shipped with
 the temporary default `Ctrl+Alt+P` chord — no init.js needed; see module 10
 K48–K53 for rebind/unbind). Deep reference:

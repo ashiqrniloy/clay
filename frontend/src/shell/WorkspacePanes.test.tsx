@@ -164,6 +164,8 @@ async function mountedWorkspace(
     persistLayout?: boolean;
     /** Spy for the tab's stamped sender (plan 119 SC-6 lane assertions). */
     send?: (payload: string) => Promise<void>;
+    /** The runtime's SDUI tree; the default is the editor-only shape. */
+    sduiTree?: unknown;
   } = {},
 ) {
   const ws = createWorkspace({
@@ -204,7 +206,7 @@ async function mountedWorkspace(
         activeDesignSystem: bootstrap({ clientId: 1 }).activeDesignSystem,
         // Live shape: the default tree is a single editorView node — the
         // editor slot (and the landing inside it) rides the SDUI tree.
-        sduiTree: {
+        sduiTree: (options.sduiTree ?? {
           uiVersion: 2,
           rootId: 1,
           nodes: [
@@ -217,7 +219,7 @@ async function mountedWorkspace(
               },
             },
           ],
-        },
+        }) as never,
         packageUi: {
           version: 2,
           emptyTab,
@@ -461,6 +463,44 @@ describe("WorkspacePanes two views", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the launcher landing when the default agent auto-attaches", async () => {
+    // Plan 125: the landing is what a folder-less tab opens on, and the auto
+    // agent must not take it away — the tab is still uncommitted about *where*
+    // the editor is, which is the only thing the landing answers.
+    const ws = await mountedWorkspace(false, launcherSurface, {
+      persistLayout: false,
+    });
+    render(<WorkspacePanes workspace={ws} />);
+    expect(
+      await screen.findByRole("group", { name: "Start" }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      ws.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "launcherEntries",
+          data: {
+            clientId: 1,
+            entries: {
+              workspaces: [],
+              pruned: 0,
+              agents: [{ name: "coding-agent", label: "Coding Agent" }],
+            },
+          },
+        },
+      } as never);
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector("[data-agent-pick] button"),
+      ).toHaveTextContent("Coding Agent");
+    });
+    expect(
+      screen.getByRole("group", { name: "Start" }),
+      "the landing survives the auto-attached agent",
+    ).toBeInTheDocument();
+  });
+
   it("renders a third-party empty-tab contribution through generic SDUI", async () => {
     const ws = await mountedWorkspace(
       false,
@@ -643,6 +683,149 @@ describe("the tab's agent lane (plan 124)", () => {
     expect(chipUpdate?.payload).toMatchObject({ query: "", scope: "shell" });
   });
 
+  it("draws a picker stage on the same sheet and shields its credential there", async () => {
+    // Plan 125: this host renders *every* commandPalette session through the
+    // one sheet — the picker stages included — so a stage's filter rides the
+    // lane's field with no sigil and its credential rides the sheet's shield,
+    // while the veil and the lane's own visibility keep their plan-124 rules.
+    const sent: string[] = [];
+    const ws = await mountedWorkspace(true, undefined, {
+      send: async (payload: string) => {
+        sent.push(payload);
+      },
+    });
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const host = screen.getByTestId("workspace-panes");
+    const veil = host.querySelector("[data-clay-slot='scrim']") as HTMLElement;
+    const deliver = async (
+      data: Record<string, unknown>,
+      sessionId: string,
+    ) => {
+      await act(async () => {
+        ws.handleEnvelope({
+          kind: "routed",
+          data: {
+            clientId: 1,
+            tabId: 1,
+            event: {
+              kind: "transientMenuSnapshot",
+              data: {
+                sessionId,
+                prompt: "Providers",
+                query: "",
+                items: [],
+                selectedIndex: 0,
+                status: "active",
+                focusPolicy: "modal",
+                origin: "commandPalette",
+                mode: "picker",
+                ...data,
+              },
+            },
+          },
+        } as never);
+      });
+    };
+
+    // The provider stage: the field is its filter (no `/`, so an empty field
+    // does not close it) and the sheet is the lane's own menu.
+    await deliver({}, "10");
+    const sheet = await screen.findByTestId("command-palette");
+    expect(sheet.dataset.mode).toBe("picker");
+    expect(sheet.getAttribute("aria-label")).toBe("Providers");
+    expect(veil.dataset.open).toBe("true");
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(field.disabled).toBe(false);
+    expect(field.value).toBe("");
+    expect(screen.queryByRole("group", { name: "Scope" })).toBeNull();
+    fireEvent.change(field, { target: { value: "anth" } });
+    await act(async () => undefined);
+    const updates = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.family === "menuQueryUpdate");
+    expect(updates.at(-1)?.payload).toMatchObject({ query: "anth" });
+
+    // The credential stage: the sheet grows its own shield, the composer's
+    // field is not a transport for that value, and what is typed there is what
+    // the session is told (the server masks it before any snapshot).
+    await deliver({ mode: "secret", prompt: "API key (hidden)" }, "10");
+    const shield = await screen.findByLabelText("API key (hidden)", {
+      selector: "input",
+    });
+    expect(shield.getAttribute("type")).toBe("password");
+    expect(
+      (screen.getByLabelText("Message") as HTMLTextAreaElement).disabled,
+    ).toBe(true);
+    expect(document.activeElement).toBe(shield);
+    fireEvent.change(shield, { target: { value: "sk-1" } });
+    await act(async () => undefined);
+    const secretUpdate = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.family === "menuQueryUpdate")
+      .at(-1);
+    expect(secretUpdate?.payload).toMatchObject({ query: "sk-1" });
+    // The same veil, still the lane's sibling: one surface, one scrim.
+    expect(host.querySelector("[data-clay-slot='scrim']")).toBe(veil);
+  });
+
+  it("draws no centred sheet for any origin the wire can carry", async () => {
+    // Plan 125: the window sheet is gone, so an origin it used to own draws
+    // nothing at all here (the package origins are the package UI renderer's
+    // own overlays). The host's transient surface set is exactly the palette.
+    const ws = await mountedWorkspace(true);
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    const host = screen.getByTestId("workspace-panes");
+    for (const origin of ["centered", "contextMenu", "menuBar"] as const) {
+      await act(async () => {
+        ws.handleEnvelope({
+          kind: "routed",
+          data: {
+            clientId: 1,
+            tabId: 1,
+            event: {
+              kind: "transientMenuSnapshot",
+              data: {
+                sessionId: `42${origin.length}`,
+                prompt: "Session actions",
+                query: "",
+                items: [
+                  {
+                    id: "coding-agent.fork",
+                    label: "Fork Session",
+                    detail: "coding-agent.fork",
+                    accessibilityLabel: "Fork Session",
+                  },
+                ],
+                selectedIndex: 0,
+                status: "active",
+                focusPolicy: "modal",
+                origin,
+              },
+            },
+          },
+        } as never);
+      });
+      expect(
+        document.querySelector(".surface"),
+        `${origin} must not draw a window sheet`,
+      ).toBeNull();
+      expect(
+        document.querySelector('[data-testid="command-centre"]'),
+      ).toBeNull();
+    }
+    expect(
+      host.querySelectorAll("[data-testid='command-palette']").length,
+    ).toBe(0);
+  });
+
   it("boots the tab's store itself and shares it with the agent view", async () => {
     // The lane mounts for tabs whose agent view was never shown, so the host —
     // not the view — resolves and bootstraps the store (plan 124). The old
@@ -678,15 +861,100 @@ describe("the tab's agent lane (plan 124)", () => {
   it("shows the agent-less state from the approved artifact", async () => {
     const ws = await mountedWorkspace(true);
     render(<WorkspacePanes workspace={ws} />);
+    // Plan 125: the field types even here; the picker is what the box offers.
     const field = await screen.findByLabelText("Message");
-    expect(field).toBeDisabled();
+    expect(field).toBeEnabled();
     expect(field).toHaveProperty(
       "placeholder",
-      "Attach an agent to this tab to send a prompt",
+      "Type a prompt — attach an agent to send it",
     );
     const trigger = document.querySelector("[data-agent-pick] button");
     expect(trigger).toHaveTextContent("Attach an agent");
     expect(screen.queryByRole("button", { name: "Effort" })).toBeNull();
+  });
+
+  it("adopts the default agent for a tab with none, once the listing lands", async () => {
+    // Plan 125 (user direction): a fresh tab works out of the box — the coding
+    // agent is adopted from the server's own listing, so the lane never asks
+    // for a pick the user did not want to make.
+    const sent: string[] = [];
+    const ws = await mountedWorkspace(true, undefined, {
+      send: async (payload: string) => {
+        sent.push(payload);
+      },
+    });
+    render(<WorkspacePanes workspace={ws} />);
+    await screen.findByLabelText("Message");
+    // The server-validated listing (the lane reads it from the tab session).
+    await act(async () => {
+      ws.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "launcherEntries",
+          data: {
+            clientId: 1,
+            entries: {
+              workspaces: [],
+              pruned: 0,
+              agents: [
+                { name: "reviewer", label: "Reviewer" },
+                { name: "coding-agent", label: "Coding Agent" },
+              ],
+            },
+          },
+        },
+      } as never);
+    });
+    await waitFor(() => {
+      const picks = sent
+        .map((payload) => JSON.parse(payload))
+        .filter((message) => message.family === "tabCommand")
+        .map((message) => message.payload?.command?.setAgent?.agent);
+      expect(picks).toEqual(["coding-agent"]);
+    });
+    // And the box shows the attached state without a second intent.
+    await waitFor(() => {
+      expect(
+        document.querySelector("[data-agent-pick] button"),
+      ).toHaveTextContent("Coding Agent");
+    });
+  });
+
+  it("leaves an already-attached tab alone, with no extra pick", async () => {
+    const sent: string[] = [];
+    const ws = await mountedWorkspace(true, undefined, {
+      send: async (payload: string) => {
+        sent.push(payload);
+      },
+    });
+    render(<WorkspacePanes workspace={ws} />);
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await screen.findByRole("region", { name: "Coding Agent" });
+    sent.length = 0;
+    await act(async () => {
+      ws.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "launcherEntries",
+          data: {
+            clientId: 1,
+            entries: {
+              workspaces: [],
+              pruned: 0,
+              agents: [{ name: "reviewer", label: "Reviewer" }],
+            },
+          },
+        },
+      } as never);
+    });
+    await act(async () => undefined);
+    const picks = sent
+      .map((payload) => JSON.parse(payload))
+      .filter((message) => message.family === "tabCommand")
+      .map((message) => message.payload?.command?.setAgent?.agent);
+    expect(picks).toEqual([]);
   });
 
   it("marks the window while this tab works, and only while it works", async () => {
@@ -760,5 +1028,78 @@ describe("the tab's agent lane (plan 124)", () => {
     });
     await waitFor(() => expect(ws.active()?.clientId).toBe(1));
     expect(ws.active()?.agent).toBe(first.agent);
+  });
+});
+
+describe("the workspace sidebar rail (DESIGN.md §12)", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** The file browser's real shape: the root row holds the sidebar's region —
+   *  sized by the host's dimension token — beside the editor. */
+  const sidebarTree = {
+    uiVersion: 3,
+    rootId: 1,
+    nodes: [
+      { id: 1, kind: { flex: { direction: "row", children: [2, 4] } } },
+      {
+        id: 2,
+        kind: { stack: { children: [3] } },
+        size: "dimension.sidebar.default",
+      },
+      { id: 3, kind: { label: { text: "Workspace · clay", icon: null } } },
+      {
+        id: 4,
+        kind: {
+          editorView: { binding: { documentId: 1, expectedVersion: null } },
+        },
+      },
+    ],
+  };
+
+  it("renders the tree's sized region as the shell's rail, not twice", async () => {
+    const ws = await mountedWorkspace(false, null, { sduiTree: sidebarTree });
+    render(<WorkspacePanes workspace={ws} />);
+    const side = document.querySelector(
+      '[data-panes="side"]',
+    ) as HTMLElement | null;
+    expect(side).not.toBeNull();
+    // The rail is the shell's box for it (the grid places it in column 1,
+    // spanning the working area's rows) and it carries the region's content.
+    expect(side?.hasAttribute("hidden")).toBe(false);
+    expect(side).toHaveTextContent("Workspace · clay");
+    // Exactly one instance: the pane's tree renders the editor without it, so
+    // the sidebar cannot appear as a column inside the pane as well.
+    expect(
+      document.querySelectorAll('[data-clay-size="dimension.sidebar.default"]'),
+    ).toHaveLength(1);
+    expect(side?.querySelector("[data-clay-size]")).not.toBeNull();
+  });
+
+  it("hides the rail with no sized region and in the agent view", async () => {
+    const noSidebar = await mountedWorkspace(false);
+    const first = render(<WorkspacePanes workspace={noSidebar} />);
+    let side = document.querySelector('[data-panes="side"]') as HTMLElement;
+    expect(side.hasAttribute("hidden")).toBe(true);
+    first.unmount();
+
+    const ws = await mountedWorkspace(true, null, { sduiTree: sidebarTree });
+    render(<WorkspacePanes workspace={ws} />);
+    side = document.querySelector('[data-panes="side"]') as HTMLElement;
+    expect(side.hasAttribute("hidden")).toBe(false);
+    // The agent view has no files rail, so the lane spans the pane's whole
+    // width there (DESIGN.md §12).
+    await act(async () => {
+      ws.attachAgent({ type: "coding-agent", configRoot: "/tmp/agents/ca" });
+    });
+    await act(async () => {
+      ws.setView("agent");
+    });
+    expect(side.hasAttribute("hidden")).toBe(true);
+    await act(async () => {
+      ws.setView("workspace");
+    });
+    expect(side.hasAttribute("hidden")).toBe(false);
   });
 });

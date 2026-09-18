@@ -203,22 +203,39 @@ redraws, announcement, tab add/reorder/remove, selected-tab, pane
 name/status updates, and menu query/selection/close — all without panic,
 with stale and inactive nodes absent from the reachable tree.
 
-## Centered Command Centre dialog (Phase 24.4)
+## Composer palette and mentions menu (plans 124/125)
 
-Command and path sessions with `TransientMenuOrigin::Centered` are exposed
-through the retained window-level overlay layer as one modal `Dialog`, named
-from the bounded/sanitized menu prompt. Its child menu reports `MenuItem`
-children with selected state, plus one stable `Status` child with
-`Live::Polite`. That status uses exact count grammar: `0 results`, `1 result`,
-or `{n} results`.
+Every transient selection surface — the command catalogue, the Path Browser, and
+each agent-picker stage — is the composer-attached palette
+(`TransientMenuOrigin::CommandPalette`), a modeless relative of the field that
+holds its query: the field keeps focus and keeps typing, and the sheet's rows are
+exposed as a listbox of options with selected state plus one stable
+`<output aria-live="polite">` count status. That status uses exact count grammar:
+`0 results`, `1 result`, or `{n} results`. The `@` mentions menu is the same
+listbox presentation over the same field.
 
-The dialog does not move Masonry focus away from the originating pane. The
-server-owned pane route remains the keyboard entry point, and every key,
-clipboard paste, or IME event is consumed while the modal is active; supported
-keys enqueue the existing bounded menu intents. Scrim pointer-down events are
-swallowed and restore/retain originating-pane focus, so they cannot mutate the
-editor. Closing removes the root layer and leaves focus on the originating
-pane.
+Focus never leaves the composer for the catalogue, path, or `url`/`oauth`
+stages, so the server-owned pane route stays the keyboard entry point for the
+field and every key routes through the bounded menu intents. The one exception
+is the shielded `secret` stage: its input lives inside the sheet
+(`type="password"`), the composer field is disabled for the duration, and focus
+moves to that field and returns to the composer when the stage ends. The value
+is masked in every snapshot, is never rendered into a document or a log, and
+reaches only the host credential path; the accessibility tree exposes the
+field's name and role only.
+
+The veil (`modal.scrim`, `aria-hidden`) covers the working area and the
+inspector rail's full height but never the agent lane, which stays interactive
+above it — the invariant is that the component holding the palette's query can
+always be reached. The palette sheet draws no focus ring of its own: the focus
+boundary remains the composer box.
+
+The retired centered sheet (Phase 24.4) exposed command and path sessions as one
+modal `Dialog` in a retained window-level overlay layer, named from the
+bounded/sanitized menu prompt, consuming every key while it was open and
+swallowing scrim pointer-down events. Plan 125 deleted that projection with no
+successor: no Clay surface is modal any more, and package `modal` dialogs remain
+the only focus-trapped Clay-rendered dialogs.
 
 Menu and item/status virtual node IDs are derived from the retained region ID
 via the shared `virtual_a11y_node_id` policy, so query snapshots and

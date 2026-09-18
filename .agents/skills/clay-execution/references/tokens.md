@@ -22,7 +22,7 @@ What the language consumes from this catalog:
 | Canvas, chrome strips, sidebar/rail | `surface.main` | One surface; chrome zones are separated by a hairline, not by a different fill |
 | Veil planes (grouped content) | `surface.panel` at design-system opacity 0.55 | Depth comes from role + opacity, never from another frame |
 | Inset wells (fields, composers, meters) | `surface.control` | Opaque, hairline-bordered |
-| Transient layers (popover, sheet, palette, modal) | `surface.overlay` | The only surfaces that carry a shadow |
+| Transient layers (popover, sheet, palette, modal) | `surface.overlay` | The only surfaces that carry a shadow. Plan 125 exempts the composer palette and the `@` mentions menu: they carry the **halo** (two zero-offset layers from `text.primary` — `0 0 14px -2px` at 0.14 and `0 0 3px 0` at 0.08) with their border retained, and standard dropdowns/popovers keep `shadow.pop` |
 | Hover / pressed / disabled surfaces | `surface.hover`, `surface.active`, `surface.disabled` | Plus `surface.selected`/`surface.list` where a role fill is preferred to an accent-opacity tint |
 | Text | `text.primary`, `text.muted`, `text.disabled`, `text.icon` | Mono for data, UI face for prose |
 | Keyboard hints, badges, tooltips | `surface.kbd`/`text.kbd`/`border.kbd`, `surface.badge`/`text.badge`, `surface.tooltip`/`text.tooltip` | Design-system radius and fill; token owns color |
@@ -31,7 +31,7 @@ What the language consumes from this catalog:
 | Disabled / locked / scrim | `opacity.disabled` (0.55 core, 0.5 in the profile), `opacity.scrim` | Profile also declares veil 0.55 and accent-soft 0.15 as design-system values |
 | Scroll chrome | `surface.scrollbar`, `surface.scrollbar.track`, `dimension.scrollbar.width` | Pill thumb, track transparent |
 | Icon, kbd, hairline geometry | `dimension.icon.size`, `dimension.kbd.height`, `dimension.border.hairline` | Host-owned sizes stay on the dimension tokens |
-| Centered overlay width | `dimension.overlay.centered.width` | Command palette / command centre |
+| Centered overlay width | `dimension.overlay.centered.width` | Package `modal` dialogs (`max-width`). Not a Clay transient surface since plan 125 retired the centered sheet — the composer palette is exactly as wide as its field |
 | Overlay and popover entrance | `motion.normal` (200) is the nearest core token; the profile nominates 240ms and the 620ms focus pulse as design-system values | Curves stay `ease-out` / `spring-snappy` |
 | Spacing rhythm | `spacing.xxs`…`spacing.xl` × `spacing_scale()` | Density scales this rhythm only |
 | UI type sizes | `typography.*` variants (variant selectors, never sizes) | Concrete families/sizes stay user-owned via `theme.setTypography` |
@@ -104,7 +104,7 @@ Core tokens live in `core_theme_value` (`src/shell/theme.rs`) and are the only s
 | `surface.main` | App background |
 | `surface.panel` | Panel background |
 | `surface.overlay` | Floating layer background |
-| `surface.scrim` | Dim behind the window-centered Command Centre sheet (Phase 24.4) and behind the composer's `/` and `@` menus since plan 124 (over the working area, never over the agent lane) |
+| `surface.scrim` | Dim behind the composer's `/` palette and `@` mentions menu (plans 124/125): over the working area and the inspector rail's full height, never over the agent lane (the field that holds the palette's query stays interactive). The retired window-centered sheet used it too (Phase 24.4) |
 | `surface.control` | Button/control background |
 | `surface.list` | List background |
 | `surface.selected` | Selected row/item |
@@ -194,7 +194,7 @@ Legacy `textStyles` themes are projected into modern UI roles by `ResolvedUiThem
 |-------|-------|-----|
 | `opacity.disabled` | 0.55 | Disabled state |
 | `opacity.full` | 1.0 | Default |
-| `opacity.scrim` | 0.5 | Scrim dim behind the centered Command Centre sheet and the composer's menus (Phase 24.4; plan 124 re-anchored the palette onto it) |
+| `opacity.scrim` | 0.5 | Scrim dim behind the composer's palette and mentions menus (plan 124; the centered sheet it replaced is retired by plan 125) |
 
 ### Dimension (Phase 20.1)
 
@@ -216,7 +216,7 @@ Panel, sidebar, and border logical-pixel defaults. These feed `ResolvedUiTheme::
 | `dimension.scrollbar.width` | 8 | Scrollbar thumb width (Phase 20.2) |
 | `dimension.icon.size` | 16 | Icon slot size (Phase 20.2) |
 | `dimension.kbd.height` | 20 | kbd hint height (Phase 20.2) |
-| `dimension.overlay.centered.width` | 640 | Centered Command Centre surface width, clamped to available window width (Phase 24.4) |
+| `dimension.overlay.centered.width` | 640 | Package `modal` dialog width, clamped to available window width (Phase 24.4; the centered Command Centre surface that named it is retired by plan 125, and the composer palette never used it) |
 
 ### Elevation (Phase 20.1)
 
@@ -324,9 +324,9 @@ Plan 088 Tasks 3–7 use the existing typed token catalog; no core token or pack
 7. **Contrast/fallback correctness enforced at validation (Phase 20.7, extended by plan 118 task 14):** text pairs must meet `TEXT_CONTRAST_MIN` (4.5); structural boundaries, focus rings and state fills must meet `UI_CONTRAST_MIN` (3.0); the decorative `border.hairline` must meet `HAIRLINE_VISIBILITY_MIN` (1.2) and stay monotonically quieter than `border.subtle` on the same surface (`validate_active_theme_contrast`, `src/shell/theme.rs`; `enforce_contrast`, `src/server/ops/theme.rs`) — every pair measured composited, and a below-floor theme is not activated. Package `fallback` must be a same-typed core token (`core_fallback_matches_type`); raw colors/CSS/sizes in `designTokens` or `style.*` are rejected at load time. Host-authority checks only; no package-facing op or facade exposes them (see creating-packages.md § "Phase 20.7 authoring contract").
 8. **Code-vs-catalog drift linted (Phase 20.7):** `core_theme_value` arms must stay in sync with the Core Tokens tables; `tests/package_ui_conformance.rs::core_token_catalog_matches_tokens_md` fails the build on drift.
 
-## Phase 24.4 consumption (centered Command Centre)
+## Phase 24.4 consumption (scrim and centered width) — plan 125 restatement
 
-Phase 24.4 adds three core tokens consumed by the Clay-internal centered Command Centre surface: `surface.scrim` (color role), `opacity.scrim` (0.5), and `dimension.overlay.centered.width` (640). Plan 124 re-anchors the command palette onto the composer box as the `/` palette: it keeps `surface.scrim` / `opacity.scrim` for its veil, but `dimension.overlay.centered.width` no longer applies to it (the sheet is exactly as wide as the composer box it answers to; the token stays for the surfaces that are still `Centered` — agent picker, package dialogs). All three resolve once at active-theme install into the cached `ResolvedUiTheme` and are read on paint/layout from cache — never re-resolved per frame. The centered host adds no blur/filter/offscreen work; `dimension.overlay.centered.width` clamps to the available window width. Authority: the scrim and centered surface are Clay-owned — theme packages may override the three typed values through `designTokens` (same validation rules as any core token), but packages cannot paint, configure, or request the centered surface; package overlay anchors remain `working-area` | `active-pane` | `main` | `pointer`.
+Phase 24.4 added three core tokens for the Clay-internal centered Command Centre surface: `surface.scrim` (color role), `opacity.scrim` (0.5), and `dimension.overlay.centered.width` (640). Plan 124 re-anchored the command palette onto the composer box as the `/` palette, and plan 125 moved every picker onto that same sheet and retired the centered projection: the palette keeps `surface.scrim` / `opacity.scrim` for its veil (over the working area and the rail's full height, with the agent lane above it), while `dimension.overlay.centered.width` now only sizes package `modal` dialogs — the palette sheet is exactly as wide as the composer box it answers to and reads no width token. The palette's shadow is **not** a shadow token: it is the design language's halo (two zero-offset `text.primary` layers, 14% at `0 0 14px -2px` and 8% at `0 0 3px 0`), pinned in `DESIGN.md` §6 and shipped as a value change in the `commandCentre.default.root.rest` / `menu.default.root.rest` recipe slots — not a new token. All three core tokens resolve once at active-theme install into the cached `ResolvedUiTheme` and are read on paint/layout from cache — never re-resolved per frame. The palette adds no blur/filter/offscreen work beyond the composited scrim's `backdropBlur: 3`. Authority: the scrim, the halo shadow, and the shielded stage are Clay-owned — theme packages may override the typed token values through `designTokens` (same validation rules as any core token), but packages cannot paint or configure the veil, request the halo for their own surfaces, or request the palette; package overlay anchors remain `working-area` | `active-pane` | `main` | `pointer`.
 
 ## Phase 20.4 consumption (no new tokens)
 

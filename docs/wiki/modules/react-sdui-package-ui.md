@@ -92,17 +92,36 @@ removal (Phase 12).
     + `agentSurfacePaneId`) and auto-closes when the contribution disappears.
     The bundled `@clay/coding-agent` surface is provenance-exact host
     rendering (`frontend/src/coding-agent/CodingAgentPanel.tsx`, the
-    SettingsPanel precedent) — a 50/50 vertical split (left
-    transcript + composer + status row + extension strip, right
-    Files/Memory/Context tabs with selected-box full-content detail); every
-    dynamic value rides the one AG-UI stream, third-party `pane` surfaces
-    render through the unchanged generic SDUI renderer. Its host-owned
+    SettingsPanel precedent). Plan 124 places its composer, agent controls,
+    approval strip, and session foot in the Clay-owned persistent
+    `frontend/src/shell/AgentLane.tsx`; the panel retains transcript/state-strip
+    and inspector presentation. The lane's `/` palette is `CommandPalette`, a
+    host shell surface rather than a package UI contribution. Every dynamic
+    agent value rides the one AG-UI stream, and third-party `pane` surfaces
+    render through the unchanged generic SDUI renderer. Host-owned
     `agent.submit`/`agent.cancel`/`agent.steer` controls bypass static-tree
     source validation and are authorized by the bound tab session; they are
-    not arbitrary package actions. Two catalog gaps
-    closed generically: `tabList` kind (React Aria Tabs, widget-local
-    selection) and `textInput` `multiline` (native textarea, auto-grow,
-    Enter submits / Shift+Enter newline).
+    not arbitrary package actions. Two catalog gaps closed generically:
+    `tabList` kind (React Aria Tabs, widget-local selection) and `textInput`
+    `multiline` (native textarea, auto-grow, Enter submits / Shift+Enter
+    newline).
+
+## Plan 124/125 ownership boundary
+
+The persistent agent lane and the composer's `/` palette are Clay-owned shell
+chrome, not `PackageWorkspace` slots. A package reaches the palette only by
+registering a validated command; it cannot declare the lane, place its
+composer, paint the veil, request the plan-125 halo, or open/drive a transient
+menu session — Plan 125 moved the picker stages into the same sheet, and their
+command ids are listed there but not package-executable (`agent.clientOpen*` are
+built-in server-first ids).
+The `secret` stage is Clay-owned end to end: its shielded field lives in the
+sheet, the composer is disabled while it is open, and the value reaches the
+server only through the credential op. The server catalogue may include package
+command metadata, but query/filter/activation still use the server-owned menu
+and command-executor paths. See [React Command Centre and Desktop
+Workflows](react-command-centre-desktop-workflows.md) and
+[Creating Clay Packages](../../reference/packages/creating-packages.md).
 
 ## Code Example
 

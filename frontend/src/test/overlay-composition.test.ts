@@ -105,23 +105,26 @@ describe("Plan 118: overlay family composition", () => {
     }
   });
 
-  it("bounds the palette and lets its results scroll", () => {
+  it("bounds the palette and lets its rows scroll", () => {
     const css = read("src/command-centre/command-centre.module.css");
-    expect(css).toMatch(/\.surface\s*\{[^}]*max-height:\s*min\(68vh,[^)]*\)/s);
-    expect(css).toMatch(/\.surface\s*\{[^}]*overflow:\s*hidden/s);
-    expect(css).toMatch(/\.results\s*\{[^}]*overflow:\s*auto/s);
+    // Plan 124 anchored the sheet to the composer box: `min(52vh, 420px)`,
+    // internal scroll, and never a second frame around the rows.
+    expect(css).toMatch(
+      /\.palette\s*\{[^}]*max-height:\s*min\(52vh,\s*420px\)/s,
+    );
+    expect(css).toMatch(/\.palette\s*\{[^}]*overflow:\s*hidden/s);
+    expect(css).toMatch(/\.palList\s*\{[^}]*overflow:\s*auto/s);
   });
 
-  it("draws the palette's focus as one ring on the sheet, not on the input", () => {
+  it("draws no ring on the sheet: the composer box in focus is the boundary", () => {
     const css = read("src/command-centre/command-centre.module.css");
-    // One ring per surface (§14.4): the sheet is the ring and carries the
-    // accent halo; the input inside it declares no outline of its own.
-    expect(css).toMatch(/\.surface:focus-within\s*\{[^}]*accent-primary/s);
-    // The halo is the artifact's own composition (`0 0 0 3px` accent-soft):
-    // the palette family declares no focus state, and borrowing another
-    // family's key would route consumption outside its owning module.
-    expect(css).toMatch(/accent-primary\)\s*15%,\s*transparent/s);
-    expect(css).toMatch(/\.input\s*\{[^}]*outline:\s*none/s);
+    // One ring per surface (§9/§14.4): the field the sheet answers to is the
+    // shell of the composition, so the sheet declares no focus state of its own
+    // and never paints an outline (Plan 124's approved geometry). The row and
+    // chip outlines below it are the list/seg recipes' own focus states.
+    expect(css).not.toMatch(/\.palette:focus-within/);
+    expect(css).not.toMatch(/\.palette\s*\{[^}]*outline:/s);
+    expect(css).toMatch(/\.palRow:focus-visible\s*\{[^}]*outline:/s);
   });
 
   it("composes the modal as head, scrolling body and an actions foot", () => {

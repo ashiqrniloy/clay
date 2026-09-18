@@ -911,3 +911,115 @@ fn wiki_navigation_is_complete_and_current_page_paths_resolve() {
         }
     }
 }
+
+/// Plan 125 wiki contract: the pages that described the retired centered
+/// projection and the picker dialogs must describe the one composer palette
+/// instead (protocol v32 `mode` stages, the shielded credential stage, the halo,
+/// default-agent adoption), and no evergreen page may still describe a centered
+/// transient surface as live. The removal record itself is the one page allowed
+/// to speak about the centered implementation at length.
+#[test]
+fn plan125_wiki_pages_describe_the_one_palette_surface() {
+    let pages = [
+        "docs/wiki/modules/control-center.md",
+        "docs/wiki/modules/centered-command-centre-surface.md",
+        "docs/wiki/modules/transient-menu-session.md",
+        "docs/wiki/modules/transient-menu-round-trip.md",
+        "docs/wiki/modules/react-command-centre-desktop-workflows.md",
+        "docs/wiki/modules/react-shell.md",
+        "docs/wiki/modules/slot-aware-package-ui.md",
+        "docs/wiki/modules/path-browser.md",
+        "docs/wiki/modules/command-registry.md",
+        "docs/wiki/modules/clay-agent.md",
+        "docs/wiki/modules/react-sdui-package-ui.md",
+        "docs/wiki/modules/ui-review-harness.md",
+        "docs/wiki/modules/react-tabs-and-splits.md",
+        "docs/wiki/modules/react-agui-chat-stream.md",
+        "docs/wiki/index.md",
+    ];
+    // Markers that carry the plan-125 story: the single sheet, its modes, the
+    // shield, the halo, the retired origin, and default-agent adoption.
+    let markers: [(&str, &str); 8] = [
+        (
+            "docs/wiki/modules/control-center.md",
+            "one session, six modes",
+        ),
+        (
+            "docs/wiki/modules/centered-command-centre-surface.md",
+            "removal record",
+        ),
+        (
+            "docs/wiki/modules/transient-menu-session.md",
+            "second, centered renderer",
+        ),
+        (
+            "docs/wiki/modules/react-command-centre-desktop-workflows.md",
+            "shielded",
+        ),
+        ("docs/wiki/modules/react-shell.md", "halo"),
+        (
+            "docs/wiki/modules/slot-aware-package-ui.md",
+            "PackageOverlayAnchor::Centered",
+        ),
+        (
+            "docs/wiki/modules/clay-agent.md",
+            "adopts the server's default type",
+        ),
+        (
+            "docs/wiki/modules/react-tabs-and-splits.md",
+            "tabUncommitted",
+        ),
+    ];
+    for (page, marker) in markers {
+        assert!(
+            read(page).to_lowercase().contains(&marker.to_lowercase()),
+            "{page} is missing the Plan 125 marker {marker:?}"
+        );
+    }
+    for page in pages {
+        let doc = read(page);
+        assert!(
+            doc.contains("plan 125") || doc.contains("Plan 125"),
+            "{page} must name the plan that retired the centered surface"
+        );
+    }
+
+    // No evergreen page may still describe a live centered renderer. These are
+    // the exact plan-124-era claims plan 125 falsified; the removal record
+    // (centered-command-centre-surface.md) is excluded because it explains them.
+    let stale = [
+        "Centered `CommandCentre` remains",
+        "Centered `CommandCentre` rendering is retained",
+        "Centered `CommandCentre` rendering survives",
+        "Centered picker/package sessions",
+        "Non-palette origins continue through",
+    ];
+    let mut dirs = vec![
+        PathBuf::from("docs/wiki/modules"),
+        PathBuf::from("docs/wiki/flows"),
+    ];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(root().join(&dir)).expect("wiki dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                dirs.push(path.strip_prefix(root()).expect("relative").to_path_buf());
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root())
+                .expect("relative")
+                .to_string_lossy()
+                .into_owned();
+            if relative.ends_with("centered-command-centre-surface.md") {
+                continue;
+            }
+            let doc = read(&relative);
+            for claim in stale {
+                assert!(
+                    !doc.contains(claim),
+                    "{relative} still claims {claim:?}; plan 125 deleted the centered renderer"
+                );
+            }
+        }
+    }
+}

@@ -401,13 +401,24 @@ for the shipped landing.
 
 ## Plan 124 steps (lane chrome + palette in the working area, 2026-09-17)
 
-Deep references: `DESIGN.md` §12 (shell layout), `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`.
+**Plan 125 supersession (2026-09-18).** S47 and S48 keep their subjects (lane
+chrome geometry, sheet + veil placement) but not their old answer about width:
+plan 124 made the lane a **full-content-width** strip, and plan 125 reversed
+that — the lane is the **view pane's** chrome, the sidebar and the inspector
+rail run the working area's full height, and the palette sheet is the composer
+box's width. S47 is amended below and S50 is the new rail/lane independence
+check; the plan-124 numbers (`lane 26,946 1280x200`, rails ending at the lane's
+top edge) describe the superseded layout.
+
+Deep references: `DESIGN.md` §12 (shell layout), `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`,
+`plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`.
 
 | # | Action | Expected |
 |---|--------|----------|
-| S47 | Open the workspace view and measure the shell bands (window edges, sidebar, rail, lane, status bar) | The agent lane is the working area's own chrome strip: it spans the **full** content width and the sidebar and inspector rails end exactly at its top edge (live: rail landmark bottom `946` == lane top `946`; lane box `x=26 w=1280` == the content width). The lane does not overlap or scroll with the panes; the status bar stays below it. Automated: `frontend/src/test/workspace-composition.test.tsx` (grid rows, lane spans `1 / -1`, `display: contents` hosts), `frontend/src/shell/WorkspacePanes.test.tsx` |
-| S48 | With two or more panes open (and again with the rail visible), open the palette and hide the lane | Exactly one sheet appears — anchored to the lane composer, so it spans the whole lane width rather than one pane — and exactly one veil dims **every** pane and the rail (live: pane/rail ratio 0.88, lane 1.00). No per-pane duplicate surface; closing the sheet (or hiding the lane: plan-124 defect D6) removes the veil in one step and pane interaction resumes. Automated: `workspace-composition.test.tsx` (veil is a grid item of row 1, lane z=41 > veil z=40), `CommandPalette.test.tsx` |
+| S47 | Open the workspace view and measure the shell bands (window edges, sidebar, rail, lane, status bar); repeat with the lane hidden | The lane is the **view pane's** chrome strip (plan 125): the sidebar and the inspector rail keep the working area's full height and the lane never covers the sidebar's column. Automation pins it: `frontend/src/test/workspace-composition.test.tsx` (three tracks — files rail · pane · inspector rail — with every grid item placed explicitly; both rails `grid-row: 1 / -1`; the lane in the pane's column and row 2), `frontend/src/shell/WorkspacePanes.test.tsx` (the sidebar region renders in the shell's own rail, exactly once) and `design-artifacts/tools/capture-sidebar.mjs` (rail bottom == working-area bottom; lane.x == rail.right; lane.right == inspector.x). **Plan 125 defect D7 is fixed (2026-09-18, "plan 126" rail work):** the workspace sidebar is the shell's own left rail now — the lane starts at its inner edge, not at the window's, and the sidebar's own content runs through the lane's row to the status bar. See the execution record below for the measured numbers. |
+| S48 | With two or more panes open (and again with the rail visible), open the palette and hide the lane | Exactly one sheet appears — anchored to the lane composer, the lane's inner width rather than one pane — and exactly one veil dims **every** pane and the rail (live: pane/rail ratio 0.88, lane 1.00); the sheet never reaches into the rail column (live `44…1168` against a rail starting at `1186`). No per-pane duplicate surface; closing the sheet (or hiding the lane: plan-124 defect D6) removes the veil in one step and pane interaction resumes. Automated: `workspace-composition.test.tsx` (veil is a grid item spanning `1 / -1`, lane z=41 > veil z=40), `CommandPalette.test.tsx` |
 | S49 | In a split layout with focus in a non-first pane, use the shell chords: `Ctrl+X Ctrl+P` (lane), `Ctrl+X Ctrl+O` (palette), `Ctrl+\`/direction splits, `Ctrl+B`, `Ctrl+I` | Shell chords act on the active tab/pane regardless of which pane holds focus; the lane/palette chords never reach the editor, and split/pane chords keep working while the lane is hidden. Pane focus policy and split aliases are unaffected by the lane's presence. Automated: shell-chord routing tests, `frontend/src/shell/workspace-commands.ts` command tests |
+| S50 | Toggle the lane (`Ctrl+X Ctrl+P` / the status-bar hint) with the rail visible, then toggle the rail (`Ctrl+I` / the titlebar button), then restore both | The three surfaces are independent: hiding the lane leaves the sidebar and inspector rail exactly where they are (live post-fix: `Document outline 1186,110 340x1036` unchanged, `Pane 1` still ending at `1186`, hints `lane Ctrl X P` + `hide outline Ctrl I`), and hiding the rail leaves the lane's visibility alone (`lane` hint unchanged). Both directions are pinned by `frontend/src/shell/layout-state.test.ts` (one store per surface — plan 125 defect D9) and covered by `workspace-composition.test.tsx`. |
 
 ## Plan 124 execution record (Linux, 2026-09-17)
 
@@ -419,3 +430,33 @@ window-cropped captures + AT-SPI, plus the automated suites.
 | S47 | PASS live | AT-SPI extents: `footer Agent lane` at `26,946 1280x200`; inspector `landmark Document outline` at `966,110 340x836` → bottom `946` == the lane's top edge; the lane's width equals the window content width. Visual: `test-plan/artifacts/124-agent-lane/01-rest.png` (sidebar and rail both stop at the lane). Plan 124 task 9 measured the same geometry after the fix (lane 1160 px → 1500 px, rails re-ended). |
 | S48 | PASS live (single pane + rail) + automated (multi-pane) | Live: palette open → pane/rail means 40.0 → 35.3/35.6 (ratio 0.88) with the lane band 1.00; lane hidden with the sheet open → 0 dialog nodes, 0 lane nodes and pane/rail back to 1.00/0.99 (D6 fix). Multi-pane duplicate-surface behavior is pinned by `workspace-composition.test.tsx` + `CommandPalette.test.tsx`. |
 | S49 | PASS automated / NOT RUN live | Chord routing is pinned by the shell-chord matcher tests and the command catalogue tests; chords could not be delivered to the live window on this host (standing ceiling, module 10 K-series), and the live lane/palette routes were driven through the status-bar hints that call the same commands. Split/pane chords were not re-run in this instance. |
+
+## Plan 125 execution record (Linux, 2026-09-18)
+
+Live on a fresh build with the canonical config (isolated root) plus the repo
+capture harness (`scripts/capture-ui-review.sh --fixture ui-review-workspace
+--size 1500x950 --drive …`), evidence in `test-plan/artifacts/125-palette/`
+(states `01…05`, `04a` = the pre-fix rail collapse, `rail-independence.ax.txt`).
+
+| Step | Result | Evidence |
+|---|---|---|
+| S47 (lane confined to the view pane) | **PASS live (2026-09-18, after defect D7 was fixed)** | Fix: the SDUI tree's `dimension.sidebar.default` region is host-placed — `frontend/src/shell/WorkspacePanes.tsx` renders it in the shell's `.side` rail, and the pane's tree is rendered without it — so the working-area grid is three tracks (files rail · pane · inspector rail) with both rails at `grid-row: 1 / -1`. Live at 1500×950: `footer Agent lane 270,946 916x200` → x `270…1186`, i.e. the lane starts at the sidebar's inner edge and ends at the inspector's left edge (plan 125's D7 run measured `26,946 1160x200`, which covered the sidebar column); `landmark Document outline 1186,110 340x1036` → bottom `1146` == the lane's bottom == the working area's content bottom; the sidebar's own content now runs *through* the lane's row (list box `26,194 243x919`, foot `26,1113 243x10`, hints to `1146`) instead of ending at the lane's top hairline. Deterministic layer (`capture-sidebar.mjs`, 3/3 widths): 1500 → rail `0,40 244x882`, lane `244…1160`, inspector `1160…1500`; 1024 → rail `224`, lane `224…712`, inspector `712…1024`; 900 → both rails `position: fixed` drawers and the lane `0…900` (the pane's full width, DESIGN §12). Evidence: `code-reviews/screenshots/2026-09-18-plan126-rails/review-log.md` (+ `report.json`), `test-plan/artifacts/126-rails/live-1500/`. |
+| S48 (sheet + veil, one surface) | PASS live (1500 px and narrow) | Live: one sheet at the lane's inner width (`44,531 1124x420` at 1500 px content; 6 px gap; 420 px cap) and one veil over panes + rail (pane −4.7, rail −5.0 luminance; lane/composer/status bar 0.0), never reaching the rail column (`1168 < 1186`). Hiding the lane with the sheet open removed sheet **and** veil (`04-lane-hidden-palette-gone.png`, 0 `Commands` nodes). Multi-pane duplicate-surface behavior stays automated. |
+| S49 (shell chords in splits) | PASS automated / NOT RUN live | Chord routing and command catalogue tests (unchanged since plan 124); the live lane/palette legs were driven through the status-bar hints that run the same commands (standing host ceiling: no input synthesis). |
+| S50 (rail/lane independence) | PASS live (post-fix) + PASS automated | Pre-fix live: clicking `hide lane` also collapsed the inspector rail (`04a-lane-hidden-rail-collapsed.png`: `Pane 1` grew into the rail column, the `Hide outline` button and the `Document outline` landmark disappeared) — root cause: the three visibility stores shared one `visibleByTab` map and one listener set (**defect D9**), fixed in `frontend/src/shell/layout-state.ts` and pinned by `frontend/src/shell/layout-state.test.ts`. Post-fix live: hiding the lane leaves `Document outline 966,110 340x1036` intact and hiding the rail leaves the `lane` hint untouched (`rail-independence.ax.txt`); the corrected state was re-captured with the repo harness (`04-lane-hidden-palette-gone.png` + `04-metadata.txt`, PASS, viewport 1500x1104). |
+
+## Plan 126 execution record (rail fix closing plan 125's D7, Linux, 2026-09-18)
+
+The user's decision on D7 ("the lane strip should not span the sidebars … the
+left and right side bar should take the full height of the window and agent lane
+should be only spanning the middle part") was implemented as the shell placing
+the SDUI tree's token-sized workspace-sidebar region in its own left rail
+(`frontend/src/shell/WorkspacePanes.tsx`, `frontend/src/sdui/renderer.tsx`), so
+the working area is three tracks with both rails at full height (DESIGN.md §12,
+the approved drawing). S47 was re-run and passes; see the amended S47 row above.
+
+Evidence: `code-reviews/screenshots/2026-09-18-plan126-rails/review-log.md` and
+`report.json` (deterministic geometry at 1500/1024/900),
+`test-plan/artifacts/126-rails/live-1500/` (+ `live-1024/`, `live-900/`, both
+recorded with the host's narrow-capture ceiling). Automated: 497 frontend tests
+(`workspace-composition.test.tsx`, `WorkspacePanes.test.tsx`).
