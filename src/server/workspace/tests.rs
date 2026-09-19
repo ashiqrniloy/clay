@@ -797,6 +797,47 @@ async fn open_existing_file_streams_large_utf8_text_and_bounds_head() {
 }
 
 #[tokio::test]
+async fn release_single_document_access_releases_bytes_with_last_holder() {
+    let root = temp_workspace("release-single-access");
+    fs::write(root.join("note.txt"), "hello").unwrap();
+    let mut workspace = WorkspaceState::new();
+    let root_id = workspace.add_root(&root).unwrap();
+    let opened = workspace
+        .open_existing_file(root_id, "note.txt", 0)
+        .await
+        .unwrap();
+    let document_id = opened.document_id;
+    // Second client, same file: two access holders on one registry entry and
+    // one resident-memory charge.
+    workspace
+        .open_existing_file(root_id, "note.txt", 7)
+        .await
+        .unwrap();
+    assert_eq!(workspace.resident_document_bytes, 5);
+
+    assert!(
+        !workspace
+            .release_single_document_access(document_id, 7)
+            .await,
+        "releasing one of two holders keeps the document registered"
+    );
+    assert!(workspace.document_handle(document_id).is_some());
+    assert_eq!(workspace.resident_document_bytes, 5);
+
+    assert!(
+        workspace
+            .release_single_document_access(document_id, 0)
+            .await,
+        "releasing the last holder removes the document"
+    );
+    assert!(workspace.document_handle(document_id).is_none());
+    assert_eq!(workspace.resident_document_bytes, 0);
+
+    let _ = fs::remove_file(root.join("note.txt"));
+    let _ = fs::remove_dir(root);
+}
+
+#[tokio::test]
 async fn opening_three_documents_including_ten_megabytes_keeps_bounded_heads() {
     use std::io::Write;
 

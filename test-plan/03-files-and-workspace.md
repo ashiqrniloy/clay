@@ -281,6 +281,12 @@ WebKitGTK target can be controlled.
 |---|--------|----------|
 | F55 | Fresh debug build: open the generated 50 MiB UTF-8 fixture, wait for ready, edit, save, and reload (`cargo test --test runtime large_document::` is the deterministic companion) | The head arrives within `max(500 ms, bytes / 25 MiB/s)` — 2 s at 50 MiB — then bounded chunks assemble before editing enables. The edit/save/reload round trip preserves exact bytes; every chunk stays ≤256 KiB. Oversize and binary inputs still refuse visibly without a stale loading state. This replaces the former flat 500 ms debug-only expectation, which flaked under ordinary CI contention; the 5 s full-load guard remains. |
 
+## Plan 126 document access-path steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F56 | Open the ≥4 MiB fixture (`scripts/capture-ui-review.sh --fixture ui-review-large-document`, or `test-plan/artifacts/126-access-paths/launch-live.sh start`) | The document opens through the chunked path, first text paints before ready, and the editor becomes editable once chunks assemble. The accessible editor text stays bounded (a few thousand characters, never document-sized) and, once the analysis route reports the over-budget document, the status bar carries `Document exceeds the package analysis limit; baseline language support remains active.` Negative: no document-sized text in the accessibility tree, no stale loading state, no refusal of the client open (the package-op budget is module 09 P55 and never gates this path). |
+
 ## Plan 099 Linux execution record (2026-08-28)
 
 | Check | Result | Evidence |
@@ -324,3 +330,11 @@ Executed against the freshly rebuilt Linux desktop build; artifacts under
 No existing step was deleted or weakened; F32's expected result was rewritten
 because the empty tab is a package contribution now, and F32a/F37a/F37b add
 the launcher-specific negative coverage.
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F48–F55 (automated companion) | PASS | `cargo test --test runtime large_document:: -- --nocapture` on this tree: 50 MiB open→head 256 ms (262,142-byte head, 52,428,800 bytes total), chunked open/edit/save/reload round trip, plus oversize and binary refusals — 2 passed in 2.11 s. |
+| F56 | PASS live | Isolated live launch (`test-plan/artifacts/126-access-paths/launch-live.sh`, private mode-700 root, `tests/fixtures/configuration/ui-review-large-document/init.js`): `review.rs` = 4,231,903 bytes (808,003 words) restored through `layout.json`; the editor exposed `role=entry name='Document editor'`, `chars=2759` (bounded window of the document head, `pub fn helper_000000…`), states `editable,focused,supports-autocompletion`, and the status bar carried the analysis-limit note. Harness run on the same fixture: `scripts/capture-ui-review.sh --fixture ui-review-large-document` PASS with `viewport=1500x1104` and a clean 1500×1151 window crop (`test-plan/artifacts/126-access-paths/live-large-open/screenshot.png`, `a11y-tree.txt`, `metadata.txt`); the live-completion run's capture is `live-large-completion/screenshot.png`. An earlier harness attempt whose window sat off-screen under an overlapping terminal was discarded rather than recorded (artifact note in `live-large-open/`). |
+| Host note (changed ceiling) | — | Input synthesis works on this host through the **xdg-desktop-portal remote-desktop keyboard session** (the computer-use-linux MCP `press_key`/`type_text`): typing and chords reached the Clay window and were verified in the document text. `ydotool`/`wtype` remain unusable and the AT-SPI editor node still exposes no `EditableText`, so the AT-SPI `--drive` path cannot type into the editor — but the earlier "no keyboard backend at all" ceiling no longer holds for portal-driven runs. |

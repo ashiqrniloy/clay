@@ -222,6 +222,12 @@ No performance budget was raised. Wide/narrow/large-type screenshots are under `
 |---|---|---|
 | Q26 | UNRESOLVED live; PASS automated/worker structural | `lsp-shared` resolution and analyzer workspace context are repaired; the fresh P2 Rust fixture reached the analyzer path but did not produce a non-empty inlay set after an AT-SPI edit, and the host has no keyboard input backend for the required toggle sequence. No visible/toggled-off claim is made. Local toggle, inlay payload, no-reflow, and hot-path tests pass. |
 
+## Plan 126 completion-on-large-document budget step
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q41 | On the ≥4 MiB fixture (module 03 F56), trigger completion (`Ctrl+Space` after a word prefix), move the selection, accept with `Enter`, then repeat and dismiss with `Escape` | The popup appears without a perceptible stall and the editor stays responsive: the completion request/response round trip on a 4 MiB document stays in the sub-millisecond range with per-request allocation independent of document size (the O(document) copy this step guards against was removed by plan 126 task 3). Negative: no document-sized allocation spike, no input wait for the provider, no stale popup after dismissal. |
+
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
 UI preflight used the UI guidance current at execution time, category `accessibility`, selected
@@ -361,3 +367,11 @@ in the rows.
 row-activation legs of Q13/Q31/Q40 remain UNRESOLVED live; the numbers that are
 claimed (geometry, veil deltas, halo profile, scroll bounds) come from pixel
 probes on window-cropped captures. Wall-clock budgets stay advisory as always.
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| Q41 | PASS live (presence) / PASS measured (server path) | Live on the 4,231,903-byte document the popup opened at the caret and accepted a snippet (module 04 E39). Server-side measurement on the same size class: completion round trip ~161 µs median (down from 427–569 µs before plan 126 task 3) with 31,118 bytes allocated per request on 4 MiB — identical to the 64 KiB case, i.e. no O(document) work. Source: `code-reviews/2026-09-18-plan126-baseline/README.md` (task-3 after-measurements). |
+| Q41 latency resolution | Ceiling recorded | The live AT-SPI probe cannot resolve sub-second paint timing (one full tree walk is ~0.9 s warm, ~15 s per fresh process), so the live leg claims presence/acceptance, not a frame number; the measured server round trip above is the budget evidence. |
+| Automated companion | PASS | `static_completion_on_large_document_matches_small_document_results` (4 MiB result parity) plus `language_intelligence_window_budget_honored` (window budget on a large multibyte document) are green in the lib suite; `cargo test --test runtime large_document::` covers the 50 MiB open/edit/save path. |

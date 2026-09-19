@@ -32,7 +32,10 @@ use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
-    perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
+    perf::budgets::{
+        COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEMS,
+        COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+    },
     protocol::{
         BehaviorVersion, ClientId, CompletionItem, CompletionItemTextFormat, CompletionStatus,
         DocumentId, DocumentVersion,
@@ -360,6 +363,12 @@ pub struct JsCompletionProviderRegistration {
     pub meta: CompletionProviderMeta,
     pub token: String,
     pub export_name: String,
+    /// Plan 127 P1: host-validated package module specifier declaring
+    /// `export_name`. When present the handler is materialized by importing
+    /// this module inside the serving lane's isolate, so the provider can run
+    /// on the latency lane. `None` keeps the token-backed closure registered
+    /// in the general lane's isolate (`module: {...}` registrations).
+    pub module_specifier: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1318,14 +1327,13 @@ fn validate_window(
         return Err(CompletionCoordinatorError::WindowMetadataMismatch);
     }
     // Cap the provider-visible window so package providers never see an
-    // unbounded document slice. 64 KiB is the generic completion window budget;
-    // it is well under the result payload budget and large enough for buffer-
-    // word and token-based providers.
-    const COMPLETION_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
-    if window_bytes > COMPLETION_WINDOW_BUDGET_BYTES {
+    // unbounded document slice. The budget is shared with the window builder
+    // in `connection::runtime`, so a legitimately built window can never be
+    // rejected here.
+    if window_bytes > COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES {
         return Err(CompletionCoordinatorError::WindowTooLarge {
             bytes: window_bytes,
-            budget: COMPLETION_WINDOW_BUDGET_BYTES,
+            budget: COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES,
         });
     }
     Ok(())

@@ -17,8 +17,9 @@ use super::{
 // connection module scope; the few names tests also import explicitly are
 // imported from their family modules for unambiguous unqualified use.
 use super::runtime::{
-    execute_command_intent, language_intelligence_document_window_for_behavior,
-    sdui_command_request, static_package_completion_result,
+    execute_command_intent, language_intelligence_document_window,
+    language_intelligence_document_window_for_behavior, sdui_command_request,
+    static_package_completion_result,
 };
 use super::tabs::open_workspace_for_bound_tab;
 use crate::protocol::ParseByteRange;
@@ -38,6 +39,16 @@ fn document_state() -> Arc<Mutex<DocumentState>> {
         "".to_string(),
         DocumentAccess::Editable { lease_id: 1 },
     )))
+}
+
+/// Document under test for window builders: they read the rope, not the id, so
+/// the request's document id is what matters.
+fn document_with_text(text: &str) -> DocumentState {
+    DocumentState::new(
+        1,
+        text.to_string(),
+        DocumentAccess::Editable { lease_id: 1 },
+    )
 }
 
 fn empty_sdui_state() -> Arc<Mutex<StaticSduiState>> {
@@ -74,7 +85,7 @@ fn language_intelligence_window_uses_active_behavior_mode() {
 
     let window = language_intelligence_document_window_for_behavior(
         &request,
-        "fn main() {}",
+        &document_with_text("fn main() {}"),
         behavior.manifest(),
     );
 
@@ -109,17 +120,137 @@ fn language_intelligence_window_resolves_per_document_mode_layer() {
 
     let markdown_window = language_intelligence_document_window_for_behavior(
         &request(7),
-        "## Heading",
+        &document_with_text("## Heading"),
         state.manifest_for(7),
     );
     assert_eq!(markdown_window.active_mode, "markdown");
 
     let rust_window = language_intelligence_document_window_for_behavior(
         &request(9),
-        "fn main() {}",
+        &document_with_text("fn main() {}"),
         state.manifest_for(9),
     );
     assert_eq!(rust_window.active_mode, "rust");
+}
+
+/// Plan 126 task 3: the static completion path reads only the replacement
+/// range, so a 4 MiB document produces exactly the small-document result.
+#[test]
+fn static_completion_on_large_document_matches_small_document_results() {
+    let provenance = crate::protocol::CompletionProvenance {
+        package_name: "@clay/javascript".to_string(),
+        package_version: "0.1.0".to_string(),
+        package_prefix: "javascript".to_string(),
+    };
+    let provider = crate::server::completion::CompletionProviderMeta {
+        id: "javascript.keywords".to_string(),
+        provenance: provenance.clone(),
+        priority: 0,
+        exclusive: false,
+        trigger_metadata: crate::server::completion::CompletionTriggerMetadata {
+            trigger_characters: vec![".".to_string()],
+        },
+        word_boundary: crate::server::completion::WordBoundaryRule::default(),
+        items: ["function", "for", "return"]
+            .into_iter()
+            .map(|item| crate::protocol::CompletionItem::new(item, item, provenance.clone()))
+            .collect(),
+        timeout_ms: 300,
+        max_items: 32,
+        generation: 0,
+    };
+    let request = crate::protocol::CompletionRequest {
+        request_id: 1,
+        client_id: 2,
+        document_id: 3,
+        document_version: 4,
+        behavior_version: 5,
+        cursor_byte_offset: 2,
+        replacement_range: crate::protocol::CompletionReplacementRange::new(0, 2),
+        trigger: crate::protocol::CompletionTrigger::Character(".".to_string()),
+        provider_generation: 0,
+        recent_completions: Vec::<String>::new().into_boxed_slice(),
+    };
+    // Same two-byte replacement range at the head of both documents.
+    let small = document_with_text("fu");
+    let large = document_with_text(&format!("fu{}", "x".repeat(4 * 1024 * 1024)));
+    let result_of = |document: &DocumentState| {
+        let replacement_text = document
+            .text_range(
+                request.replacement_range.byte_start,
+                request.replacement_range.byte_end,
+            )
+            .expect("replacement range is inside the document");
+        static_package_completion_result(
+            &request,
+            "javascript.javascript",
+            &replacement_text,
+            std::slice::from_ref(&provider),
+        )
+        .expect("static provider matches the replacement range")
+    };
+
+    let small_result = result_of(&small);
+    let large_result = result_of(&large);
+
+    assert_eq!(small_result.status, large_result.status);
+    assert_eq!(small_result.provenance, large_result.provenance);
+    assert_eq!(large_result.items, small_result.items);
+    assert_eq!(
+        large_result
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["function"]
+    );
+    assert_eq!(
+        large_result.replacement_range,
+        small_result.replacement_range
+    );
+}
+
+/// Plan 126 task 3: the language-intelligence window is built from the rope,
+/// stays inside its budget, and lands on scalar boundaries on a multi-MiB
+/// multibyte document.
+#[test]
+fn language_intelligence_window_budget_honored() {
+    use crate::perf::budgets::LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES;
+
+    let text = "日本語 🦀 fn main() {}\n".repeat(4 * 1024 * 1024 / 28);
+    let document = document_with_text(&text);
+    let cursor_byte_offset = (text.len() / 2) as u64;
+    let request = crate::protocol::LanguageIntelligenceRequest {
+        request_id: 1,
+        client_id: 2,
+        document_id: 3,
+        document_version: 4,
+        behavior_version: 3,
+        cursor_byte_offset,
+        feature: crate::protocol::LanguageIntelligenceFeature::Hover,
+        provider_generation: 0,
+    };
+
+    let window = language_intelligence_document_window(&request, &document, "rust");
+
+    assert!(
+        window.text.len() <= LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES + 3,
+        "window of {} bytes exceeds the {} byte budget",
+        window.text.len(),
+        LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES
+    );
+    assert_eq!(
+        window.byte_end - window.byte_start,
+        window.text.len() as u64
+    );
+    assert!(window.byte_start <= cursor_byte_offset);
+    assert!(cursor_byte_offset <= window.byte_end);
+    // Indexing panics unless both bounds are scalar boundaries; the equality
+    // then proves the window is the document's own text, uncorrupted.
+    assert_eq!(
+        window.text,
+        text[window.byte_start as usize..window.byte_end as usize]
+    );
 }
 
 #[test]
@@ -7430,6 +7561,82 @@ async fn mode_activation_cache_hit_skips_generated_module_evaluation() {
     );
     eprintln!(
         "Plan 099 measurement: generated V8 open activation took {v8_elapsed:?};              registry fast path reuses the cached manifest without V8"
+    );
+}
+
+#[tokio::test]
+async fn mode_activation_cache_evicts_oldest_not_all() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let capacity = crate::perf::budgets::MODE_ACTIVATION_CACHE_ENTRIES;
+    let make_metadata = |document_id| DocumentMetadata {
+        document_id,
+        version: 1,
+        access: DocumentAccess::Editable { lease_id: 1 },
+        lease_id: Some(1),
+        dirty: false,
+        workspace_root_id: 1,
+        path: "notes.md".to_string(),
+    };
+    let behavior = Arc::new(Mutex::new(ActiveBehaviorManifest::default()));
+    let sdui = empty_sdui_state();
+    let runtime = js_runtime();
+    let coordinator = parse_coordinator();
+    load_markdown_runtime(&runtime, &coordinator, &behavior, &sdui).await;
+
+    // Each distinct leading content is a distinct activation key, so one open
+    // per key fills the cache exactly to capacity and then overflows by one.
+    let text_for = |index: usize| format!("# Title\n\nprobe-{index}\n");
+    for index in 0..=capacity {
+        super::classify_open_document(
+            capacity as u64 + 1,
+            &runtime,
+            &coordinator,
+            &make_metadata(2),
+            &text_for(index),
+            &behavior,
+            &sdui,
+        )
+        .await
+        .unwrap_or_else(|| panic!("open {index} classifies through the generated module"));
+    }
+    let evaluations = runtime.open_activation_evaluation_count();
+    assert_eq!(evaluations, capacity as u64 + 1);
+
+    // The second-oldest key survived the overflow: a repeat open still hits the
+    // cache, which the previous clear-all behaviour could not do.
+    super::classify_open_document(
+        capacity as u64 + 1,
+        &runtime,
+        &coordinator,
+        &make_metadata(3),
+        &text_for(1),
+        &behavior,
+        &sdui,
+    )
+    .await
+    .expect("second-oldest key still classifies through the registry fast path");
+    assert_eq!(
+        runtime.open_activation_evaluation_count(),
+        evaluations,
+        "second-oldest key must not re-evaluate its generated module"
+    );
+
+    // The oldest key was evicted instead of the whole cache.
+    super::classify_open_document(
+        capacity as u64 + 1,
+        &runtime,
+        &coordinator,
+        &make_metadata(4),
+        &text_for(0),
+        &behavior,
+        &sdui,
+    )
+    .await
+    .expect("oldest key classifies through the generated module again");
+    assert_eq!(
+        runtime.open_activation_evaluation_count(),
+        evaluations + 1,
+        "oldest key must re-evaluate its generated module"
     );
 }
 

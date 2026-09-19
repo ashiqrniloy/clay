@@ -77,11 +77,13 @@ Returns a promise for document metadata plus the complete document text as a JSO
 
 **Chunking note**: This trusted-runtime facade returns the full document text in a single JSON string, not the protocol's `DocumentTextHead`/chunk transfer path. The trusted JS runtime heap (128 MiB) is the effective bound; external packages never receive this full-text JSON. The protocol chunked path (`DocumentTextHead` + `DocumentChunkRequest`/`DocumentChunk`) is a separate Tauri/client bridge concern.
 
+**Package budget**: documents over `DOCUMENTS_OP_MAX_DOCUMENT_BYTES` (256 KiB) are refused with a typed `documents.document_too_large` error before any document text is converted for JavaScript, so a package cannot pull an unbounded document into the V8 heap in one op call. The client editor is unaffected: it opens and transfers large files through the chunked protocol path.
+
 Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, a dirty document would be overwritten without an explicit force option, or the document exceeds the package documents budget (`documents.document_too_large`, 256 KiB — open larger files in the Clay editor). The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 

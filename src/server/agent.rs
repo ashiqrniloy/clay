@@ -95,6 +95,26 @@ impl std::fmt::Display for AgentError {
 
 impl std::error::Error for AgentError {}
 
+/// The Clay root a server without an explicit configuration root keeps its
+/// agent state under: the per-user `~/.clay`, which is also the daemon's own
+/// `homedir()` default and the runtime's effective root. `None` only when no
+/// home is knowable.
+///
+/// Under `cfg(test)` a per-process temp root stands in: a unit test that
+/// constructs a server without a root (most of them do) must never read or
+/// write the developer's real profile — the integration suites that prove the
+/// per-user resolution isolate `HOME` themselves.
+fn root_less_agent_config_root() -> Option<PathBuf> {
+    #[cfg(test)]
+    {
+        Some(std::env::temp_dir().join(format!("clay-agent-test-root-{}", std::process::id())))
+    }
+    #[cfg(not(test))]
+    {
+        crate::server::configuration::ConfigurationRuntime::default_config_root()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentHostConfig {
     pub program: PathBuf,
@@ -122,7 +142,19 @@ impl AgentHostConfig {
         // credentials.vault, book.json and vault.passphrase follow; on
         // rename failure the legacy dir keeps serving (never orphan
         // credentials).
+        //
+        // Absent an explicit root the per-user Clay root (`~/.clay`) applies —
+        // the same root the runtime and the daemon's own homedir() default
+        // resolve to. A shared `temp_dir()` fallback used to live here, which
+        // made every root-less server (the desktop's own launch, a fixture, an
+        // isolated HOME, a bare `clay server`) share one book.json /
+        // credentials.vault / sessions.sqlite: a stale selection from another
+        // run then named a profile this run never registered, and the tab
+        // could not bind a session at all. Only a missing HOME still falls
+        // back to temp.
         let data_dir = configuration_root
+            .map(Path::to_path_buf)
+            .or_else(root_less_agent_config_root)
             .map(|root| {
                 let new_dir = root.join("agents").join("coding-agent").join("data");
                 let legacy_dir = root.join("agent");
@@ -1830,6 +1862,13 @@ for line in sys.stdin:
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"ok":True}}), flush=True)
     elif method == "session.new":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":"s1","profile":params.get("profile"),"provider":params.get("provider"),"model":params.get("model")}}), flush=True)
+    elif method == "agentProfile.list":
+        # The daemon that can run the coding surface has its profile
+        # registered (a package load entry declares it); the mount only
+        # adopts a profile the daemon actually lists.
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"profiles":[
+            {"name":"coding","description":"Coding agent"},
+            {"name":"Chat","description":""}]}}), flush=True)
     elif method == "environment.list":
         print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{
             "commands":[{"name":"/compact","description":"compact"}],
@@ -1903,6 +1942,86 @@ for line in sys.stdin:
         }
         let again = host.tab_state_snapshot(1).await;
         assert_eq!(again.profile, "custom");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tab_state_snapshot_skips_a_profile_the_daemon_does_not_have() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // The mount guesses the coding surface's profile so a pane shown
+        // without a launch still runs the coding tools. That guess must be
+        // checked against the daemon's own profile list: a profile no package
+        // registered (the package never loaded, a store without it) would
+        // fail `session.new` with `Unknown agent: coding`, and the tab would
+        // never bind a session — a dead pane with no error. With the profile
+        // absent the book stays unselected and the daemon's built-in `Chat`
+        // default serves the tab instead.
+        let script_dir = unique_temp("clay-mock-tabstate-no-coding");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        let program = script_dir.join("mock-agent");
+        std::fs::write(
+            &program,
+            r#"#!/usr/bin/env python3
+import json, os, sys
+for line in sys.stdin:
+    msg = json.loads(line)
+    ident = msg.get("id")
+    method = msg.get("method")
+    params = msg.get("params") or {}
+    if method == "agentProfile.list":
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"profiles":[
+            {"name":"Chat","description":""}]}}), flush=True)
+    elif method == "session.new":
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "requested-profile.txt"), "w") as handle:
+            handle.write(str(params.get("profile")))
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{"sessionId":"s1","profile":params.get("profile"),"provider":params.get("provider"),"model":params.get("model")}}), flush=True)
+    else:
+        print(json.dumps({"jsonrpc":"2.0","id":ident,"result":{}}), flush=True)
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&program).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&program, perms).unwrap();
+
+        let repo = git_repo_with_branch("feature/no-coding-profile");
+        let data_dir = unique_temp("clay-mock-tabstate-no-coding-data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let host = AgentHost::new(AgentHostConfig {
+            program,
+            args: Vec::new(),
+            data_dir,
+            inherit_environment: Vec::new(),
+            inert: false,
+            mcp_allow_list: Vec::new(),
+        });
+        let registry = Arc::new(Mutex::new(super::super::tab_registry::TabRegistry::new()));
+        registry
+            .lock()
+            .await
+            .create_tab(1, 10, repo.to_str().unwrap().to_string());
+        host.set_tab_registry(Arc::clone(&registry));
+        {
+            let mut book = host.inner.book.lock().await;
+            book.provider = "mock".into();
+            book.model = "demo".into();
+        }
+
+        let snapshot = host.tab_state_snapshot(1).await;
+        assert_eq!(
+            snapshot.session_id, "s1",
+            "the tab still binds a session when the guessed profile is absent"
+        );
+        assert_eq!(
+            std::fs::read_to_string(script_dir.join("requested-profile.txt")).unwrap(),
+            "Chat",
+            "the daemon's built-in default is what the session is created with"
+        );
+        assert!(
+            host.inner.book.lock().await.profile.is_empty(),
+            "an unavailable profile is never recorded as the book's selection"
+        );
     }
 
     #[cfg(unix)]
@@ -3367,8 +3486,38 @@ mod data_dir_migration_tests {
     }
 
     #[test]
-    fn for_server_without_a_configuration_root_falls_back_to_temp() {
+    fn for_server_without_a_configuration_root_keeps_agent_state_off_the_shared_temp_dir() {
+        // No explicit root: the per-user `~/.clay` applies in a real server
+        // (the same root the daemon's homedir() default resolves to), *not* a
+        // shared temp dir — one temp dir for every root-less server meant one
+        // book.json, credentials.vault, and sessions.sqlite shared across
+        // profiles and runs, so a stale selection named a profile the run
+        // never registered and the tab could not bind a session. Unit tests
+        // (cfg(test)) resolve a per-process root instead, so no test touches
+        // the developer's profile; `tests/agent_session_isolation.rs` proves
+        // the per-user path end-to-end with an isolated HOME.
         let config = AgentHostConfig::for_server(None, None);
-        assert_eq!(config.data_dir, std::env::temp_dir().join("clay-agent"));
+        let expected_root = if cfg!(test) {
+            std::env::temp_dir().join(format!("clay-agent-test-root-{}", std::process::id()))
+        } else {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(std::path::PathBuf::from)
+                .expect("a home")
+                .join(".clay")
+        };
+        assert_eq!(
+            config.data_dir,
+            expected_root
+                .join("agents")
+                .join("coding-agent")
+                .join("data"),
+            "root-less agent state follows the per-user (or per-process test) Clay root"
+        );
+        assert_ne!(
+            config.data_dir,
+            std::env::temp_dir().join("clay-agent"),
+            "never the old shared temp dir"
+        );
     }
 }

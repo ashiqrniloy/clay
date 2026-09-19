@@ -46,7 +46,7 @@ A package declares `clay.contributions.languageIntelligenceProviders` and calls 
 language.hover | goToDefinition | codeActions | signatureHelp
   -> client captures document/version/behavior/cursor byte offset
   -> nonblocking ClientMessage::LanguageIntelligenceRequest
-  -> connection builds a UTF-8-safe <=64 KiB document window
+  -> connection builds a UTF-8-safe <=64 KiB rope window (O(window), floor-clamped end)
   -> LanguageIntelligenceCoordinator::schedule
   -> deterministic provider selection by feature, mode, priority, ID
   -> per-request oneshot result delivery
@@ -57,6 +57,8 @@ language.hover | goToDefinition | codeActions | signatureHelp
 The coordinator owns one in-flight task key per client/document/feature. A newer request aborts the old task. It caps global outstanding work at `LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS`, applies each provider timeout up to `LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS`, and returns immediately. Completion sends through a per-request oneshot, avoiding cross-client result theft from a shared receiver.
 
 `finish_task` checks provider generation and document version, validates the result, and overwrites result provenance with registered provider provenance. Timeout/provider failures become sanitized status envelopes; cancelled/stale work is dropped without flashing UI.
+
+Plan 126 (Document Access Path Hardening) removed the full-document copy from this path: the connection clones the behavior manifest before taking the document lock and builds the window with `DocumentState::window_around`, so a hover/definition/code-action/signature request on a multi-MiB document allocates O(window) instead of O(document). The window comes from the shared `cursor_window_bounds` helper (same one completion uses), whose end boundary is floor-clamped at or below `LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES` (64 KiB) and never splits a code point; both window budgets are listed in the performance guide's deterministic hard-guard table.
 
 ### Protocol and validation
 
@@ -132,6 +134,7 @@ See the authoritative API page for complete options and errors.
 - External URIs, absolute/traversing paths, callbacks, raw ops, client JavaScript, and executable fields are rejected.
 - Code-action edits are inert previews only.
 - No provider, JavaScript, process, or IPC wait occurs before local text paint.
+- The provider window is bounded and O(window): it never exceeds the 64 KiB budget, never ends mid-code-point, and is built without copying the document (`window_around` over the canonical rope).
 
 ## Phase 18.21 Handoff (Complete)
 
@@ -147,6 +150,7 @@ See the authoritative API page for complete options and errors.
 ## Tests
 
 - `tests/language_intelligence.rs`: protocol round trips, validation, provider ordering, cancellation, timeout, provenance, semantic composition, authority separation, and document-analysis worker intelligence routing.
+- `src/server/connection/tests.rs`: `language_intelligence_window_budget_honored` verifies the window budget on a large multibyte document; `src/server/document.rs`: `window_respects_multibyte_boundaries`, `window_at_document_edges_clamps_to_boundaries`, and `window_cost_is_independent_of_document_size` cover the shared helper.
 - `tests/editor_intelligence_protocol.rs::completion_recency_and_hover_intelligence_messages_round_trip`: shared-codec coverage for Phase 28.6 completion recency plus hover request/result envelopes.
 - `tests/decoration_intent_authority.rs::hover_intent_does_not_imply_parse_document_or_language_server`: Link hover publication stays on `render-decorations`; built-in language fallbacks retain `ServerIntent` + `UiReactivePriority` metadata.
 - `src/masonry_pane_document.rs::tests::decoration_hover_is_local_and_activation_queues_only_safe_open`: hover changes local chrome without queueing work; safe activation queues only the existing root-bound `OpenDocument` message.

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    ops::{Range, RangeBounds},
+};
 
 use crop::Rope;
 
@@ -192,13 +195,14 @@ impl DocumentState {
 
     pub(crate) fn document_text_head(&self) -> DocumentTextHead {
         let total_bytes = self.text.byte_len();
-        let mut first_chunk_end = total_bytes.min(MAX_CHUNK_BYTES);
-        while first_chunk_end > 0 && !self.text.is_char_boundary(first_chunk_end) {
-            first_chunk_end -= 1;
-        }
+        let first_chunk_end = char_boundary_at_or_before(
+            |offset| self.text.is_char_boundary(offset),
+            total_bytes,
+            MAX_CHUNK_BYTES,
+        );
         DocumentTextHead {
             total_bytes: total_bytes as u64,
-            first_chunk: self.text.byte_slice(..first_chunk_end).to_string(),
+            first_chunk: self.rope_slice_string(..first_chunk_end),
         }
     }
 
@@ -207,16 +211,69 @@ impl DocumentState {
     }
 
     pub(crate) fn bounded_byte_end(&self, max_bytes: usize) -> usize {
-        let mut end = self.text.byte_len().min(max_bytes);
-        while end > 0 && !self.text.is_char_boundary(end) {
-            end -= 1;
-        }
-        end
+        char_boundary_at_or_before(
+            |offset| self.text.is_char_boundary(offset),
+            self.text.byte_len(),
+            max_bytes,
+        )
     }
 
     pub(crate) fn bounded_prefix(&self, max_bytes: usize) -> String {
         let end = self.bounded_byte_end(max_bytes);
-        self.text.byte_slice(..end).to_string()
+        self.rope_slice_string(..end)
+    }
+
+    /// Cursor-centered, budget-bounded window of the document text.
+    ///
+    /// Construction is O(window): the window bounds are found on the rope and
+    /// only that byte range is copied out, so callers hand providers a bounded
+    /// slice without materializing the whole document first.
+    pub(crate) fn window_around(
+        &self,
+        cursor_byte: u64,
+        budget_bytes: usize,
+    ) -> (u64, u64, String) {
+        let total_bytes = self.text.byte_len();
+        let cursor = usize::try_from(cursor_byte)
+            .unwrap_or(usize::MAX)
+            .min(total_bytes);
+        let (start, end) = cursor_window_bounds(
+            |offset| self.text.is_char_boundary(offset),
+            total_bytes,
+            cursor,
+            budget_bytes,
+        );
+        (start as u64, end as u64, self.rope_slice_string(start..end))
+    }
+
+    /// Text of `[start, end)` for a client-supplied range, or `None` when the
+    /// range is reversed, past the end of the document, or not on character
+    /// boundaries — the same rejections `str::get` produced when callers held the
+    /// whole document text. Only the range is copied (Plan 126 D1).
+    pub(crate) fn text_range(&self, start: u64, end: u64) -> Option<String> {
+        let (Ok(start), Ok(end)) = (usize::try_from(start), usize::try_from(end)) else {
+            return None;
+        };
+        if start > end
+            || end > self.text.byte_len()
+            || !self.text.is_char_boundary(start)
+            || !self.text.is_char_boundary(end)
+        {
+            return None;
+        }
+        Some(self.rope_slice_string(start..end))
+    }
+
+    /// One-allocation copy of a rope byte range. `RopeSlice::to_string` grows a
+    /// `String` from an unknown capacity instead, so a window would reallocate
+    /// its way up to the final size.
+    fn rope_slice_string(&self, range: impl RangeBounds<usize>) -> String {
+        let slice = self.text.byte_slice(range);
+        let mut text = String::with_capacity(slice.byte_len());
+        for chunk in slice.chunks() {
+            text.push_str(chunk);
+        }
+        text
     }
 
     pub(crate) fn document_chunk_message(
@@ -247,10 +304,11 @@ impl DocumentState {
         if start >= total_bytes || !self.text.is_char_boundary(start) {
             return reject(DocumentChunkRejection::InvalidOffset);
         }
-        let mut end = start.saturating_add(max_bytes).min(total_bytes);
-        while end > start && !self.text.is_char_boundary(end) {
-            end -= 1;
-        }
+        let end = char_boundary_at_or_before(
+            |offset| self.text.is_char_boundary(offset),
+            total_bytes,
+            start.saturating_add(max_bytes),
+        );
         if end == start {
             return reject(DocumentChunkRejection::InvalidOffset);
         }
@@ -258,7 +316,7 @@ impl DocumentState {
             document_id: self.document_id,
             document_version,
             offset,
-            text: self.text.byte_slice(start..end).to_string(),
+            text: self.rope_slice_string(start..end),
         }
     }
 
@@ -524,12 +582,12 @@ impl DocumentState {
                 .start_byte
                 .min((self.text.byte_len() as u64).saturating_sub(1));
             let anchor = identity_offset / nominal_bytes * nominal_bytes;
-            let start = self.floor_char_boundary(anchor)?;
+            let start = self.floor_char_boundary(anchor);
             let end = self.floor_char_boundary(
                 start
                     .saturating_add(nominal_bytes)
                     .min(self.text.byte_len() as u64),
-            )?;
+            );
             (start, start, end, false)
         };
         let range = ParseByteRange::new(start, end);
@@ -613,8 +671,8 @@ impl DocumentState {
         max_windows: usize,
     ) -> Result<Vec<ParseWindowSnapshot>, String> {
         let text_len = self.text.byte_len() as u64;
-        let start = self.floor_char_boundary(range.start.min(text_len))?;
-        let end = self.floor_char_boundary(range.end.min(text_len).max(start))?;
+        let start = self.floor_char_boundary(range.start.min(text_len));
+        let end = self.floor_char_boundary(range.end.min(text_len).max(start));
         let piece = policy
             .max_window_bytes
             .saturating_sub(policy.guard_bytes)
@@ -622,7 +680,7 @@ impl DocumentState {
         let mut windows = Vec::new();
         let mut cursor = start;
         while cursor < end && windows.len() < max_windows {
-            let piece_end = self.floor_char_boundary(cursor.saturating_add(piece).min(end))?;
+            let piece_end = self.floor_char_boundary(cursor.saturating_add(piece).min(end));
             let window_range =
                 self.expand_parse_window(ParseByteRange::new(cursor, piece_end), policy)?;
             windows.push(self.parse_window_snapshot(
@@ -839,44 +897,41 @@ impl DocumentState {
         let guard_budget = policy.max_window_bytes.saturating_sub(original_len);
         let before = policy.guard_bytes.min(guard_budget / 2);
         let after = policy.guard_bytes.min(guard_budget.saturating_sub(before));
-        let start = self.floor_char_boundary(range.start.saturating_sub(before))?;
-        let end = self.ceil_char_boundary(range.end.saturating_add(after))?;
+        let start = self.floor_char_boundary(range.start.saturating_sub(before));
+        let end = self.ceil_char_boundary(range.end.saturating_add(after));
         if end.saturating_sub(start) <= policy.max_window_bytes {
             return Ok(ParseByteRange::new(start, end));
         }
 
-        let capped_end = self.floor_char_boundary(start.saturating_add(policy.max_window_bytes))?;
+        let capped_end = self.floor_char_boundary(start.saturating_add(policy.max_window_bytes));
         if capped_end < range.end {
             return Err("parse snapshot range cannot fit inside max window".to_string());
         }
         Ok(ParseByteRange::new(start, capped_end))
     }
 
-    fn floor_char_boundary(&self, offset: u64) -> Result<u64, String> {
-        let mut offset = offset.min(self.text.byte_len() as u64);
-        while offset > 0 {
-            let candidate = usize::try_from(offset)
-                .map_err(|_| "parse snapshot offset is too large".to_string())?;
-            if self.text.is_char_boundary(candidate) {
-                return Ok(offset);
-            }
-            offset -= 1;
-        }
-        Ok(0)
+    fn floor_char_boundary(&self, offset: u64) -> u64 {
+        let total_bytes = self.text.byte_len();
+        let offset = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(total_bytes);
+        char_boundary_at_or_before(
+            |candidate| self.text.is_char_boundary(candidate),
+            total_bytes,
+            offset,
+        ) as u64
     }
 
-    fn ceil_char_boundary(&self, offset: u64) -> Result<u64, String> {
-        let text_len = self.text.byte_len() as u64;
-        let mut offset = offset.min(text_len);
-        while offset < text_len {
-            let candidate = usize::try_from(offset)
-                .map_err(|_| "parse snapshot offset is too large".to_string())?;
-            if self.text.is_char_boundary(candidate) {
-                return Ok(offset);
-            }
-            offset += 1;
-        }
-        Ok(text_len)
+    fn ceil_char_boundary(&self, offset: u64) -> u64 {
+        let total_bytes = self.text.byte_len();
+        let offset = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(total_bytes);
+        char_boundary_at_or_after(
+            |candidate| self.text.is_char_boundary(candidate),
+            total_bytes,
+            offset,
+        ) as u64
     }
 
     fn validate_lock_range(&self, start: u64, end: u64) -> Result<(), String> {
@@ -900,6 +955,63 @@ impl DocumentState {
         }
         Ok(offset)
     }
+}
+
+/// Clamp `offset` down to the nearest UTF-8 boundary at or before it.
+///
+/// The boundary predicate keeps one implementation for `&str` and `crop::Rope`
+/// callers; `Rope::is_char_boundary` panics past the end of the rope, so
+/// `total_bytes` is also the hard upper clamp.
+pub(crate) fn char_boundary_at_or_before(
+    is_char_boundary: impl Fn(usize) -> bool,
+    total_bytes: usize,
+    offset: usize,
+) -> usize {
+    let mut offset = offset.min(total_bytes);
+    while offset > 0 && !is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+/// Clamp `offset` up to the nearest UTF-8 boundary at or after it, stopping at
+/// `total_bytes` (always a boundary).
+pub(crate) fn char_boundary_at_or_after(
+    is_char_boundary: impl Fn(usize) -> bool,
+    total_bytes: usize,
+    offset: usize,
+) -> usize {
+    let mut offset = offset.min(total_bytes);
+    while offset < total_bytes && !is_char_boundary(offset) {
+        offset += 1;
+    }
+    offset
+}
+
+/// Cursor-centered window bounds: `budget_bytes` split around the cursor, both
+/// ends clamped inwards to UTF-8 boundaries and never past `total_bytes`.
+///
+/// Every server window (completion, language intelligence, rope windows) is
+/// built from these bounds, and materializing the slice is the caller's
+/// O(window) step.
+pub(crate) fn cursor_window_bounds(
+    is_char_boundary: impl Fn(usize) -> bool,
+    total_bytes: usize,
+    cursor_byte: usize,
+    budget_bytes: usize,
+) -> (usize, usize) {
+    let cursor = cursor_byte.min(total_bytes);
+    let start = char_boundary_at_or_before(
+        &is_char_boundary,
+        total_bytes,
+        cursor.saturating_sub(budget_bytes / 2),
+    );
+    let end = char_boundary_at_or_before(
+        &is_char_boundary,
+        total_bytes,
+        start.saturating_add(budget_bytes),
+    );
+    (start, end.max(start))
 }
 
 fn point_after_text(start: ParsePoint, text: &str) -> ParsePoint {
@@ -953,6 +1065,158 @@ mod tests {
         DocumentAccess, DocumentTextHead, EditOperation, EditRejection, LockOwner, ParseByteRange,
         ParseInputEdit, ParsePoint, ParsePolicy, RegionLockConflict, ServerMessage,
     };
+
+    /// Plan 126 task 2: counts bytes allocated by the measuring thread only, so
+    /// parallel lib tests cannot pollute a window-cost measurement. Disabled by
+    /// default; every other test pays one relaxed atomic load per allocation.
+    mod allocation_counter {
+        use std::{
+            alloc::{GlobalAlloc, Layout, System},
+            cell::Cell,
+            sync::atomic::{AtomicBool, Ordering},
+        };
+
+        thread_local! {
+            static THREAD_ALLOCATED_BYTES: Cell<u64> = const { Cell::new(0) };
+        }
+
+        static MEASURE_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
+
+        struct MeasuringAllocator;
+
+        unsafe impl GlobalAlloc for MeasuringAllocator {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                record(layout.size());
+                unsafe { System.alloc(layout) }
+            }
+
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                unsafe { System.dealloc(ptr, layout) }
+            }
+
+            unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                record(new_size);
+                unsafe { System.realloc(ptr, layout, new_size) }
+            }
+        }
+
+        #[global_allocator]
+        static TEST_ALLOCATOR: MeasuringAllocator = MeasuringAllocator;
+
+        fn record(bytes: usize) {
+            if MEASURE_ALLOCATIONS.load(Ordering::Relaxed) {
+                let _ =
+                    THREAD_ALLOCATED_BYTES.try_with(|total| total.set(total.get() + bytes as u64));
+            }
+        }
+
+        /// Bytes allocated while running `measured` on this thread.
+        pub(super) fn allocated_bytes(measured: impl FnOnce()) -> u64 {
+            let before = THREAD_ALLOCATED_BYTES.with(Cell::get);
+            MEASURE_ALLOCATIONS.store(true, Ordering::SeqCst);
+            measured();
+            MEASURE_ALLOCATIONS.store(false, Ordering::SeqCst);
+            THREAD_ALLOCATED_BYTES.with(Cell::get) - before
+        }
+    }
+
+    fn mixed_unicode_document(size_bytes: usize) -> DocumentState {
+        let mut bytes = Vec::with_capacity(size_bytes);
+        crate::perf::fixtures::generate_fixture(
+            &crate::perf::fixtures::FixtureSpec::new(
+                crate::perf::fixtures::FixtureKind::MixedUnicode,
+                size_bytes,
+            ),
+            &mut bytes,
+        )
+        .unwrap();
+        DocumentState::new(
+            1,
+            String::from_utf8(bytes).unwrap(),
+            DocumentAccess::Editable { lease_id: 1 },
+        )
+    }
+
+    #[test]
+    fn window_at_document_edges_clamps_to_boundaries() {
+        let document = DocumentState::new(
+            1,
+            "abc".to_string(),
+            DocumentAccess::Editable { lease_id: 1 },
+        );
+        assert_eq!(document.window_around(0, 4), (0, 3, "abc".to_string()));
+        // Cursor past the end and a zero budget both collapse without panicking.
+        assert_eq!(
+            document.window_around(u64::MAX, 4),
+            (1, 3, "bc".to_string())
+        );
+        assert_eq!(document.window_around(1, 0), (1, 1, String::new()));
+        assert_eq!(document.window_around(0, usize::MAX).2, "abc");
+
+        let empty = DocumentState::new(2, String::new(), DocumentAccess::Editable { lease_id: 1 });
+        assert_eq!(empty.window_around(u64::MAX, 4), (0, 0, String::new()));
+    }
+
+    #[test]
+    fn window_respects_multibyte_boundaries() {
+        let text = "a🙂длинный текст🧑‍🚀z".to_string();
+        let document =
+            DocumentState::new(1, text.clone(), DocumentAccess::Editable { lease_id: 1 });
+        for budget in [1, 2, 3, 5, 8, 64 * 1024] {
+            for cursor in 0..=text.len() as u64 {
+                let (start, end, window) = document.window_around(cursor, budget);
+                let (start, end) = (start as usize, end as usize);
+                assert!(start <= end, "budget {budget} cursor {cursor}");
+                assert!(
+                    text.is_char_boundary(start) && text.is_char_boundary(end),
+                    "window split a scalar: budget {budget} cursor {cursor} -> {start}..{end}"
+                );
+                assert_eq!(window, text[start..end]);
+                assert!(
+                    end - start <= budget + 3,
+                    "window exceeded its budget: {start}..{end} for {budget}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn window_cost_is_independent_of_document_size() {
+        use crate::perf::budgets::COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES;
+
+        let small = mixed_unicode_document(64 * 1024);
+        let large = mixed_unicode_document(8 * 1024 * 1024);
+        let window = |document: &DocumentState| {
+            let cursor = document.byte_len() as u64 / 2;
+            let (start, end, text) =
+                document.window_around(cursor, COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES);
+            assert_eq!(text.len(), (end - start) as usize);
+            text
+        };
+
+        // Warm the rope's chunk cache before measuring.
+        let _ = window(&small);
+        let _ = window(&large);
+        let small_bytes = allocation_counter::allocated_bytes(|| {
+            let _ = window(&small);
+        });
+        let large_bytes = allocation_counter::allocated_bytes(|| {
+            let _ = window(&large);
+        });
+
+        assert!(
+            small_bytes >= COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES as u64,
+            "window copies its own bytes: {small_bytes}"
+        );
+        assert!(
+            large_bytes >= COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES as u64,
+            "window copies its own bytes: {large_bytes}"
+        );
+        assert!(
+            large_bytes <= small_bytes + 4 * 1024,
+            "window cost must stay O(window), not O(document): 64 KiB doc {small_bytes} bytes, 8 MiB doc {large_bytes} bytes"
+        );
+    }
 
     #[test]
     fn server_document_uses_rope_for_insert_delete_replace() {

@@ -1521,18 +1521,20 @@ impl WorkspaceState {
         let Some(open_document) = self.documents.get(&document_id) else {
             return false;
         };
-        open_document
-            .document
-            .lock()
-            .await
-            .release_access(client_id);
-        if open_document.document.lock().await.access_holder_count() > 0 {
+        // Plan 126 D7: release, holder count, and byte length are read under one
+        // guard. Three separate acquisitions let a concurrent access grant slip
+        // between the holder check and the registry removal.
+        let (holders, bytes) = {
+            let mut document = open_document.document.lock().await;
+            document.release_access(client_id);
+            (document.access_holder_count(), document.byte_len() as u64)
+        };
+        if holders > 0 {
             return false;
         }
         let Some(open_document) = self.documents.remove(&document_id) else {
             return false;
         };
-        let bytes = open_document.document.lock().await.byte_len() as u64;
         self.release_document_bytes(bytes);
         self.path_to_document
             .remove(&open_document.file_state.canonical_path);

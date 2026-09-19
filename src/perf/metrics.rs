@@ -51,6 +51,12 @@ pub const SYNTAX_QUERY_BYTES: &str = "syntax.query.bytes";
 pub const SYNTAX_DECORATION_CHUNKS: &str = "syntax.decoration.chunks";
 pub const SYNTAX_CANCELLED_SUPERSEDED: &str = "syntax.parse.cancelled_superseded";
 pub const SYNTAX_EDIT_TO_PUBLISH: &str = "syntax.edit_to_publish";
+/// Plan 127 P2: undelivered completion/language-intelligence commands a newer
+/// request for the same work key replaced before they ran.
+pub const JS_RUNTIME_COMMAND_SUPERSEDED: &str = "js_runtime.command.superseded";
+/// Plan 127 P2: undelivered completion/language-intelligence commands dropped
+/// because the lane's supersedable backlog was at capacity (oldest first).
+pub const JS_RUNTIME_COMMAND_EVICTED: &str = "js_runtime.command.evicted";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerfConfig {

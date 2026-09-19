@@ -420,6 +420,23 @@ impl AgentHost {
         })
     }
 
+    /// Whether the daemon currently lists a profile with this name. Used
+    /// before adopting a *guessed* profile (the coding surface's): a name the
+    /// daemon does not have makes `session.new` fail with `Unknown agent`, and
+    /// the tab then never binds a session. Fails closed (false) when the
+    /// daemon is unreachable, so the caller keeps the built-in default.
+    pub(crate) async fn profile_available(&self, name: &str) -> bool {
+        if self.inner.config.inert {
+            return false;
+        }
+        match self.rpc("agentProfile.list", json!({})).await {
+            Ok(list) => parse_profiles(&list)
+                .iter()
+                .any(|profile| profile.name == name),
+            Err(_) => false,
+        }
+    }
+
     pub(super) async fn inventory_rich(&self) -> Result<AgentPickerInventory, AgentError> {
         let providers = self.rpc("provider.list", json!({})).await?;
         let models = self.rpc("model.list", json!({})).await?;

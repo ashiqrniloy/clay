@@ -239,7 +239,7 @@ These are current implementation bounds, not user configuration knobs:
 | Open document resident memory | `DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES = 256 MiB`                        | Server-owned workspace reservation; open/reload fail closed, never `init.js` configurable    |
 | Native syntax concurrency     | `SYNTAX_EXECUTOR_MAX_JOBS = 4`                                           | Shared `spawn_blocking` permits across all document sessions                                 |
 | Per-document parser state     | `SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES = 64`                                | Session-owned parser/tree cache; eviction beyond the bound is arbitrary, not an LRU promise  |
-| Mode activation cache         | `MODE_ACTIVATION_CACHE_ENTRIES = 64` per generation                      | Completed activation manifests are reused only when classification inputs match              |
+| Mode activation cache         | `MODE_ACTIVATION_CACHE_ENTRIES = 64` per generation                      | Completed activation manifests are reused only when classification inputs match; at capacity the least-recently-used entry is evicted, never the whole cache |
 | Retained syntax/decor data    | `SYNTAX_CACHE_BUDGET_BYTES = 30 MiB`                                     | Server `SyntaxChunkCache` byte accounting plus near-viewport pruning                         |
 | Developer trace retention     | `PERF_SNAPSHOT_CAPACITY = 4096`                                          | Frontend/Rust recorders are disabled by default and drop beyond capacity                     |
 | Frontend render overscan      | `4,096` UTF-16 positions per side, widened to covered range              | `render-patch.ts` `guardOf`; current patches replace exact covered authority                 |
@@ -276,6 +276,40 @@ fixture-byte throughput) was removed with the native client at cutover;
 wall-clock values below remain machine-local history. Current equivalents: the
 lib `server::syntax::tests` / `server::parse_coordinator::tests` work-count and
 retention assertions plus the frontend editor suites.
+
+## Plan 127 runtime scheduling bounds and metrics (2026-09-19)
+
+Each trust domain runs two worker lanes (`JS_RUNTIME_LANES_PER_DOMAIN`): a
+`general` lane for configuration/package evaluation, parse handlers, and
+document analysis, and a `latency` lane for completion and language-
+intelligence providers so a general command busy to its timeout cannot
+head-of-line block them. Lanes are separate V8 isolates with the same
+per-domain op extension set and heap budget discipline (`general` =
+`JS_RUNTIME_HEAP_LIMIT_BYTES`, `latency` ≤
+`JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES = 32 MiB`); poison/restart applies to
+one lane (Plan 127 P1).
+
+Each lane's command mailbox is bounded by
+`JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY = 64` undelivered completion/
+language-intelligence requests: a newer request for the same work key
+(host-stamped client + document + registration token) replaces the older
+undelivered one, and at capacity the oldest supersedable command is dropped
+for the newest (Plan 127 P2). Dropped commands answer
+`ClayRuntimeError::Superseded` — never a stale result — and the lane's
+coordinators already abort their host-side tasks for superseded work.
+Evaluation, parse, and analysis commands are host-gated (one pending job per
+document) and are never superseded or evicted.
+
+| Metric                          | Meaning                                                                                                                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `js_runtime.command.superseded` | An undelivered completion/language-intelligence command a newer request for the same client/document/provider replaced before it ran.           |
+| `js_runtime.command.evicted`    | An undelivered supersedable command dropped because the lane's supersedable backlog was at capacity (oldest first).                             |
+
+Both counters carry no document text, provider source, or paths; the same
+values are exposed per lane for the flood tests
+(`ClayJsRuntimeService::lane_queue_stats`), which assert a one-document typing
+burst collapses onto a single queue slot while distinct documents queue
+without supersede.
 
 ## Plan 056 low-latency syntax Linux verification (2026-07-19)
 
@@ -588,6 +622,9 @@ Phase 18.21 keeps Rust core LSP-wire neutral. Deterministic hard guards cover se
 | Document-analysis worker heap                                 | <= 67108864 bytes (`DOCUMENT_ANALYSIS_WORKER_HEAP_BYTES`)            | `cargo test --test protocol performance_protocol::`                                 |
 | Documents per analysis worker                                 | <= 32                                                                | `cargo test --test protocol performance_protocol::`                                 |
 | Synced document text                                          | <= 262144 bytes (`DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES`)             | document-analysis unit tests + performance locks                                    |
+| Package documents op text (open/reload)                            | <= 262144 bytes (`DOCUMENTS_OP_MAX_DOCUMENT_BYTES`)                  | JS-runtime facade tests + `performance_budgets` locks                               |
+| Completion provider document window                               | <= 65536 bytes (`COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES`)           | connection window tests + `performance_budgets` locks                               |
+| Language-intelligence provider document window                    | <= 65536 bytes (`LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES`) | language-intelligence window budget tests + `performance_budgets` locks             |
 | Analysis input mailbox                                        | <= 64 events / 2097152 bytes                                         | document-analysis unit tests                                                        |
 | Analysis output queue                                         | <= 64 events / 524288 bytes                                          | document-analysis unit tests                                                        |
 | Pending child requests                                        | <= 8                                                                 | shared LSP client + performance locks                                               |

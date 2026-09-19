@@ -123,6 +123,10 @@ pub(super) async fn execute_command_intent(
     if crate::server::command_execution::is_agent_surface_command(&request.command_id) {
         if request.command_id == "coding-agent.profile"
             && let Some(server) = reload_server
+            && server
+                .agent
+                .profile_available(crate::server::command_execution::CODING_SURFACE_PROFILE_NAME)
+                .await
         {
             // Resolve the connection's tab so the selection broadcast lands on
             // this tab's session instead of a session-less snapshot (which
@@ -438,82 +442,72 @@ pub(super) fn empty_language_intelligence_payload(
 
 pub(super) fn completion_document_window(
     request: &CompletionRequest,
-    text: &str,
+    document: &DocumentState,
     package_prefix: &str,
 ) -> crate::server::completion::CompletionDocumentWindow {
-    const WINDOW_BYTES: usize = 64 * 1024;
-    let cursor = (request.cursor_byte_offset as usize).min(text.len());
-    let mut start = cursor.saturating_sub(WINDOW_BYTES / 2);
-    while start > 0 && !text.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = (start + WINDOW_BYTES).min(text.len());
-    while end > start && !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    use crate::perf::budgets::COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES;
+
+    // Rope window: costs the window, never the document (Plan 126 D1).
+    let (byte_start, byte_end, text) = document.window_around(
+        request.cursor_byte_offset,
+        COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES,
+    );
     crate::server::completion::CompletionDocumentWindow {
         document_id: request.document_id,
         document_version: request.document_version,
         behavior_version: request.behavior_version,
         package_prefix: package_prefix.to_string(),
-        byte_start: start as u64,
-        byte_end: end as u64,
-        text: text[start..end].to_string(),
+        byte_start,
+        byte_end,
+        text,
     }
 }
 
 pub(super) fn language_intelligence_document_window_for_behavior(
     request: &crate::protocol::LanguageIntelligenceRequest,
-    text: &str,
+    document: &DocumentState,
     behavior: &BehaviorManifest,
 ) -> LanguageIntelligenceDocumentWindow {
     let manifest_id = &behavior.manifest_id;
     language_intelligence_document_window(
         request,
-        text,
+        document,
         manifest_id.rsplit('.').next().unwrap_or(manifest_id),
     )
 }
 
 pub(super) fn language_intelligence_document_window(
     request: &crate::protocol::LanguageIntelligenceRequest,
-    text: &str,
+    document: &DocumentState,
     active_mode: &str,
 ) -> LanguageIntelligenceDocumentWindow {
     use crate::perf::budgets::LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES;
 
-    let cursor = (request.cursor_byte_offset as usize).min(text.len());
-    let half = LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES / 2;
-    let mut start = cursor.saturating_sub(half);
-    while start > 0 && !text.is_char_boundary(start) {
-        start -= 1;
-    }
-    let mut end = (start + LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES).min(text.len());
-    while end < text.len() && !text.is_char_boundary(end) {
-        end += 1;
-    }
-    while end > start && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    if end < start {
-        end = start;
-    }
+    // Rope window: costs the window, never the document (Plan 126 D1).
+    let (byte_start, byte_end, text) = document.window_around(
+        request.cursor_byte_offset,
+        LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES,
+    );
 
     LanguageIntelligenceDocumentWindow {
         document_id: request.document_id,
         document_version: request.document_version,
         behavior_version: request.behavior_version,
-        byte_start: start as u64,
-        byte_end: end as u64,
-        text: text[start..end].to_string(),
+        byte_start,
+        byte_end,
+        text,
         active_mode: active_mode.to_string(),
     }
 }
 
+/// Static (package-declared) completion for `request`'s replacement range.
+/// `replacement_text` is the document text covered by
+/// `request.replacement_range` — callers never materialize the document, so
+/// this reads only those bytes (Plan 126 D1).
 pub(super) fn static_package_completion_result(
     request: &CompletionRequest,
     manifest_id: &str,
-    document_text: &str,
+    replacement_text: &str,
     providers: &[CompletionProviderMeta],
 ) -> Option<CompletionResultSet> {
     let package_prefix = manifest_id.split('.').next()?;
@@ -539,9 +533,7 @@ pub(super) fn static_package_completion_result(
     });
     apply_exclusive_suppression(&mut matched);
     let provenance = matched.first()?.provenance.clone();
-    let start = usize::try_from(request.replacement_range.byte_start).ok()?;
-    let end = usize::try_from(request.replacement_range.byte_end).ok()?;
-    let prefix = document_text.get(start..end)?;
+    let prefix = replacement_text;
     let mut result = CompletionResultSet {
         request_id: request.request_id,
         client_id: request.client_id,
@@ -1008,26 +1000,11 @@ where
         .manifest_id
         .clone();
     let package_prefix = manifest_id.split('.').next().unwrap_or("");
-    let document_text = target_document.lock().await.text();
     let providers = runtime_generation
         .current()
         .await
         .service
         .completion_providers();
-    let fallback =
-        static_package_completion_result(request, &manifest_id, &document_text, &providers)
-            .unwrap_or_else(|| CompletionResultSet {
-                request_id: request.request_id,
-                client_id: request.client_id,
-                document_id: request.document_id,
-                document_version: request.document_version,
-                behavior_version: request.behavior_version,
-                provider_generation: request.provider_generation,
-                replacement_range: request.replacement_range,
-                status: CompletionStatus::Empty,
-                items: Vec::new(),
-                provenance: CompletionProvenance::builtin_core(),
-            });
     let analysis_provider_ids =
         document_analysis.active_completion_provider_ids(request.document_id);
     let dynamic_provider = completion.providers().into_iter().find(|provider| {
@@ -1042,13 +1019,43 @@ where
                     .any(|trigger| trigger == character),
             }
     });
-    if let Some(provider) = dynamic_provider {
+    // Provider matching runs before any text access: the document lock is held
+    // only to read the replacement range and, when a JS provider matched, one
+    // bounded window (Plan 126 D1).
+    let (fallback, window) = {
+        let document = target_document.lock().await;
+        let fallback = document
+            .text_range(
+                request.replacement_range.byte_start,
+                request.replacement_range.byte_end,
+            )
+            .and_then(|replacement_text| {
+                static_package_completion_result(
+                    request,
+                    &manifest_id,
+                    &replacement_text,
+                    &providers,
+                )
+            })
+            .unwrap_or_else(|| CompletionResultSet {
+                request_id: request.request_id,
+                client_id: request.client_id,
+                document_id: request.document_id,
+                document_version: request.document_version,
+                behavior_version: request.behavior_version,
+                provider_generation: request.provider_generation,
+                replacement_range: request.replacement_range,
+                status: CompletionStatus::Empty,
+                items: Vec::new(),
+                provenance: CompletionProvenance::builtin_core(),
+            });
+        let window = dynamic_provider.as_ref().map(|provider| {
+            completion_document_window(request, &document, &provider.provenance.package_prefix)
+        });
+        (fallback, window)
+    };
+    if let Some((provider, window)) = dynamic_provider.zip(window) {
         request.provider_generation = provider.generation;
-        let window = completion_document_window(
-            request,
-            &document_text,
-            &provider.provenance.package_prefix,
-        );
         if let Ok(reply_rx) = completion.schedule_completion(&provider.id, request.clone(), window)
         {
             let tx = completion_tx.clone();
@@ -1135,11 +1142,15 @@ where
             .await?;
         return Ok(());
     };
-    let document_text = target_document.lock().await.text();
     let window = {
-        let behavior = behavior.lock().await;
-        let manifest = behavior.manifest_for(request.document_id).clone();
-        language_intelligence_document_window_for_behavior(request, &document_text, &manifest)
+        // Clone the manifest under the behavior lock only; the document lock is
+        // never nested behind it.
+        let manifest = {
+            let behavior = behavior.lock().await;
+            behavior.manifest_for(request.document_id).clone()
+        };
+        let document = target_document.lock().await;
+        language_intelligence_document_window_for_behavior(request, &document, &manifest)
     };
     match language_intelligence.schedule(None, request.clone(), window) {
         Ok(reply_rx) => {

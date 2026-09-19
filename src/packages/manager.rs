@@ -851,12 +851,13 @@ impl PackageManagerBackend for NpmBackend {
         let value: Value = serde_json::from_str(&stdout).map_err(|err| {
             BackendError::parse_failed(format!("failed to parse `npm list --json` output: {err}"))
         })?;
+        // A fresh (or package.json-less) store prints no `dependencies`
+        // object at all: that is "nothing installed", not a discovery failure.
+        let empty = serde_json::Map::new();
         let dependencies = value
             .get("dependencies")
             .and_then(Value::as_object)
-            .ok_or_else(|| {
-                BackendError::parse_failed("`npm list --json` output has no dependencies object")
-            })?;
+            .unwrap_or(&empty);
 
         let mut packages = Vec::new();
         for (dep_name, dep) in dependencies {
@@ -1192,6 +1193,56 @@ mod tests {
             pkg.package_root.ends_with("node_modules/@arnilo/st"),
             "npm packages resolve to their node_modules root"
         );
+    }
+
+    #[test]
+    fn npm_backend_list_treats_a_dependencies_less_reply_as_an_empty_store() {
+        // A fresh store (no package.json, or one without dependencies) makes
+        // `npm list --json` print an object with no `dependencies` key at all.
+        // That is "nothing installed" — reporting it as a discovery failure
+        // made every first launch log a package-manager error.
+        let store_root =
+            std::env::temp_dir().join(format!("clay-npm-empty-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&store_root);
+        std::fs::create_dir_all(&store_root).unwrap();
+        let dir = fake_bin("fake-npm-empty", "npm", "#!/bin/sh\necho '{}'\nexit 0\n");
+        let backend = NpmBackend {
+            npm_bin: dir.join("npm").display().to_string(),
+        };
+        let discovered = backend
+            .list_installed(&PackageStore::new(&store_root))
+            .expect("an empty store is not a discovery failure");
+        assert!(discovered.is_empty(), "nothing installed: {discovered:?}");
+        let _ = std::fs::remove_dir_all(&store_root);
+    }
+
+    #[test]
+    fn discovery_creates_a_missing_store_root_before_spawning_the_manager() {
+        // The manager runs *in* the store root (`current_dir(store.root)`), so
+        // a fresh profile (no `~/.clay/packages` yet) must not hand the child
+        // a nonexistent working directory: `Command::current_dir` on a missing
+        // directory fails the spawn with ENOENT before npm ever starts.
+        let dir = fake_bin(
+            "fake-npm-missing-store",
+            "npm",
+            "#!/bin/sh\necho '{\"dependencies\":{}}'\nexit 0\n",
+        );
+        let store_root = dir.join("store-that-does-not-exist");
+        let mut service = crate::packages::service::PackageService::open(
+            &store_root,
+            Box::new(NpmBackend {
+                npm_bin: dir.join("npm").display().to_string(),
+            }),
+        )
+        .expect("open the service on a fresh store root");
+        service
+            .refresh_installed()
+            .expect("discovery on a store root that does not exist yet");
+        assert!(
+            store_root.is_dir(),
+            "discovery creates the store root it runs the manager in"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

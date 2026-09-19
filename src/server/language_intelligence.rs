@@ -346,6 +346,12 @@ pub struct JsLanguageIntelligenceProviderRegistration {
     pub meta: LanguageIntelligenceProviderMeta,
     pub token: String,
     pub export_name: String,
+    /// Plan 127 P1: host-validated package module specifier declaring
+    /// `export_name`. When present the handler is materialized by importing
+    /// this module inside the serving lane's isolate, so the provider can run
+    /// on the latency lane. `None` keeps the token-backed closure registered
+    /// in the general lane's isolate (`module: {...}` registrations).
+    pub module_specifier: Option<String>,
 }
 
 /// Registration metadata for one language-intelligence provider.

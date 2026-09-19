@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Plan 126 E39/Q41 live drive record (Linux, 2026-09-19).
+#
+# Host: GNOME Wayland, 1920x1200 primary monitor. Input synthesis works through
+# the xdg-desktop-portal remote-desktop keyboard session (the computer-use-linux
+# MCP's press_key/type_text); the AT-SPI editor node itself has no EditableText
+# interface, so the AT-SPI drive path in scripts/capture-ui-review.sh cannot
+# type into the document.
+#
+# Sequence (each step driven, then verified against the live AT-SPI tree):
+#
+#   test-plan/artifacts/126-access-paths/launch-live.sh start   # ≥4 MiB review.rs, completion fixture init.js
+#   python3 test-plan/artifacts/126-access-paths/probe.py focus  # AT-SPI grab_focus on the editor
+#   # press_key ctrl+space (MCP)                                  -> popup appears at the caret
+#   python3 test-plan/artifacts/126-access-paths/probe.py dump   # rows: rust | fn | fnfunction snippet
+#   # press_key escape (MCP)                                     -> popup closed, no text change
+#   # type_text zzzz + press_key ctrl+space (MCP)                -> Empty: no popup, no blocking panel
+#   # type_text fn + press_key ctrl+space + press_key enter      -> snippet accepted into the document
+#   python3 test-plan/artifacts/126-access-paths/portal-shot.py live-large-completion/screenshot.png
+#
+# Measured facts recorded next to this file:
+#   review.rs = 4,231,903 bytes (808,003 words), editor AT-SPI text = 2,759 chars
+#   completion rows: `rust` group, `fn` (selected), `fn function snippet`
+#   editor state while open: editable,focusable,focused,has-popup,supports-autocompletion
+#   Escape: rows 0, editor text unchanged (2,761 chars)
+#   `zzzz` + Ctrl+Space: text 2,765 chars, rows 0, dialogs 0, editor still focused
+#   `fn` + Ctrl+Space + ArrowDown + Enter: snippet accepted -> head
+#     `fn name(args) {    }pub fn helper_000000...`, 2,779 chars, caret 7, rows 0
+#
+# Popup latency: two attempts to time the keypress->popup interval with a
+# background poller were discarded, not recorded: one AT-SPI tree walk costs
+# ~0.9 s warm and ~15 s per fresh process over D-Bus, so the poller cannot
+# resolve the event (the popup was already present at the first poll each time).
+# The authoritative latency evidence is the server-side measurement in
+# plans/126: completion round trip ~161 µs median on a 4 MiB document with
+# per-request allocation independent of document size
+# (code-reviews/2026-09-18-plan126-baseline/README.md, task 3).

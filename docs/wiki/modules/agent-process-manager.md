@@ -33,6 +33,15 @@ command respawns the daemon and can resume persisted sessions.
   Event types with no `AgentWireEvent` arm are dropped, never forwarded (a
   synthesized `Started` would pin the client run "streaming" forever).
 - Redact known secrets (vault passphrase, put secrets) from diagnostics.
+- Resolve the daemon's data dir from the Clay root:
+  `<configuration root>/agents/coding-agent/data`, or the per-user
+  `~/.clay/agents/coding-agent/data` when the server has no explicit root (the
+  desktop's `clay auto` launch, a bare `clay server`) — the same root the
+  daemon's `homedir()` default resolves to. Unit tests resolve a per-process
+  temp root instead, so no test reads or writes the developer's profile. One
+  shared `temp_dir()/clay-agent` for every root-less server used to hold every
+  profile's `book.json`, `credentials.vault`, `sessions.sqlite`, and
+  `vault.passphrase` at once.
 - Fire-and-forget `dispatch` so the connection loop never awaits the child.
 
 ## How It Works
@@ -73,6 +82,9 @@ server.agent.dispatch(AgentClientCommand::Prompt {
 
 - No `std::process::Command` / `tokio::process::Command` in editor, client, or
   package-ops hot paths for this daemon.
+- Agent runtime state (book, vault, sessions, passphrase) belongs to exactly one
+  Clay root: never a shared temp directory, and never the developer's real
+  profile from a unit test.
 - `src/server/ops` and `src/server/js_runtime` must not name `AgentHost`.
 - stderr is drained and discarded so a full pipe cannot stall the child.
 - `# ponytail: global AgentHost lock, per-session queues if prompt throughput matters`
@@ -84,7 +96,13 @@ server.agent.dispatch(AgentClientCommand::Prompt {
 - Slow daemon: `dispatch` returns before the child replies.
 - `tests/agent_session_isolation.rs` — real-server scripted-daemon and shipped
   mock-daemon checks for root isolation, fail-closed tab closure, and respawned
-  session-root recovery.
+  session-root recovery; its isolated `HOME` is what proves the per-user data
+  dir (a shared temp dir made it read another run's persisted profile and time
+  out).
+- `src/server/agent.rs`: `for_server_without_a_configuration_root_keeps_agent_state_off_the_shared_temp_dir`,
+  `for_server_moves_a_legacy_agent_data_dir_under_the_per_agent_root`, and
+  `tab_state_snapshot_skips_a_profile_the_daemon_does_not_have` pin the root
+  resolution and the profile-availability fallback.
 - `cargo test --test protocol -- agent_protocol`
 - `cargo test --test editor -- agent_daemon_work_is_absent`
 

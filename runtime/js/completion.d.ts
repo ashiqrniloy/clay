@@ -27,6 +27,12 @@ export type ServerRegisterCompletionProviderOptions = {
     nativeHandle?: never;
     rawOps?: never;
     module?: Record<string, unknown>;
+    /** Plan 127 P1: the package-owned module that declares `exportName`,
+     *  resolved with `import.meta.resolve("./provider.js")`. When present the
+     *  provider runs on the domain's latency lane (module import), so a busy
+     *  parse/analysis/config lane cannot delay completions. Omit it for an
+     *  inline `module: {...}` handler, which stays on the general lane. */
+    moduleSpecifier?: string;
     exportName?: string;
 };
 export declare function serverRegisterCompletionProvider(options: ServerRegisterCompletionProviderOptions): unknown;

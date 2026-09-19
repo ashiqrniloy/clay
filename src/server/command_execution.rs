@@ -430,6 +430,13 @@ pub(crate) fn is_agent_surface_command(command_id: &str) -> bool {
 /// default with no coding tools and no MCP servers.
 pub(crate) const CODING_SURFACE_PROFILE_ID: &str = "agent:coding";
 
+/// The daemon-side profile name behind [`CODING_SURFACE_PROFILE_ID`] (picker
+/// ids are `agent:<profile>`). Checked against the daemon's own profile list
+/// before the surface adopts it: a profile no package registered (a profile
+/// whose store never loaded the package, a hostless runtime) would otherwise
+/// fail `session.new` and leave the pane with no session at all.
+pub(crate) const CODING_SURFACE_PROFILE_NAME: &str = "coding";
+
 /// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 

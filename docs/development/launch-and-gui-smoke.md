@@ -135,8 +135,8 @@ scripts/capture-ui-review.sh --fixture ui-review-completion \
 
 `--fixture` accepts `ui-review-default`, `ui-review-loading`,
 `ui-review-error`, `ui-review-recovery`, `ui-review-large-typography`,
-`ui-review-completion`, `ui-review-command-centre`, and `ui-review-rust`. The
-fixtures live under
+`ui-review-completion`, `ui-review-large-document`, `ui-review-command-centre`,
+and `ui-review-rust`. The fixtures live under
 `tests/fixtures/configuration/ui-review-*/`:
 
 | Fixture | State and capture step |
@@ -147,6 +147,7 @@ fixtures live under
 | `ui-review-recovery` | Connects normally, stops only its private server, then captures `Disconnected`/recovery status. |
 | `ui-review-large-typography` | Applies `theme.setTypography` with UI 24/document 20–21 before the client handshake; captures the bounded large-type shell. |
 | `ui-review-completion` | Loads `@clay/rust` and binds `Ctrl+Space`; focus editor, trigger completion, then press Enter in the terminal to capture. |
+| `ui-review-large-document` | Same init.js as `ui-review-completion`, but the harness writes a ≥4 MiB `review.rs` and restores it through `layout.json`; used by the plan 126 access-path steps (bounded accessible text on a large document). |
 | `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; opens `controlCenter.open` — since plan 124/125 the composer palette (catalogue mode) rather than the retired centered sheet — then press Enter in the terminal to capture. |
 | `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
 

@@ -70,7 +70,10 @@ generation. Its key contains the path extension/name, shebang line, and a hash
 of bounded leading content. A hit republishes the cached behavior manifest
 under the new document scope and avoids another generated-module V8 evaluation;
 cold and third-party modes retain the regular activation path. The cache is
-bounded to `MODE_ACTIVATION_CACHE_ENTRIES` (64).
+bounded to `MODE_ACTIVATION_CACHE_ENTRIES` (64); at capacity Plan 126 (Document
+Access Path Hardening) evicts the single least-recently-used entry (one linear
+scan over 64 entries) instead of clearing the whole cache, so one cold mode can
+no longer evict every warm activation.
 
 ## Bounds and invariants
 
@@ -96,6 +99,9 @@ bounded to `MODE_ACTIVATION_CACHE_ENTRIES` (64).
   window refusal and bounded per-document cache.
 - `src/server/connection/mod.rs::mode_activation_cache_hit_skips_generated_module_evaluation` —
   activation identity parity and no repeat generated-module evaluation.
+- `src/server/connection/mod.rs::mode_activation_cache_evicts_oldest_not_all` —
+  least-recently-used eviction at the 64-entry cap: the second-oldest mode still
+  hits the cache after 65 distinct activations, only the oldest re-evaluates.
 - `src/server/connection/mod.rs::open_document_renders_before_background_parse_completes` —
   open response does not wait for syntax work.
 

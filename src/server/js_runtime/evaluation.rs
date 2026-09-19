@@ -323,17 +323,32 @@ pub(super) async fn evaluate_js_completion_provider(
     timeout: Duration,
     heap_limit_hit: &std::sync::atomic::AtomicBool,
 ) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
+    let handler_binding = match &registration.module_specifier {
+        // Plan 127 P1: a host-validated module specifier lets the latency lane
+        // materialize the handler in its own isolate by importing the module
+        // (document-analyzer precedent), instead of reading the token-backed
+        // closure that only exists in the general lane's isolate.
+        Some(specifier) => format!(
+            "import * as providerModule from {specifier};\nconst handler = providerModule[{export_name}];",
+            specifier = serde_json::to_string(specifier)
+                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?,
+            export_name = serde_json::to_string(&registration.export_name)
+                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?,
+        ),
+        None => format!(
+            "const registry = globalThis.__clayCompletionHandlers ?? Object.create(null);\nconst handler = registry[{token:?}];",
+            token = registration.token,
+        ),
+    };
     let source = format!(
         r#"
-const registry = globalThis.__clayCompletionHandlers ?? Object.create(null);
-const handler = registry[{token:?}];
+{handler_binding}
 if (typeof handler !== "function") {{
   throw new Error("completion.handler_missing: registered completion handler is unavailable");
 }}
 const result = await handler({request}, {window});
 Deno.core.ops.op_clay_completion_store_result(JSON.stringify(result ?? null));
 "#,
-        token = registration.token,
         request = completion_request_json(&request),
         window = completion_window_json(&window),
     );
@@ -375,10 +390,25 @@ pub(super) async fn evaluate_js_language_intelligence_provider(
     timeout: Duration,
     heap_limit_hit: &std::sync::atomic::AtomicBool,
 ) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
+    let handler_binding = match &registration.module_specifier {
+        // Plan 127 P1: same module-import materialization as the completion
+        // lane, so language-intelligence providers can serve from the latency
+        // lane without evaluation replay.
+        Some(specifier) => format!(
+            "import * as providerModule from {specifier};\nconst handler = providerModule[{export_name}];",
+            specifier = serde_json::to_string(specifier)
+                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?,
+            export_name = serde_json::to_string(&registration.export_name)
+                .map_err(|error| ClayRuntimeError::Runtime(error.to_string()))?,
+        ),
+        None => format!(
+            "const registry = globalThis.__clayLanguageIntelligenceHandlers ?? Object.create(null);\nconst handler = registry[{token:?}];",
+            token = registration.token,
+        ),
+    };
     let source = format!(
         r#"
-const registry = globalThis.__clayLanguageIntelligenceHandlers ?? Object.create(null);
-const handler = registry[{token:?}];
+{handler_binding}
 if (typeof handler !== "function") {{
   throw new Error("language.handler_missing: registered language-intelligence handler is unavailable");
 }}
@@ -387,7 +417,6 @@ const window = {window};
 const result = await handler(request, window);
 Deno.core.ops.op_clay_language_store_intelligence_result(JSON.stringify(result ?? null));
 "#,
-        token = registration.token,
         request = language_intelligence_request_json(&request),
         window = language_intelligence_window_json(&window),
     );

@@ -179,8 +179,13 @@ pub(crate) struct ClayOpState {
     /// third-party package load evaluations to the CURRENT third-party
     /// worker. Rewired on every third-party worker replacement; always `None`
     /// on the third-party worker itself.
-    third_party_commands:
-        Mutex<Option<std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>>>,
+    third_party_commands: Mutex<Option<crate::server::js_runtime::RuntimeCommandSender>>,
+    /// Plan 127 P1: third-party LATENCY lane command channel, used only for
+    /// active-mode replication so that lane's `editor-control` gate matches
+    /// the general lane. Package loads never route here (the latency lane
+    /// materializes provider handlers by module import instead). Always
+    /// `None` on the third-party worker itself.
+    third_party_latency_commands: Mutex<Option<crate::server::js_runtime::RuntimeCommandSender>>,
     /// Host-replicated active editor mode snapshot for the THIRD-PARTY
     /// worker (follow-up round `editor-control`). The trusted worker pushes
     /// it after every behavior-manifest replacement; the third-party gate
@@ -399,6 +404,7 @@ impl ClayOpState {
             shell_preferences_publisher: Mutex::new(None),
             shell_preferences_store: Mutex::new(None),
             third_party_commands: Mutex::new(None),
+            third_party_latency_commands: Mutex::new(None),
             package_service,
             language_server_authority_sealed: AtomicBool::new(
                 domain == crate::packages::bundled::RuntimeDomain::ThirdParty,
@@ -427,11 +433,12 @@ impl ClayOpState {
             .expect("current package mutex poisoned") = context;
     }
 
-    /// Rewire the cross-domain bridge to the current third-party worker
-    /// (service constructor and every third-party worker replacement).
+    /// Rewire the cross-domain bridge to the current third-party general-lane
+    /// worker (service construction and every third-party general-lane worker
+    /// replacement).
     pub(crate) fn set_third_party_commands(
         &self,
-        sender: std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>,
+        sender: crate::server::js_runtime::RuntimeCommandSender,
     ) {
         *self
             .third_party_commands
@@ -442,11 +449,25 @@ impl ClayOpState {
         self.replicate_active_editor_mode();
     }
 
+    /// Rewire the active-mode replication lane to the current third-party
+    /// latency worker (service construction and every third-party latency
+    /// worker replacement).
+    pub(crate) fn set_third_party_latency_sender(
+        &self,
+        sender: crate::server::js_runtime::RuntimeCommandSender,
+    ) {
+        *self
+            .third_party_latency_commands
+            .lock()
+            .expect("third-party latency bridge mutex poisoned") = Some(sender);
+        self.replicate_active_editor_mode();
+    }
+
     /// Current third-party worker command channel for the cross-domain
     /// package-load bridge op.
     pub(crate) fn third_party_commands(
         &self,
-    ) -> Option<std::sync::mpsc::Sender<crate::server::js_runtime::RuntimeCommand>> {
+    ) -> Option<crate::server::js_runtime::RuntimeCommandSender> {
         self.third_party_commands
             .lock()
             .expect("third-party bridge mutex poisoned")
@@ -828,6 +849,16 @@ impl ClayOpState {
             .third_party_commands
             .lock()
             .expect("third-party command channel mutex poisoned")
+            .as_ref()
+        {
+            let _ = sender.send(
+                crate::server::js_runtime::RuntimeCommand::UpdateActiveEditorMode(mode_id.clone()),
+            );
+        }
+        if let Some(sender) = self
+            .third_party_latency_commands
+            .lock()
+            .expect("third-party latency command channel mutex poisoned")
             .as_ref()
         {
             let _ = sender

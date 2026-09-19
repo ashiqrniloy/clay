@@ -51,9 +51,17 @@ menus, modals, rail toggles, the agent view) without input synthesis:
    {"find": {"role": "button", "name": "Palette"}, "do": "focus"},
    {"wait": 400}]
 
-`do` is one of click, focus, type, clear. Every step is verified against the
-live AT-SPI tree; a step that cannot be applied records UNRESOLVED with its
-reason instead of passing.
+`do` is one of click, focus, type, clear, insert. `type`/`clear` replace the
+whole field through `SetTextContents`; `insert` appends `text` at the caret (or
+at `"at": "end"`, the last offset the field exposes) through `InsertText`, so a
+large field stays large while the insertion goes through the editor's own
+editing path. These actions need the node to expose `EditableText`: the WebKit
+document editor exposes only `Text`/`Action`/`Component` on this host, so its
+live typing is driven through the portal keyboard session instead (see
+`test-plan/artifacts/126-access-paths/`), and an `insert`/`type` step aimed at it
+records UNRESOLVED with that reason. Every step is verified against the live
+AT-SPI tree; a step that cannot be applied records UNRESOLVED with its reason
+instead of passing.
 
 Fixtures:
   ui-review-default         clean Clay shell, core empty-tab fallback (no packages)
@@ -65,6 +73,8 @@ Fixtures:
   ui-review-design-system-light shipped design-system activation (light)
   ui-review-large-typography user-owned large typography state
   ui-review-completion      completion-ready document (interactive capture)
+  ui-review-large-document  ≥4 MiB Rust document with the completion fixture's
+                            init.js (plan 126 access-path steps)
   ui-review-command-centre command centre (interactive capture)
   ui-review-rust            authorized Rust analyzer/inlay states (interactive capture)
 
@@ -128,7 +138,7 @@ while (($#)); do
 done
 
 case "$fixture" in
-    ui-review-default|ui-review-launcher|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-large-typography|ui-review-completion|ui-review-command-centre|ui-review-workspace|ui-review-rust|ui-review-coding-agent|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) ;;
+    ui-review-default|ui-review-launcher|ui-review-loading|ui-review-error|ui-review-recovery|ui-review-design-system|ui-review-design-system-light|ui-review-large-typography|ui-review-completion|ui-review-large-document|ui-review-command-centre|ui-review-workspace|ui-review-rust|ui-review-coding-agent|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) ;;
     *)
         echo "unknown --fixture: ${fixture:-<missing>}" >&2
         usage >&2
@@ -493,6 +503,23 @@ if sys.argv[1] == "drive":
                 Atspi.Component.grab_focus(node)
                 Atspi.EditableText.set_text_contents(node, text)
                 print(f"OK step {position}: {action} {clean(node.get_name())!r}")
+            elif action == "insert":
+                # InsertText keeps the field's existing content: the large-document
+                # steps need the document to stay large while the insertion drives
+                # the same live typing path a keypress would.
+                text = str(step.get("text", ""))
+                Atspi.Component.grab_focus(node)
+                if str(step.get("at", "caret")) == "end":
+                    offset = Atspi.Text.get_character_count(node)
+                else:
+                    offset = Atspi.Text.get_caret_offset(node)
+                if offset is None or offset < 0:
+                    offset = Atspi.Text.get_character_count(node)
+                Atspi.EditableText.insert_text(node, offset, text, len(text))
+                print(
+                    f"OK step {position}: insert {text!r} at {offset} in"
+                    f" {clean(node.get_name())!r}"
+                )
             else:
                 failures.append(f"step {position}: unknown do {action!r}")
         except Exception as exc:  # noqa: BLE001 - the probe reports, never raises
@@ -724,6 +751,25 @@ The first-entry summary of the migrated shell.
 
 A second entry so the outline rail has something to navigate.
 MD
+elif [[ "$fixture" == ui-review-large-document ]]; then
+    # Plan 126 access-path steps: a document past the 4 MiB manual threshold so
+    # the completion and rope-window paths run against a real large document
+    # without a 50 MiB transfer dominating the run. The trailing `pub fn hello`
+    # leaves a completable prefix at the end of the file.
+    python3 - "$workspace/review.rs" <<'PY'
+import sys
+
+line = "pub fn helper_{index:06}() -> usize {{ {index} }}\n"
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    written = 0
+    index = 0
+    while written < 4 * 1024 * 1024:
+        chunk = "".join(line.format(index=index + offset) for offset in range(1000))
+        handle.write(chunk)
+        written += len(chunk)
+        index += 1000
+    handle.write("\npub fn hello")
+PY
 elif [[ "$fixture" == ui-review-loading || "$fixture" == ui-review-design-system || "$fixture" == ui-review-design-system-light || "$fixture" == ui-review-icons-regular-light || "$fixture" == ui-review-icons-duotone-dark || "$fixture" == ui-review-icons-fallback-large ]]; then
     printf 'Fixture document\n' > "$workspace/loading.txt"
 fi
@@ -732,6 +778,7 @@ document_name=""
 case "$fixture" in
     ui-review-loading|ui-review-design-system|ui-review-design-system-light|ui-review-icons-regular-light|ui-review-icons-duotone-dark|ui-review-icons-fallback-large) document_name=loading.txt ;;
     ui-review-completion) document_name=review.rs ;;
+    ui-review-large-document) document_name=review.rs ;;
     ui-review-workspace) document_name=review.md ;;
     ui-review-rust) document_name=src/main.rs ;;
 esac
@@ -778,6 +825,16 @@ documents. It never reads the ambient Clay configuration. The Rust fixture
 inherits host HOME only for the fixed rustup toolchain lookup.
 EOF
 case "$fixture" in
+    ui-review-large-document)
+        cat >> "$output/instructions.md" <<'EOF'
+
+The workspace holds a ≥4 MiB `review.rs` (the completion fixture's init.js is
+copied, so the `Ctrl+Space` binding and the `@clay/rust` provider are active).
+Plan 126 steps: the document opens through the chunked path, the editor is
+read-only until ready, then an insertion at the end of the file drives the live
+typing path on a document that stays past 4 MiB.
+EOF
+        ;;
     ui-review-completion)
         cat >> "$output/instructions.md" <<'EOF'
 

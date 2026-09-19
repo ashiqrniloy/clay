@@ -8,6 +8,7 @@
 - `src/server/workspace/mod.rs` — streamed open/reload/read and atomic save.
 - `src/server/document.rs` — rope head/chunk reads and parse-window slicing.
 - `src/server/connection/documents.rs` — routed chunk request handling.
+- `src/server/ops/documents.rs` — package-facing `clay:documents` open/reload budget gate (Plan 126).
 - `src/server/connection/mod.rs` — connection dispatch.
 - `src-tauri/src/bridge/dto.rs` — typed bridge projection.
 - `src-tauri/src/bridge/forwarder.rs` — bounded delivery.
@@ -32,6 +33,17 @@ The frontend does not build a second full string buffer. A pane's
 `DocumentSession` keeps one current CodeMirror `Text`: `view.state.doc` while a
 view is attached, or `detachedDoc` only while detached. Chunk writes are
 programmatic, no-history transactions.
+
+Plan 126 (Document Access Path Hardening) draws the line between this client path
+and the package path: `documents.open`/`documents.reload` — the `clay:documents`
+ops that hand a whole document to JavaScript — refuse documents over
+`DOCUMENTS_OP_MAX_DOCUMENT_BYTES` (256 KiB) with a typed
+`documents.document_too_large` error before any rope→`String` conversion, while
+the head/chunk flow above stays deliberately ungated so the editor can open
+multi-MiB files. Windowed server consumers (completion, language intelligence,
+the parse-window prefix) read rope windows through the shared boundary helpers
+instead of materializing the document, so a large open costs O(head + window)
+server work rather than O(document) per consumer.
 
 P1-1 keeps the mandatory full-rope server load but removes avoidable allocation
 churn: `read_file_streamed` reuses one scratch buffer and carries up to three
@@ -146,6 +158,9 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
   singleton and no React-held source string.
 - Head/chunk/reload/resync transactions are annotated and excluded from undo and
   edit emission. Ordinary user edits remain compact deltas.
+- The package documents ops are budgeted (256 KiB, typed refusal, no path/content
+  in the message); this client chunked path is not, so a document refused by the
+  package op can still be open and editable in the editor.
 - Read-only/loading status is metadata; shell notification/persistence selectors
   ignore per-ack version/pending churn.
 - Trace metadata may record numeric document/version/byte counts only; fixture
@@ -166,7 +181,14 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
 - `tests/editor_performance.rs` — protocol open/edit/save/reload/resync matrix
   and close retirement.
 - `tests/performance_budgets.rs` — source guard for the hoisted read buffer and
-  absence of the old per-chunk `combined` allocation.
+  absence of the old per-chunk `combined` allocation, plus the package-op and
+  provider-window budget pins (`chunked_document_security_budgets_are_pinned`,
+  `plan126_provider_document_window_budgets_are_pinned_and_documented`).
+- `src/server/js_runtime/tests.rs` — `documents_open_over_budget_returns_typed_error`
+  (open and reload legs, no document text to JS) and
+  `documents_open_under_budget_unchanged` (golden contract below the cap).
+- `src/server/connection/tests.rs` — `static_completion_on_large_document_matches_small_document_results`
+  (windowed consumer parity on a 4 MiB document).
 
 Run focused coverage with:
 
@@ -183,4 +205,6 @@ cd frontend && npm test -- --run src/editor/sync/session.test.ts
 - [Server Document State](../modules/server-document-state.md)
 - [React Client Bridge](../modules/react-client-bridge.md)
 - [Editor Viewport Render Patch](editor-viewport-render-patch.md)
+- [Server File Workspace Model](../modules/server-file-workspace.md) — the package-op budget that stops short of this path
+- [Completion Snippet Expansion](../modules/completion-snippet-expansion.md) and [Language Intelligence](../modules/language-intelligence.md) — windowed consumers over the same rope
 - `docs/reference/primitives/registry.md#documentchunktransfer`

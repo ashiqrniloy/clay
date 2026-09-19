@@ -783,8 +783,18 @@ directory — the launch test
 showed that path leaking the real home under the daemon's env-clear
 spawn, which is why the server always passes it. The spawn environment is
 cleared except `HOME`/`USERPROFILE`/`PATH` (`for_server`), so MCP bare
-commands resolve and homedir follows the isolated profile. The data dir
-holds
+commands resolve and homedir follows the isolated profile. The server's data
+dir follows the same root: `<configuration root>/agents/coding-agent/data`,
+or the per-user `~/.clay/agents/coding-agent/data` when the server was given
+no root (the desktop's own `clay auto` launch, a bare `clay server`) — the
+same place the daemon's `homedir()` default resolves to. It used to fall back
+to a single shared `temp_dir()/clay-agent`, which made every root-less server
+share one `book.json`/`credentials.vault`/`sessions.sqlite`: a persisted
+profile from another run then named a profile that run never registered and
+the tab could not bind a session. Unit tests (`cfg(test)`) resolve a
+per-process temp root instead, so no test touches the developer's profile;
+`tests/agent_session_isolation.rs` proves the per-user path with an isolated
+`HOME`. The data dir holds
 `sessions.sqlite`, `credentials.vault`,
 `vault.passphrase`, and `book.json` (the server-side persisted
 provider/model/profile selection, reloaded at server boot so a configured

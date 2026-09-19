@@ -689,6 +689,11 @@ impl PackageService {
     /// The store is the single source of truth: this replaces the entire
     /// `installed` map with the discovered set.
     pub fn refresh_installed(&mut self) -> Result<(), PackageServiceError> {
+        // The manager runs *in* the store root (`npm list --prefix <root>` with
+        // `current_dir(<root>)`), so the directory must exist before the first
+        // spawn: a fresh profile has no `~/.clay/packages` yet, and spawning
+        // with a nonexistent cwd fails with ENOENT before the manager starts.
+        self.ensure_store_root()?;
         let discovered = self
             .backend
             .list_installed(&self.store)
@@ -712,6 +717,22 @@ impl PackageService {
         Ok(())
     }
 
+    /// Create the store root when it does not exist yet. Both the discovery
+    /// and the install paths hand it to the manager as the child's working
+    /// directory, and `Command::current_dir` on a missing directory fails the
+    /// spawn with ENOENT.
+    fn ensure_store_root(&self) -> Result<(), PackageServiceError> {
+        std::fs::create_dir_all(&self.store.root).map_err(|error| {
+            PackageServiceError::BackendError(BackendError {
+                kind: BackendErrorKind::IoError,
+                message: format!(
+                    "could not create package store {}: {error}",
+                    self.store.root.display()
+                ),
+            })
+        })
+    }
+
     /// Install a package by spec.
     ///
     /// Delegates the actual download/resolution/lockfile/integrity/caching to
@@ -733,15 +754,7 @@ impl PackageService {
 
         // Ensure the store directory exists before invoking the backend; pnpm
         // needs a valid current working directory.
-        std::fs::create_dir_all(&self.store.root).map_err(|error| {
-            PackageServiceError::BackendError(BackendError {
-                kind: BackendErrorKind::IoError,
-                message: format!(
-                    "could not create package store {}: {error}",
-                    self.store.root.display()
-                ),
-            })
-        })?;
+        self.ensure_store_root()?;
 
         // Delegate to the backend.
         let result = self

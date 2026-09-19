@@ -6,6 +6,7 @@
 - `src/server/connection/mod.rs`
 - `src/protocol/mod.rs`
 - `src/protocol/codec.rs`
+- `src/perf/budgets.rs` — window and package-op byte budgets
 
 ## Overview
 
@@ -16,6 +17,7 @@ The module proves the server-authoritative text model: client edit deltas cross 
 ## Responsibilities
 
 - Own the canonical server text as a `crop::Rope`.
+- Provide the shared bounded-extraction helpers (`window_around`, `text_range`, `rope_slice_string`) and UTF-8 boundary predicates (`char_boundary_at_or_before`, `char_boundary_at_or_after`, `cursor_window_bounds`) that windowed consumers (completion, language intelligence, document heads, chunk messages, the parse-window prefix) build their snapshots with, so no consumer copies the whole rope for a bounded slice.
 - Track the document ID, server document version, current editable lease holder, next lease ID, active in-memory region locks, most recent accepted transaction ID, and dirty state for file-backed persistence.
 - Produce `ServerMessage::InitialDocument` snapshots for a bound tab's post-`New`/`Reclaim` bootstrap and `ServerMessage::ResyncSnapshot` snapshots for explicit resync requests with client-specific editable/read-only access metadata.
 - Expose internal save/reload hooks: `text`, `version`, `mark_clean_if_version`, and `replace_text_from_storage` let `WorkspaceState` persist or refresh file-backed documents without moving filesystem authority into `DocumentState`.
@@ -49,6 +51,22 @@ workspace so file-backed `DocumentId`s remain unique across tabs. Standalone
 its server version at `1`. Snapshots call `Rope::to_string()` only for initial
 load, file open, or resync; ordinary acknowledged edits remain delta messages
 and do not serialize the full document.
+
+Plan 126 (Document Access Path Hardening) centralized the "clamp an offset to a
+UTF-8 boundary inside a byte budget" loops that completion, language
+intelligence, document heads, chunk messages, and the parse-window prefix each
+hand-rolled. `char_boundary_at_or_before`/`char_boundary_at_or_after` walk the
+rope by byte offset (guarded against `crop`'s out-of-bounds panic, which
+`str::is_char_boundary` does not have), `cursor_window_bounds` derives a
+cursor-centered window that never exceeds its byte budget and never splits a
+code point, and `DocumentState::window_around` materializes that window through
+`rope_slice_string` (`RopeSlice::to_string`, i.e. work proportional to the
+window, not the document). `DocumentState::text_range` is the same idea for an
+explicit replacement range, and `floor_char_boundary`/`ceil_char_boundary`
+became infallible wrappers over the predicates. Completion and
+language-intelligence requests therefore allocate O(window) on multi-MiB
+documents (measured 31,118 B per request on both a 64 KiB and a 4 MiB document,
+~161 µs median round trip, down from 427–569 µs).
 
 Before mutation, `apply_edit` checks the target document ID, then compares the client-provided base version with the current canonical server version. Lower base versions return `EditRejection::StaleVersion`; higher base versions return `EditRejection::FutureVersion`. Neither case mutates the rope, advances the server version, or records the transaction. When the base version matches, the document validates that the sending client ID and lease ID match the current editable lease. Missing leases return `LeaseRequired`; guessed, replayed, or otherwise wrong leases return `LeaseExpired`. Only the lease holder can reach byte-range and region-lock validation.
 
@@ -115,6 +133,8 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - Region lock ranges are non-empty, in-bounds, and UTF-8 boundary aligned.
 - Disconnecting the current lease holder releases the lease. Existing observers stay read-only until they reconnect or later explicit transfer UI exists.
 - Initial/resync heads and chunk fetches, streamed saves, and reloads stay at explicit server-side boundaries; ordinary edit acknowledgements do not send full-document text. Saves stream Crop chunks and do not materialize a whole-document `String`.
+- Windowed extraction is O(window): `window_around`/`text_range` never copy the document, and their allocation stays flat as `byte_len()` grows (`window_cost_is_independent_of_document_size` asserts allocated bytes rather than wall time, because µs ratios on shared hardware are flaky).
+- A bounded window never exceeds its budget and never ends mid-code-point: the end boundary is floor-clamped at or below the budget and both ends are char boundaries.
 - The server version is authoritative; clients cannot advance it by sending forged future base versions.
 - Version checks are constant-time metadata comparisons before any text mutation.
 - Each routed `DocumentState` is protected by a Tokio mutex, so connection tasks do not mutate that canonical rope concurrently; tab routing prevents another tab from reaching it.
@@ -127,6 +147,7 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - `src/server/document.rs`: `server_document_rejects_non_boundary_rope_edit_without_panic` validates UTF-8 boundary rejection before `crop` mutation.
 - `src/server/document.rs`: `server_document_rejects_out_of_range_rope_edit` validates range checks prevent panics and preserve version state.
 - `src/server/document.rs`: `server_document_snapshot_preserves_unicode` validates Unicode snapshot extraction from the rope.
+- `src/server/document.rs`: `window_at_document_edges_clamps_to_boundaries`, `window_respects_multibyte_boundaries`, and `window_cost_is_independent_of_document_size` validate the shared window/boundary helpers (edge clamping, multibyte safety, and O(window) allocation).
 - `src/server/document.rs`: `server_document_version_advances_once_per_accepted_edit` validates accepted/rejected version behavior and transaction metadata.
 - `src/server/document.rs`: `server_accepts_edit_at_current_base_version`, `server_rejects_stale_base_version`, and `server_rejects_future_base_version` validate strict base-version enforcement.
 - `src/server/document.rs`: `first_client_receives_editable_lease`, `second_client_receives_read_only_access`, `server_rejects_edit_without_current_lease`, and `lease_released_or_retained_on_disconnect_matches_policy` validate lease grant, observer, validation, and release behavior.
@@ -143,5 +164,7 @@ The response is an `EditAck` with confirmed version `2`, and the canonical rope 
 - [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
+- [Document Chunked Loading](../flows/document-chunked-loading.md) — the client transfer path these windows deliberately do not copy
+- [Language Intelligence](language-intelligence.md) and [Completion Snippet Expansion](completion-snippet-expansion.md) — the windowed consumers
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`
 - `plans/006-Phase5-Versioned-Text-Synchronization-and-Leases.md`

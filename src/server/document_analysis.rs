@@ -1711,10 +1711,13 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap()
             .unwrap();
         assert!(matches!(output, DocumentAnalysisOutput::Decorations(_)));
-        // Plan 061 task 4: analyzer registration, document open, and analysis
-        // invocation never create additional persistent runtimes beyond the
-        // two domain workers.
-        assert_eq!(runtime_probe.workers_started(), 2);
+        // Plan 061 task 4 / Plan 127 P1: analyzer registration, document
+        // open, and analysis invocation never create additional persistent
+        // runtimes beyond the two domain workers and their lanes.
+        assert_eq!(
+            runtime_probe.workers_started(),
+            2 * crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN as u64
+        );
 
         assert!(!coordinator.change_document(7, 1, 2, 2, 2, " x".to_string()));
         let output = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())

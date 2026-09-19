@@ -24,29 +24,99 @@ mod validation;
 mod worker;
 
 pub(crate) use self::error::{ClayRuntimeError, ClayRuntimeEvaluation, DocumentAnalysisInvocation};
-pub(crate) use self::worker::{RuntimeCommand, RuntimeEntry};
+pub(crate) use self::worker::{RuntimeCommand, RuntimeCommandSender, RuntimeEntry};
 use self::worker::{RuntimeWorker, harvest_op_state_evaluation, start_runtime_worker};
 
-/// One persistent domain worker plus its per-domain generation state
-/// (poison flag, evaluation metric, replaceable worker handle).
+/// Per-domain worker lane (Plan 127 P1). Lanes are separate isolates and
+/// command threads inside ONE trust domain: they share the domain extension
+/// set, package service, and load-entry allowlist, and never share V8
+/// globals, module instances, or op state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeLane {
+    /// Configuration/package evaluation, parse handlers, document analysis.
+    General = 0,
+    /// Completion and language-intelligence provider invocations. Handlers
+    /// materialize by importing the registration's validated module specifier
+    /// (document-analyzer precedent), so this lane needs no evaluation replay.
+    Latency = 1,
+}
+
+impl RuntimeLane {
+    /// Every lane, indexed by `RuntimeLane as usize`. Length is pinned to the
+    /// `JS_RUNTIME_LANES_PER_DOMAIN` budget: adding a lane fails to compile
+    /// until the variant (and its heap ceiling) exists.
+    pub(crate) const ALL: [RuntimeLane; crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN] =
+        [RuntimeLane::General, RuntimeLane::Latency];
+
+    fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Lane serving a provider invocation (Plan 127 P1): a registration that
+    /// carries a host-validated package module specifier can materialize its
+    /// handler in any isolate, so it runs on the latency lane. Inline
+    /// `module: {...}` registrations only exist as closures in the isolate
+    /// that evaluated the package, so they stay on the general lane until the
+    /// package adopts `moduleSpecifier`.
+    pub(crate) fn for_provider(module_specifier: Option<&str>) -> Self {
+        if module_specifier.is_some() {
+            Self::Latency
+        } else {
+            Self::General
+        }
+    }
+}
+
+/// Heap ceiling for one lane: the general lane keeps the configured service
+/// ceiling; the latency lane is clamped to the provider-lane budget and never
+/// raised above the configured ceiling, so synthetic small-heap tests stay
+/// bounded on every lane.
+pub(crate) fn lane_heap_limit_bytes(
+    configured_heap_limit_bytes: usize,
+    lane: RuntimeLane,
+) -> usize {
+    match lane {
+        RuntimeLane::General => configured_heap_limit_bytes,
+        RuntimeLane::Latency => configured_heap_limit_bytes
+            .min(crate::perf::budgets::JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES),
+    }
+}
+
+/// One lane's isolate handle plus its own poison flag: a lane timeout/heap
+/// limit replaces that lane's worker only (Plan 127 P1).
 #[derive(Debug, Clone)]
-struct DomainRuntime {
+struct LaneRuntime {
     poisoned: Arc<std::sync::atomic::AtomicBool>,
-    evaluations: Arc<AtomicU64>,
-    /// Per-domain runtime generation, bumped on every worker replacement
-    /// (poison recovery, trusted reload). Registration ownership metadata
-    /// per Plan 061 task 12.
-    generation: Arc<AtomicU64>,
     worker: Arc<std::sync::Mutex<Arc<RuntimeWorker>>>,
 }
 
-/// Isolated server-side Clay JavaScript runtime boundary. Owns exactly two
-/// persistent application runtimes (Plan 061 trust domains): one trusted
-/// runtime for configuration and bundled first-party packages, and one shared
-/// third-party runtime for adopted packages. Each domain has its own op
-/// extension, module-loader allowlist, facade export set, poison/restart
-/// path, and evaluation metric; both share the host-owned `PackageService`
-/// and package load-entry allowlist.
+/// One trust domain's lanes plus per-domain generation state (evaluation
+/// metric, replaceable worker handles, registration ownership generation).
+#[derive(Debug, Clone)]
+struct DomainRuntime {
+    evaluations: Arc<AtomicU64>,
+    /// Per-domain runtime generation, bumped on every GENERAL-lane worker
+    /// replacement (poison recovery, trusted reload). Registration ownership
+    /// metadata per Plan 061 task 12; the latency lane owns no host-visible
+    /// registrations, so replacing it leaves the generation untouched.
+    generation: Arc<AtomicU64>,
+    lanes: [LaneRuntime; crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN],
+}
+
+impl DomainRuntime {
+    fn lane(&self, lane: RuntimeLane) -> &LaneRuntime {
+        &self.lanes[lane.index()]
+    }
+}
+
+/// Isolated server-side Clay JavaScript runtime boundary. Owns two trust
+/// domains (Plan 061): one trusted runtime for configuration and bundled
+/// first-party packages, and one shared third-party runtime for adopted
+/// packages. Each domain owns `JS_RUNTIME_LANES_PER_DOMAIN` worker lanes
+/// (Plan 127 P1): separate isolates inside the same domain with their own
+/// poison/restart path, each carrying that domain's op extension set and
+/// sharing the host-owned `PackageService` and package load-entry allowlist.
+/// No V8 value, module instance, or op state crosses a lane or a domain.
 #[derive(Clone)]
 pub(crate) struct ClayJsRuntimeService {
     evaluations: Arc<AtomicU64>,
@@ -55,14 +125,7 @@ pub(crate) struct ClayJsRuntimeService {
     /// whose classification inputs and native grammar registration match a
     /// cached activation skips the per-open generated module evaluation
     /// entirely: the cached manifest is republished from Rust.
-    mode_activation_cache: Arc<
-        std::sync::Mutex<
-            HashMap<
-                crate::server::connection::ModeActivationKey,
-                crate::server::connection::CachedModeActivation,
-            >,
-        >,
-    >,
+    mode_activation_cache: Arc<std::sync::Mutex<ModeActivationCache>>,
     /// Count of generated module evaluations served by the V8 open path, for
     /// the registry fast-path parity/measurement tests.
     pub(crate) open_activation_evaluations: Arc<AtomicU64>,
@@ -97,6 +160,60 @@ pub(crate) struct ClayJsRuntimeService {
     /// connection initial sync and lag replay.
     shell_preferences: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
     shell_preferences_state: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
+}
+
+/// Per-generation mode-activation cache with least-recently-used eviction
+/// (Plan 126 D6). The cap is small (`MODE_ACTIVATION_CACHE_ENTRIES`), so the
+/// oldest entry is found by linear scan instead of a second index structure,
+/// mirroring `SyntaxChunkCache::next_access`.
+#[derive(Default)]
+struct ModeActivationCache {
+    entries: HashMap<
+        crate::server::connection::ModeActivationKey,
+        (u64, crate::server::connection::CachedModeActivation),
+    >,
+    access_counter: u64,
+}
+
+impl ModeActivationCache {
+    fn next_access(&mut self) -> u64 {
+        self.access_counter = self.access_counter.saturating_add(1);
+        self.access_counter
+    }
+
+    /// Cached activation for `key`, marked most-recently used.
+    fn get(
+        &mut self,
+        key: &crate::server::connection::ModeActivationKey,
+    ) -> Option<crate::server::connection::CachedModeActivation> {
+        let stamp = self.next_access();
+        let (last_access, cached) = self.entries.get_mut(key)?;
+        *last_access = stamp;
+        Some(cached.clone())
+    }
+
+    /// Insert `key` as most-recently used. At capacity only the
+    /// least-recently used entry is evicted; clearing the whole cache here
+    /// (Plan 126 D6) forced every previously cached mode to re-evaluate its
+    /// generated module after 64 distinct modes.
+    fn insert(
+        &mut self,
+        key: crate::server::connection::ModeActivationKey,
+        cached: crate::server::connection::CachedModeActivation,
+    ) {
+        if !self.entries.contains_key(&key)
+            && self.entries.len() >= crate::perf::budgets::MODE_ACTIVATION_CACHE_ENTRIES
+            && let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (last_access, _))| *last_access)
+                .map(|(key, _)| key.clone())
+        {
+            self.entries.remove(&oldest);
+        }
+        let stamp = self.next_access();
+        self.entries.insert(key, (stamp, cached));
+    }
 }
 
 impl std::fmt::Debug for ClayJsRuntimeService {
@@ -150,46 +267,11 @@ impl ClayJsRuntimeService {
             &current.load_entry_allowlist,
             &workers_started,
         );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_third_party_commands(
-                current
-                    .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
-                    .sender
-                    .clone(),
-            );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_editor_command_publisher(current.editor_commands.clone());
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_caret_style_publisher(
-                current.caret_styles.clone(),
-                std::sync::Arc::clone(&current.caret_style_state),
-            );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_editor_layout_publisher(
-                current.editor_layouts.clone(),
-                std::sync::Arc::clone(&current.editor_layout_state),
-            );
-        Self {
+        let service = Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             // A reload rebuilds the trusted worker and its registries; the
             // per-generation activation cache must not survive it.
-            mode_activation_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            mode_activation_cache: Arc::new(std::sync::Mutex::new(ModeActivationCache::default())),
             open_activation_evaluations: Arc::new(AtomicU64::new(0)),
             timeout: current.timeout,
             heap_limit_bytes: current.heap_limit_bytes,
@@ -209,7 +291,12 @@ impl ClayJsRuntimeService {
             editor_layout_state: std::sync::Arc::clone(&current.editor_layout_state),
             shell_preferences: current.shell_preferences.clone(),
             shell_preferences_state: std::sync::Arc::clone(&current.shell_preferences_state),
-        }
+        };
+        // Same wiring as a fresh service: the rebuilt trusted lanes attach to
+        // the carried-over channels and to the surviving third-party lanes
+        // (Plan 061 task 12).
+        service.wire_domain_lanes();
+        service
     }
 
     /// Production server runtime: durable approval store at the default
@@ -251,9 +338,6 @@ impl ClayJsRuntimeService {
             &load_entry_allowlist,
             &workers_started,
         );
-        // Wire the cross-domain bridge: trusted config `loadPackage` of an
-        // approved third-party package dispatches its load evaluation to the
-        // third-party worker (Plan 061 task 12).
         let (editor_commands, _) = tokio::sync::broadcast::channel(16);
         // Plan 071 caret-transport fix: runtime caret override lane.
         let (caret_styles, _) = tokio::sync::broadcast::channel(4);
@@ -271,79 +355,9 @@ impl ClayJsRuntimeService {
             std::sync::Arc::new(std::sync::Mutex::new(crate::protocol::ShellPreferences {
                 pane_focus_policy: "click".to_string(),
             }));
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_third_party_commands(
-                third_party
-                    .worker
-                    .lock()
-                    .expect("Clay runtime service worker mutex poisoned")
-                    .sender
-                    .clone(),
-            );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_editor_command_publisher(editor_commands.clone());
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_caret_style_publisher(
-                caret_styles.clone(),
-                std::sync::Arc::clone(&caret_style_state),
-            );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_editor_layout_publisher(
-                editor_layouts.clone(),
-                std::sync::Arc::clone(&editor_layout_state),
-            );
-        trusted
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_shell_preferences_publisher(
-                shell_preferences.clone(),
-                std::sync::Arc::clone(&shell_preferences_state),
-            );
-        third_party
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_editor_command_publisher(editor_commands.clone());
-        third_party
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_caret_style_publisher(
-                caret_styles.clone(),
-                std::sync::Arc::clone(&caret_style_state),
-            );
-        third_party
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned")
-            .op_state
-            .set_shell_preferences_publisher(
-                shell_preferences.clone(),
-                std::sync::Arc::clone(&shell_preferences_state),
-            );
-        Self {
+        let service = Self {
             evaluations: Arc::new(AtomicU64::new(0)),
-            mode_activation_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            mode_activation_cache: Arc::new(std::sync::Mutex::new(ModeActivationCache::default())),
             open_activation_evaluations: Arc::new(AtomicU64::new(0)),
             timeout,
             heap_limit_bytes,
@@ -363,7 +377,14 @@ impl ClayJsRuntimeService {
             editor_layout_state,
             shell_preferences,
             shell_preferences_state,
-        }
+        };
+        // Wire shared host channels into every lane plus the cross-domain
+        // bridge: trusted general `loadPackage` of an approved third-party
+        // package dispatches its load evaluation to the third-party general
+        // lane (Plan 061 task 12), while both third-party lanes receive
+        // active-mode replication.
+        service.wire_domain_lanes();
+        service
     }
 
     fn start_domain_runtime(
@@ -374,18 +395,24 @@ impl ClayJsRuntimeService {
         load_entry_allowlist: &Arc<PackageLoadEntryAllowlist>,
         workers_started: &Arc<AtomicU64>,
     ) -> DomainRuntime {
-        workers_started.fetch_add(1, Ordering::Relaxed);
+        let lanes = RuntimeLane::ALL.map(|lane| {
+            workers_started.fetch_add(1, Ordering::Relaxed);
+            LaneRuntime {
+                poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                worker: Arc::new(std::sync::Mutex::new(start_runtime_worker(
+                    timeout,
+                    lane_heap_limit_bytes(heap_limit_bytes, lane),
+                    domain,
+                    Arc::clone(package_service),
+                    Arc::clone(load_entry_allowlist),
+                    lane,
+                ))),
+            }
+        });
         DomainRuntime {
-            poisoned: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             evaluations: Arc::new(AtomicU64::new(0)),
             generation: Arc::new(AtomicU64::new(1)),
-            worker: Arc::new(std::sync::Mutex::new(start_runtime_worker(
-                timeout,
-                heap_limit_bytes,
-                domain,
-                Arc::clone(package_service),
-                Arc::clone(load_entry_allowlist),
-            ))),
+            lanes,
         }
     }
 
@@ -453,47 +480,108 @@ impl ClayJsRuntimeService {
         }
     }
 
-    fn replace_domain_worker(&self, domain: crate::packages::bundled::RuntimeDomain) {
+    fn lane(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
+    ) -> &LaneRuntime {
+        self.domain(domain).lane(lane)
+    }
+
+    fn replace_domain_worker(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
+    ) {
         self.workers_started.fetch_add(1, Ordering::Relaxed);
-        self.domain(domain)
-            .generation
-            .fetch_add(1, Ordering::Relaxed);
+        // Only the general lane owns host-visible registrations, so only its
+        // replacement invalidates registration ownership metadata.
+        if lane == RuntimeLane::General {
+            self.domain(domain)
+                .generation
+                .fetch_add(1, Ordering::Relaxed);
+        }
         let replacement = start_runtime_worker(
             self.timeout,
-            self.heap_limit_bytes,
+            lane_heap_limit_bytes(self.heap_limit_bytes, lane),
             domain,
             Arc::clone(&self.package_service),
             Arc::clone(&self.load_entry_allowlist),
+            lane,
         );
-        // Rewire the cross-domain bridge: the trusted worker dispatches
-        // third-party load evaluations to the CURRENT third-party worker.
+        // Rewire the cross-domain bridge: the trusted general lane dispatches
+        // third-party load evaluations to the CURRENT third-party general
+        // lane (mode replication follows every third-party lane).
         if domain == crate::packages::bundled::RuntimeDomain::ThirdParty {
-            self.domain_worker(crate::packages::bundled::RuntimeDomain::Trusted)
-                .op_state
-                .set_third_party_commands(replacement.sender.clone());
+            let trusted_general =
+                self.domain_worker(crate::packages::bundled::RuntimeDomain::Trusted);
+            match lane {
+                RuntimeLane::General => trusted_general
+                    .op_state
+                    .set_third_party_commands(replacement.sender.clone()),
+                RuntimeLane::Latency => trusted_general
+                    .op_state
+                    .set_third_party_latency_sender(replacement.sender.clone()),
+            }
         }
-        // Replacement workers start unwired: restore the editor-command
-        // publisher so the `editor-control` execution channel survives.
-        replacement
-            .op_state
-            .set_editor_command_publisher(self.editor_commands.clone());
-        replacement.op_state.set_caret_style_publisher(
-            self.caret_styles.clone(),
-            std::sync::Arc::clone(&self.caret_style_state),
-        );
-        replacement.op_state.set_editor_layout_publisher(
-            self.editor_layouts.clone(),
-            std::sync::Arc::clone(&self.editor_layout_state),
-        );
-        replacement.op_state.set_shell_preferences_publisher(
-            self.shell_preferences.clone(),
-            std::sync::Arc::clone(&self.shell_preferences_state),
-        );
+        self.wire_runtime_publishers(&replacement);
         *self
-            .domain(domain)
+            .lane(domain, lane)
             .worker
             .lock()
             .expect("Clay runtime service worker mutex poisoned") = replacement;
+    }
+
+    /// Attach the shared host channels to one lane's op state. Replacement
+    /// workers start unwired, so every replacement and initial construction
+    /// routes through here.
+    fn wire_runtime_publishers(&self, worker: &RuntimeWorker) {
+        worker
+            .op_state
+            .set_editor_command_publisher(self.editor_commands.clone());
+        worker.op_state.set_caret_style_publisher(
+            self.caret_styles.clone(),
+            std::sync::Arc::clone(&self.caret_style_state),
+        );
+        worker.op_state.set_editor_layout_publisher(
+            self.editor_layouts.clone(),
+            std::sync::Arc::clone(&self.editor_layout_state),
+        );
+        worker.op_state.set_shell_preferences_publisher(
+            self.shell_preferences.clone(),
+            std::sync::Arc::clone(&self.shell_preferences_state),
+        );
+    }
+
+    /// Wire every domain lane to the shared host channels and the
+    /// cross-domain bridge. The trusted latency lane deliberately gets no
+    /// bridge: provider modules it imports must not drive package loading, so
+    /// only the general lane can dispatch `loadPackage` into the third-party
+    /// domain.
+    fn wire_domain_lanes(&self) {
+        for domain in [
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+        ] {
+            for lane in RuntimeLane::ALL {
+                let worker = self.domain_lane_worker(domain, lane);
+                self.wire_runtime_publishers(&worker);
+            }
+        }
+        let trusted_general = self.domain_worker(crate::packages::bundled::RuntimeDomain::Trusted);
+        trusted_general.op_state.set_third_party_commands(
+            self.domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
+                .sender
+                .clone(),
+        );
+        trusted_general.op_state.set_third_party_latency_sender(
+            self.domain_lane_worker(
+                crate::packages::bundled::RuntimeDomain::ThirdParty,
+                RuntimeLane::Latency,
+            )
+            .sender
+            .clone(),
+        );
     }
 
     /// Host-owned package authority shared by both domain runtimes.
@@ -654,8 +742,9 @@ impl ClayJsRuntimeService {
         metric: &'static str,
     ) -> Result<ClayRuntimeEvaluation, ClayRuntimeError> {
         let domain_runtime = self.domain(domain);
-        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
-            self.replace_domain_worker(domain);
+        let general_lane = domain_runtime.lane(RuntimeLane::General);
+        if general_lane.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain, RuntimeLane::General);
         }
         let (response, receiver) = oneshot::channel();
         let command = RuntimeCommand::Evaluate {
@@ -667,10 +756,10 @@ impl ClayJsRuntimeService {
             response,
         };
         if let Err(error) = self.domain_worker(domain).sender.send(command) {
-            self.replace_domain_worker(domain);
+            self.replace_domain_worker(domain, RuntimeLane::General);
             self.domain_worker(domain)
                 .sender
-                .send(error.0)
+                .send(*error.0)
                 .map_err(|_| {
                     ClayRuntimeError::Runtime(
                         "persistent JavaScript runtime worker stopped".to_string(),
@@ -684,7 +773,7 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            domain_runtime.poisoned.store(true, Ordering::Relaxed);
+            general_lane.poisoned.store(true, Ordering::Relaxed);
         } else if let Ok(evaluation) = &result {
             self.evaluations.fetch_add(1, Ordering::Relaxed);
             domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
@@ -942,9 +1031,6 @@ impl ClayJsRuntimeService {
             .mode_activation_cache
             .lock()
             .expect("mode activation cache lock poisoned");
-        if cache.len() >= crate::perf::budgets::MODE_ACTIVATION_CACHE_ENTRIES {
-            cache.clear();
-        }
         cache.insert(key, cached);
     }
 
@@ -957,7 +1043,6 @@ impl ClayJsRuntimeService {
             .lock()
             .expect("mode activation cache lock poisoned")
             .get(key)
-            .cloned()
     }
 
     /// Number of generated module evaluations the open path served from V8.
@@ -1006,29 +1091,37 @@ impl ClayJsRuntimeService {
         ))
     }
 
-    /// Dispatch one provider command to the runtime domain that owns the
-    /// registration's package (Plan 061 task 7): third-party callbacks run in
-    /// the third-party worker, trusted callbacks in the trusted worker, so a
-    /// slow or hostile sibling can never block the trusted runtime. On a
-    /// poisoned worker the domain worker is replaced once and the command is
-    /// retried; timeout/heap results poison the owning domain only.
+    /// Dispatch one provider command to the lane that owns it inside the
+    /// runtime domain that owns the registration's package (Plan 061 task 7,
+    /// Plan 127 P1). Third-party callbacks run in third-party lanes, trusted
+    /// callbacks in trusted lanes. On a poisoned lane only that lane's worker
+    /// is replaced and the command retried; timeout/heap results poison the
+    /// owning lane only.
     async fn dispatch_to_domain<T>(
         &self,
         domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
         command: RuntimeCommand,
         receiver: oneshot::Receiver<Result<T, ClayRuntimeError>>,
     ) -> Result<T, ClayRuntimeError> {
         let domain_runtime = self.domain(domain);
-        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
-            self.replace_domain_worker(domain);
-            self.replay_third_party_domain(domain).await?;
+        let lane_runtime = domain_runtime.lane(lane);
+        if lane_runtime.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain, lane);
+            // The latency lane materializes handlers from their validated
+            // module specifiers, so only the general lane needs replay.
+            if lane == RuntimeLane::General {
+                self.replay_third_party_domain(domain).await?;
+            }
         }
-        if let Err(error) = self.domain_worker(domain).sender.send(command) {
-            self.replace_domain_worker(domain);
-            self.replay_third_party_domain(domain).await?;
-            self.domain_worker(domain)
+        if let Err(error) = self.domain_lane_worker(domain, lane).sender.send(command) {
+            self.replace_domain_worker(domain, lane);
+            if lane == RuntimeLane::General {
+                self.replay_third_party_domain(domain).await?;
+            }
+            self.domain_lane_worker(domain, lane)
                 .sender
-                .send(error.0)
+                .send(*error.0)
                 .map_err(|_| {
                     ClayRuntimeError::Runtime(
                         "persistent JavaScript runtime worker stopped".to_string(),
@@ -1042,7 +1135,7 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            domain_runtime.poisoned.store(true, Ordering::Relaxed);
+            lane_runtime.poisoned.store(true, Ordering::Relaxed);
         } else if result.is_ok() {
             domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
         }
@@ -1122,7 +1215,9 @@ impl ClayJsRuntimeService {
                     error,
                     ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit
                 ) {
-                    self.domain(domain).poisoned.store(true, Ordering::Relaxed);
+                    self.lane(domain, RuntimeLane::General)
+                        .poisoned
+                        .store(true, Ordering::Relaxed);
                 }
                 return Err(error);
             }
@@ -1148,6 +1243,7 @@ impl ClayJsRuntimeService {
         let (response, receiver) = oneshot::channel();
         self.dispatch_to_domain(
             domain,
+            RuntimeLane::General,
             RuntimeCommand::Parse {
                 registration,
                 notification,
@@ -1165,9 +1261,11 @@ impl ClayJsRuntimeService {
         window: crate::server::completion::CompletionDocumentWindow,
     ) -> Result<crate::protocol::CompletionResultSet, ClayRuntimeError> {
         let domain = self.registration_domain(&registration.package);
+        let lane = RuntimeLane::for_provider(registration.module_specifier.as_deref());
         let (response, receiver) = oneshot::channel();
         self.dispatch_to_domain(
             domain,
+            lane,
             RuntimeCommand::Completion {
                 registration,
                 request,
@@ -1259,8 +1357,9 @@ impl ClayJsRuntimeService {
             &registration.package.manifest.version,
         );
         let domain_runtime = self.domain(domain);
-        if domain_runtime.poisoned.swap(false, Ordering::Relaxed) {
-            self.replace_domain_worker(domain);
+        let general_lane = domain_runtime.lane(RuntimeLane::General);
+        if general_lane.poisoned.swap(false, Ordering::Relaxed) {
+            self.replace_domain_worker(domain, RuntimeLane::General);
         }
         let (response, receiver) = oneshot::channel();
         let invocation_id = self.evaluations.fetch_add(1, Ordering::Relaxed);
@@ -1272,10 +1371,10 @@ impl ClayJsRuntimeService {
             response,
         };
         if let Err(error) = self.domain_worker(domain).sender.send(command) {
-            self.replace_domain_worker(domain);
+            self.replace_domain_worker(domain, RuntimeLane::General);
             self.domain_worker(domain)
                 .sender
-                .send(error.0)
+                .send(*error.0)
                 .map_err(|_| {
                     ClayRuntimeError::Runtime("document analysis worker stopped".to_string())
                 })?;
@@ -1287,7 +1386,7 @@ impl ClayJsRuntimeService {
             result,
             Err(ClayRuntimeError::Timeout | ClayRuntimeError::HeapLimit)
         ) {
-            domain_runtime.poisoned.store(true, Ordering::Relaxed);
+            general_lane.poisoned.store(true, Ordering::Relaxed);
         } else if result.is_ok() {
             domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
         }
@@ -1301,9 +1400,11 @@ impl ClayJsRuntimeService {
         window: crate::server::language_intelligence::LanguageIntelligenceDocumentWindow,
     ) -> Result<crate::protocol::LanguageIntelligenceResult, ClayRuntimeError> {
         let domain = self.registration_domain(&registration.package);
+        let lane = RuntimeLane::for_provider(registration.module_specifier.as_deref());
         let (response, receiver) = oneshot::channel();
         self.dispatch_to_domain(
             domain,
+            lane,
             RuntimeCommand::LanguageIntelligence {
                 registration,
                 request,
@@ -1321,9 +1422,20 @@ impl ClayJsRuntimeService {
     }
 
     fn domain_worker(&self, domain: crate::packages::bundled::RuntimeDomain) -> Arc<RuntimeWorker> {
+        // The general lane owns every host-visible registration (evaluation
+        // snapshots, command registries, language-server sessions), so the
+        // existing "the domain worker" API keeps meaning exactly that lane.
+        self.domain_lane_worker(domain, RuntimeLane::General)
+    }
+
+    fn domain_lane_worker(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
+    ) -> Arc<RuntimeWorker> {
         Arc::clone(
             &self
-                .domain(domain)
+                .lane(domain, lane)
                 .worker
                 .lock()
                 .expect("Clay runtime service worker mutex poisoned"),
@@ -1332,19 +1444,23 @@ impl ClayJsRuntimeService {
 
     /// Revoke previous-generation executable process authority after commit.
     /// Coordinator registrations are cancelled separately; this tears down any
-    /// language-server children still owned by either domain of this service.
+    /// language-server children still owned by either domain of this service
+    /// (every lane, so a latency-lane provider module cannot strand one).
     pub(crate) async fn shutdown_generation_resources(&self) -> usize {
-        let trusted = self
-            .worker()
-            .op_state
-            .shutdown_language_server_sessions()
-            .await;
-        let third_party = self
-            .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
-            .op_state
-            .shutdown_language_server_sessions()
-            .await;
-        trusted + third_party
+        let mut sessions = 0;
+        for domain in [
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+        ] {
+            for lane in RuntimeLane::ALL {
+                sessions += self
+                    .domain_lane_worker(domain, lane)
+                    .op_state
+                    .shutdown_language_server_sessions()
+                    .await;
+            }
+        }
+        sessions
     }
 
     /// Snapshot of the third-party worker's current registration payload
@@ -1378,23 +1494,36 @@ impl ClayJsRuntimeService {
 
     /// Trusted-domain-only generation shutdown (Plan 061 task 12): reload
     /// shares the third-party worker across generations, so only the old
-    /// trusted worker's language-server sessions end at commit.
+    /// trusted worker's language-server sessions end at commit (both trusted
+    /// lanes, so a latency-lane provider module cannot strand a session).
     pub(crate) async fn shutdown_trusted_generation_resources(&self) -> usize {
-        self.worker()
-            .op_state
-            .shutdown_language_server_sessions()
-            .await
+        let mut sessions = 0;
+        for lane in RuntimeLane::ALL {
+            sessions += self
+                .domain_lane_worker(crate::packages::bundled::RuntimeDomain::Trusted, lane)
+                .op_state
+                .shutdown_language_server_sessions()
+                .await;
+        }
+        sessions
     }
 
     #[cfg(test)]
     pub(crate) async fn language_server_session_count(&self) -> usize {
-        let trusted = self.worker().op_state.language_server_session_count().await;
-        let third_party = self
-            .domain_worker(crate::packages::bundled::RuntimeDomain::ThirdParty)
-            .op_state
-            .language_server_session_count()
-            .await;
-        trusted + third_party
+        let mut sessions = 0;
+        for domain in [
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+        ] {
+            for lane in RuntimeLane::ALL {
+                sessions += self
+                    .domain_lane_worker(domain, lane)
+                    .op_state
+                    .language_server_session_count()
+                    .await;
+            }
+        }
+        sessions
     }
 
     /// Test-only handle to the trusted generation's language-server process service.
@@ -1411,11 +1540,22 @@ impl ClayJsRuntimeService {
     }
 
     /// Total persistent application runtimes started by this service
-    /// (initial two plus any poison replacements). Trust-domain tests assert
-    /// package/document/analyzer activity never raises it above two.
+    /// (initial `2 domains × JS_RUNTIME_LANES_PER_DOMAIN` lanes plus any
+    /// poison replacements). Trust-domain tests assert package/document/
+    /// analyzer activity never raises it above the lane baseline.
     #[cfg(test)]
     pub(crate) fn workers_started(&self) -> u64 {
         self.workers_started.load(Ordering::Relaxed)
+    }
+
+    /// Per-lane command mailbox state (Plan 127 P2 flood tests).
+    #[cfg(test)]
+    pub(crate) fn lane_queue_stats(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
+    ) -> self::worker::CommandQueueStats {
+        self.domain_lane_worker(domain, lane).sender.queue_stats()
     }
 
     /// Per-domain successful evaluation count (trust-domain dispatch tests).

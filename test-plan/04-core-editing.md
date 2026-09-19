@@ -199,6 +199,12 @@ explicit rather than inferred from static screenshots.
 | Physical typing, undo, completion trigger | UNRESOLVED live; PASS structural | Host has no safe keyboard backend. Existing local-edit, CodeMirror, completion, editable-text, and hot-path tests pass |
 | Absolute path safety | PASS | Editor fallback now uses sanitized workspace basename; `frontend/src/test/editor.test.tsx` prevents `/tmp/ws` from reaching chrome/region labels |
 
+## Plan 126 completion-on-large-document step
+
+| # | Action | Expected |
+|---|--------|----------|
+| E39 | With the ≥4 MiB `review.rs` fixture open (module 03 F56), type a word prefix and press `Ctrl+Space`; move the selection with `ArrowDown` and accept with `Enter`; then repeat and dismiss with `Escape`; finally type a no-match prefix (`zzzz`) and press `Ctrl+Space` again | The modeless popup opens at the caret with the provider's items (`@clay/rust`: keyword `fn` plus the `fn` snippet), the editor keeps focus and reports `has-popup`, and the popup width/row caps of E16 still hold. Accepting inserts the selected item's text (snippet expanded) at the caret; `Escape` closes the popup with no text change; a no-match prefix returns `Empty` — no popup, no blocking panel, no dialog. Opening, dismissing, and accepting must not scale with document size (see module 11 Q41). |
+
 ## Plan 099 delayed-syntax editing steps
 
 | # | Action | Expected |
@@ -232,3 +238,12 @@ re-verified on this branch:
 | E37 automated companion | PASS | Split `tests/editor_performance.rs` runtime suite (green 2026-08-31, 49.44 s combined) still covers server-authoritative typing/viewport/patch flows including the 10 MiB and 50 MiB cells — the same large-file delayed-parse paths E37 exercises; frontend hot-path suite green (194 tests, task 7). |
 | E38 automated companion | PASS | Same suite plus the protocol/runtime `large_document` tests (chunk bounds, resync, no-history/remount invariants) green on this branch (task 6 full run). |
 | E37/E38 live typing | UNRESOLVED | `computer-use-linux doctor` 2026-09-01: no capable input backend (`can_send_development_input=false`). Unchanged from Plan 098/099 records; not a Plan 105 regression. |
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| E16/E18/E19 (re-run on a ≥4 MiB document) | PASS live | Same live run as module 03 F56 (4,231,903-byte document). Typing `fn` auto-activated completion (word context + `activateOnTyping`), and `Ctrl+Space` opened the popup: AT-SPI rows `rust` (group), `fn` (selected), `fn function snippet` at `281,201` next to the caret; editor state `editable,focused,has-popup,supports-autocompletion`. `Escape` closed it (rows 0, text unchanged at 2,761 chars). `zzzz` + `Ctrl+Space` returned `Empty`: text 2,765 chars, popup rows 0, dialogs 0, editor still focused. |
+| E39 (accept on a ≥4 MiB document) | PASS live | `ArrowDown` + `Enter` accepted the snippet: document head went from `fn…` to `fn name(args) {    }pub fn helper_000000…` (2,761 → 2,779 chars, caret 7), popup rows 0, editor still focused. `test-plan/artifacts/126-access-paths/live-large-completion/` holds `screenshot.png` (popup open over the 4.2 MB document), `accessibility-popup.txt`, `accessibility-accepted.txt`, `editor.txt`, `escape-dismissal.txt`, `empty-result.txt`, `accept-result.txt`, `drive.txt`. |
+| E39 latency | UNRESOLVED live (probe resolution) | The popup is present at the first AT-SPI observation after the keypress, but the probe's tree walk costs ~0.9 s warm (~15 s per fresh process) over D-Bus, so no live keypress→paint number is claimed. Server-side completion round trip on the same 4 MiB document is the measured evidence: ~161 µs median with constant per-request allocation (module 11 Q41). |
+| Automated companion | PASS | `cargo test --lib -- --test-threads=1 static_completion_on_large_document_matches_small_document_results` — a 4 MiB document returns exactly the small-document items, so result parity is pinned independently of the live run. |

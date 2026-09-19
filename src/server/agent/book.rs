@@ -1153,7 +1153,11 @@ impl AgentHost {
     /// selection is never overwritten.
     pub(crate) async fn tab_state_snapshot(&self, tab: TabId) -> AgentSessionSnapshot {
         let profile_empty = self.inner.book.lock().await.profile.is_empty();
-        if profile_empty {
+        if profile_empty
+            && self
+                .profile_available(crate::server::command_execution::CODING_SURFACE_PROFILE_NAME)
+                .await
+        {
             self.select_picker(
                 crate::protocol::AgentPickerKind::Agent,
                 crate::server::command_execution::CODING_SURFACE_PROFILE_ID,

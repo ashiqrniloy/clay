@@ -42,6 +42,12 @@ pub const DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS: u64 = 5_000;
 pub const DOCUMENT_ANALYSIS_GRACEFUL_SHUTDOWN_MS: u64 = 2_000;
 pub const DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS: u64 = 5_000;
 
+/// Largest document a package-facing `documents.open`/`documents.reload` op may
+/// hand to JavaScript as one JSON string. The trusted runtime's chunked editor
+/// path is unaffected; this bounds what a package can pull into the V8 heap in
+/// a single op call (Plan 126 D2) at the same cap the analysis route uses.
+pub const DOCUMENTS_OP_MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // Per-document client undo/redo depth (Phase 20). Aligned with pending-edit /
 // previous-behavior-grace transaction ceilings.
@@ -228,6 +234,11 @@ pub const LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS: usize = 16;
 pub const LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS: u64 = 500;
 /// Hard ceiling on per-provider timeout. Matches the completion lane.
 pub const LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS: u64 = 5_000;
+/// Bounded open-document text slice handed to completion providers, and the
+/// cap the completion coordinator enforces when validating a window.
+/// Deliberately the same size as the language-intelligence window below so
+/// analyzers and completion providers see equivalently bounded context.
+pub const COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
 /// Bounded open-document text slice handed to a provider. Same size as the
 /// completion window so analyzers never see an unbounded document.
 pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
@@ -368,6 +379,25 @@ pub const JS_RUNTIME_EVALUATION_TIMEOUT_MS: u64 = 5000;
 // Server-owned security budget, not user configuration. Near-limit callback
 // terminates execution and surfaces `runtime.heap_limit`.
 pub const JS_RUNTIME_HEAP_LIMIT_BYTES: usize = 128 * 1024 * 1024;
+// Plan 127 P1: worker lanes per trust domain. Each lane owns an isolate and a
+// command thread: `general` serves configuration/package evaluation, parse
+// handlers, and document analysis; `latency` serves completion and
+// language-intelligence provider invocations so a general command busy to its
+// timeout cannot head-of-line-block them. `RuntimeLane::ALL` must match this
+// count; lane count is a server-owned budget, not user configuration.
+pub const JS_RUNTIME_LANES_PER_DOMAIN: usize = 2;
+/// V8 heap ceiling for one latency-lane isolate. Provider invocations carry
+/// only bounded request/window payloads, so the latency lane gets a smaller
+/// ceiling than the general lane; aggregate per-domain authority stays
+/// bounded by `JS_RUNTIME_HEAP_LIMIT_BYTES` + this constant.
+pub const JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+// Plan 127 P2: undelivered supersedable commands (completion and
+// language-intelligence requests) one lane may hold. A typing burst for one
+// document collapses onto its own queue slot, so the cap only trips when many
+// distinct requests flood one lane; past it the oldest supersedable command is
+// dropped for the newest. Evaluation, parse, and analysis commands are
+// host-gated by their coordinators and are never superseded or dropped.
+pub const JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY: usize = 64;
 pub const RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS: u64 = 25;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;

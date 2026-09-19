@@ -1035,18 +1035,20 @@ pub(super) fn schedule_parse_snapshot(
     }
 }
 
-pub(super) fn floor_char_boundary(text: &str, mut offset: usize) -> usize {
-    while !text.is_char_boundary(offset) {
-        offset = offset.saturating_sub(1);
-    }
-    offset
+pub(super) fn floor_char_boundary(text: &str, offset: usize) -> usize {
+    crate::server::document::char_boundary_at_or_before(
+        |candidate| text.is_char_boundary(candidate),
+        text.len(),
+        offset,
+    )
 }
 
-pub(super) fn ceil_char_boundary(text: &str, mut offset: usize) -> usize {
-    while offset < text.len() && !text.is_char_boundary(offset) {
-        offset += 1;
-    }
-    offset
+pub(super) fn ceil_char_boundary(text: &str, offset: usize) -> usize {
+    crate::server::document::char_boundary_at_or_after(
+        |candidate| text.is_char_boundary(candidate),
+        text.len(),
+        offset,
+    )
 }
 
 pub(super) fn edited_range(edit: ParseInputEdit, window: ParseByteRange) -> ParseByteRange {
@@ -1066,10 +1068,7 @@ pub(super) fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
     if text.len() <= max_bytes {
         return (text, text.len() as u64);
     }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
+    let end = floor_char_boundary(text, max_bytes);
     (&text[..end], end as u64)
 }
 

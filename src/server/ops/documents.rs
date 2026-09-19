@@ -5,6 +5,7 @@ use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
 use crate::{
+    perf::budgets::DOCUMENTS_OP_MAX_DOCUMENT_BYTES,
     protocol::{DocumentAccess, DocumentMetadata},
     server::workspace::WorkspaceError,
 };
@@ -40,6 +41,7 @@ pub(super) async fn op_clay_documents_open_document(
     .await
     .map_err(workspace_error("documents.open_failed"))?;
     let document = opened.document.lock().await;
+    ensure_within_package_document_budget(&document)?;
     let metadata = DocumentMetadata {
         document_id: opened.document_id,
         version: document.version(),
@@ -132,7 +134,11 @@ pub(super) async fn op_clay_documents_reload_document(
                 document_id,
             })
         })?;
-        let text = document.lock().await.text();
+        let text = {
+            let document = document.lock().await;
+            ensure_within_package_document_budget(&document)?;
+            document.text()
+        };
         (metadata, text)
     };
     serialize_result(
@@ -182,6 +188,23 @@ pub(super) async fn op_clay_documents_list_documents(
         Value::Array(documents.iter().map(metadata_json).collect()),
         "documents.list_failed",
     )
+}
+
+/// Package-facing ops hand JavaScript the whole document as one JSON string, so
+/// they refuse documents over `DOCUMENTS_OP_MAX_DOCUMENT_BYTES` before any
+/// rope→String conversion reaches the V8 heap (Plan 126 D2). The client
+/// editor's chunked transfer path is deliberately not gated here.
+fn ensure_within_package_document_budget(
+    document: &crate::server::document::DocumentState,
+) -> Result<(), JsErrorBox> {
+    let bytes = document.byte_len();
+    if bytes > DOCUMENTS_OP_MAX_DOCUMENT_BYTES {
+        return Err(JsErrorBox::generic(format!(
+            "documents.document_too_large: document is {bytes} bytes; the package documents limit is \
+             {DOCUMENTS_OP_MAX_DOCUMENT_BYTES} bytes (open larger files in the Clay editor)"
+        )));
+    }
+    Ok(())
 }
 
 fn parse_object(json: &str, code: &str) -> Result<serde_json::Map<String, Value>, JsErrorBox> {

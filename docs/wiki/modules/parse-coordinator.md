@@ -103,7 +103,11 @@ coordination shape; ordinary edit acknowledgements do not carry parse output.
 The connection prepares bounded rope windows before enqueueing in the current
 implementation. This leaves O(window) snapshot work on the connection task,
 but parser/query work is off the runtime hot path; move slicing into the worker
-only if profiling proves the remaining cost material.
+only if profiling proves the remaining cost material. Plan 126 (Document Access
+Path Hardening) routed the connection's prefix clamp through the shared
+`DocumentState::char_boundary_at_or_before` predicate, so the parse-window
+prefix and the completion/language-intelligence windows now clamp identically
+instead of each carrying its own loop.
 
 Each window must match document/version/package/mode metadata, have byte length
 equal to its UTF-8 text, fit the grammar's `ParsePolicy::max_window_bytes`, and
@@ -184,6 +188,10 @@ internals.
 - `tests/editor_performance.rs` — 30-cell protocol matrix, mode identity,
   exact edit/version accounting, patch completion, and close retirement.
 - `tests/performance_budgets.rs` — syntax/window/cache budget documentation.
+- `src/server/document.rs` — `window_at_document_edges_clamps_to_boundaries`,
+  `window_respects_multibyte_boundaries`, and
+  `window_cost_is_independent_of_document_size` cover the shared boundary/window
+  helpers the parse-window prefix now delegates to.
 
 Run focused coverage with:
 

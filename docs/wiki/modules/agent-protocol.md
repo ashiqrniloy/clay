@@ -155,6 +155,17 @@ let message = ClientMessage::Agent {
   coding tools and no MCP servers (`mcpServers: []`), which read in the panel
   as `MCP none`. A non-empty profile is never overwritten, so a deliberate
   selection survives the mount.
+- The guess is checked against the daemon's own profile list first
+  (`AgentHost::profile_available`, one `agentProfile.list` RPC; false when the
+  daemon is unreachable or the host is inert). A profile no package registered
+  — the package never loaded, a store without it, a hostless runtime — makes
+  `session.new` fail with the daemon's `Unknown agent: coding`, which left the
+  tab with no session at all: a dead pane with no error. With the profile
+  absent the book stays unselected and the daemon's built-in `Chat` default
+  serves the tab, so the mount still binds a session. The
+  `coding-agent.profile` launch command applies the same check, and
+  `tab_state_snapshot_skips_a_profile_the_daemon_does_not_have` pins both the
+  fallback profile and the untouched book.
 - A daemon exit clears the host's `Running` handle (identity-checked on the
   channel the actor owns), so the next agent call spawns a fresh daemon rather
   than addressing a dead channel; sessions survive it, because `session.prompt`

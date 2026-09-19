@@ -61,6 +61,11 @@ pub(crate) enum ClayRuntimeError {
     Runtime(String),
     Timeout,
     HeapLimit,
+    /// Plan 127 P2: a newer command for the same (lane, document, provider)
+    /// replaced this command before it ran, or the lane's supersedable backlog
+    /// was at capacity and this stale command was dropped for a newer one. The
+    /// request never reached the isolate; callers treat it as no result.
+    Superseded,
     Join(task::JoinError),
 }
 
@@ -77,6 +82,10 @@ impl fmt::Display for ClayRuntimeError {
                 "JavaScript runtime evaluation exceeded the configured timeout"
             ),
             Self::HeapLimit => write!(formatter, "JavaScript runtime exceeded the heap limit"),
+            Self::Superseded => write!(
+                formatter,
+                "JavaScript runtime command was superseded before it ran"
+            ),
             Self::Join(error) => write!(formatter, "JavaScript runtime task failed: {error}"),
         }
     }
@@ -87,9 +96,11 @@ impl Error for ClayRuntimeError {
         match self {
             Self::Configuration(error) => Some(error),
             Self::Join(error) => Some(error),
-            Self::InvalidMainSpecifier(_) | Self::Runtime(_) | Self::Timeout | Self::HeapLimit => {
-                None
-            }
+            Self::InvalidMainSpecifier(_)
+            | Self::Runtime(_)
+            | Self::Timeout
+            | Self::HeapLimit
+            | Self::Superseded => None,
         }
     }
 }
@@ -113,6 +124,10 @@ impl ClayRuntimeError {
             Self::HeapLimit => RuntimeDiagnostic::error(
                 "runtime.heap_limit",
                 "JavaScript runtime exceeded its heap budget and was terminated.",
+            ),
+            Self::Superseded => RuntimeDiagnostic::error(
+                "runtime.superseded",
+                "A newer request replaced this JavaScript runtime command before it ran.",
             ),
             Self::Join(_) => RuntimeDiagnostic::error(
                 "runtime.task_failed",

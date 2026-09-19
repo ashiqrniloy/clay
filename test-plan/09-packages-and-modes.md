@@ -252,6 +252,12 @@ Negative: `textStyles` is inert manifest data — it grants no permission and
 executes no code; `background`/`scale` never change the protocol wire shape
 (no `DecorationSpan` field added; payload budgets unchanged).
 
+## Plan 126 package documents-op budget step
+
+| # | Action | Expected |
+|---|--------|----------|
+| P55 | From a package script, call `serverOpenDocument` (or `serverReloadDocument`) for a workspace file larger than the 256 KiB package documents budget (`DOCUMENTS_OP_MAX_DOCUMENT_BYTES`) | The call fails with the typed `documents.document_too_large` code instead of handing the file to JavaScript. The surfaced diagnostic is sanitized (`Document/workspace operation failed server validation.` in the status bar; the code in the server diagnostics/log), carries no path and no document text, and the client keeps working: the same file stays open and editable through the client's chunked transfer path, which the package budget never gates. Negative: no oversized text in the diagnostic, no orphan loading state, no client open refusal. |
+
 ## Phase 26 Linux execution record (2026-08-19)
 
 | Checks | Result | Evidence |
@@ -326,3 +332,10 @@ own-prefixed keys, and load ≠ select enforced (selection never installs or
 grants authority). Git/markdown packages use semantic icon references with
 text labels carrying full meaning. Steps: [18 — Icon packs](18-icon-packs.md)
 (ICON-05, ICON-06, ICON-07, executed 2026-09-07).
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| P55 | PASS live | Live isolated run: the fixture init.js called `serverOpenDocument({ workspaceRootId: "1", path: "review.rs" })` for the 4,231,903-byte workspace file. Server diagnostics recorded `clay server runtime reload failed [documents.document_too_large]: Document/workspace operation failed server validation.` (no path, no content, no byte count); the status bar showed the same sanitized sentence while the client stayed connected with the 4 MiB document open and editable (`review.rs v7 dirty`). Artifacts: `test-plan/artifacts/126-access-paths/op-budget-live/` (`server-diagnostic.txt`, `accessibility.txt`, `screenshot.png`) and the fixture script `op-budget-init.js`. |
+| Automated companion | PASS | `documents_open_over_budget_returns_typed_error` drives both ops (`open` and `reload`) and asserts the typed code with the payload marker absent from the JS error path; `documents_open_under_budget_unchanged` pins the golden JSON contract for the under-budget path; `performance_budgets::chunked_document_security_budgets_are_pinned` pins the 256 KiB cap. |
