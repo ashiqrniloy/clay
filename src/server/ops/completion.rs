@@ -209,18 +209,6 @@ pub(super) fn op_clay_completion_register_completion_provider(
     })
 }
 
-fn trigger_characters(options: &Map<String, Value>) -> Value {
-    if let Some(value) = options.get("triggerCharacters") {
-        return value.clone();
-    }
-    options
-        .get("triggers")
-        .and_then(Value::as_object)
-        .and_then(|triggers| triggers.get("characters"))
-        .cloned()
-        .unwrap_or(Value::Null)
-}
-
 pub(crate) fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderMeta> {
     package
         .contributions

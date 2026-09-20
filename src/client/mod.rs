@@ -9,23 +9,18 @@ use std::{
 };
 
 use crate::ipc::IpcEndpoint;
-use crate::perf::{
-    budgets::{COMPLETION_RECENCY_MAX_ITEM_CHARS, COMPLETION_RECENCY_MAX_ITEMS},
-    metrics::{
-        BRIDGE_CLIENT_DELIVERY, BRIDGE_SERVER_DELIVERY, MetricMetadata, MetricValue,
-        global_recorder,
-    },
+use crate::perf::metrics::{
+    BRIDGE_CLIENT_DELIVERY, BRIDGE_SERVER_DELIVERY, MetricMetadata, MetricValue, global_recorder,
 };
 use crate::protocol::{
     ActiveTypography, BehaviorManifest, BehaviorScope, BehaviorVersion, CaretStyle, ClientId,
-    ClientMessage, CompletionRejection, CompletionRequest, CompletionRequestId,
-    CompletionResultSet, DecorationSet, DiagnosticSet, DocumentAccess, DocumentChunkRejection,
-    DocumentId, DocumentMetadata, DocumentTextHead, DocumentVersion, EditOperation, EditRejection,
-    EditorCommandRequest, FileErrorCode, LanguageIntelligenceRejection,
-    LanguageIntelligenceRequest, LanguageIntelligenceRequestId, LanguageIntelligenceResult,
-    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, SduiActionIntent, SduiTree,
-    SduiTreeUpdate, SelectionQueryRequest, SelectionQueryResult, ServerMessage, ShellPreferences,
-    TabCommand, TabId, TabRegistrySnapshot, TransactionId, WorkspaceRootId,
+    ClientMessage, CompletionRejection, CompletionRequestId, CompletionResultSet, DecorationSet,
+    DiagnosticSet, DocumentAccess, DocumentChunkRejection, DocumentId, DocumentMetadata,
+    DocumentTextHead, DocumentVersion, EditOperation, EditRejection, EditorCommandRequest,
+    FileErrorCode, LanguageIntelligenceRejection, LanguageIntelligenceRequestId,
+    LanguageIntelligenceResult, PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic,
+    SduiActionIntent, SduiTree, SduiTreeUpdate, SelectionQueryResult, ServerMessage,
+    ShellPreferences, TabCommand, TabId, TabRegistrySnapshot, TransactionId, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
@@ -56,37 +51,6 @@ pub struct EditorEditEvent {
     pub base_version: DocumentVersion,
     pub behavior_version: BehaviorVersion,
     pub operation: EditOperation,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EditorCompletionRequestEvent {
-    pub(crate) document_id: DocumentId,
-    pub(crate) document_version: DocumentVersion,
-    pub(crate) behavior_version: BehaviorVersion,
-    pub(crate) cursor_byte_offset: u64,
-    pub(crate) replacement_range: crate::protocol::CompletionReplacementRange,
-    pub(crate) trigger: crate::protocol::CompletionTrigger,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EditorLanguageIntelligenceRequestEvent {
-    pub(crate) document_id: DocumentId,
-    pub(crate) document_version: DocumentVersion,
-    pub(crate) behavior_version: BehaviorVersion,
-    pub(crate) cursor_byte_offset: u64,
-    pub(crate) feature: crate::protocol::LanguageIntelligenceFeature,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EditorSelectionQueryRequestEvent {
-    pub(crate) document_id: DocumentId,
-    pub(crate) document_version: DocumentVersion,
-    pub(crate) behavior_version: BehaviorVersion,
-    pub(crate) query: crate::protocol::SelectionQuery,
-    pub(crate) selections: Vec<crate::protocol::SelectionQueryCursor>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -353,11 +317,10 @@ pub struct ClientEditQueue {
     lease_id: Option<crate::protocol::LeaseId>,
     sync_state: Arc<Mutex<ClientSyncState>>,
     file_open_capability: Arc<Mutex<Option<String>>>,
-    #[allow(dead_code)]
-    completion_recency: Arc<Mutex<VecDeque<String>>>,
 }
 
-#[allow(dead_code)]
+// Native-client queue paths below are used by tests only; the React frontend
+// emits these protocol frames itself (`frontend/src/editor/sync/messages.ts`).
 impl ClientEditQueue {
     pub fn bounded(capacity: usize) -> (Self, mpsc::Receiver<ClientMessage>) {
         let (sender, receiver) = mpsc::channel(capacity);
@@ -368,14 +331,9 @@ impl ClientEditQueue {
                 lease_id: None,
                 sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
                 file_open_capability: Arc::new(Mutex::new(None)),
-                completion_recency: Arc::new(Mutex::new(VecDeque::new())),
             },
             receiver,
         )
-    }
-
-    pub(crate) fn client_id(&self) -> ClientId {
-        self.client_id
     }
 
     pub fn from_sender(sender: mpsc::Sender<ClientMessage>) -> Self {
@@ -385,7 +343,6 @@ impl ClientEditQueue {
             lease_id: None,
             sync_state: Arc::new(Mutex::new(ClientSyncState::new(0))),
             file_open_capability: Arc::new(Mutex::new(None)),
-            completion_recency: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
@@ -455,6 +412,7 @@ impl ClientEditQueue {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn enqueue_viewport_render_request(
         &self,
         document_id: DocumentId,
@@ -490,6 +448,7 @@ impl ClientEditQueue {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn enqueue_command_intent(
         &self,
         document_id: DocumentId,
@@ -504,178 +463,6 @@ impl ClientEditQueue {
         })
     }
 
-    // Phase 24.1: server-owned menu intents. The client forwards keystrokes
-    // only; the server is authoritative for query, items, selection, and
-    // activation payloads (`session_id` is the opaque server handle).
-    pub(crate) fn enqueue_menu_query_update(
-        &self,
-        session_id: u64,
-        query: String,
-        scope: Option<String>,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::MenuQueryUpdate {
-            client_id: self.client_id,
-            session_id,
-            query,
-            scope,
-        })
-    }
-
-    /// Phase 24.3: semantic Backspace; the server session decides whether it
-    /// deletes query text or ascends (path mode).
-    pub(crate) fn enqueue_menu_backspace(
-        &self,
-        session_id: u64,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::MenuBackspace {
-            client_id: self.client_id,
-            session_id,
-        })
-    }
-
-    pub(crate) fn enqueue_menu_selection_move(
-        &self,
-        session_id: u64,
-        delta: i64,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::MenuSelectionMove {
-            client_id: self.client_id,
-            session_id,
-            delta,
-        })
-    }
-
-    pub(crate) fn enqueue_menu_activate(
-        &self,
-        session_id: u64,
-        kind: crate::protocol::TransientMenuActivationData,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::MenuActivate {
-            client_id: self.client_id,
-            session_id,
-            kind,
-        })
-    }
-
-    pub(crate) fn enqueue_menu_cancel(
-        &self,
-        session_id: u64,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::MenuCancel {
-            client_id: self.client_id,
-            session_id,
-        })
-    }
-
-    /// Acknowledge a fully installed runtime generation after atomic client install.
-    pub(crate) fn enqueue_runtime_generation_installed(
-        &self,
-        runtime_generation_id: crate::protocol::RuntimeGenerationId,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender
-            .try_send(ClientMessage::RuntimeGenerationInstalled {
-                client_id: self.client_id,
-                runtime_generation_id,
-            })
-    }
-
-    pub(crate) fn record_completion_accept(&self, insert_text: &str) {
-        // ponytail: keep only four 64-char entries; send the full ring only if
-        // completion quality proves this request-budget ceiling too restrictive.
-        let text: String = insert_text
-            .chars()
-            .take(COMPLETION_RECENCY_MAX_ITEM_CHARS)
-            .collect();
-        if text.is_empty() {
-            return;
-        }
-        let mut recency = self
-            .completion_recency
-            .lock()
-            .expect("completion recency poisoned");
-        if let Some(index) = recency.iter().position(|item| item == &text) {
-            recency.remove(index);
-        }
-        recency.push_front(text);
-        recency.truncate(COMPLETION_RECENCY_MAX_ITEMS);
-    }
-
-    fn recent_completion_texts(&self) -> Box<[String]> {
-        self.completion_recency
-            .lock()
-            .expect("completion recency poisoned")
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
-    }
-
-    pub(crate) fn enqueue_completion_request(
-        &self,
-        event: EditorCompletionRequestEvent,
-        request_id: CompletionRequestId,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        let document_version = event.document_version.max(
-            self.sync_state
-                .lock()
-                .expect("client sync state poisoned")
-                .snapshot_for(event.document_id)
-                .optimistic_version,
-        );
-        self.sender.try_send(ClientMessage::CompletionRequest {
-            request: CompletionRequest {
-                request_id,
-                client_id: self.client_id,
-                document_id: event.document_id,
-                document_version,
-                behavior_version: event.behavior_version,
-                cursor_byte_offset: event.cursor_byte_offset,
-                replacement_range: event.replacement_range,
-                trigger: event.trigger,
-                provider_generation: 0,
-                recent_completions: self.recent_completion_texts(),
-            },
-        })
-    }
-
-    pub(crate) fn enqueue_language_intelligence_request(
-        &self,
-        event: EditorLanguageIntelligenceRequestEvent,
-        request_id: LanguageIntelligenceRequestId,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender
-            .try_send(ClientMessage::LanguageIntelligenceRequest {
-                request: LanguageIntelligenceRequest {
-                    request_id,
-                    client_id: self.client_id,
-                    document_id: event.document_id,
-                    document_version: event.document_version,
-                    behavior_version: event.behavior_version,
-                    cursor_byte_offset: event.cursor_byte_offset,
-                    feature: event.feature,
-                    provider_generation: 0,
-                },
-            })
-    }
-
-    pub(crate) fn enqueue_selection_query_request(
-        &self,
-        event: EditorSelectionQueryRequestEvent,
-        request_id: u64,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::SelectionQueryRequest {
-            request: SelectionQueryRequest {
-                request_id,
-                client_id: self.client_id,
-                document_id: event.document_id,
-                document_version: event.document_version,
-                behavior_version: event.behavior_version,
-                query: event.query,
-                selections: event.selections,
-            },
-        })
-    }
-
     pub fn enqueue_open_selected_file(
         &self,
         selected_path: PathBuf,
@@ -685,21 +472,6 @@ impl ClientEditQueue {
             client_id: self.client_id,
             capability,
             selected_path: selected_path.to_string_lossy().into_owned(),
-        })
-    }
-
-    /// Notify the server that a document session is closed (explicit close or
-    /// client LRU eviction), so server-side document state can be released
-    /// when the last holder leaves. `force` discards unsaved edits.
-    pub(crate) fn enqueue_close_document(
-        &self,
-        document_id: DocumentId,
-        force: bool,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::CloseDocument {
-            client_id: self.client_id,
-            document_id,
-            force,
         })
     }
 
@@ -745,6 +517,7 @@ impl ClientEditQueue {
     }
 
     /// Request a server-first save for an open document. Never blocks paint.
+    #[cfg(test)]
     pub(crate) fn enqueue_save_document(
         &self,
         document_id: DocumentId,
@@ -753,34 +526,6 @@ impl ClientEditQueue {
         self.sender.try_send(ClientMessage::SaveDocument {
             client_id: self.client_id,
             document_id,
-            known_version,
-        })
-    }
-
-    /// Request a server-first reload. `force` discards dirty server text.
-    pub(crate) fn enqueue_reload_document(
-        &self,
-        document_id: DocumentId,
-        known_version: DocumentVersion,
-        force: bool,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::ReloadDocument {
-            client_id: self.client_id,
-            document_id,
-            known_version,
-            force,
-        })
-    }
-
-    /// Request a canonical document resync snapshot. Never blocks paint.
-    pub(crate) fn enqueue_request_resync(
-        &self,
-        document_id: DocumentId,
-        known_version: DocumentVersion,
-    ) -> Result<(), mpsc::error::TrySendError<ClientMessage>> {
-        self.sender.try_send(ClientMessage::RequestResync {
-            document_id,
-            client_id: self.client_id,
             known_version,
         })
     }
@@ -810,16 +555,6 @@ impl ClientEditQueue {
             .lock()
             .expect("client sync state poisoned")
             .snapshot()
-    }
-
-    /// Snapshot of one document's tracking state (Phase 22.2). Pane views use
-    /// this when stashing a session so only that document's pending edits are
-    /// retained.
-    pub(crate) fn sync_snapshot_for(&self, document_id: DocumentId) -> ClientSyncSnapshot {
-        self.sync_state
-            .lock()
-            .expect("client sync state poisoned")
-            .snapshot_for(document_id)
     }
 
     #[doc(hidden)]

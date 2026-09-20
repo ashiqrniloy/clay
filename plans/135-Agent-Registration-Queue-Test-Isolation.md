@@ -1,5 +1,17 @@
 # Plan 135 — Agent Registration Queue Test Isolation and Gate Reliability
 
+> **Superseded (2026-09-20) by plan 130 task A1.** A1 deleted the
+> process-global `AGENT_HOST_AUTHORITY` and `PENDING_PACKAGE_REGISTRATIONS` and
+> injects the `AgentHostHandle` into each runtime lane's `ClayOpState`;
+> declarations now queue on the lane that made them. The root cause this plan
+> wanted to isolate under test is gone rather than isolated: the baseline-red
+> `coding_agent_clean_init_one_line_activates_working_defaults` passes in the
+> full parallel lib suite, `two_servers_in_one_process_own_independent_agent_hosts`
+> pins per-server independence, and no test can drain another test's queue
+> (evidence: `plans/130-Agent-Host-Decomposition-and-Ownership-Cleanup.md`, task
+> A1). Do not build a test-only isolation seam on removed state — the tasks below
+> are moot and kept only for their failure-matrix history.
+
 ## Objectives
 
 - Make the lib test suite deterministic under parallel execution: no test's

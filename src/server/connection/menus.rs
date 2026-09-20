@@ -8,7 +8,7 @@ use tokio::{io::AsyncWrite, sync::Mutex};
 use crate::{
     packages::commands::CommandRegistry,
     protocol::{
-        AgentPickerKind, ClientId, ProtocolErrorCode, ServerMessage, TabId, TabRegistrySnapshot,
+        AgentPickerKind, ClientId, ProtocolErrorCode, ServerMessage, TabId,
         TransientMenuSnapshotData,
         codec::{Codec, CodecError},
     },
@@ -23,10 +23,7 @@ use crate::{
         },
         control_center::ServerMenuActivation,
         document::DocumentState,
-        document_analysis::DocumentAnalysisCoordinator,
         menu_sessions::{ServerMenuActivateOutcome, ServerMenuSessions, snapshot_from_session},
-        parse_coordinator::ParseCoordinator,
-        sdui::StaticSduiState,
         tab_registry::TabRegistry,
         workspace::{
             UserBrowseListingPlan, WorkspaceState, execute_user_browse_listing,
@@ -39,6 +36,7 @@ use crate::{
 use crate::server::{IpcServer, RuntimeGenerationStore, behavior::ActiveBehaviorManifest};
 
 use super::{
+    ConnectionCtx,
     documents::write_document_open_response,
     runtime::execute_command_intent,
     tabs::open_workspace_for_bound_tab,
@@ -142,21 +140,21 @@ pub(super) async fn open_command_centre_session(
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
 
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_menu_query_update<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     session_id: u64,
     query: String,
     scope: Option<String>,
-    agent: Option<&AgentHost>,
-    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let client_id = ctx.client_id;
+    let agent = ctx.reload_server.map(|server| &server.agent);
+    let bound_tab_id = *ctx.bound_tab_id;
     let Some(session) = menu_sessions.get_mut(session_id) else {
         codec
             .write_server_message(
@@ -223,17 +221,18 @@ where
 }
 
 pub(super) async fn handle_menu_backspace<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     session_id: u64,
-    agent: Option<&AgentHost>,
-    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let client_id = ctx.client_id;
+    let agent = ctx.reload_server.map(|server| &server.agent);
+    let bound_tab_id = *ctx.bound_tab_id;
     let Some(session) = menu_sessions.get_mut(session_id) else {
         codec
             .write_server_message(
@@ -304,16 +303,17 @@ where
 }
 
 pub(super) async fn handle_menu_selection_move<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     session_id: u64,
     delta: i64,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let client_id = ctx.client_id;
     let Some(session) = menu_sessions.get_mut(session_id) else {
         codec
             .write_server_message(
@@ -333,29 +333,29 @@ where
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_menu_activate<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    parse_coordinator: &ParseCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    tab_registry: &Arc<Mutex<TabRegistry>>,
-    tab_registry_tx: &tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
-    reload_server: Option<&IpcServer>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     session_id: u64,
     kind: crate::protocol::TransientMenuActivationData,
-    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let document = &*ctx.document;
+    let workspace = &*ctx.workspace;
+    let sdui = ctx.sdui;
+    let parse_coordinator = ctx.parse_coordinator;
+    let document_analysis = ctx.document_analysis;
+    let tab_registry = ctx.tab_registry;
+    let tab_registry_tx = ctx.tab_registry_tx;
+    let reload_server = ctx.reload_server;
+    let client_id = ctx.client_id;
+    let bound_tab_id = *ctx.bound_tab_id;
     // Activation resolves server-side: the session kind maps the selected
     // item to a dispatch (palette closes first, then the command executes
     // against the connection's tab) or a path navigation (the session stays
@@ -989,15 +989,16 @@ where
 }
 
 pub(super) async fn handle_menu_cancel<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     session_id: u64,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let client_id = ctx.client_id;
     if menu_sessions.cancel(session_id).is_some() {
         codec
             .write_server_message(stream, &ServerMessage::TransientMenuClosed { session_id })

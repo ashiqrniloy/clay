@@ -138,7 +138,8 @@ async function insideRoots(roots: readonly string[], paths: readonly string[]): 
 export interface ClayAcceptancePolicyOptions {
   /** Workspace roots; inside-root mutations run free (2157). */
   readonly roots: readonly string[];
-  /** Live per-session full-autonomy flag (default off). */
+  /** Live per-session full-autonomy flag (default on — decision
+   *  2026-09-20-2049; `false` restores the out-of-root approval gate). */
   readonly fullAutonomy: () => boolean;
   /**
    * Host approval callback for outside-workspace mutations. Omission fails
@@ -170,8 +171,10 @@ function approveGate(
  * `createCodingApprovalPolicy`: that one rejects out-of-root paths outright,
  * while 2157 routes them to host approval. Reads are free everywhere;
  * in-root mutations are free; out-of-root mutations need approval unless
- * full autonomy is on. No approval cache: every out-of-root mutation asks
- * again (safer; run-scope caching returns with durable runs in task 7).
+ * full autonomy is on — which it is by default (decision 2026-09-20-2049),
+ * so the gate above is the opt-out path, not the default one. No approval
+ * cache: every out-of-root mutation asks again (safer; run-scope caching
+ * returns with durable runs in task 7).
  */
 export function createClayAcceptancePolicy(options: ClayAcceptancePolicyOptions): ExecutionPolicy {
   return {

@@ -39,7 +39,7 @@ Clay evaluates a constrained local configuration entry point from a configuratio
 
 ## How It Works
 
-`ClayJsRuntimeService::load_configuration_from_root` runs on the same blocking runtime worker used by controlled JavaScript evaluation. It constructs a `ConfigurationRuntime` from the supplied root, canonicalizes `init.js`, creates a file URL for that entry point, and installs both `ClayOpState` and the configuration state in `deno_core::OpState`.
+`ClayJsRuntimeService::load_configuration_from_root_with_workspace` (the production entry point; the bare `load_configuration_from_root` wrapper is a `#[cfg(test)]` helper since plan 131) runs on the same blocking runtime worker used by controlled JavaScript evaluation. It constructs a `ConfigurationRuntime` from the supplied root, canonicalizes `init.js`, creates a file URL for that entry point, and installs both `ClayOpState` and the configuration state in `deno_core::OpState`.
 
 `ClayModuleLoader` handles three allowed module families:
 
@@ -140,7 +140,9 @@ console.log(packageConfig.loaded, getConfigurationState().loadedModules);
 
 ```rust
 let service = ClayJsRuntimeService::default();
-let result = service.load_configuration_from_root(config_root).await?;
+let result = service
+    .load_configuration_from_root_with_workspace(config_root, workspace)
+    .await?;
 ```
 
 ## Plan 080 configuration primitive review

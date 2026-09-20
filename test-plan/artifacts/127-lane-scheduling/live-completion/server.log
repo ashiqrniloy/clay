@@ -1,0 +1,3 @@
+clay server listening on /tmp/clay-plan127-live/clay.sock
+[daemon] [skills] /tmp/clay-plan127-live/home/.clay/agents/coding-agent/skills.json absent or unreadable; using defaults (all roots enabled)
+[agent] ensure_tab_session(1): empty book (provider='' model='')

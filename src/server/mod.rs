@@ -13,29 +13,21 @@ mod config_watch;
 mod configuration;
 mod connection;
 pub(crate) mod control_center;
-pub(crate) mod menu_sessions;
-// Cross-domain envelope validation is wired to extension-point handlers in
-// Plan 061 task 8; until then only tests exercise it.
-#[allow(dead_code)]
-pub(crate) mod cross_domain;
 pub mod decorations;
 pub mod diagnostics;
 pub(crate) mod document;
 pub(crate) mod document_analysis;
 mod facades;
 pub(crate) mod folding; // FOLDING_RANGE_PAYLOAD_BUDGET_BYTES
-#[allow(dead_code)]
 pub(crate) mod git;
-#[allow(dead_code)]
 mod js_runtime;
 #[doc(hidden)]
 pub mod language_intelligence;
 #[doc(hidden)]
 pub mod language_server;
-#[allow(dead_code)]
 pub(crate) mod launcher;
 pub(crate) mod locks;
-#[allow(dead_code)]
+pub(crate) mod menu_sessions;
 mod ops;
 pub(crate) mod output_router;
 pub mod parse_coordinator;
@@ -95,7 +87,7 @@ use crate::{
     },
     perf::budgets::RUNTIME_STATE_BROADCAST_CAPACITY,
     protocol::{
-        ClientId, DocumentAccess, DocumentId, LockOwner, RuntimeDiagnostic, RuntimeGenerationId,
+        ClientId, DocumentAccess, DocumentId, RuntimeDiagnostic, RuntimeGenerationId,
         RuntimeStateSnapshot, ServerMessage, TabId, TabRegistrySnapshot, WorkspaceRootId,
         codec::Codec,
     },
@@ -114,7 +106,7 @@ use self::{
     document::DocumentState,
     js_runtime::ClayJsRuntimeService,
     language_intelligence::LanguageIntelligenceCoordinator,
-    locks::{ScopedLockManager, ScopedLockTarget},
+    locks::ScopedLockManager,
     parse_coordinator::ParseCoordinator,
     sdui::StaticSduiState,
     workspace::WorkspaceState,
@@ -152,10 +144,14 @@ pub(crate) struct RuntimeGeneration {
 }
 
 impl RuntimeGeneration {
-    fn initial() -> Self {
+    fn initial(agent_host: crate::server::agent::AgentHostHandle) -> Self {
+        let service = ClayJsRuntimeService::production();
+        // Plan 130 A1: the server's own agent host rides into every lane op
+        // state here — construction, not a process global.
+        service.set_agent_host(agent_host);
         Self {
             id: 1,
-            service: ClayJsRuntimeService::production(),
+            service,
             evaluation: None,
             diagnostics: Vec::new(),
         }
@@ -305,9 +301,9 @@ impl ActiveTypographyState {
 }
 
 impl RuntimeGenerationStore {
-    fn initial() -> Self {
+    fn initial(agent_host: crate::server::agent::AgentHostHandle) -> Self {
         Self {
-            current: Arc::new(Mutex::new(RuntimeGeneration::initial())),
+            current: Arc::new(Mutex::new(RuntimeGeneration::initial(agent_host))),
             typography: ActiveTypographyState::default(),
             runtime_state: ActiveRuntimeStateFanout::default(),
             behavior_grace: BehaviorGraceState::new(),
@@ -604,7 +600,6 @@ pub struct IpcServer {
     /// permit for its lifetime; excess connections are refused at accept time
     /// instead of spawning unbounded tasks (Plan 060 T6, P1-10).
     connection_permits: Arc<tokio::sync::Semaphore>,
-    #[allow(dead_code)]
     parse_coordinator: ParseCoordinator,
     completion: crate::server::completion::CompletionCoordinator,
     document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
@@ -745,10 +740,11 @@ impl IpcServer {
                 .clone()
                 .or_else(effective_agent_root),
         );
-        // Phase 1 `agent` domain: install the process-global RPC authority
-        // for user-facing agent facades (`clay:agent`). Package JS cannot
-        // reach the daemon except through these validated ops.
-        agent::AgentHostHandle::install_global(agent.clone());
+        // Phase 1 `agent` domain: server-owned RPC authority for the
+        // user-facing agent facades (`clay:agent`). Package JS cannot reach
+        // the daemon except through these validated ops, and a second server
+        // in the same process owns its own host (Plan 130 A1).
+        let agent_host = agent::AgentHostHandle::new(agent.clone());
 
         Ok(Self {
             config,
@@ -779,7 +775,7 @@ impl IpcServer {
             document_analysis:
                 crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
             language_intelligence: LanguageIntelligenceCoordinator::new(),
-            runtime_generation: RuntimeGenerationStore::initial(),
+            runtime_generation: RuntimeGenerationStore::initial(agent_host),
             scoped_locks: ScopedLockManager::default(),
             reload_attempt: Arc::new(Mutex::new(())),
             next_client_id: Arc::new(AtomicU64::new(1)),
@@ -1034,23 +1030,26 @@ impl IpcServer {
     }
 
     async fn load_default_configuration(&self) {
+        // Plan 129 P4: boxed reload stages keep `run`/`main` futures small too
+        // (same reason as `reload_runtime_generation_inner`).
         let generation_id = self.runtime_generation.generation_id().await;
         let service = self.runtime_generation.current_service().await;
-        match self.load_configuration_for_service(&service).await {
+        match Box::pin(self.load_configuration_for_service(&service)).await {
             Ok(Some(evaluation)) => {
                 self.record_configuration_diagnostics(&evaluation.configuration_diagnostics)
                     .await;
-                match self
-                    .prepare_runtime_generation_candidate(
-                        generation_id,
-                        generation_id,
-                        service,
-                        evaluation,
-                    )
-                    .await
+                match Box::pin(self.prepare_runtime_generation_candidate(
+                    generation_id,
+                    generation_id,
+                    service,
+                    evaluation,
+                ))
+                .await
                 {
                     Ok(candidate) => {
-                        if let Err(diagnostic) = self.commit_runtime_generation(candidate).await {
+                        if let Err(diagnostic) =
+                            Box::pin(self.commit_runtime_generation(candidate)).await
+                        {
                             self.record_runtime_diagnostic(
                                 "clay server configuration commit failed",
                                 diagnostic,
@@ -1154,7 +1153,7 @@ impl IpcServer {
                 message: "runtime reload is already in progress".to_string(),
             });
         };
-        Ok(self.reload_runtime_generation_inner().await)
+        Ok(Box::pin(self.reload_runtime_generation_inner()).await)
     }
 
     pub(crate) async fn reload_runtime_generation(&self) -> RuntimeReloadOutcome {
@@ -1185,6 +1184,10 @@ impl IpcServer {
         }
     }
 
+    // Plan 129 P4: the three heavy reload stages are boxed so this future (and
+    // every caller's: settings persistence, command intents, the connection
+    // loop) stays under clippy's large-futures threshold. Reload is rare; the
+    // allocation is cold-path only.
     async fn reload_runtime_generation_inner(&self) -> RuntimeReloadOutcome {
         #[cfg(test)]
         self.reload_barrier.wait_if_armed().await;
@@ -1196,7 +1199,7 @@ impl IpcServer {
         let current_service = self.runtime_generation.current_service().await;
         let next_service = ClayJsRuntimeService::production_reload(&current_service);
         let (evaluation, configuration_diagnostics) =
-            match self.load_configuration_for_service(&next_service).await {
+            match Box::pin(self.load_configuration_for_service(&next_service)).await {
                 Ok(evaluation) => {
                     let evaluation = evaluation.unwrap_or_default();
                     let diagnostics = evaluation.configuration_diagnostics.clone();
@@ -1216,14 +1219,13 @@ impl IpcServer {
                     };
                 }
             };
-        let candidate = match self
-            .prepare_runtime_generation_candidate(
-                previous_generation_id,
-                next_generation_id,
-                next_service,
-                evaluation,
-            )
-            .await
+        let candidate = match Box::pin(self.prepare_runtime_generation_candidate(
+            previous_generation_id,
+            next_generation_id,
+            next_service,
+            evaluation,
+        ))
+        .await
         {
             Ok(candidate) => candidate,
             Err(diagnostic) => {
@@ -1241,7 +1243,7 @@ impl IpcServer {
                 };
             }
         };
-        match self.commit_runtime_generation(candidate).await {
+        match Box::pin(self.commit_runtime_generation(candidate)).await {
             Ok(refreshed_documents) => RuntimeReloadOutcome {
                 previous_generation_id,
                 active_generation_id: next_generation_id,
@@ -1571,15 +1573,12 @@ impl IpcServer {
         &self,
         candidate: RuntimeGenerationCandidate,
     ) -> Result<Vec<ReloadedDocumentRefresh>, RuntimeDiagnostic> {
-        let behavior_lock = self
-            .scoped_locks
-            .try_acquire(ScopedLockTarget::Behavior, LockOwner::Server)
-            .map_err(|_| {
-                runtime_candidate_error(
-                    "runtime.behavior_locked",
-                    "Runtime behavior state is locked by another server operation.",
-                )
-            })?;
+        let behavior_lock = self.scoped_locks.try_acquire().map_err(|_| {
+            runtime_candidate_error(
+                "runtime.behavior_locked",
+                "Runtime behavior state is locked by another server operation.",
+            )
+        })?;
         if self.runtime_generation.generation_id().await != candidate.expected_generation_id {
             return Err(runtime_candidate_error(
                 "runtime.generation_conflict",

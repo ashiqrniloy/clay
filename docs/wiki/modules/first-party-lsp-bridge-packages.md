@@ -3,7 +3,7 @@
 ## Source
 
 - `packages/lsp-shared/framing.js` — Content-Length frame encode/decode (1 MiB frame, 8 KiB header)
-- `packages/lsp-shared/positions.js` — `VersionedDocument` with UTF-8/UTF-16/UTF-32 encoding, byte-to-position conversion
+- `packages/lsp-shared/positions.js` — `VersionedDocument`: incremental UTF-16↔UTF-8 line index (chunked treap) over UTF-8/UTF-16/UTF-32 positions
 - `packages/lsp-shared/mapping.js` — LSP responses → Clay vocabulary (semantic tokens, diagnostics, completions, hover, definitions, code actions, signature help) with payload budgets
 - `packages/lsp-shared/client.js` — `LspClient` session lifecycle, initialize handshake, document sync, server request allowlist
 - `packages/lsp-shared/utf8.js` — Pure-JS UTF-8 codec (`encodeUtf8`/`decodeUtf8`/`utf8ByteLength`; no TextEncoder/TextDecoder)
@@ -24,7 +24,7 @@
 - `src/perf/budgets.rs` — all Phase 18.21 typed budget constants
 - `tests/fixtures/lsp/fake-server/{profiles,session,server,matrix.test,mjs}` — generic deterministic fake LSP harness
 - `tests/lsp_bridge.rs` — shared adapter freshness, package manifests, fake-server matrix
-- `packages/lsp-shared/adapter.test.mjs` — host-stamped language-server session options
+- `packages/lsp-shared/adapter.test.mjs` — host-stamped language-server session options plus the incremental position-index invariants (edit cost, round-trip oracle, CRLF/multibyte, long line)
 - `packages/lsp-rust/rust-package.test.mjs` — bounded decoration viewport regression
 - `tests/lsp_real_servers.rs` — environment-gated real-server smoke
 - `tests/language_server_authority.rs` — session cap, revoke, byte-op limits, process lifecycle
@@ -67,12 +67,56 @@ Bounded Content-Length frame encode/decode with hard limits:
 
 ### `positions.js`
 
-`VersionedDocument` with UTF-8/UTF-16/UTF-32 position encoding:
-- `applyByteChange(byteOffset, oldEnd, newText)` → updates cached encoder output
-- `byteOffsetToPosition(byteOffset)` → `{line, character}` in negotiated encoding
-- `positionToByteRange(position)` → `{byteStart, byteEnd}` in UTF-8
-- `normalizeRoot(path)` → rejects backslash, double-slash, dot/dotdot segments, query, hash, and percent-encoded slashes
-- `isInRoot(uri, root)` → validates file URI containment within canonical root
+`VersionedDocument` keeps document lines in an **implicit treap of 64-line
+chunks** (`CHUNK_LINES`), so an incremental edit costs O(log lines) tree work
+instead of a full re-encode. Each leaf stores its line texts with per-line widths
+(UTF-16 units, UTF-8 bytes) and subtree totals `lines`/`w16`/`w8`; `join`/`split`
+rebuild only the nodes on the touched paths and share the untouched subtrees with
+the previous root, and `replaceRange(start, count, texts)` (split, split, join,
+join) is the only structural edit. Priorities come from the same deterministic
+xorshift32 PRNG as `frontend/src/editor/position-index.ts`, so one edit sequence
+always produces the same tree shape.
+
+Invariants:
+- **Every line carries a phantom trailing `\n`** in the width aggregates, so the
+document's UTF-8 length is the root's `w8 − 1`: `get byteLength` is O(1) and
+needs no scan.
+- Line content excludes that newline, and a trailing CR is stripped before
+conversion (`strippedLine`); `#lineBounds(line).end` subtracts the stripped bytes,
+which is what keeps LSP CRLF positions on the right offsets.
+- Unpaired surrogates are rejected while a leaf is built
+(`lsp.invalid_utf8: unpaired surrogate`), so the tree can never hold text that
+`encodeUtf8` refuses.
+- Each edit produces a new root that shares untouched subtrees with the previous
+one; no version history is retained, so a reader sees either the pre-edit or the
+post-edit tree.
+
+API:
+- `constructor(text, version, encoding)` / `reset(text, version)` — full sync
+(`didOpen`, full-content `didChange`); rebuilds the tree from `text.split("\n")`.
+- `applyByteChange({ baseVersion, version, byteStart, byteEnd, text })` —
+incremental sync; returns the affected `{start, end}` position range in the
+negotiated encoding and rejects unordered or stale versions
+(`lsp.stale_document`).
+- `byteToPosition(offset)` / `positionToByte(position)` / `rangeToBytes(range)` —
+offset↔position conversion in the negotiated encoding (UTF-8 reports bytes,
+UTF-16 code units, UTF-32 scalars).
+- `get text` / `get bytes` — lazy O(n) materialization out of the tree; callers
+that need only the size use `get byteLength` (O(1)). Reading `bytes.length`
+forces a whole-document UTF-8 re-encode, which is why the viewport and refresh
+paths use `byteLength`.
+- Module helpers: `rootPathToFileUri`, `pathToFileUri`, `fileUriToRelative`
+(canonical-root containment, `lsp.out_of_root`) and `POSITION_ENCODINGS`.
+
+Costs and errors: `locateByte` descends by `w8` totals and then scans one line's
+code points (`scanLine`), so a conversion is O(log lines + line bytes) with no
+document-wide work; it rejects an offset that splits a UTF-8 code point or lands
+inside a line ending. `applyByteChange` is therefore O(log lines + edited line +
+inserted lines) — measured flat in document size at 0.014–0.021 ms/edit across
+64 KiB/256 KiB/1 MiB/8 MiB (`code-reviews/2026-09-19-plan128-task3/`). A single
+multi-megabyte line still costs an O(line) scan: the frontend's scan blocks were
+not ported, the code carries a `ponytail:` note, and
+`long_single_line_does_not_regress` bounds it.
 
 ### `mapping.js`
 
@@ -156,9 +200,11 @@ current canonical root and exact grant. The package cannot supply a package
 name to bypass host provenance.
 
 The GUI regression chain also exposed a shared adapter contract bug: the
-facade rejects the old caller-supplied `package` field, and `VersionedDocument`
-exposes `bytes.length`, not `byteLength`. Both are covered by the package
-adapter tests. `scripts/capture-ui-review.sh --fixture ui-review-rust` keeps
+facade rejects the old caller-supplied `package` field, and the adapter must read
+`VersionedDocument.byteLength`, not `bytes.length` — the array accessor forces a
+whole-document re-encode. Both are covered by the package adapter tests. (Plan
+128 added the O(1) `byteLength` accessor; before it, every refresh paid the
+re-encode.) `scripts/capture-ui-review.sh --fixture ui-review-rust` keeps
 XDG config/data/socket state private while allowing host `HOME` only so the
 fixed `rustup` descriptor can find its installed toolchain. The 2026-08-21
 run reached the Rust bridge with no `analysis.worker_failed` and emitted an
@@ -211,7 +257,7 @@ All four packages share the same manifest structure:
 - `completion-provider` permission with `runtimeBridge: true`, `priority: 100`, `exclusive: false`, and `exportName: "provideCompletion"`.
 - `languageIntelligenceProviders` with mode-scoped features matching what each server advertises; inlay hints stay outside this closed intelligence-feature enum.
 - `createLspBridge` features are opt-in. When `inlayHint` is present, the bridge advertises `textDocument.inlayHint`, requests bounded hints during refresh, maps Parameter/Type hints to Before/After decoration overlays, and publishes a separate `inlayHint` decoration set.
-- The bridge calls `startLanguageServerSession` with only `{ contribution, workspaceRootId }`; the host-stamped executing package owns package identity. Decoration viewports use the shared `VersionedDocument.bytes.length` byte count.
+- The bridge calls `startLanguageServerSession` with only `{ contribution, workspaceRootId }`; the host-stamped executing package owns package identity. Decoration viewports use the shared O(1) `VersionedDocument.byteLength` byte count (`bytes.length` would re-encode the document on every refresh).
 - API prefix (`apiPrefix`) must match all contribution IDs (e.g., `lsp-rust` prefix → `lsp-rust.server`, `lsp-rust.bridge`).
 
 ## Security Boundary
@@ -220,7 +266,8 @@ All four packages share the same manifest structure:
 - Grant-before-load: `authorizeLanguageServer` must be called during configuration evaluation and sealed before package code executes. No bundled/implicit grant.
 - Byte bounds: send/read operations enforce `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES` (1 MiB); oversize frames are rejected before reaching the child.
 - Malformed framing: `FrameDecoder` rejects invalid Content-Length, non-ASCII headers, truncated frames, and non-JSON-RPC objects.
-- External URI denial: file URIs outside the approved workspace root are rejected by `isInRoot`.
+- External URI denial: file URIs outside the approved workspace root are rejected by `fileUriToRelative` (`lsp.out_of_root`), which also rejects non-`file:` schemes, credentials, ports, queries, fragments, and percent-encoded path separators.
+- Position index scope: `positions.js` processes host-provided document text only — no paths, network, or package-supplied offsets bypass validation. It rejects unpaired surrogates at ingest and edit time (so a package cannot make the bridge emit malformed UTF-8 offsets) and range-checks every offset against the document's byte length.
 - Inert workspace edits: `codeActionsToClay` already filters items with `.edit`; no mutating operations reach the editor.
 - Containment language: all four package docs repeat the trusted-subprocess model (same-user OS authority, not OS sandboxing).
 
@@ -262,6 +309,14 @@ Base packages remain usable without bridge grants. Removing a bridge `loadPackag
 - `tests/lsp_real_servers.rs` — runs per-server Node smoke tests; skips with reason when binary unavailable
 - Each bridge has a `*-real-smoke.test.mjs` with document fixtures, polling loops, and clean shutdown
 
+### Shared adapter position index (`packages/lsp-shared/adapter.test.mjs`)
+
+- `position_roundtrip_after_incremental_edits` — randomized edit driver compares every line and offset against a naive line-table oracle in all three encodings, and asserts `byteLength` equals the materialized `bytes` length
+- `crlf_and_multibyte_lines_track` — CRLF and multi-byte/astral lines keep conversions and boundary errors exact
+- `edit_cost_flat_in_document_size` — median edit time at 1 MiB must stay within a small constant factor of 64 KiB
+- `long_single_line_does_not_regress` — a 1 MiB single-line document converts inside a fixed budget
+- Parity with the pre-plan-128 full-rebuild implementation (identical results and error messages across 25 seeds × 60 edits × 3 encodings) plus adapter-level edit+refresh timings: `code-reviews/2026-09-19-plan128-task3/`
+
 ### Package integration tests
 
 - `*-package.test.mjs` — 3 tests per package covering manifest, feature mapping, error/identity rejection
@@ -291,6 +346,7 @@ Base packages remain usable without bridge grants. Removing a bridge `loadPackag
 
 ## Related
 
+- [Frontend Edit Synchronization](../flows/frontend-edit-synchronization.md) — the CodeMirror-side `position-index.ts` this treap mirrors
 - [Phase 18.21 LSP Bridge Primitive Review](../archive/phase18.21-lsp-bridge-primitive-review.md)
 - [Language Intelligence](language-intelligence.md)
 - [Language Server Process Service](language-server-process-service.md)

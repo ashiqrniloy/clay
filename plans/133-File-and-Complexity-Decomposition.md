@@ -236,4 +236,14 @@ behavior changes.
 - To be filled after tasks are completed and tests pass.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+
+- **Rust `ClientEditQueue` keeps test-only enqueue capabilities** (delegated from
+  plan 131 task 4; priority: medium, test weight only):
+  `enqueue_viewport_render_request`, `enqueue_command_intent`, and
+  `enqueue_save_document` are `#[cfg(test)]` because the React frontend emits those
+  protocol frames itself (`frontend/src/editor/sync/messages.ts` for
+  `saveDocument`/`viewportRenderRequest`, `frontend/src/editor/extensions/controller.ts`
+  for `commandIntent`). Decide the capability set while this plan extracts
+  `src/client/tests.rs`: keep the queue as a real Rust-client emission path with
+  live callers, or retire the remaining test-only surface with its tests (plan 132
+  is the co-owner if the frames are declared duplicates).

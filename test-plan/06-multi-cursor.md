@@ -54,3 +54,19 @@ reference: `docs/development/manual-editor-capabilities-test-plan.md`
 | Checks | Result | Evidence |
 |---|---|---|
 | Multi-cursor logic (X1–X15) | PASS by automated equivalents; UNRESOLVED keyboard live | CodeMirror owns multiple-selection/range primitives; the editor extension and position-map frontend tests pin selection state handling. Physical keyboard steps remain UNRESOLVED on this host (`/dev/uinput` denied, no xdotool/ydotool, no Wayland portal input) — not claimed as a live pass |
+
+## Plan 129 connection-loop decomposition execution record (2026-09-20)
+
+Regression-only pass over the refactored connection dispatcher. The X steps are
+client-local CodeMirror operations (multiple selections, match selection,
+cursor stacking/columns, cursor-move history) and were not re-driven live:
+
+| Checks | Result | Evidence |
+|---|---|---|
+| X1–X15 | UNRESOLVED keyboard live; PASS by automated equivalents (fresh) | Fresh `frontend` `npx vitest run src/editor`: 9 files / 75 tests passed (editor extensions incl. multi-selection/position-map handling, hot-path invariants) on the refactored tree. CodeMirror owns the range/set primitives. Host ceiling this run: `xdg-desktop-portal-gnome` segfaults on RemoteDesktop keyboard sessions, so only short key bursts land — no multi-step `Ctrl+D`/`Ctrl+Shift+L`/`Ctrl+Alt+Down` sequence was claimed. |
+| Negative checks (offset corruption, selection-set reset) | PASS automated | Same editor suite plus the position-map edit-sequence tests; no live claim. |
+
+No step was weakened; the earlier plan 097 record's automated-equivalent
+statement stands and is now backed by a fresh run on the refactored tree.
+Artifacts: `test-plan/artifacts/129-connection-loop/` (`automated-companions.txt`,
+harness `run-live.sh start cursors` prepared but not driven to a live claim).

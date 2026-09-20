@@ -2683,7 +2683,7 @@ Use the documented `clay:syntax` API for engine preference. Do not add hidden JS
 
 ## Phase 18.11 authoring contract: completion providers
 
-Phase 18.11 adds the `CompletionTriggerAndResult` primitive and server-side completion framework; Phase 18.18 extends its metadata-only package contract with bounded static text items. A package declares provider metadata, trigger/word-boundary parameters, and optional inert `items`, and Clay owns trigger classification, result computation scheduling, and the completion picker UI. Package authors do **not** ship an executable completion handler, raw callback, raw op, native handle, client JavaScript, snippet with executable transforms, command side effect on accept, CSS, or any completion-specific popup widget.
+Phase 18.11 adds the `CompletionTriggerAndResult` primitive and server-side completion framework; Phase 18.18 extends the package contract with bounded static text items; Phase 27 makes `clay.contributions.completionProviders` the registration source, so the manifest — not the registration call — declares provider metadata, trigger/word-boundary parameters, budgets, and optional inert `items`, while Clay owns trigger classification, result computation scheduling, and the completion picker UI. A package may additionally bind a package-owned handler module (`module` + `exportName`, or `moduleSpecifier` + `exportName`, whose `exportName` export Clay imports and invokes itself under the provider timeout). Package authors do **not** pass callbacks, raw ops, native handles, client JavaScript, snippet transforms with executable code, command side effects on accept, CSS, or any completion-specific popup widget.
 
 Completion uses Clay's shared retained menu renderer with `TransientMenuOrigin::Completion`, a caret/IME-derived active-pane anchor, `TransientMenuFocusPolicy::Modeless`, and a bounded `scroll` component; it is not a package `TransientOverlayContribution`, a fixed bottom panel, or a package-specific widget tree. The host caps the projection at `COMPLETION_MAX_VISIBLE_ROWS` = 8 visible rows and `COMPLETION_MAX_WIDTH_PX` = 480 logical pixels. Accepting a completion commits a validated text replacement in the active document only — it never executes a command, raw op, or provider code. Stale document/version/behavior results and empty items dismiss the popup; timeout/provider-error states use sanitized Clay status diagnostics instead of a blocking empty panel.
 
@@ -2711,19 +2711,17 @@ Declare completion provider contributions under `clay.contributions.completionPr
 
 ```js
 import { serverRegisterCompletionProvider } from "clay:completion";
+import * as completionModule from "./completion.js";
 
 export default function load() {
+  // The manifest above declares the metadata; the call binds the handler.
+  // Clay imports and invokes `provideCompletion` itself under the manifest
+  // timeout. Pass `module` for the general lane, `moduleSpecifier` for the
+  // latency lane (plan 127), or neither for a metadata-only provider.
   serverRegisterCompletionProvider({
-    packageName: "@vendor/words",
-    packageVersion: "0.1.0",
-    packagePrefix: "words",
-    permissions: ["completion-provider"],
-    providerId: "words.buffer",
-    triggerCharacters: ["."],
-    wordBoundaryChars: [".", ","],
-    items: ["const", "function", "return"],
-    timeoutMs: 500,
-    maxItems: 64
+    module: completionModule,
+    moduleSpecifier: import.meta.resolve("./completion.js"),
+    exportName: "provideCompletion"
   });
 }
 ```
@@ -2736,13 +2734,13 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@vendor/words");
 ```
 
-Validation is load/registration-time only and reuses the package metadata budget. Provider IDs must be package-owned (`<apiPrefix>.<name>`), must not claim the reserved `clay.*` namespace, and must be unique within a package. Trigger characters are inert single-character strings; word-boundary characters are inert strings. Static `items` must be unique non-empty strings, fit `CompletionItem` label/insert-text limits, and contain no more entries than `maxItems` or `COMPLETION_RESULT_MAX_ITEMS`. `timeoutMs` must be within `1..=5000` and `maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`. Clay rejects raw callbacks (`handler`, `callback`, `complete`, `function`, `module`), raw ops, native handles, client-side JavaScript, snippets/commands, URLs, shell/network/AI/WASM/native/package-manager fields, duplicate provider IDs, and oversize metadata.
+Validation is load/registration-time only and reuses the package metadata budget. Provider IDs must be package-owned (`<apiPrefix>.<name>`), must not claim the reserved `clay.*` namespace, and must be unique within a package. Trigger characters are inert single-character strings; word-boundary characters are inert strings. Static `items` must be unique non-empty strings, fit `CompletionItem` label/insert-text limits, and contain no more entries than `maxItems` or `COMPLETION_RESULT_MAX_ITEMS`. `timeoutMs` must be within `1..=5000` and `maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`. Manifest contributions reject executable or external-authority fields (`nativeHandle`, `nativeLibrary`, `dynamicLibrary`, `downloadUrl`, `packageManager`, `shellCommand`, `clientJavaScript`, `drawCallback`, `rawOps`, `css`, `rawColor`, `snippet`, `command`), URL-bearing strings, duplicate provider IDs, duplicate item labels, and oversize metadata. The registration call rejects `handler`, `callback`, `complete`, `function`, `clientJavaScript`, `nativeHandle`, and `rawOps`, and accepts only a package-owned `module` object or package-owned `moduleSpecifier` (plus `exportName`) as its handler binding; it reads no provider metadata from its options.
 
 Result items are inert text-replacement data only: `label`, `insertText`, `detail`, `commitCharacters`, and provenance. They carry no callbacks, command side effects, file paths, shell/network/AI directives, raw op names, or client JavaScript. Providers may read only Clay-provided open-document content/windows; completion grants no filesystem/network/shell/AI/raw-op/native-UI/client-runtime authority without later documented APIs and an approved decision log. Per-field and result payload budgets (`COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES`, `COMPLETION_RESULT_MAX_ITEMS`, and per-field char caps) are enforced before client publication.
 
 Trigger classification is local manifest lookup: typing a trigger character edits locally first (`ClientFirstPredictable`) and then enqueues a typed `CompletionRequest` through a bounded non-blocking channel. Manual `completion.trigger` requests completions without mutating text. Provider execution runs server-side on a cancellable `UiReactivePriority` lane that aborts or stale-drops older in-flight requests and validates results against the current document/behavior version and provider generation before publication. Provider work is UI-reactive/cancellable and never runs on keypress-to-local-paint, paint, layout, scroll, pointer, or text-event hot paths.
 
-Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 28.6 ranks matching results with one host-owned scorer: exact/case-sensitive prefix, case-insensitive prefix, shorter labels, then a bounded in-memory recency hint from accepted insert text. Provider priority and exclusive suppression remain authoritative; the scorer only orders candidates within an eligible provider/tier. The recency ring is process-local, sent on the next request, capped at `COMPLETION_RECENCY_MAX_ITEMS` / `COMPLETION_RECENCY_MAX_ITEM_CHARS`, and never persisted. Phase 18.18 package providers registered through `completion.serverRegisterCompletionProvider` remain callback-free: registered static strings normalize to provenance-bearing `CompletionItem` text replacements, and the connection path filters the active package's Rust snapshot by replacement prefix without running package JavaScript. A future constrained handler bridge may add computed package providers; current package execution is limited to bounded static text. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
+Phase 18.11 ships one built-in `core.bufferWords` provider that suggests unique words from the bounded server-prepared document window around the cursor prefix; it is always available and is not removed by package disable/reload. Phase 28.6 ranks matching results with one host-owned scorer: exact/case-sensitive prefix, case-insensitive prefix, shorter labels, then a bounded in-memory recency hint from accepted insert text. Provider priority and exclusive suppression remain authoritative; the scorer only orders candidates within an eligible provider/tier. The recency ring is process-local, sent on the next request, capped at `COMPLETION_RECENCY_MAX_ITEMS` / `COMPLETION_RECENCY_MAX_ITEM_CHARS`, and never persisted. Phase 18.18 package providers registered through `completion.serverRegisterCompletionProvider` stay callback-free in the boundary sense: a `module`/`moduleSpecifier` handler is bound as a token plus a resolver-validated export, Clay imports and invokes it itself on the domain runtime lane under the provider timeout, and no function value or raw authority crosses the op boundary. Static strings still normalize to provenance-bearing `CompletionItem` text replacements and the connection path filters the active package's Rust snapshot by replacement prefix. A handler bound with `moduleSpecifier` runs on the domain's latency lane, so a busy parse/analysis lane cannot delay completions (plan 127); an inline `module` handler runs on the general lane. Handler results are validated against the current document/behavior version and provider generation before publication. Any future provider needing workspace, network, AI, shell, or filesystem authority must introduce explicit permissions and an approved decision log before implementation.
 
 See [`completion.serverRegisterCompletionProvider`](../clay-js-api/completion/server-register-completion-provider.md) for the authoritative API reference, and [`docs/wiki/archive/phase18.11-completion-provider-primitive-review.md`](../../wiki/archive/phase18.11-completion-provider-primitive-review.md) for the implementation review.
 

@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::PendingViewportPatch;
+use super::{ConnectionCtx, PendingViewportPatch};
 use crate::server::connection::{file_operation_failed, teardown_closed_document};
 
 /// Upper bound on parse windows scheduled per viewport request. A tall or
@@ -33,9 +33,7 @@ use crate::server::{
     RuntimeGenerationStore,
     behavior::{ActiveBehaviorManifest, BehaviorVersionDecision},
     document::DocumentState,
-    document_analysis::DocumentAnalysisCoordinator,
     js_runtime::ClayJsRuntimeService,
-    language_intelligence::LanguageIntelligenceCoordinator,
     parse_coordinator::{ParseCoordinator, ParseCoordinatorError, ParseScheduleRequest},
     sdui::StaticSduiState,
     workspace::{
@@ -101,32 +99,44 @@ where
     Ok(())
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "shared edit/intent dispatch keeps server-owned state explicit instead of hiding authority in a context bag"
-)]
+/// Fields of the two editor messages (`Edit` carries an operation,
+/// `EditorIntent` an intent the caller maps to one) that
+/// [`dispatch_edit_operation`] applies.
+pub(super) struct EditOperationParams {
+    pub(super) document_id: DocumentId,
+    pub(super) lease_id: Option<crate::protocol::LeaseId>,
+    pub(super) base_version: crate::protocol::DocumentVersion,
+    pub(super) behavior_version: crate::protocol::BehaviorVersion,
+    pub(super) transaction_id: crate::protocol::TransactionId,
+    pub(super) operation: crate::protocol::EditOperation,
+}
+
 pub(super) async fn dispatch_edit_operation<S>(
-    codec: Codec,
-    stream: &mut S,
-    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    completion: &crate::server::completion::CompletionCoordinator,
-    language_intelligence: &LanguageIntelligenceCoordinator,
-    document_analysis: &crate::server::document_analysis::DocumentAnalysisCoordinator,
-    parse_coordinator: &ParseCoordinator,
-    client_id: ClientId,
-    document_id: DocumentId,
-    lease_id: Option<crate::protocol::LeaseId>,
-    base_version: crate::protocol::DocumentVersion,
-    behavior_version: crate::protocol::BehaviorVersion,
-    transaction_id: crate::protocol::TransactionId,
-    operation: crate::protocol::EditOperation,
+    ctx: &mut ConnectionCtx<'_, S>,
+    params: EditOperationParams,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let EditOperationParams {
+        document_id,
+        lease_id,
+        base_version,
+        behavior_version,
+        transaction_id,
+        operation,
+    } = params;
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let document = &*ctx.document;
+    let workspace = &*ctx.workspace;
+    let completion = ctx.completion;
+    let language_intelligence = ctx.language_intelligence;
+    let document_analysis = ctx.document_analysis;
+    let parse_coordinator = ctx.parse_coordinator;
+    let client_id = ctx.client_id;
     let ack_scope = global_recorder().scope_with_metadata(
         SERVER_EDIT_ACK,
         MetricMetadata::transaction(document_id, client_id, transaction_id, base_version),
@@ -304,7 +314,6 @@ where
 }
 
 pub(super) struct DocumentChunkRequestParams {
-    pub(super) client_id: ClientId,
     pub(super) document_id: DocumentId,
     pub(super) document_version: DocumentVersion,
     pub(super) offset: u64,
@@ -312,10 +321,7 @@ pub(super) struct DocumentChunkRequestParams {
 }
 
 pub(super) async fn handle_document_chunk_request<S>(
-    codec: Codec,
-    stream: &mut S,
-    default_document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
+    ctx: &mut ConnectionCtx<'_, S>,
     request: DocumentChunkRequestParams,
 ) -> Result<(), CodecError>
 where
@@ -323,9 +329,9 @@ where
 {
     let message = match document_for_message(
         request.document_id,
-        request.client_id,
-        default_document,
-        workspace,
+        ctx.client_id,
+        ctx.document,
+        ctx.workspace,
     )
     .await
     {
@@ -341,7 +347,7 @@ where
             reason: crate::protocol::DocumentChunkRejection::UnknownDocument,
         },
     };
-    codec.write_server_message(stream, &message).await
+    ctx.codec.write_server_message(ctx.stream, &message).await
 }
 
 // Resolve only an explicitly authorized document. Unknown IDs must not fall
@@ -1074,34 +1080,33 @@ pub(super) fn bounded_utf8_prefix(text: &str, max_bytes: usize) -> (&str, u64) {
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_request_resync<S>(
-    codec: Codec,
-    stream: &mut S,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
     let Some(target_document) =
-        document_for_message(document_id, client_id, document, workspace).await
+        document_for_message(document_id, ctx.client_id, ctx.document, ctx.workspace).await
     else {
         let response = file_operation_failed(
             WorkspaceError::UnknownDocument { document_id },
             None,
             Some(document_id),
         );
-        codec.write_server_message(stream, &response).await?;
+        ctx.codec
+            .write_server_message(ctx.stream, &response)
+            .await?;
         return Ok(());
     };
     let response = {
         let document = target_document.lock().await;
-        document.resync_snapshot_message_for_client(document_id, client_id)
+        document.resync_snapshot_message_for_client(document_id, ctx.client_id)
     };
-    codec.write_server_message(stream, &response).await?;
+    ctx.codec
+        .write_server_message(ctx.stream, &response)
+        .await?;
     Ok(())
 }
 
@@ -1269,25 +1274,38 @@ pub(super) fn track_pending_viewport_request(
     }
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
+/// Viewport render request fields carried by the message.
+pub(super) struct ViewportRequestParams {
+    pub(super) document_id: DocumentId,
+    pub(super) document_version: DocumentVersion,
+    pub(super) request_id: crate::protocol::ViewportRequestId,
+    pub(super) byte_start: u64,
+    pub(super) byte_end: u64,
+    pub(super) trace_id: Option<crate::protocol::PerformanceTraceId>,
+}
+
 pub(super) async fn handle_viewport_render_request<S>(
-    codec: Codec,
-    stream: &mut S,
-    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    parse_coordinator: &ParseCoordinator,
-    client_id: ClientId,
-    document_id: DocumentId,
-    document_version: DocumentVersion,
-    request_id: crate::protocol::ViewportRequestId,
-    byte_start: u64,
-    byte_end: u64,
-    trace_id: Option<crate::protocol::PerformanceTraceId>,
+    ctx: &mut ConnectionCtx<'_, S>,
+    params: ViewportRequestParams,
 ) -> Result<usize, CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let ViewportRequestParams {
+        document_id,
+        document_version,
+        request_id,
+        byte_start,
+        byte_end,
+        trace_id,
+    } = params;
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let workspace = &*ctx.workspace;
+    let parse_coordinator = ctx.parse_coordinator;
+    let client_id = ctx.client_id;
     use crate::protocol::{ViewportRenderPatch, ViewportRenderStatus};
 
     if byte_start > byte_end {
@@ -1477,66 +1495,50 @@ where
         .await
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_open_document<S>(
-    codec: Codec,
-    stream: &mut S,
-    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    parse_coordinator: &ParseCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     workspace_root_id: WorkspaceRootId,
     path: String,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let response = open_document_response(workspace, workspace_root_id, path, client_id).await;
+    let response =
+        open_document_response(ctx.workspace, workspace_root_id, path, ctx.client_id).await;
     write_document_open_response(
-        &codec,
-        stream,
+        &ctx.codec,
+        ctx.stream,
         response,
-        behavior,
-        runtime_generation,
-        workspace,
-        sdui,
-        parse_coordinator,
-        document_analysis,
-        client_id,
+        ctx.behavior,
+        ctx.runtime_generation,
+        ctx.workspace,
+        ctx.sdui,
+        ctx.parse_coordinator,
+        ctx.document_analysis,
+        ctx.client_id,
     )
     .await?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_save_document<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
     known_version: DocumentVersion,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let response = save_document_response(workspace, document_id, client_id, known_version).await;
-    codec.write_server_message(stream, &response).await?;
+    let response =
+        save_document_response(ctx.workspace, document_id, ctx.client_id, known_version).await;
+    ctx.codec
+        .write_server_message(ctx.stream, &response)
+        .await?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_reload_document<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    completion: &crate::server::completion::CompletionCoordinator,
-    language_intelligence: &LanguageIntelligenceCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
     _known_version: DocumentVersion,
     force: bool,
@@ -1544,26 +1546,23 @@ pub(super) async fn handle_reload_document<S>(
 where
     S: AsyncWrite + Unpin,
 {
-    let response = reload_document_response(workspace, document_id, client_id, force).await;
-    codec.write_server_message(stream, &response).await?;
+    let response = reload_document_response(ctx.workspace, document_id, ctx.client_id, force).await;
+    ctx.codec
+        .write_server_message(ctx.stream, &response)
+        .await?;
     if let ServerMessage::DocumentReloaded { metadata, head } = response {
-        completion.document_changed(document_id, metadata.version);
-        language_intelligence.document_changed(document_id, metadata.version);
-        document_analysis.reset_document(document_id, metadata.version, head.first_chunk);
+        ctx.completion
+            .document_changed(document_id, metadata.version);
+        ctx.language_intelligence
+            .document_changed(document_id, metadata.version);
+        ctx.document_analysis
+            .reset_document(document_id, metadata.version, head.first_chunk);
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_close_document<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    parse_coordinator: &ParseCoordinator,
-    completion: &crate::server::completion::CompletionCoordinator,
-    language_intelligence: &LanguageIntelligenceCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
     force: bool,
 ) -> Result<(), CodecError>
@@ -1571,30 +1570,32 @@ where
     S: AsyncWrite + Unpin,
 {
     let outcome = {
-        let mut workspace = workspace.lock().await;
+        let mut workspace = ctx.workspace.lock().await;
         workspace
-            .close_document(document_id, client_id, force)
+            .close_document(document_id, ctx.client_id, force)
             .await
     };
     match outcome {
         Ok(outcome) => {
             // This connection's subscriptions end immediately; the document
             // may stay alive for other connections.
-            parse_coordinator.unsubscribe_document(document_id, client_id);
-            document_analysis.unsubscribe_document(document_id, client_id);
+            ctx.parse_coordinator
+                .unsubscribe_document(document_id, ctx.client_id);
+            ctx.document_analysis
+                .unsubscribe_document(document_id, ctx.client_id);
             if outcome.closed {
                 teardown_closed_document(
                     document_id,
                     outcome.version,
-                    parse_coordinator,
-                    completion,
-                    language_intelligence,
-                    document_analysis,
+                    ctx.parse_coordinator,
+                    ctx.completion,
+                    ctx.language_intelligence,
+                    ctx.document_analysis,
                 );
             }
-            codec
+            ctx.codec
                 .write_server_message(
-                    stream,
+                    ctx.stream,
                     &ServerMessage::DocumentClosed {
                         document_id,
                         closed: outcome.closed,
@@ -1604,40 +1605,38 @@ where
         }
         Err(error) => {
             let response = file_operation_failed(error, None, Some(document_id));
-            codec.write_server_message(stream, &response).await?;
+            ctx.codec
+                .write_server_message(ctx.stream, &response)
+                .await?;
         }
     }
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_get_document_status<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let response = document_status_response(workspace, document_id, client_id).await;
-    codec.write_server_message(stream, &response).await?;
+    let response = document_status_response(ctx.workspace, document_id, ctx.client_id).await;
+    ctx.codec
+        .write_server_message(ctx.stream, &response)
+        .await?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_list_documents<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let response = document_list_response(workspace, client_id).await;
-    codec.write_server_message(stream, &response).await?;
+    let response = document_list_response(ctx.workspace, ctx.client_id).await;
+    ctx.codec
+        .write_server_message(ctx.stream, &response)
+        .await?;
     Ok(())
 }
 
@@ -1645,20 +1644,20 @@ where
 /// Every miss (validation, no grammar, no parse handler, timed-out parse)
 /// degrades to empty ranges so an advisory selection query can never block
 /// editing.
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_selection_query_request<S>(
-    codec: Codec,
-    stream: &mut S,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    document: &Arc<Mutex<DocumentState>>,
-    parse_coordinator: &ParseCoordinator,
-    runtime_generation: &RuntimeGenerationStore,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     request: &crate::protocol::SelectionQueryRequest,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let workspace = &*ctx.workspace;
+    let document = &*ctx.document;
+    let parse_coordinator = ctx.parse_coordinator;
+    let runtime_generation = ctx.runtime_generation;
+    let client_id = ctx.client_id;
     if let Err(rejection) = request.validate() {
         codec
             .write_server_message(

@@ -255,6 +255,7 @@ pub(super) fn validate_set_selection(options_json: &str) -> Result<String, JsErr
 
 /// Validate `clientSetCursorStyle` options (deny-by-default enum). All fields
 /// are optional; present-but-unknown `shape`/`blink` values error.
+#[cfg(test)]
 pub(super) fn validate_set_cursor_style(options_json: &str) -> Result<String, JsErrorBox> {
     let value = parse_options(options_json, "editor.invalid_set_cursor_style")?;
     validate_set_cursor_style_value(&value)

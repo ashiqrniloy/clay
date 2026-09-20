@@ -9,7 +9,6 @@
 - `src/packages/service.rs` — `install_from_value_at_root_with_spec`, `approve_package`, `adoption_state`, `enable` with adoption gating and replacement approval revocation, `rollback_replacement`, `enable_graph` with `verify_relation_authority`, `enable` transactionality (snapshot/restore), `force_enabled_runtime_domain_for_test`.
 - `src/packages/record/mod.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
 - `src/packages/conflict.rs` — `reconcile_enabled_conflicts` post-enable, `PackageReplaces` conflict resolution.
-- `src/server/cross_domain.rs` — `CrossDomainRequestEnvelope`, cross-domain invocation validation, `dispatch_to_domain` with provider routing.
 - `src/server/ops/packages.rs` — `op_clay_packages_load_package_by_specifier` (sync trusted-only, stamps domain in result), `op_clay_packages_load_in_package_domain` (async, bridge dispatch + absorption).
 - `src/server/js_runtime/mod.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
 - `src/server/mod.rs` — `TrustedOpState`, connected-loop references wired to `PackageService` and bridge.
@@ -117,14 +116,9 @@ When a third-party package with `replaces` relation is enabled:
 
 ## Cross-Domain Typed Invocation
 
-`src/server/cross_domain.rs` validates `clay-cross-domain-envelope-v1` requests:
+The `clay-cross-domain-envelope-v1` design validated requests at ingress: requester must be enabled ThirdParty (Trusted blocked), target enabled with declared `extension_point/version/operation`, `approval_ref` bound to a matching durable approval covered by `approval_covers`. Denial reasons: stale requester, revoked approval, wrong target/point/operation, oversize payload, forged approval_ref. Constants: max 16 pending cross-domain requests, 250ms deadline.
 
-- Requester must be enabled ThirdParty (Trusted blocked at ingress).
-- Target must be enabled with declared `extension_point/version/operation`.
-- `approval_ref` must bind to a matching durable approval.
-- Durable approval must cover the relation (`approval_covers`).
-
-Denial reasons: stale requester, revoked approval, wrong target/point/operation, oversize payload, forged approval_ref. Constants: max 16 pending cross-domain requests, 250ms deadline.
+Plan 131 deleted `src/server/cross_domain.rs` (envelope types, validator, tests, `CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES`) as unwired: no handler consumed a validated route, and the first-party extension surfaces it was pre-wired for never arrived. Git retains the implementation; the validator should return with the first real consumer. Live cross-domain work is the load bridge — `op_clay_packages_load_in_package_domain` dispatches a third-party load entry through `dispatch_to_domain` and `absorb_cross_domain_evaluation` merges coordinator-bound registrations into the trusted op state.
 
 ## First-Party Package Replacement
 
@@ -170,7 +164,6 @@ cargo test --test security package_conflicts::    # replacement edge approval, s
 cargo test --test protocol primitives_docs::      # op/extension/subset inventory tests, wiki doc completeness
 cargo test --lib package_approval      # PackageApprovalStore round-trip, corruption, version drift
 cargo test --lib bundled_trust         # inventory matches source, extension points match real contributions
-cargo test --lib cross_domain          # cross-domain envelope validation, requester/target checks
 cargo test --lib third_party_config    # plan 061 task 15 config verification (adoption, stale, load)
 cargo test --lib runtime_resource      # two-runtime RSS/thread/candidate reload baselines
 cargo test --lib rust_visibility       # facade allowlist parity, internal type audit

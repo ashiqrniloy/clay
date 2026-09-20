@@ -5,8 +5,10 @@
 - `src/bin/clay-server.rs`
 - `src/server/mod.rs`
 - `src/server/tab_registry.rs`
-- `src/server/connection/mod.rs`
+- `src/server/connection/mod.rs` — thin router, `ConnectionCtx` + `ctx!`, first-message handshake, identity/routing, cleanup.
+- `src/server/connection/documents.rs`, `workspace.rs`, `tabs.rs`, `menus.rs`, `runtime.rs` — per-family dispatch handlers (Plan 129).
 - `src/server/connection/delivery.rs` — Plan 119 per-lane delivery policy.
+- `src/server/connection/tests.rs` — router/handler suite incl. the `DirectHandlerState` handler harness (Plan 129).
 - `src/server/workspace/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
@@ -18,15 +20,33 @@
 
 | File | Contents |
 |------|----------|
-| `src/server/connection/mod.rs` | `handle_connection_loop` + `handle_connection_with_analysis`, identity/routing, welcome snapshot, `cleanup_connection_documents` (single cleanup owner), capability pool, and the collocated test module |
+| `src/server/connection/mod.rs` | `handle_connection_loop` (thin router, Plan 129) + `handle_connection_with_analysis`, `complete_first_message_handshake`, `ConnectionCtx` + the loop-local `ctx!` macro, identity/routing, welcome snapshot, `cleanup_connection_documents` (single cleanup owner), capability pool, and the collocated test module |
 | `src/server/connection/documents.rs` | open/save/reload/close/status/list, `dispatch_edit_operation`, parse/analysis scheduling, `classify_open_document`, `open_document_followup_messages` |
 | `src/server/connection/workspace.rs` | `OpenSelectedFile`/`AddSelectedWorkspaceRoot`, file-browser helpers, `open_selected_file` |
 | `src/server/connection/tabs.rs` | `TabCommand` arm + `send_tab_*` helpers + `TabDispatch` (Continue/CloseConnection) |
 | `src/server/connection/menus.rs` | `MenuQueryUpdate`/`Backspace`/`SelectionMove`/`Activate`/`Cancel` + `open_command_centre_session` |
-| `src/server/connection/runtime.rs` | `SduiAction`/`CommandIntent`/`RequestResync`/`DecorationViewportRequest`/completion/language-intelligence + `execute_command_intent` + persist helpers |
+| `src/server/connection/runtime.rs` | `SduiAction`/`CommandIntent`/`CompletionRequest`/`LanguageIntelligenceRequest`/`RuntimeGenerationInstalled`/duplicate `Hello`/`Agent` + `execute_command_intent` + persist helpers |
 | `src/server/connection/delivery.rs` | Per-lane delivery policy (Plan 119 SC-2): `Delivery` (State/Advice lag policy), `Flow` (Continue/Close), and one helper per broadcast or result lane (`typography`, `editor_command`, `caret_style`, `editor_layout`, `shell_preferences`, `tab_registry`, `runtime_generation`, `result`, `analysis`, `agent`) |
 
 Lane policy (Plan 119 SC-2). The loop selects over one lane per family and hands the receive outcome to that family's helper, so the loop body stays a router. `Delivery::State` lanes (`typography`, `caret_style`, `editor_layout`, `shell_preferences`, `tab_registry`, `runtime_generation`) replay the family's *current* value on a broadcast lag — a gap in state is worse than a repeated value — while `Delivery::Advice` lanes (`editor_command`) drop a lagged request, whose moment has passed. A closed sender ends the connection on those lanes; the coding-agent lane is the deliberate exception (its subscription outlives a daemon restart, and an event too large for one frame becomes an `agent.frame_too_large` diagnostic instead of a codec error that would kill the view). The decision table and the per-lane writes are unit-tested in `delivery.rs` without a connection.
+
+## Dispatch Router and Handler Context (Plan 129)
+
+Plan 129 turned `handle_connection_loop` from a 1,073-line function with 31 inline arms into a thin router. The loop keeps only what is single-owner per connection — the `select!` over subscription and result lanes, the one-time post-`Hello` identity check, the `message_requires_tab_state` route through `route_connection_tab_state`, the handshake, and the final cleanup boundary — and every `ClientMessage` arm is now one handler call in the owning submodule:
+
+| Arm family | Handler entry points |
+|------------|----------------------|
+| Documents | `documents::dispatch_edit_operation` (`Edit`, `EditorIntent`), `documents::handle_open_document`, `documents::handle_save_document`, `documents::handle_reload_document`, `documents::handle_close_document`, `documents::handle_get_document_status`, `documents::handle_list_documents`, `documents::handle_request_resync`, `documents::handle_document_chunk_request`, `documents::handle_viewport_render_request`, `documents::handle_selection_query_request` |
+| Workspace | `workspace::handle_open_selected_file`, `workspace::handle_add_selected_workspace_root`, `workspace::handle_list_launcher_entries`, `workspace::handle_remove_launcher_recent`, `workspace::handle_list_agent_settings_files`, `workspace::handle_open_agent_settings_file` |
+| Tabs | `tabs::handle_tab_command` (returns `TabDispatch::Continue` / `TabDispatch::CloseConnection`) |
+| Menus | `menus::handle_menu_query_update`, `menus::handle_menu_backspace`, `menus::handle_menu_selection_move`, `menus::handle_menu_activate`, `menus::handle_menu_cancel` |
+| Runtime | `runtime::handle_sdui_action`, `runtime::handle_command_intent`, `runtime::handle_completion_request`, `runtime::handle_language_intelligence_request`, `runtime::handle_runtime_generation_installed`, `runtime::handle_duplicate_hello`, `runtime::handle_agent_command` |
+
+Each arm builds a `ConnectionCtx` through the loop-local `ctx!` macro instead of repeating the loop's ~24-argument list. `ConnectionCtx` (`src/server/connection/mod.rs:142`) holds borrows only: the `Codec` and write half, the connection's handshake-assigned `ClientId`, the mutable routing handles (`document`, `workspace`, `bound_tab_id`, `bound_state`, `file_open_capabilities`, `menu_sessions`, `pending_viewport_patches`) and the shared coordinators (`behavior`, `runtime_generation`, `sdui`, `parse_coordinator`, `completion`, `language_intelligence`, `document_analysis`, `tab_registry` + broadcast sender, `completion_tx`, `language_intelligence_tx`, `dropped_results`). Because every field is a borrow, a handler cannot outlive the connection state it serves; `TabCommand` rebinds `document`/`workspace` through the `&mut` fields, and the subscription lanes above the dispatch keep using the loop's own locals.
+
+Authorization checks live at handler entry points. The loop performs only the handler-agnostic boundaries — the post-`Hello` identity check (`client_message_identity` against the handshake id, fail-closed before any arm runs) and the tab-state route — then hands off; each handler re-authorizes the exact resource it touches: `documents::document_for_message` resolves a document only when the routed tab owns it **and** the requesting `client_id` holds access (an unknown ID never falls back to welcome text, which would leak text across tabs), `workspace::handle_open_selected_file`/`handle_add_selected_workspace_root` consume single-use selected-path capabilities from the context pool, `tabs::handle_tab_command` goes through `TabRegistry`, and `runtime::handle_agent_command` keeps the session/approval boundary it had. A missing binding, unknown document, or spent capability is a typed rejection, never a silent no-op or an implicit grant.
+
+Future sizes (Plan 129). Extraction was also a compile-cost fix: with every arm inline in one generator, the loop's future was sized around ~21 KB and `clippy::large_futures` reported 15 library sites on the connection path (85 unique sites repo-wide including collocated test helpers) at 20–28 KB. Two changes brought every connection-path future under the 8 KB target: per-arm work now runs in its own handler future (the loop no longer carries all arms' temporaries in one frame), and the remaining cold paths are `Box::pin`ed at their call sites so a nested future is not inlined into its caller — `load_configuration_for_service`, `prepare_runtime_generation_candidate`, `commit_runtime_generation`, `reload_runtime_generation_inner`, and `execute_reload_command` in `src/server/mod.rs`; `runtime::persist_settings_change` and `runtime::execute_command_intent`; and `IpcServer::try_new` in `src/bin/clay-server.rs` (each site carries an in-code comment naming the reason). Results: zero library-code `large_futures` sites on the connection path (default threshold), zero library-code sites above 8 KB repo-wide under a temporary `clippy.toml` (`future-size-threshold = 8192`; the 13 residual sites are test modules), the loop's own future ≈ 4.3 KB, its largest awaited handlers all below 8 KB (`menus::handle_menu_activate` 6,488 B, `tabs::handle_tab_command` 5,232 B, `runtime::handle_sdui_action` 5,040 B, `runtime::handle_agent_command` 4,984 B, `runtime::handle_command_intent` 4,504 B), and the function down from 1,073 to 603 lines with a 249-line dispatch `match` (49 `.await`s, down from 68). The `#[allow(clippy::too_many_arguments)]` attributes the old per-handler argument lists forced are gone from the extracted handlers (the loop itself and the genuinely wide state-threading helpers keep theirs).
 
 ## Overview
 
@@ -120,6 +140,8 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 - Runtime reload refresh emits only follow-up behavior/decorations/diagnostics for already-open documents.
 - Runtime diagnostic publication is asynchronous bootstrap/status traffic and is never sent from Masonry paint, text-event handling, or ordinary edit acknowledgement paths.
 - Every connection-loop exit passes through `cleanup_connection_documents`; output-write failures cannot bypass document authority teardown.
+- Every dispatch arm calls exactly one family handler with a per-message `ConnectionCtx`; the loop itself keeps only subscription lanes, the identity check, tab-state routing, the handshake, and the cleanup boundary (Plan 129). A bare `pub` item is not allowed in the connection submodules — handlers are `pub(super)` or private, pinned by `tests/rust_visibility_api_mapping.rs`.
+- Authorization is re-established at handler entry (`document_for_message`, capability consumption, tab registry), never inherited from the loop's route; the context carries borrows, so no handler can escape the connection's authority scope.
 - Version fields are enforced by `DocumentState` before mutation; stale/future edits are rejected and can trigger client resync.
 
 ## Tests
@@ -132,15 +154,18 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 - `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync, region-lock rejection, and runtime reload open-document refresh coverage; `src/server/tests.rs::server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies typed construction failure, and `src/server/tests.rs::production_server_binaries_use_fallible_constructor` prevents panic-constructor regression. Plan 030 adds `src/server/tests.rs::unix_socket_is_created_with_owner_only_permissions` and `windows_pipe_creation_applies_current_user_security_descriptor`.
 - `src/client/mod.rs`: client queue tests cover selected-file and selected-folder non-edit messages, and Windows named-pipe integration tests cover deferred initial snapshot delivery, edit acknowledgement, independent per-tab welcome documents, and stale-edit resync recovery; tests are now robust to an ambient default `~/.clay/init.js` that publishes a behavior manifest.
 - `src/server/connection/delivery.rs`: unit tests pin State replay, Advice drop, closed-lane flow, agent restart survival, and oversized-event diagnostics (`cargo test --lib server::connection::delivery`).
+- `src/server/connection/tests.rs`: Plan 129's `DirectHandlerState` builds the connection state without a socket or server so extracted handlers are callable directly — `extracted_list_documents_handler_answers_without_the_loop`, `extracted_launcher_handler_answers_without_the_loop`, and `extracted_duplicate_hello_handler_rejects_without_the_loop` (`cargo test --lib server::connection`).
 - Relevant commands: `cargo test server --quiet`, `cargo test protocol --quiet`, `cargo test --all-targets`, `cargo check --all-targets`.
 
 ## Related
 
 - [Protocol Codec](protocol-codec.md)
+- [Tabs and Independent Client Views](tabs-and-clients.md) — `TabRegistry` binding that `route_connection_tab_state` and `tabs::handle_tab_command` use.
 - [Server Document State](server-document-state.md)
 - [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `RuntimeStateSnapshot` broadcast fan-out and `RuntimeGenerationInstalled` acknowledgement through existing connection tasks.
 - [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)
 - [Versioned Text Synchronization](../flows/versioned-text-synchronization.md)
 - [Document Leases and Region Locks](../flows/document-leases-and-region-locks.md)
 - `plans/005-Phase4-IPC-Client-Server-Skeleton.md`
+- `plans/129-Connection-Loop-Decomposition.md` — the Plan 090→129 extraction, handler context, and future-size work above.
 - `roadmap.md`

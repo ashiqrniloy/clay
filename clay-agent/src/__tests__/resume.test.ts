@@ -5,11 +5,12 @@
 // restores from record metadata: transcript, live context, and the
 // session's persisted provider/model (the Rust resume path writes those
 // into the per-workspace book).
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { providerDone, providerTextDelta, providerToolCall, toolCallContent, type AIProvider } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
 
 async function tempDir(): Promise<string> {
@@ -154,6 +155,208 @@ test("resumable list requires a workspace root (fail closed)", async () => {
   } finally {
     host.close();
     await rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+/** Provider: writes one relative path, then finishes. The path is relative on
+ *  purpose — it is the session's tool cwd that decides where it lands. */
+function writeOnceProvider(relativePath: string): AIProvider {
+  let turns = 0;
+  return {
+    id: "mock",
+    async *generate() {
+      turns += 1;
+      if (turns === 1) {
+        yield providerToolCall(toolCallContent("w1", "write", { path: relativePath, content: "resumed\n" }));
+        yield providerDone();
+      } else {
+        yield providerTextDelta("written");
+        yield providerDone();
+      }
+    },
+  };
+}
+
+function liveToolNames(host: ClayAgentHost, sessionId: string): string[] {
+  const live = (host as unknown as { live: Map<string, { tools: Array<{ name: string }> }> }).live.get(sessionId);
+  return (live?.tools ?? []).map((tool) => tool.name);
+}
+
+/** The live records' full-autonomy flag (what the run loop gates on). */
+function liveAutonomy(host: ClayAgentHost, sessionId: string): boolean | undefined {
+  const live = (host as unknown as { live: Map<string, { fullAutonomy?: boolean }> }).live.get(sessionId);
+  return live?.fullAutonomy;
+}
+
+/**
+ * Plan 130 A2: a resumed session's tools come from the workspace root the
+ * session was created in — the key recorded at `session.new` — never the
+ * restarted daemon's launch cwd. Tool cwd and acceptance roots are the same
+ * value (one `workspaceRoot`), so a relative write proves the whole binding,
+ * and the graft tools prove the workspace's binding was re-established for
+ * that recorded root (a restarted daemon has none).
+ */
+test("resumed session binds its tools to the recorded workspace root, not the daemon cwd", async () => {
+  const dataDir = await tempDir();
+  const recordedRoot = await tempDir();
+  const launchDir = await tempDir();
+  const configRoot = await tempDir();
+  const homeSkillsRoot = await tempDir();
+  const mcpFixture = join(process.cwd(), "src", "__tests__", "mcp-fixture-server.mjs");
+  const graftStub = join(recordedRoot, "graft-stub.sh");
+  await writeFile(graftStub, "#!/usr/bin/env bash\nprintf '{}\\n'\n", { mode: 0o755 });
+  await chmod(graftStub, 0o755);
+
+  const hostOptions = {
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+    agentConfigRoot: configRoot,
+    homeSkillsRoot,
+    graftCliPath: graftStub,
+    resolveObscuraBinary: () => undefined,
+    // Plan 130 A2: a coding session's MCP bridge is part of the same lazy
+    // activation resume has to redo, so the fixture server is allow-listed
+    // exactly as the Rust server allow-lists a real one.
+    mcpAllowList: [{ serverId: "live", command: process.execPath, args: [mcpFixture] }],
+  } as const;
+
+  const first = await ClayAgentHost.create({ ...hostOptions });
+  let sessionId: string;
+  try {
+    await first.handle("agentProfile.register", { name: "coding", instructions: "Code.", tools: ["read", "write"] });
+    const created = (await first.handle("session.new", {
+      profile: "coding",
+      provider: "mock",
+      model: "demo",
+      workspaceRoot: recordedRoot,
+    })) as { sessionId: string };
+    sessionId = created.sessionId;
+  } finally {
+    first.close();
+  }
+
+  // The daemon that resumes runs in a different directory than the session's
+  // root: without the recorded key, `process.cwd()` would be the tool cwd.
+  const previousCwd = process.cwd();
+  const writes: string[] = [];
+  let hostRef: ClayAgentHost | undefined;
+  let resumedHost: ClayAgentHost | undefined;
+  try {
+    process.chdir(launchDir);
+    resumedHost = await ClayAgentHost.create({
+      ...hostOptions,
+      mockProvider: writeOnceProvider("resumed.txt"),
+      emit: (method, params) => {
+        if (method !== "reverse") return;
+        const frame = params as { id: number; method: string; params?: Record<string, unknown> };
+        const answer = (): unknown => {
+          if (frame.method === "document.write") {
+            writes.push(String(frame.params?.path));
+            return { version: 1, saved: true, open: false };
+          }
+          if (frame.method === "document.mkdir") return {};
+          throw new Error(`unexpected reverse method: ${frame.method}`);
+        };
+        try {
+          hostRef!.resolveReverse(frame.id, { result: answer() });
+        } catch (error) {
+          hostRef!.resolveReverse(frame.id, { error: { code: -32000, message: String(error) } });
+        }
+      },
+    });
+    hostRef = resumedHost;
+    await resumedHost.handle("agentProfile.register", { name: "coding", instructions: "Code.", tools: ["read", "write"] });
+    const resumed = (await resumedHost.handle("session.resume", { sessionId })) as { workspaceRoot: string };
+    assert.equal(resumed.workspaceRoot, recordedRoot, "resume reports the recorded root, not the cwd");
+
+    // The restarted daemon re-activates the workspace's coding surfaces for
+    // that root: the graft binding (with its tool) and the MCP bridge.
+    const resumedTools = liveToolNames(resumedHost, sessionId);
+    assert.ok(
+      resumedTools.includes("graft_ask"),
+      "the resumed coding session re-binds graft for its recorded workspace",
+    );
+    assert.ok(
+      resumedTools.some((name) => name.startsWith("mcp:live:")),
+      `the resumed coding session re-connects its MCP allow-list: ${resumedTools.join(", ")}`,
+    );
+
+    // Decision 2026-09-20-2049: the resumed session restores the autonomy
+    // recorded with it — the live record the run loop gates on, not a
+    // hardcoded value — and a session created without the flag records the
+    // opt-out default (on). So the run streams through with no approval round
+    // trip and no `session.setAutonomy` call after the restart.
+    assert.equal(
+      liveAutonomy(resumedHost, sessionId),
+      true,
+      "a resumed session keeps the recorded autonomy (on by default)",
+    );
+    const run = (await resumedHost.handle("session.prompt", { sessionId, text: "write it" })) as { lastEvent: string };
+    assert.equal(run.lastEvent, "agent_finished");
+    assert.deepEqual(
+      writes,
+      [join(recordedRoot, "resumed.txt")],
+      "the relative write resolved against the recorded workspace root",
+    );
+  } finally {
+    resumedHost?.close();
+    process.chdir(previousCwd);
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(recordedRoot, { recursive: true, force: true });
+    await rm(launchDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Decision 2026-09-20-2049, the other direction: a caller who blocks autonomy
+ * is not overridden by a daemon restart. The session is created with
+ * `fullAutonomy: false`, which both gates the run before the restart and must
+ * survive it — a resumed session whose live record re-armed autonomy would
+ * silently drop the user's block.
+ */
+test("resumed session keeps a recorded autonomy block (approvals stay armed)", async () => {
+  const dataDir = await tempDir();
+  const workspace = await tempDir();
+  const hostOptions = {
+    dataDir,
+    passphrase: "pass-phrase-ok",
+    mock: true,
+    emit: () => {},
+    resolveObscuraBinary: () => undefined,
+  } as const;
+
+  const first = await ClayAgentHost.create({ ...hostOptions });
+  let sessionId: string;
+  try {
+    await first.handle("agentProfile.register", { name: "coding", instructions: "Code.", tools: ["read", "write"] });
+    const created = (await first.handle("session.new", {
+      profile: "coding",
+      provider: "mock",
+      model: "demo",
+      workspaceRoot: workspace,
+      fullAutonomy: false,
+    })) as { sessionId: string; fullAutonomy: boolean };
+    assert.equal(created.fullAutonomy, false, "session.new honours the explicit block");
+    sessionId = created.sessionId;
+  } finally {
+    first.close();
+  }
+
+  const resumedHost = await ClayAgentHost.create({ ...hostOptions });
+  try {
+    await resumedHost.handle("agentProfile.register", { name: "coding", instructions: "Code.", tools: ["read", "write"] });
+    await resumedHost.handle("session.resume", { sessionId });
+    assert.equal(
+      liveAutonomy(resumedHost, sessionId),
+      false,
+      "the recorded block survives the restart",
+    );
+  } finally {
+    resumedHost.close();
+    await rm(dataDir, { recursive: true, force: true });
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 

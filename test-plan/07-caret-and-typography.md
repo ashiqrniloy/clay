@@ -152,3 +152,23 @@ No new theme budget or token was introduced.
 ## Plan 103 Typography & Design-System Cross-Reference (2026-08-30)
 
 User typography (`UiTypographyHierarchy` and font roles configured via `setTypography`) strictly owns font family stacks and scale ratios across all UI surfaces and editor views. UI design systems cannot inject custom font families, point sizes, or concrete typography overrides. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+## Plan 129 connection-loop decomposition execution record (2026-09-20)
+
+Regression-only pass over the refactored connection dispatcher (pure refactor;
+the caret/typography path is client-local, reload-heavy steps exercise the
+`Box::pin`ed cold paths). Isolated live launch
+(`test-plan/artifacts/129-connection-loop/run-live.sh start cursorstyle`) with
+the module's `setTypography` pin plus `clientSetCursorStyle({shape:"block",
+blink:"solid", widthPx:2.5, hollow:true})`.
+
+| Check | Result | Evidence |
+|---|---|---|
+| T9 (default ligatures) | PASS live | `test-plan/artifacts/129-connection-loop/live-cursorstyle/screenshot.png`: the sample line renders with joined Fira Code ligatures (`=>` `!=` `==` `->` `::` `||` `>=` as joined glyphs) under the 16 px monospace pin. |
+| T1–T8 (caret shapes/blink) | UNRESOLVED live | AT-SPI `grab_focus` reports the editor as `focused`, but the webview never paints a caret in a screenshot without real input, so no shape was visually confirmed. The configured shape was accepted (no diagnostic). Whether a shape reaches paint is covered by the client cursor-style command + theme tests. |
+| Negative (`clientSetCursorStyle({shape:"triangle"})`) | PASS live | Deny-by-default with the named diagnostic: `clay server configuration failed [editor.invalid_set_cursor_style]: JavaScript runtime evaluation failed.` (`live-cursorstyle/invalid-style.log`); the app stayed up with the editor rendered. |
+| T20/T21/T22/T25/T26 (typography/chrome rest state) | PARTIAL live; T25 expectation stale | The 16 px monospace pin and the light/zero sample render in bounds. The captured editor paints **no line-number gutter**, contradicting T25's “gutter line numbers right-aligned in the left inset”: the full-bleed editor documents the removal (`docs/wiki/modules/react-shell.md`: “no centred measure, no line-number gutter”; `frontend/src/editor/extensions/behavior.ts`: “No line-number gutter … The manifest's gutter toggle is accepted and ignored”). Recorded as a stale test-plan expectation for a maintainer decision, not as a code defect; the step text is left unchanged so it is not silently weakened. Active-line wash/indent guides/bracket match need a caret and stay UNRESOLVED live. |
+| T23/T24/T27 (layout/theme reload overrides) | UNRESOLVED live | They need init.js edits plus a reload keystroke; the host input path dropped it. The runtime reload path itself was exercised live this execution through module 10 (`runtime.reloadConfiguration` activated from the palette, init.js re-ran, client stayed connected). |
+| Automated companions (fresh on the refactored tree) | PASS | `frontend` `npx vitest run src/editor` 9 files / 75 tests passed; `cargo test --lib connection::` 96 passed. |
+
+Artifacts: `test-plan/artifacts/129-connection-loop/live-cursorstyle/`.

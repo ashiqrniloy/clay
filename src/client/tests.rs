@@ -8,6 +8,7 @@ use tokio::io::duplex;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 
+use super::EditorEditEvent;
 #[cfg(windows)]
 use super::connect_transport;
 use super::{
@@ -18,16 +19,15 @@ use super::{
 };
 #[cfg(any(unix, windows))]
 use super::{ClientSession, connect};
-use super::{EditorCompletionRequestEvent, EditorEditEvent};
 #[cfg(any(unix, windows))]
 use crate::ipc::IpcEndpoint;
 #[cfg(any(unix, windows))]
 use crate::protocol::EditRejection;
 use crate::protocol::{
-    ActiveTypography, BehaviorManifest, ClientMessage, CommandDeclaration,
-    CompletionReplacementRange, CompletionTrigger, DocumentAccess, DocumentTextHead, EditOperation,
-    FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic, SduiActionIntent, SduiActionSource,
-    SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, ServerMessage, codec::Codec,
+    ActiveTypography, BehaviorManifest, ClientMessage, CommandDeclaration, DocumentAccess,
+    DocumentTextHead, EditOperation, FileErrorCode, PROTOCOL_VERSION, RuntimeDiagnostic,
+    SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind,
+    SduiTree, ServerMessage, codec::Codec,
 };
 #[cfg(any(unix, windows))]
 use crate::server::{IpcServer, ServerConfig};
@@ -237,158 +237,6 @@ async fn edit_event_is_enqueued_as_client_edit_message() {
             operation: EditOperation::Insert {
                 byte_offset: 2,
                 text: "x".to_string()
-            }
-        }
-    );
-}
-
-#[tokio::test]
-async fn completion_request_is_enqueued_as_non_blocking_message() {
-    let (queue, mut receiver) = ClientEditQueue::bounded(1);
-    let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
-
-    queue
-        .enqueue_completion_request(
-            EditorCompletionRequestEvent {
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 9,
-                replacement_range: CompletionReplacementRange::new(7, 9),
-                trigger: CompletionTrigger::Manual,
-            },
-            11,
-        )
-        .unwrap();
-
-    assert_eq!(
-        receiver.recv().await.unwrap(),
-        ClientMessage::CompletionRequest {
-            request: crate::protocol::CompletionRequest {
-                request_id: 11,
-                client_id: 42,
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 9,
-                replacement_range: CompletionReplacementRange::new(7, 9),
-                trigger: CompletionTrigger::Manual,
-                provider_generation: 0,
-                recent_completions: Vec::<String>::new().into_boxed_slice(),
-            }
-        }
-    );
-}
-
-#[tokio::test]
-async fn completion_request_carries_bounded_accept_recency() {
-    let (queue, mut receiver) = ClientEditQueue::bounded(1);
-    let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
-    queue.record_completion_accept("recent");
-    queue
-        .enqueue_completion_request(
-            EditorCompletionRequestEvent {
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 9,
-                replacement_range: CompletionReplacementRange::new(7, 9),
-                trigger: CompletionTrigger::Manual,
-            },
-            12,
-        )
-        .unwrap();
-    let ClientMessage::CompletionRequest { request } = receiver.recv().await.unwrap() else {
-        panic!("expected completion request");
-    };
-    assert_eq!(
-        request
-            .recent_completions
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["recent"]
-    );
-}
-
-#[tokio::test]
-async fn completion_after_local_edit_uses_optimistic_document_version() {
-    let (queue, mut receiver) = ClientEditQueue::bounded(2);
-    let queue = queue
-        .with_authority(42, &DocumentAccess::Editable { lease_id: 1 })
-        .with_confirmed_version(5);
-
-    queue
-        .enqueue_edit_event(
-            EditorEditEvent {
-                document_id: 4,
-                base_version: 5,
-                behavior_version: 6,
-                operation: EditOperation::Insert {
-                    byte_offset: 0,
-                    text: "p".to_string(),
-                },
-            },
-            10,
-        )
-        .unwrap();
-    queue
-        .enqueue_completion_request(
-            EditorCompletionRequestEvent {
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 1,
-                replacement_range: CompletionReplacementRange::new(0, 1),
-                trigger: CompletionTrigger::Manual,
-            },
-            11,
-        )
-        .unwrap();
-
-    assert!(matches!(
-        receiver.recv().await,
-        Some(ClientMessage::Edit { .. })
-    ));
-    let Some(ClientMessage::CompletionRequest { request }) = receiver.recv().await else {
-        panic!("expected completion request after edit");
-    };
-    assert_eq!(request.document_version, 6);
-}
-
-#[tokio::test]
-async fn language_intelligence_request_is_enqueued_as_non_blocking_message() {
-    use super::EditorLanguageIntelligenceRequestEvent;
-    use crate::protocol::LanguageIntelligenceFeature;
-
-    let (queue, mut receiver) = ClientEditQueue::bounded(1);
-    let queue = queue.with_authority(42, &DocumentAccess::Editable { lease_id: 1 });
-
-    queue
-        .enqueue_language_intelligence_request(
-            EditorLanguageIntelligenceRequestEvent {
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 9,
-                feature: LanguageIntelligenceFeature::Hover,
-            },
-            13,
-        )
-        .unwrap();
-
-    assert_eq!(
-        receiver.recv().await.unwrap(),
-        ClientMessage::LanguageIntelligenceRequest {
-            request: crate::protocol::LanguageIntelligenceRequest {
-                request_id: 13,
-                client_id: 42,
-                document_id: 4,
-                document_version: 5,
-                behavior_version: 6,
-                cursor_byte_offset: 9,
-                feature: LanguageIntelligenceFeature::Hover,
-                provider_generation: 0,
             }
         }
     );

@@ -1,8 +1,6 @@
 // Auto-extracted from js_runtime.rs (Plan 090 task 3). Private submodule: error family.
 use std::{error::Error, fmt};
 
-use tokio::task;
-
 use crate::protocol::RuntimeDiagnostic;
 use crate::server::configuration::ConfigurationError;
 
@@ -66,7 +64,14 @@ pub(crate) enum ClayRuntimeError {
     /// was at capacity and this stale command was dropped for a newer one. The
     /// request never reached the isolate; callers treat it as no result.
     Superseded,
-    Join(task::JoinError),
+    /// Plan 127 task 6: the command's package is not enabled at the exact
+    /// version its registration was minted for (its approval was revoked or it
+    /// was disabled). Refused host-side before any lane is touched, so every
+    /// lane and trust domain refuses identically.
+    Revoked {
+        package: String,
+        version: String,
+    },
 }
 
 impl fmt::Display for ClayRuntimeError {
@@ -86,7 +91,10 @@ impl fmt::Display for ClayRuntimeError {
                 formatter,
                 "JavaScript runtime command was superseded before it ran"
             ),
-            Self::Join(error) => write!(formatter, "JavaScript runtime task failed: {error}"),
+            Self::Revoked { package, version } => write!(
+                formatter,
+                "JavaScript runtime refused a command from revoked package `{package}@{version}`"
+            ),
         }
     }
 }
@@ -95,12 +103,12 @@ impl Error for ClayRuntimeError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Configuration(error) => Some(error),
-            Self::Join(error) => Some(error),
             Self::InvalidMainSpecifier(_)
             | Self::Runtime(_)
             | Self::Timeout
             | Self::HeapLimit
-            | Self::Superseded => None,
+            | Self::Superseded
+            | Self::Revoked { .. } => None,
         }
     }
 }
@@ -129,9 +137,11 @@ impl ClayRuntimeError {
                 "runtime.superseded",
                 "A newer request replaced this JavaScript runtime command before it ran.",
             ),
-            Self::Join(_) => RuntimeDiagnostic::error(
-                "runtime.task_failed",
-                "JavaScript runtime worker failed before configuration completed.",
+            Self::Revoked { package, version } => RuntimeDiagnostic::error(
+                "runtime.revoked",
+                format!(
+                    "JavaScript runtime refused a command from revoked package `{package}@{version}`."
+                ),
             ),
         }
     }
@@ -188,17 +198,6 @@ pub(super) fn configuration_diagnostic_message(message: &str) -> String {
     } else {
         "Configuration import rejected: only clay:* facades (clay:theme, clay:configuration, clay:keybindings, clay:packages, clay:ui, clay:commands, ...) and explicit relative .js files under the configuration root are allowed. Check the import specifier spelling.".to_string()
     }
-}
-
-/// Extract the human-readable detail from a `configuration.invalid_module: <detail>`
-/// JS error string so runtime-routed configuration errors name the rejected
-/// module/path instead of an opaque generic message.
-pub(super) fn configuration_runtime_detail(message: &str) -> Option<&str> {
-    let prefix = "configuration.invalid_module:";
-    message
-        .strip_prefix(prefix)
-        .map(str::trim)
-        .filter(|d| !d.is_empty())
 }
 
 pub(super) fn extract_clay_error_code(message: &str) -> Option<String> {

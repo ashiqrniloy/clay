@@ -13,18 +13,17 @@ use crate::{
         codec::{Codec, CodecError},
     },
     server::{
-        document::DocumentState, menu_sessions::ServerMenuSessions, sdui::StaticSduiState,
-        tab_registry::TabRegistry, workspace::WorkspaceState,
+        document::DocumentState, sdui::StaticSduiState, tab_registry::TabRegistry,
+        workspace::WorkspaceState,
     },
 };
 
 use crate::protocol::AgentServerMessage;
-use crate::server::IpcServer;
-use crate::server::TabServerState;
 use crate::server::launcher;
 
 use super::{
-    file_operation_failed, new_tab_binding_conflict_error, tab_binding_conflict_error,
+    ConnectionCtx, file_operation_failed, new_tab_binding_conflict_error,
+    tab_binding_conflict_error,
     workspace::{file_browser_snapshot_for_visibility, send_tab_file_browser_snapshot},
 };
 
@@ -168,28 +167,25 @@ pub(super) async fn open_workspace_for_bound_tab(
 
 // ---------- coordinator loop handler (Plan 090 task 2 extraction) ----------
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "tab lifecycle carries every server-owned state handle explicitly"
-)]
 pub(super) async fn handle_tab_command<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    bound_state: &Arc<std::sync::Mutex<Option<TabServerState>>>,
-    document: &mut Arc<Mutex<DocumentState>>,
-    workspace: &mut Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    tab_registry: &Arc<Mutex<TabRegistry>>,
-    tab_registry_tx: &tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
-    reload_server: Option<&IpcServer>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     command: TabCommand,
-    bound_tab_id: &mut Option<TabId>,
 ) -> Result<TabDispatch, CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let client_id = ctx.client_id;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let bound_state = ctx.bound_state;
+    let document: &mut Arc<Mutex<DocumentState>> = &mut *ctx.document;
+    let workspace: &mut Arc<Mutex<WorkspaceState>> = &mut *ctx.workspace;
+    let sdui = ctx.sdui;
+    let tab_registry = ctx.tab_registry;
+    let tab_registry_tx = ctx.tab_registry_tx;
+    let reload_server = ctx.reload_server;
+    let bound_tab_id: &mut Option<TabId> = &mut *ctx.bound_tab_id;
     match command {
         TabCommand::New { workspace_root } => {
             if bound_tab_id.is_some()

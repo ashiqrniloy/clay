@@ -109,10 +109,6 @@ pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 /// One validated three-profile typography snapshot. Family/profile limits are
 /// checked before publication; this bounds its serialized protocol envelope.
 pub const TYPOGRAPHY_PAYLOAD_BUDGET_BYTES: usize = 1024;
-/// One cross-domain extension request or result payload (inert JSON bytes).
-/// Rust-mediated only; checked before allocation-heavy parsing so a hostile
-/// sibling package cannot force unbounded buffering across the trust boundary.
-pub const CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES: usize = 8192;
 /// Maximum payload budget for one inert UI design-system contribution declaration (Plan 101).
 pub const UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 

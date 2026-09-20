@@ -15,14 +15,14 @@
 
 `GitDiscoveryService` is Clay's server-owned read-only Git status primitive. It reports Git repository root, current branch or detached HEAD, dirty state, changed-file count, and typed refresh status for known workspace roots.
 
-`GitStatusCache` sits on top of discovery. It stores one cached status per workspace root, supports explicit refresh, coalesces concurrent refreshes for the same root, polls stale entries only after `GIT_STATUS_POLL_INTERVAL`, and keeps the previous good snapshot when a later refresh fails.
+`GitStatusCache` sits on top of discovery. It stores one cached status per workspace root, supports explicit refresh, coalesces concurrent refreshes for the same root, and keeps the previous good snapshot when a later refresh fails. The periodic stale-polling path (`GIT_STATUS_POLL_INTERVAL`, `GitStatusCache::refresh_stale_workspace`, `GitDiscoveryService::discover_workspace_statuses`) currently has no production caller: plan 131 gated it `#[cfg(test)]`, and the live refresh path is the explicit `refresh_root` used by `clay:git` and command execution.
 
 Packages do not run Git. They consume `clay:git` APIs backed by this service/cache: `serverListGitStatuses()` for cached reads and `serverRefreshGitStatus({ workspaceRootId })` for explicit refresh. The first-party `@clay/git` package (`packages/git/`) is the reference consumer: it declares no permissions and publishes a sanitized read-only status panel from cached `clay:git` data.
 
 ## Flow
 
 1. `WorkspaceState::directory_roots()` returns canonical directory workspace roots.
-2. `GitDiscoveryService::discover_workspace_statuses()` starts one Tokio task per root; every discovery acquires a shared `GIT_ROOT_CONCURRENCY = 4` semaphore permit for its complete command sequence. Roots therefore run concurrently without creating unbounded Git subprocesses.
+2. The multi-root helper `GitDiscoveryService::discover_workspace_statuses()` (`#[cfg(test)]` since plan 131; production discovers one root per `discover_root_status` call) starts one Tokio task per root; every discovery acquires a shared `GIT_ROOT_CONCURRENCY = 4` semaphore permit for its complete command sequence. Roots therefore run concurrently without creating unbounded Git subprocesses.
 3. Each permitted root is canonicalized and checked as a directory before spawning anything. Its commands remain strictly sequential (`repository root` → branch/detached head → status), while completed root snapshots are sorted back by workspace-root ID so results retain authority association.
 4. The service runs a closed command table only:
    - `git --no-optional-locks rev-parse --show-toplevel`
@@ -34,7 +34,7 @@ Packages do not run Git. They consume `clay:git` APIs backed by this service/cac
 7. `GitStatusCache::list_cached()` returns current cached data without spawning Git.
 8. `GitStatusCache::refresh_root()` marks one root `Refreshing`, runs discovery without holding the cache mutex, then records `LastSuccess` or `LastError` with timestamps.
 9. Concurrent refreshes for the same root wait on a per-entry `Notify`; refreshes for different roots run independently.
-10. `GitStatusCache::refresh_stale_workspace()` refreshes only roots whose last success/error is older than `GIT_STATUS_POLL_INTERVAL`.
+10. Test-only (plan 131): `GitStatusCache::refresh_stale_workspace()` refreshes only roots whose last success/error is older than `GIT_STATUS_POLL_INTERVAL`; no production poll loop calls it.
 11. `src/server/ops/git.rs` serializes cache snapshots into the public `clay:git` facade shape.
 12. Built-in command IDs `git.listStatuses` and `git.refreshStatus` expose the same read-only data through server-first command execution.
 

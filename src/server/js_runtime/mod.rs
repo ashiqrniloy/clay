@@ -160,6 +160,11 @@ pub(crate) struct ClayJsRuntimeService {
     /// connection initial sync and lag replay.
     shell_preferences: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
     shell_preferences_state: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
+    /// Plan 130 A1: server-owned agent host handle, installed into every lane
+    /// op state (hostless services — unit harnesses, embedded runtimes — leave
+    /// it `None` and fail closed). Carried across `production_reload` and
+    /// re-installed on poison restarts, so no lane ever reads a process global.
+    agent_host: std::sync::Arc<std::sync::Mutex<Option<crate::server::agent::AgentHostHandle>>>,
 }
 
 /// Per-generation mode-activation cache with least-recently-used eviction
@@ -291,6 +296,7 @@ impl ClayJsRuntimeService {
             editor_layout_state: std::sync::Arc::clone(&current.editor_layout_state),
             shell_preferences: current.shell_preferences.clone(),
             shell_preferences_state: std::sync::Arc::clone(&current.shell_preferences_state),
+            agent_host: std::sync::Arc::clone(&current.agent_host),
         };
         // Same wiring as a fresh service: the rebuilt trusted lanes attach to
         // the carried-over channels and to the surviving third-party lanes
@@ -377,6 +383,7 @@ impl ClayJsRuntimeService {
             editor_layout_state,
             shell_preferences,
             shell_preferences_state,
+            agent_host: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         // Wire shared host channels into every lane plus the cross-domain
         // bridge: trusted general `loadPackage` of an approved third-party
@@ -536,6 +543,17 @@ impl ClayJsRuntimeService {
     /// workers start unwired, so every replacement and initial construction
     /// routes through here.
     fn wire_runtime_publishers(&self, worker: &RuntimeWorker) {
+        // Plan 130 A1: the agent handle rides the same wiring path as the
+        // other host channels, so a replacement lane (poison restart) and a
+        // reloaded lane both come up with the server's own host attached.
+        if let Some(host) = self
+            .agent_host
+            .lock()
+            .expect("agent host mutex poisoned")
+            .clone()
+        {
+            worker.op_state.set_agent_host(host);
+        }
         worker
             .op_state
             .set_editor_command_publisher(self.editor_commands.clone());
@@ -584,6 +602,14 @@ impl ClayJsRuntimeService {
         );
     }
 
+    /// Plan 130 A1: install the server-owned agent authority into this
+    /// service and every lane's op state. Called once by server construction;
+    /// `production_reload` carries the remembered handle to the rebuilt lanes.
+    pub(crate) fn set_agent_host(&self, host: crate::server::agent::AgentHostHandle) {
+        *self.agent_host.lock().expect("agent host mutex poisoned") = Some(host);
+        self.wire_domain_lanes();
+    }
+
     /// Host-owned package authority shared by both domain runtimes.
     pub(crate) fn package_service(
         &self,
@@ -623,6 +649,7 @@ impl ClayJsRuntimeService {
     }
 
     /// Evaluates a controlled server-owned ES module on the persistent runtime worker.
+    #[cfg(test)]
     pub(crate) async fn evaluate_controlled_module(
         &self,
         source: impl Into<String> + Send + 'static,
@@ -649,6 +676,7 @@ impl ClayJsRuntimeService {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn load_configuration_from_root(
         &self,
         config_root: impl Into<PathBuf> + Send + 'static,
@@ -676,6 +704,7 @@ impl ClayJsRuntimeService {
         .await
     }
 
+    #[cfg(test)]
     pub(crate) async fn load_configuration_from_root_for_document(
         &self,
         config_root: impl Into<PathBuf> + Send + 'static,
@@ -746,6 +775,12 @@ impl ClayJsRuntimeService {
         if general_lane.poisoned.swap(false, Ordering::Relaxed) {
             self.replace_domain_worker(domain, RuntimeLane::General);
         }
+        // Recovery stays ahead of the revocation gate: a lane left poisoned by
+        // an earlier command must be replaced (and its isolate dropped) no
+        // matter which command arrives next.
+        if let Some(context) = package_context.as_ref() {
+            self.ensure_package_enabled(&context.package_name, &context.package_version)?;
+        }
         let (response, receiver) = oneshot::channel();
         let command = RuntimeCommand::Evaluate {
             entry,
@@ -812,20 +847,6 @@ impl ClayJsRuntimeService {
             .lock()
             .expect("completion provider snapshot lock poisoned")
             .clone()
-    }
-
-    pub(crate) async fn load_default_configuration(
-        &self,
-    ) -> Result<Option<ClayRuntimeEvaluation>, ClayRuntimeError> {
-        let Some(config_root) = ConfigurationRuntime::default_config_root() else {
-            return Ok(None);
-        };
-        if !config_root.join("init.js").is_file() {
-            return Ok(None);
-        }
-        self.load_configuration_from_root(config_root)
-            .await
-            .map(Some)
     }
 
     pub(crate) async fn load_default_configuration_with_workspace(
@@ -1046,6 +1067,7 @@ impl ClayJsRuntimeService {
     }
 
     /// Number of generated module evaluations the open path served from V8.
+    #[cfg(test)]
     pub(crate) fn open_activation_evaluation_count(&self) -> u64 {
         self.open_activation_evaluations
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1113,6 +1135,12 @@ impl ClayJsRuntimeService {
             if lane == RuntimeLane::General {
                 self.replay_third_party_domain(domain).await?;
             }
+        }
+        // Recovery stays ahead of the revocation gate: a lane left poisoned by
+        // an earlier command must be replaced (and its isolate dropped) no
+        // matter which command arrives next.
+        if let Some((package_name, package_version)) = command.package_identity() {
+            self.ensure_package_enabled(package_name, package_version)?;
         }
         if let Err(error) = self.domain_lane_worker(domain, lane).sender.send(command) {
             self.replace_domain_worker(domain, lane);
@@ -1232,6 +1260,33 @@ impl ClayJsRuntimeService {
         package: &crate::packages::record::PackageRecord,
     ) -> crate::packages::bundled::RuntimeDomain {
         self.enabled_record_domain(&package.manifest.name, &package.manifest.version)
+    }
+
+    /// Plan 127 task 6 revocation gate: a command may only reach a lane while
+    /// the package it claims is still enabled at that exact version. Revoking
+    /// an approval/disabling a package withdraws its authority immediately, so
+    /// a registration the host still holds (coordinator table, global handler
+    /// registry, module allowlist) must fail closed — identically in every lane
+    /// and trust domain — instead of being replayed from whichever lane still
+    /// happens to hold state for it.
+    fn ensure_package_enabled(
+        &self,
+        package_name: &str,
+        package_version: &str,
+    ) -> Result<(), ClayRuntimeError> {
+        let enabled = self
+            .package_service
+            .lock()
+            .expect("package service mutex poisoned")
+            .enabled_record(package_name, package_version)
+            .is_some();
+        if enabled {
+            return Ok(());
+        }
+        Err(ClayRuntimeError::Revoked {
+            package: package_name.to_string(),
+            version: package_version.to_string(),
+        })
     }
 
     async fn invoke_parse_handler(
@@ -1442,27 +1497,6 @@ impl ClayJsRuntimeService {
         )
     }
 
-    /// Revoke previous-generation executable process authority after commit.
-    /// Coordinator registrations are cancelled separately; this tears down any
-    /// language-server children still owned by either domain of this service
-    /// (every lane, so a latency-lane provider module cannot strand one).
-    pub(crate) async fn shutdown_generation_resources(&self) -> usize {
-        let mut sessions = 0;
-        for domain in [
-            crate::packages::bundled::RuntimeDomain::Trusted,
-            crate::packages::bundled::RuntimeDomain::ThirdParty,
-        ] {
-            for lane in RuntimeLane::ALL {
-                sessions += self
-                    .domain_lane_worker(domain, lane)
-                    .op_state
-                    .shutdown_language_server_sessions()
-                    .await;
-            }
-        }
-        sessions
-    }
-
     /// Snapshot of the third-party worker's current registration payload
     /// (Plan 061 task 12): the worker survives trusted reloads, so at
     /// generation commit the server re-registers these under the new
@@ -1576,6 +1610,15 @@ impl ClayJsRuntimeService {
     #[cfg(test)]
     pub(crate) fn test_op_state(&self) -> Arc<crate::server::ops::ClayOpState> {
         Arc::clone(&self.worker().op_state)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_lane_op_state(
+        &self,
+        domain: crate::packages::bundled::RuntimeDomain,
+        lane: RuntimeLane,
+    ) -> Arc<crate::server::ops::ClayOpState> {
+        Arc::clone(&self.domain_lane_worker(domain, lane).op_state)
     }
 }
 

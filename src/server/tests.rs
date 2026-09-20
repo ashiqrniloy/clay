@@ -85,7 +85,9 @@ fn server_with_document_and_registry(
         completion: crate::server::completion::CompletionCoordinator::new(),
         document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
         language_intelligence: LanguageIntelligenceCoordinator::new(),
-        runtime_generation: RuntimeGenerationStore::initial(),
+        runtime_generation: RuntimeGenerationStore::initial(super::agent::AgentHostHandle::new(
+            super::agent::AgentHost::inert(),
+        )),
         scoped_locks: ScopedLockManager::default(),
         reload_attempt: Arc::new(Mutex::new(())),
         next_client_id: Arc::new(AtomicU64::new(1)),
@@ -131,6 +133,40 @@ async fn live_command_catalogue_contains_builtins_and_exact_shell_surface() {
     }
 
     fs::remove_dir_all(socket_path.parent().expect("socket directory")).unwrap();
+}
+
+#[tokio::test]
+async fn two_servers_in_one_process_own_independent_agent_hosts() {
+    // Plan 130 A1: agent authority is server state. The removed process-global
+    // OnceLock made the first install win, so a second server — and every test
+    // after the first full-server test — silently routed agent ops to a
+    // foreign host.
+    let first = IpcServer::new(ServerConfig::new(unique_socket_path("agent-host-first")));
+    let second = IpcServer::new(ServerConfig::new(unique_socket_path("agent-host-second")));
+
+    let first_host = first
+        .runtime_generation
+        .current_service()
+        .await
+        .test_op_state()
+        .agent_host()
+        .expect("server construction wires its own agent host into its lanes");
+    let second_host = second
+        .runtime_generation
+        .current_service()
+        .await
+        .test_op_state()
+        .agent_host()
+        .expect("server construction wires its own agent host into its lanes");
+
+    assert!(
+        !first_host.same_host(&second_host),
+        "each server must route agent ops to its own host"
+    );
+    assert!(
+        !second_host.same_host(&first_host),
+        "and neither host may be handed the other's authority"
+    );
 }
 
 #[tokio::test]

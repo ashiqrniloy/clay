@@ -2,8 +2,9 @@
 
 Manual verification for the Phase 1 agent-host configuration surfaces: the
 `clay:agent` facade controls (autonomy, compaction, search, session tree)
-documented in `examples/init.js` section 12 and the `docs/reference/clay-js-api/agent/`
-pages. Daemon-side behavior (coding tools, dirty buffers, approvals, durable
+documented in `examples/config/init.js` section 12 and the `docs/reference/clay-js-api/agent/`
+pages (the example tree moved under `examples/config/` while these rows were
+written as `examples/init.js`; the path was corrected in the plan 130 record). Daemon-side behavior (coding tools, dirty buffers, approvals, durable
 runs, workspace-scoped search, checkpoints, MCP allow-list, Obscura) is gated
 by automated suites — listed under each step as "Automated" — so the manual
 steps here cover only what a human can observe on a real build.
@@ -17,7 +18,7 @@ decision logs 2157 (autonomy default), 2158 (OM compaction defaults), 0714
 ```bash
 cargo build
 cd clay-agent && npm install && npm test   # daemon suites cited below
-cp -r examples/. /tmp/clay-agent-manual-config/   # isolated config root
+cp -r examples/config/. /tmp/clay-agent-manual-config/   # isolated config root (~/.clay)
 mkdir -p /tmp/clay-agent-manual-ws && echo "# scratch" > /tmp/clay-agent-manual-ws/notes.md
 ```
 
@@ -32,8 +33,8 @@ Most checks below are configuration-level and server-log observations.
 
 | # | Action | Expected |
 |---|--------|----------|
-| A1 | `node --check examples/init.js`; launch with the copied example tree | Check passes; server starts with no `runtime.*` diagnostics; the agent surface (the Coding Agent pane contributed by `@clay/coding-agent`) renders unchanged by this configuration work — no new panels, tools or prompts come from the Phase 1 facades. The Chat surface this row originally referenced was removed with `@clay/chat` (plan 118): no step in this module loads or expects it |
-| A2 | Read section 12 of `examples/init.js` | Documents the five `clay:agent` exports (`agent.compact`, `agent.searchSessions`, `agent.setFullAutonomy`, `agent.resumeRun`, `agent.sessionTree`) with commented examples only; the active/uncommented configuration is unchanged and copy-safe; no API keys or Obscura/MCP executable paths anywhere in the file |
+| A1 | `node --check examples/config/init.js`; launch with the copied example tree | Check passes; server starts with no `runtime.*` diagnostics; the agent surface (the Coding Agent pane contributed by `@clay/coding-agent`) renders unchanged by this configuration work — no new panels, tools or prompts come from the Phase 1 facades. The Chat surface this row originally referenced was removed with `@clay/chat` (plan 118): no step in this module loads or expects it |
+| A2 | Read section 12 of `examples/config/init.js` | Documents the six `clay:agent` exports (`agent.compact`, `agent.knowledgeSetOptions`, `agent.searchSessions`, `agent.setFullAutonomy`, `agent.resumeRun`, `agent.sessionTree`) with commented examples only; the active/uncommented configuration is unchanged and copy-safe; no API keys or Obscura/MCP executable paths anywhere in the file |
 | A3 | Cross-check the option names/enums/defaults in section 12 against `docs/reference/clay-js-api/agent/compact.md` and `set-full-autonomy.md` | `strategy` enum is `default`/`llm`/`om`; autonomy default `false` (decision 2157); `compactAfterTokens` default `80000` (decision 2158). Names match the inventory (`docs/reference/clay-js-api/api-inventory.toml`); no hidden-key alternative exists |
 | A4 | Confirm no `agent*`/`provider*` credential option exists in `clay:configuration` and no API key appears in `examples/` | Provider credentials remain vault/keychain-only (set on first use of the agent surface); grep of the example tree shows no secret-shaped strings |
 
@@ -43,13 +44,24 @@ Most checks below are configuration-level and server-log observations.
 |---|--------|----------|
 | A20 | In a protocol/client harness call `session.prompt` with `toolNames` omitted, `[]`, a known subset, an unknown name, and malformed values | Omitted keeps the full registry; `[]` grants no tools; a known subset is forwarded; unknown names fail closed before a provider turn; malformed shapes return `-32602`; `run.resume` cannot widen the original grant. This is daemon RPC behavior, not a `clay:agent` or `init.js` surface (automated: `clay-agent/src/__tests__/tool-names.test.ts`) |
 
-## Autonomy (decision 2157)
+## Autonomy (decision 2157 — **superseded in behavior**, see the plan 130 record)
+
+**Current behavior (verified 2026-09-20):** a session created without an
+explicit `fullAutonomy` is **autonomous** — approvals are opt-out
+(`clay-agent/src/host/sessions.ts`: `params.fullAutonomy !== false`, comment
+"user decision 2026-09-05"), so a gated call executes without a prompt at
+creation time. The docs/inventory still document the older
+`default:boolean=false` (decision 2157), and a **resumed** session comes up
+non-autonomous because `ensureLive` writes the live record with
+`fullAutonomy: false` while the session itself is created from the recorded
+value. The steps below keep both directions reachable and the divergence is
+recorded as a finding; a doc-or-code decision is needed.
 
 | # | Action | Expected |
 |---|--------|----------|
-| A5 | Fresh session, no `setFullAutonomy` call; trigger a gated tool call (e.g. agent writes outside workspace roots, or a shell-metacharacter command) | Approval prompt appears; the call does not execute until approved. Autonomy is off by default — no init.js key can pre-enable it (Automated: `session.setAutonomy toggles full autonomy; default stays false`, `acceptance policy: in-root writes free, out-root gated by approval`) |
-| A6 | Enable autonomy for one session via the host (`agent.setFullAutonomy({ sessionId, enabled: true })`); repeat A5's gated call | Call executes without the approval prompt; other sessions are unaffected; restarting or starting a new session is off again (autonomy is session state, not persisted config) |
-| A7 | Inspect `docs/reference/clay-js-api/agent/set-full-autonomy.md` custom properties | `default:boolean=false` documented as the autonomy default with an explicit statement that no settable "default autonomy" init.js key exists |
+| A5 | Fresh session, no `setFullAutonomy` call; trigger a gated tool call (e.g. an out-root write, or a shell-metacharacter command) | The call executes with **no** prompt: autonomy is on by default (decision 2026-09-20-2049). Gated-when-off is pinned by `acceptance policy: in-root writes free, out-root gated by approval`, `… shell metacharacters gated`; the default by `session.setAutonomy toggles full autonomy; default stays true` and by the inventory gate, which now pins the documented `default:boolean=true` **and** the daemon expression `params.fullAutonomy !== false` |
+| A6 | Block autonomy for one session via the host (`agent.setFullAutonomy({ sessionId, enabled: false })`); repeat A5's gated call | The gated call now needs an approval decision; other sessions are unaffected; autonomy is session state, not persisted config (a fresh session starts autonomous again). A **resumed** session restores the autonomy recorded with it — created autonomous it resumes autonomous, created with `fullAutonomy: false` it resumes gated (decision 2026-09-20-2049; pinned by `resumed session binds its tools to the recorded workspace root, not the daemon cwd` and `resumed session keeps a recorded autonomy block (approvals stay armed)`) |
+| A7 | Inspect `docs/reference/clay-js-api/agent/set-full-autonomy.md` custom properties | `default:boolean=true` is documented with an explicit statement that no settable "default autonomy" init.js key exists, and the page states plainly that gated calls run unprompted unless autonomy is blocked (inventory `api-inventory.toml` carries the same `default:boolean=true`). The divergence this step recorded is resolved by decision 2026-09-20-2049 |
 
 ## Compaction (decisions 2158 / defaults)
 
@@ -68,6 +80,12 @@ Most checks below are configuration-level and server-log observations.
 | A13 | Search for text that exists only inside a tool result (e.g. bytes a `read` tool returned) | No hit: raw tool output is not indexed for search (only user/assistant text blocks are) |
 | A14 | Use `agent.sessionTree({ sessionId, method: "checkout", leafId })` on a leaf that has a document checkpoint | Document buffers for that leaf are restored (buffer-only, left dirty for review) and the conversation leaf moves; the checkout does not delete the abandoned branch (Automated: `session.checkpoint captures via reverse RPC; restore failure fails checkout closed`) |
 | A15 | `fork` then `clone` a session | Fork keeps the same `sessionId` at a different leaf; clone produces a new persisted `sessionId` with copied workspace metadata (Automated: `fork and clone produce independent branches/sessions`) |
+
+## Resume binding (workspace root, not the daemon cwd)
+
+| # | Action | Expected |
+|---|--------|----------|
+| A25 | Create a coding session in workspace root B (a real graft workspace), stop the daemon, then start it again with its launch cwd set to an unrelated directory A and resume that session | The resumed session reports and uses B — `session.resume` echoes the **recorded** root, tool cwd and acceptance roots are B, never A or the daemon's cwd (a session created without a root keeps the documented `process.cwd()` fallback, which is what makes the pair meaningful). Resume also **re-activates the workspace's coding surfaces**, because a restarted daemon has neither: `environment.list` shows the graft extension loaded for B and the allow-listed MCP server re-connected, and a graft tool is offered again (Automated: `resumed session binds its tools to the recorded workspace root, not the daemon cwd`; live protocol probe: `test-plan/artifacts/130-agent-host/live-daemon.log`, whose three re-activation legs fail when the activation is removed — `live-daemon-falsify.log`) |
 
 ## MCP allow-list and Obscura (fail-closed)
 
@@ -119,10 +137,11 @@ the procedure for an input-capable host.
 | Daemon suite | PASS automated | Fresh `clay-agent npm test`: 149 pass / 0 fail / 1 skip |
 | Live GUI steps | NOT RUN | Same host ceiling as the Phase 1 record and the plan 119 record; this cut adds no user-visible chrome, so no manual step is weakenable by it |
 
-Note for a future runner: the A-step text above still says `examples/init.js`;
-the canonical example file gate-read by the suites is
-`examples/config/init.js` (`node --check` passes there). That path staleness
-predates plan 120 and is recorded here rather than reused as a pass claim.
+Note for a future runner: the A-step text above said `examples/init.js`; the
+canonical example file gate-read by the suites is `examples/config/init.js`.
+That path staleness predates plan 120 and is recorded here rather than reused as
+a pass claim. **Resolved by the plan 130 record below** (the paths are corrected
+in the steps, and `node --check examples/config/init.js` is a live PASS).
 
 ## Plan 123 work-scope record (2026-09-16, Prism 0.7 per-prompt scopes)
 
@@ -148,6 +167,35 @@ input-capable host.
 | Recall rules unchanged | PASS automated | `OM attach records an observation; recall round-trips a known id; invalid id fails closed`; `chat session without OM attach has no recall tool` (unchanged suites) |
 | Daemon suite | PASS automated | Fresh `clay-agent npm test`: 180 pass / 0 fail / 1 pre-existing skip (181 total; `spawn-agent` supervisor steps apply unchanged) |
 | Live GUI steps | NOT RUN | Same host ceiling as the plan 120 record; this cut adds no user-visible chrome, so no manual step is weakenable by it |
+
+## Plan 130 execution record (2026-09-20, agent-host decomposition + resume binding)
+
+Plan 130 injected the agent-host authority into the runtime lanes (no
+process-global handle, per-lane registration queue) and split `ClayAgentHost`
+into `clay-agent/src/host/*.ts` with every function inside the 80-line budget —
+neither is observable from the agent surface, so the pass is a regression pass
+plus the one behavioral fix (A2: a resumed coding session re-activates its
+workspace's capabilities and graft binding, new step A25).
+
+Build: `target/debug/clay` 19:36, `target/debug/clay-desktop` 19:37,
+`clay-agent/dist` 19:37, `frontend/dist` unchanged (no frontend source newer).
+Evidence: `test-plan/artifacts/130-agent-host/` (`README.md`, `live-daemon.log`,
+`live-daemon-falsify.log`, `gui/`, `automated-legs.txt`, `config-legs.txt`).
+
+| # | Result | Evidence |
+|---|--------|----------|
+| A1–A4 (config level) | PASS live | `node --check examples/config/init.js` parses; section 12 documents the six `clay:agent` exports with commented-only examples; inventory carries `compactAfterTokens:number=80000` and `default:boolean=false`; no uncommented credential option or secret-shaped string in `examples/` (`config-legs.txt`). Path/export-count corrections applied to the steps above |
+| A5–A7 (autonomy) | PASS automated + **policy decided** | Fresh daemon suite pins both directions (`session.setAutonomy toggles full autonomy; default stays true`, `acceptance policy: out-root gated by approval`); live probe toggles `session.setAutonomy` both ways on the real daemon. The divergence this pass recorded — opt-out creation vs `default:boolean=false` docs/inventory, plus `ensureLive` writing its live record with `fullAutonomy: false` — was decided by the user (decision 2026-09-20-2049): **autonomy stays the default and the docs moved to it**; the resume path now restores the recorded value. Steps A5–A7 rewritten to the resolved policy, and `clay-agent/src/__tests__/resume.test.ts` gained a falsified case (`fullAutonomy: false` at creation → resumed session stays gated) |
+| A8–A11 (compaction, OM/recall) | PASS automated + live | Fresh daemon suite; live probe `session.compact` appends a persisted compaction entry on the real daemon (3 entries, `compaction` kind present) |
+| A12–A15 (search, tree, fork/clone) | PASS automated; live for search/fork/clone | Fresh daemon suite; live probe: workspace-scoped `session.search` (hit for its own session, no hit for a phrase nothing contains), `session.resumable` scoped to the recorded root (0 rows for another root), `session.clone` (new id), `session.fork` (same id, new leaf). `session.checkpoint` needs a document backend, so it stays automated-only |
+| A16–A19 (MCP allow-list, Obscura, no vendor imports) | PASS automated + live | Fresh daemon suite; live probe: an allow-listed stdio MCP server connects (`environment.list` → `connected:true, tools:2`) and its `mcp:live:` tool is in the session's tool list, while an empty allow-list offers none; Obscura stays hidden (`CLAY_OBSCURA_BIN` empty) and no browser tool appears |
+| A20 (toolNames) | PASS automated | Fresh daemon suite (`tool-names` cases) |
+| **A25 (new: resume binding)** | **PASS live + automated** | Live protocol probe on the real build: session recorded in B (`/home/arn/Projects/clay`, a real graft repo), second daemon launched in an unrelated cwd A resumes it → `session.resume` reports B, graft skill + graft tool re-bound, `environment.list` shows the graft extension and the re-connected MCP server; the same probe with the activation removed fails exactly those three legs (`live-daemon-falsify.log`). Automated: `resumed session binds its tools to the recorded workspace root, not the daemon cwd` (fresh `npm test`, 181 pass / 1 skip / 0 fail) |
+| Authority ownership (plan 130 A1) | PASS live + automated | Server log of the live GUI run: every `agentProfile.register`/`command.register` takes the `[agent-reg] … host=live -> Ok({"queued": true})` branch (the lane's injected host resolved — the A1 ownership path) and the daemon then reports `[daemon] … applied`; automated `server::tests::two_servers_in_one_process_own_independent_agent_hosts`, `agent_protocol::initialize_handshake_carries_the_built_mcp_allow_list` (protocol/security suites) |
+| Regression suites | PASS automated | `cargo test` 0 failures (lib 1421 pass / 1 ignored; presentation 62; protocol 226; runtime 75; security 152); fresh `clay-agent npm test` 182 tests (181 pass / 1 skip / 0 fail); `frontend vitest run src/agent src/shell` 11 files / 125 tests |
+| Live GUI steps (lane, composer, palette) | PASS live via AT-SPI | Isolated launch, no input synthesis: `Agent lane` + `Message` entry + `Coding Agent Agent type` picker present at rest; palette opened through the status-bar button lists all daemon slash commands (`/resume`, `/branch`, `/fork`, … `server-first — @clay/coding-agent@0.1.0`); the `Session` scope chip narrows it to those 14 rows; lane hide/restore verified by node counts (`gui/`) |
+| Composer typing, send, approvals, session create/resume from the lane, `/resume` row activation | UNRESOLVED live | No keyboard/pointer synthesis on this host (standing ceilings: no `/dev/uinput`, no `xdotool`/`ydotool`, portal keyboard crash loop) and the isolated profile has no provider credentials (`[agent] ensure_tab_session(1): empty selection (provider='' model='')`, status bar `no provider configured · Settings · Providers`). Automated legs cited per row; A21 covers the resume semantics at protocol level |
+| Portal screenshots | NOT RETAINED | The portal surface exposes only the currently visible workspace/monitor and the isolated client opens on another workspace; the first crop (from the plan-126/129 `portal-shot.py` copy) contained an unrelated desktop window and was deleted before entering the repo. `portal-shot.py` here is hardened (AT-SPI frame first, compositor rect only when inside it, fail-closed exit 2) and refused every capture — recorded as a follow-up for the older copies |
 
 ## Plan 124 steps (the lane is Clay-owned shell chrome, 2026-09-17)
 

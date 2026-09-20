@@ -9,71 +9,27 @@ deno_op: op_clay_completion_register_completion_provider
 deno_op_path: src/server/ops/completion.rs::op_clay_completion_register_completion_provider
 name: serverRegisterCompletionProvider
 user_facing_name: Register Completion Provider
-summary: Register package-provided completion metadata and bounded static keyword/snippet items for Clay's server-side completion framework. Phase 18.19 adds inert snippet text-format, exclusive provider claim, and structured item descriptors.
+summary: Registers the completion providers declared in a package's `clay.contributions.completionProviders` manifest entries and optionally binds a package-owned handler module (`module` or `moduleSpecifier` plus `exportName`) that Clay invokes itself under the per-provider timeout. A `moduleSpecifier` handler runs on the domain's latency lane (plan 127); provider metadata, items, and budgets stay manifest-declared data.
 owner: server
-phase: Phase 18.19
+phase: Phase 27
 visibility: public
 permissions: ['completion-provider']
 key_bindings: []
 custom_properties:
-  - name: packageManifest
+  - name: module
     type: object
     default: optional
-    description: Full package.json-shaped manifest; when provided, Clay validates its completionProviders metadata directly.
-  - name: packageName
+    description: Package-owned module object whose `exportName` export receives completion requests. Clay invokes that export itself on the domain's general runtime lane; the function value never crosses the op boundary and no callback, cross-package module, command, or native handle is accepted.
+  - name: exportName
     type: string
-    default: required-without-packageManifest
-    description: Package name used for provenance when a load entry passes one provider descriptor.
-  - name: packagePrefix
+    default: provideCompletion
+    description: Export of `module` (or `moduleSpecifier`) that Clay invokes, max 128 chars. Ignored when neither handler binding is present.
+  - name: moduleSpecifier
     type: string
-    default: required-without-packageManifest
-    description: Package apiPrefix used for provider ID ownership and provenance.
-  - name: permissions
-    type: string[]
-    default: required-without-packageManifest
-    description: Must include completion-provider.
-  - name: completionProvider
-    type: object
-    default: required-without-packageManifest
-    description: Inert completion provider descriptor matching clay.contributions.completionProviders.
-  - name: providerId
-    type: string
-    default: required-without-completionProvider
-    description: Package-prefixed provider ID such as example.words.
-  - name: triggerCharacters
-    type: string[]
-    default: []
-    description: Inert trigger characters. They request completion but never execute callbacks.
-  - name: wordBoundaryChars
-    type: string[]
-    default: core-buffer-word-boundaries
-    description: Inert word-boundary characters used by providers to split tokens.
-  - name: items
-    type: (string|object)[]
-    default: []
-    description: Bounded inert static keyword/snippet items. Strings become both label and insertText with textFormat plainText; structured objects carry label, insertText, optional detail, and optional textFormat.
-  - name: exclusive
-    type: boolean
-    default: false
-    description: When true and this provider matches at the highest priority tier, suppresses all strictly lower-priority matching providers while preserving equal-priority peers.
-  - name: textFormat
-    type: "plainText"|"snippet"
-    default: "plainText"
-    description: Per-item text format. Snippet items carry inert LSP placeholder syntax expanded client-local on accept.
-  - name: priority
-    type: number
-    default: 0
-    description: Higher priority providers are considered first; ties are deterministic by ID.
-  - name: timeoutMs
-    type: number
-    default: 500
-    description: Provider timeout budget, bounded to 1..=5000.
-  - name: maxItems
-    type: number
-    default: 64
-    description: Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS.
-security: Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.
-agent_guidance: Use `completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage("@vendor/provider")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
+    default: optional
+    description: Package-owned module specifier (max 512 chars), typically `import.meta.resolve("./provider.js")`. When present the provider runs on the domain's latency lane by importing that module in the lane's isolate, so a busy parse, analysis, or configuration lane cannot delay completions. Must resolve to a loaded module owned by the registering package.
+security: Requires completion-provider permission and a package record whose `clay.contributions.completionProviders` entries passed package-record validation (package-owned IDs, unique IDs and item labels, payload budget, inert trigger/boundary metadata, item/budget bounds). Optionally accepts a package-owned `module` object or package-owned `moduleSpecifier` whose `exportName` export Clay invokes itself on the runtime worker under the per-provider timeout budget; the op validates specifier ownership against the package's loaded-module allowlist and never receives a function value, callback, or native handle. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function, client JavaScript, native handles, raw ops, non-package module references, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.
+agent_guidance: Declare provider metadata, trigger characters, items, and budgets in `package.json` under `clay.contributions.completionProviders` — this call never reads those fields from its options object. Use the options only to bind a package-owned handler module. Prefer `loadPackage("@vendor/provider")` from user configuration; do not pass callbacks, raw Deno ops, another package's modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
 lookup_tags: [js-api, completion, provider, package, phase18.19]
 app_visible: true
 help_visible: true
@@ -85,38 +41,69 @@ async: false
 
 ## Summary
 
-Registers inert completion provider metadata for a package. Phase 18.19 adds inert snippet text-format items with client-local LSP placeholder expansion, an exclusive boolean that suppresses lower-priority matching providers, and structured item descriptors (plain strings or `{ label, insertText, detail?, textFormat? }` objects). It does **not** expose JavaScript provider execution; built-in `core.bufferWords` remains the executable provider until the handler bridge is added.
+Registers the completion providers declared by the executing package's `clay.contributions.completionProviders` manifest entries, and optionally binds a package-owned handler module for those providers. Provider metadata — provider ID, trigger characters, word-boundary characters, static items, priority, exclusive claim, and budgets — is manifest data: the package record assembler validates it at enable/load time and this call registers exactly what the package declared. The call's options bind a handler: an inline package-owned `module` object with an `exportName` export, or a package-owned `moduleSpecifier` that the runtime imports itself. A `moduleSpecifier` handler additionally runs on the domain's latency lane (plan 127), so a busy parse, analysis, or configuration lane cannot delay completions.
 
 ## Description
 
-`serverRegisterCompletionProvider` is the public `clay:completion` registration API for package load entries. It requires the `completion-provider` permission, validates the package-shaped contribution through Clay's package record assembler, and records only inert provider metadata in the server runtime state. It remains callback-free: package JavaScript functions are rejected instead of being stored as executable completion handlers. Bounded `items` accept plain strings (label == insertText, textFormat plainText) or structured objects with `{ label, insertText, detail?, textFormat?: "plainText"|"snippet" }`. Snippet items carry inert LSP placeholder syntax (`$1`, `${2:default}`, `$0`) expanded client-local on accept; no provider code runs on accept. Clay retains the successful runtime evaluation's Rust snapshot and prefix-filters the active package's static items on completion requests without running package JavaScript.
+`serverRegisterCompletionProvider` is the public `clay:completion` registration API. It requires the `completion-provider` permission and an enabled package record that declares at least one `completionProviders` contribution. Calling it registers every provider the package declares — `registeredProviderCount` reports how many — with provenance and package-owned provider IDs taken from the manifest. The Rust snapshot recorded from this registration is what completion requests are served against; the connection path prefix-filters the active package's static items without running package JavaScript.
+
+Executable functions are never passed across the boundary. A JS-backed provider supplies a package-owned `module` object (or a package-owned `moduleSpecifier`) plus an `exportName`; Clay invokes that export itself on the domain's runtime lane under the per-provider timeout. An inline `module` stays on the domain's general lane; a `moduleSpecifier` is materialized by importing the module inside the domain's latency lane, so it cannot be blocked behind package load entries, parse handlers, or document analyzers running on the general lane.
+
+Provider metadata follows the manifest contract: bounded `items` accept plain strings (label == insertText, textFormat plainText) or structured objects with `{ label, insertText, detail?, textFormat?: "plainText"|"snippet" }`. Snippet items carry inert LSP placeholder syntax (`$1`, `${2:default}`, `$0`) expanded client-local on accept; no provider code runs on accept. Budgets (`budgets.timeoutMs`, `budgets.maxItems`), `priority`, `exclusive`, `triggerCharacters`, and `wordBoundaryChars` are declared in the manifest entry; see the package authoring contract.
 
 ## When to use
 
-Use this API from a package load entry that declares completion provider metadata. End-user configuration should normally use `loadPackage("@vendor/provider")`; it should not pass executable callbacks or provider functions directly.
+Use this API from a package load entry that needs a handler bound to its declared completion providers, or when a package that registers at runtime must (re)register its manifest-declared provider metadata. Metadata-only providers need no call at all when the host applies the manifest record itself; end-user configuration should use `loadPackage("@vendor/provider")`.
 
 ## JavaScript usage
+
+Metadata-only registration (the package declares its providers in `package.json` and ships no executable handler):
 
 ```ts
 import { serverRegisterCompletionProvider } from "clay:completion";
 
-serverRegisterCompletionProvider({
-  packageName: "@vendor/words",
-  packageVersion: "0.1.0",
-  packagePrefix: "words",
-  permissions: ["completion-provider"],
-  providerId: "words.buffer",
-  triggerCharacters: ["."],
-  wordBoundaryChars: [".", ",", ";"],
-  items: ["const", "function", { label: "fn", insertText: "fn ${1:name}(${2:args}) {\n\t$0\n}", textFormat: "snippet", detail: "function" }],
-  exclusive: false,
-  priority: 0,
-  timeoutMs: 50,
-  maxItems: 50
-});
+serverRegisterCompletionProvider({});
 ```
 
-A package may also pass its full `packageManifest` when the manifest declares `clay.contributions.completionProviders`.
+JS-backed provider bound to a package-owned module that runs on the domain's latency lane:
+
+```ts
+import { serverRegisterCompletionProvider } from "clay:completion";
+import * as completionModule from "./completion.js";
+
+export default function load() {
+  serverRegisterCompletionProvider({
+    module: completionModule,
+    moduleSpecifier: import.meta.resolve("./completion.js"),
+    exportName: "provideCompletion"
+  });
+}
+```
+
+The matching manifest contribution carries the inert metadata:
+
+```json
+{
+  "clay": {
+    "apiPrefix": "words",
+    "permissions": ["completion-provider"],
+    "contributions": {
+      "completionProviders": [{
+        "id": "words.buffer",
+        "priority": 0,
+        "exclusive": false,
+        "triggerCharacters": ["."],
+        "wordBoundaryChars": [".", ","],
+        "items": [
+          "const",
+          { "label": "fn", "insertText": "fn ${1:name}(${2:args}) {\n\t$0\n}", "textFormat": "snippet", "detail": "function" }
+        ],
+        "budgets": { "timeoutMs": 500, "maxItems": 64 }
+      }]
+    }
+  }
+}
+```
 
 ## Example
 
@@ -126,11 +113,17 @@ import { loadPackage } from "clay:packages";
 await loadPackage("@vendor/words");
 ```
 
-The resolver validates and loads the package load entry; the load entry then calls `serverRegisterCompletionProvider` with inert metadata.
+The resolver validates and loads the package; the host-enabled record supplies the provider metadata that this API registers.
 
 ## Options
 
-Pass either `packageManifest` or package context fields plus one inert provider descriptor. `completionProvider` and `contribution` accept the same descriptor shape; top-level `providerId`, trigger, boundary, static-item, priority, timeout, and item-cap fields are normalized into that descriptor.
+`serverRegisterCompletionProvider({ module?, moduleSpecifier?, exportName? })`:
+
+- `module`: package-owned module object whose `exportName` export receives completion requests. Bound as an inline handler on the domain's general lane.
+- `moduleSpecifier`: package-owned module specifier (max 512 chars, e.g. `import.meta.resolve("./provider.js")`). The latency lane imports it and invokes `exportName` there; it must resolve to a loaded module owned by the registering package. Omitting both handler bindings registers metadata only.
+- `exportName`: handler export name, default `"provideCompletion"`, max 128 chars, read only when `module` or `moduleSpecifier` is present.
+
+Provider metadata is not an option of this call. Fields such as `providerId`, `triggerCharacters`, `triggers`, `wordBoundaryChars`, `items`, `exclusive`, `textFormat`, `priority`, `timeoutMs`, `maxItems`, `packageManifest`, `packageName`, `packagePrefix`, `permissions`, `completionProvider`, and `contribution` are ignored here — declare them in `clay.contributions.completionProviders` (see [Creating Packages: completion providers](../../packages/creating-packages.md#phase-1811-authoring-contract-completion-providers)). Passing an unknown field does not widen authority: nothing in this call grants a provider any capability beyond the manifest record it was enabled with. The op additionally rejects the executable/raw authority fields `handler`, `callback`, `complete`, `function`, `clientJavaScript`, `nativeHandle`, and `rawOps`, and range-checks a `timeoutMs` option when present (1..=5000); the effective timeout is the manifest budget.
 
 ## Key bindings
 
@@ -138,42 +131,31 @@ This API has no default key bindings. Manual completion triggering is handled se
 
 ## Custom properties
 
-- `packageManifest`: full package manifest with `clay.contributions.completionProviders`.
-- `packageName`: package name used for provenance without `packageManifest`.
-- `packageVersion`: package version used for provenance without `packageManifest`.
-- `packagePrefix`: package `apiPrefix` used for provider ownership and provenance.
-- `permissions`: required permissions must include `completion-provider`.
-- `completionProvider`: inert completion provider descriptor.
-- `contribution`: alias for `completionProvider`.
-- `providerId`: package-owned provider ID.
-- `triggerCharacters`: inert trigger metadata.
-- `triggers`: optional wrapper for trigger characters.
-- `wordBoundaryChars`: inert word-boundary metadata.
-- `items`: bounded unique static entries. Plain strings become both label and insertText as plainText; structured objects carry { label, insertText, detail? (optional, bounded), textFormat? ("plainText" or "snippet") }. Snippet items use inert LSP placeholder syntax expanded client-local on accept.
-- `exclusive`: when `true` and this provider is the highest-priority match for a request, suppresses all strictly lower-priority matching providers. Equal-priority peers remain. Default `false`.
-- `textFormat`: per-item format ("plainText" or "snippet"). Only structured items carry an explicit textFormat; plain-string items default to "plainText". Mixing plainText and snippet items in one provider is rejected.
-- `priority`: deterministic provider priority.
-- `timeoutMs`: provider timeout budget.
-- `maxItems`: provider result item cap.
+- `module`: optional package-owned module object whose `exportName` export receives the completion request (never a cross-package module, callback, or native handle). Bound on the general lane.
+- `exportName`: handler export on `module`/`moduleSpecifier`, default `"provideCompletion"`, max 128 chars.
+- `moduleSpecifier`: optional package-owned module specifier (max 512 chars, e.g. `import.meta.resolve("./provider.js")`) that routes the provider to the latency lane by module import. Must resolve to a loaded module owned by the registering package.
+
+Provider ID, triggers, items, `exclusive`, `textFormat`, `priority`, and budgets (`timeoutMs`, `maxItems`) are package.json contribution fields, documented in [Creating Packages](../../packages/creating-packages.md#phase-1811-authoring-contract-completion-providers), not call options.
 
 ## Return and async behavior
 
-Returns a synchronous registration summary with `packageName`, `packageVersion`, `packagePrefix`, `registeredProviderCount`, provider IDs, and `runtimeBridge: false`. Registration is load/reload-time work; completion request scheduling and result publication remain server-side cancellable UI-reactive work.
+Returns a synchronous registration summary with `packageName`, `packageVersion`, `packagePrefix`, `registeredProviderCount`, the registered `providers` IDs, `tokens` (empty unless a handler was bound), `exportName`, and `runtimeBridge` (`true` when a `module` was passed, `false` otherwise). Registration is load/reload-time work; completion request scheduling and result publication remain server-side cancellable UI-reactive work.
 
 ## Errors
 
-- `completion.invalid_provider`: options are malformed, missing `completion-provider`, use a non-package-owned provider ID, duplicate or exceed static item bounds, exceed budgets, or include prohibited authority fields.
-- `completion.registration_failed`: duplicate provider metadata was already registered in the current runtime evaluation state.
+- `completion.invalid_provider`: options are malformed, the executing package lacks `completion-provider`, the package declares no `completionProviders` contribution, a prohibited executable/raw authority field is present, `timeoutMs` is outside 1..=5000, or `moduleSpecifier` does not resolve to a loaded module owned by the registering package.
+- `completion.invalid_provider: module export <name> must be a function`: an inline `module` was passed without a callable `exportName` export.
+- `completion.registration_failed`: provider metadata was already registered in the current runtime evaluation state (duplicate IDs inside one evaluation or generation).
 
 ## Permissions and security
 
-The facade and op reject executable fields including `handler`, `callback`, `complete`, `function`, and `module`, plus `clientJavaScript`, `nativeHandle`, `rawOps`, and `snippets`. Requires: `completion-provider`. Snippet items (`textFormat: "snippet"`) carry inert LSP placeholder syntax only; they are data, not executable code. server-side validation checks package permission declarations, provider ID ownership, duplicate IDs/items, trigger metadata, static item field/count bounds, and timeout/item budgets. Completion provider metadata grants only that registration capability. It does not grant filesystem, network, shell, AI mutation authority, WASM, workspace index, extension loading authority, client-side JavaScript authority, raw-op, native widget, package manager, or command execution authority.
+The facade and op reject executable fields including `handler`, `callback`, `complete`, and `function`, plus `clientJavaScript`, `nativeHandle`, and `rawOps`. Requires: `completion-provider`, plus a package record whose `completionProviders` contributions passed package-record validation (package-owned IDs, unique IDs, unique item labels, payload budget, inert trigger/boundary metadata, `budgets.timeoutMs` within 1..=5000 and `budgets.maxItems` within `1..=COMPLETION_RESULT_MAX_ITEMS`). A JS-backed provider passes a package-owned `module` object or a package-owned `moduleSpecifier`; the op validates `moduleSpecifier` ownership against the package's loaded module allowlist before storing it, and the runtime imports and invokes the handler itself, so no function value crosses the boundary. Snippet items (`textFormat: "snippet"`) carry inert LSP placeholder syntax only; they are data, not executable code. Completion provider metadata grants only that registration capability. It does not grant filesystem, network, shell, AI mutation authority, WASM, workspace index, extension loading authority, client-side JavaScript authority, raw-op, native widget, package manager, or command execution authority.
 
-Local typing, paint, layout, scroll, pointer, and text-event handlers never run package provider JavaScript.
+Local typing, paint, layout, scroll, pointer, and text-event handlers never run package provider JavaScript: provider handlers execute on the domain runtime worker (general lane for an inline `module`, latency lane for a `moduleSpecifier`) as cancellable UI-reactive work with a per-request timeout.
 
 ## Agent guidance
 
-Prefer `loadPackage("@vendor/provider")` from user configuration. Package load entries may call this API with inert provider metadata. Do not pass callbacks, raw ops, module objects, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
+Declare provider metadata in `package.json`; do not pass it as call options. Use `module` for an inline package-owned handler on the general lane and `moduleSpecifier` for a handler that must stay responsive while the general lane is busy. Prefer `loadPackage("@vendor/provider")` from user configuration. Do not pass callbacks, raw ops, another package's module objects, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.
 
 ## Backing implementation
 
@@ -181,6 +163,7 @@ Prefer `loadPackage("@vendor/provider")` from user configuration. Package load e
 - Runtime include table: `src/server/facades.rs`
 - Deno op: `src/server/ops/completion.rs::op_clay_completion_register_completion_provider`
 - Metadata shape: `src/server/completion.rs::CompletionProviderMeta`
+- Manifest contribution contract: `src/packages/record/language.rs::parse_completion_provider_contributions`
 
 ## Lookup metadata
 

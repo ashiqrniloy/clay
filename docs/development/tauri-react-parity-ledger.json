@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated": "2026-09-19T00:00:00Z",
+  "updated": "2026-09-20T00:00:00Z",
   "native_client_frozen": true,
   "status_vocabulary": [
     "pending",
@@ -368,7 +368,8 @@
             "E36",
             "E37",
             "E38",
-            "E39"
+            "E39",
+            "E40"
           ]
         }
       ],
@@ -646,7 +647,8 @@
             "S31",
             "S32",
             "S33",
-            "S34"
+            "S34",
+            "S35"
           ]
         }
       ],
@@ -783,7 +785,8 @@
             "P52",
             "P53",
             "P54",
-            "P55"
+            "P55",
+            "P56"
           ]
         }
       ],
@@ -1115,7 +1118,9 @@
             "M7",
             "Q39",
             "Q40",
-            "Q41"
+            "Q41",
+            "Q42",
+            "Q43"
           ]
         }
       ],
@@ -1542,6 +1547,7 @@
       "migration_phase": 2,
       "current_owner": [
         "clay-agent/src/host.ts",
+        "clay-agent/src/host/*.ts",
         "src/server/ops/agent.rs",
         "runtime/js/agent.js"
       ],
@@ -1577,7 +1583,8 @@
             "A21",
             "A22",
             "A23",
-            "A24"
+            "A24",
+            "A25"
           ]
         }
       ],
@@ -1606,8 +1613,8 @@
       },
       "target_owner": "unchanged server authority; daemon-owned session runtime; Phase 2 Coding Agent package registers its profile through the facades",
       "target_tests": "clay-agent node suites + Rust protocol/inventory gates (incl. coding-agent manifest + load-entry contract) + test-plan/16",
-      "verified_automated": "clay-agent suites 49/49; protocol 203/203 incl. agent_protocol gates; inventory coverage gate pins decision 2157/2158 defaults; plan 121 toolNames and attention compiler suites covered omitted/empty/subset/unknown/malformed grants, coding-only valid-window enablement, limit-less-model skip, and over-budget fail-closed behavior",
-      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans); plan 121 A20 is daemon-only and verified through automated RPC/provider evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling"
+      "verified_automated": "clay-agent suites 182 (181 pass / 1 skip) incl. the resume workspace-binding and restored-autonomy cases; protocol 227/227 incl. agent_protocol gates; inventory coverage gate pins the decision 2157 acceptance policy, the 2158 compaction default, and the 2026-09-20-2049 autonomy default (documented default and daemon expression in one gate); plan 121 toolNames and attention compiler suites covered omitted/empty/subset/unknown/malformed grants, coding-only valid-window enablement, limit-less-model skip, and over-budget fail-closed behavior",
+      "verified_manual": "test-plan/16-agent-host.md record (2026-09-02): configuration/doc steps executed; live GUI steps standing procedure (host input ceiling as recorded in prior plans); plan 121 A20 is daemon-only and verified through automated RPC/provider evidence; plan 124 execution record (2026-09-17): canonical-config live pass, window-cropped captures in test-plan/artifacts/124-agent-lane/, chord/typing legs under the documented input-backend ceiling; plan 130 execution record (2026-09-20): live daemon protocol pass (24/24 legs) plus AT-SPI GUI pass on a fresh build, with the new A25 resume-binding step verified live and automated (module 17 C43); the agent host modules behind the class facade carry the same public surface (no JS API change)"
     },
     {
       "capability_id": "agent.codingAgent.parity",
@@ -1617,6 +1624,7 @@
       "migration_phase": 2,
       "current_owner": [
         "clay-agent/src/host.ts",
+        "clay-agent/src/host/*.ts",
         "packages/coding-agent/dist/load.js",
         "frontend/src/coding-agent/CodingAgentPanel.tsx"
       ],

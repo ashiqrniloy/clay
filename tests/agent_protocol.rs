@@ -487,14 +487,53 @@ fn package_runtime_cannot_import_a_daemon_handle() {
         !facades_src.contains("Facade::public(\"clay:agent\")"),
         "clay:agent facade must stay trusted-only (no third-party daemon access)"
     );
-    let trusted_src = read_src("src/server/ops/agent.rs");
+    // Plan 130 A1: the host comes from the lane's injected op state, and a
+    // lane without one fails closed. No process-global authority may return.
+    let agent_ops_src = read_src("src/server/ops/agent.rs");
+    let trusted_src = non_test(&agent_ops_src);
     assert!(
-        non_test(&trusted_src).contains("AgentHostHandle::global()"),
+        trusted_src.contains("agent_host()"),
+        "agent ops must resolve the server-injected host from their lane"
+    );
+    assert!(
+        trusted_src.contains("no agent host is attached"),
         "agent ops must fail closed when no agent host is wired"
+    );
+    assert!(
+        !trusted_src.contains("AgentHostHandle::global()")
+            && !trusted_src.contains("queue_package_registration"),
+        "agent ops must not reach a process-global host or queue"
     );
     assert!(
         clay::packages::manifest::RESERVED_CORE_API_DOMAINS.contains(&"agent"),
         "agent domain must be reserved"
+    );
+}
+
+#[test]
+fn agent_authority_is_server_state_not_a_process_global() {
+    // Plan 130 A1: the OnceLock authority and the process-global pending
+    // registration queue (whose "first install wins" comment admitted the
+    // hazard) must not come back. The lane queue lives in `ClayOpState` and
+    // the handle in the server's state graph.
+    let agent_src = read_src("src/server/agent.rs");
+    assert_absent(
+        &agent_src,
+        &[
+            "AGENT_HOST_AUTHORITY",
+            "PENDING_PACKAGE_REGISTRATIONS",
+            "install_global",
+        ],
+        "no process-global agent authority may exist",
+    );
+    let ops_src = read_src("src/server/ops/mod.rs");
+    assert!(
+        ops_src.contains("agent_host: Mutex<Option<crate::server::agent::AgentHostHandle>>"),
+        "the lane op state owns the agent handle"
+    );
+    assert!(
+        ops_src.contains("pending_agent_registrations"),
+        "registrations queue on the lane op state"
     );
 }
 

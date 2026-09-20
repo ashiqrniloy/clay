@@ -401,7 +401,7 @@ task.
       `.../task5-stage-exit-codes.txt`, `.../task5-heap-ratchet-evidence.log`,
       `.../task5-lane-and-queue-evidence.log`, `.../run-stages-task5.sh`.
 
-- [ ] Preserve and prove the two trust domains under the new scheduling
+- [x] Preserve and prove the two trust domains under the new scheduling
   - Acceptance Criteria:
     - Functional: all existing cross-domain denial/reload/revocation suites pass; new lanes inherit domain extensions exactly (no lane-specific op sets).
     - Performance: none.
@@ -422,8 +422,100 @@ task.
   - Test Cases to Write:
     - `reload_shares_third_party_lanes_untouched` (pooled analog of the Plan 061 reload test).
     - `revoked_package_commands_refused_per_lane`.
+    - `lanes_share_their_domain_op_set` (added: the acceptance criterion "new lanes
+      inherit domain extensions exactly (no lane-specific op sets)" needed its own
+      proof; the two named tests cover reload and revocation, not the op inventory).
+  - Outcome (2026-09-19):
+    - Files went beyond the planned "tests.rs extensions only": proving revocation
+      per lane required a host-side revocation gate, because the runtime dispatched
+      commands for a revoked/disabled package's stale registration into the lane and
+      left the refusal to whatever the generated provider module happened to call.
+    - Deliverable (Rust-mediated revocation check, one place, every lane/domain):
+      `RuntimeCommand::package_identity()` (worker.rs) derives the host-stamped
+      package identity from the registration the host minted (never a
+      package-supplied string); `ClayJsRuntimeService::ensure_package_enabled`
+      (mod.rs) requires that package to be enabled at that exact version; it runs in
+      `dispatch_to_domain` (Completion, Parse, DocumentAnalysis,
+      LanguageIntelligence, package-context Evaluate) and in
+      `evaluate_entry_for_domain` (package loads/activation), i.e. before the lane's
+      mailbox sees the command. Refusal is the new typed
+      `ClayRuntimeError::Revoked { package, version }` (Display + `runtime.revoked`
+      diagnostic); host/configuration commands carry no package identity and are
+      unaffected.
+    - Placement detail: the gate sits *after* the poisoned-lane recovery block, so a
+      lane left poisoned by an earlier command is still replaced and its isolate
+      dropped no matter which command arrives next. Moving it ahead of recovery
+      broke `third_party_poison_replay_skips_disabled_packages` (the refused
+      completion never consumed the poison flag, so no replacement and no generation
+      bump); recovery-first restores that contract.
+    - `lanes_share_their_domain_op_set`: enumerates the *running* op inventory from
+      inside all four live isolates through the real dispatch path (not a claim about
+      the wiring code): `PLAN127_LANES trusted_ops=194 third_party_ops=142
+      trusted_only=52`. Both trusted lanes and both third-party lanes install
+      identical sets; eight named privileged ops (`op_clay_runtime_ping`,
+      `op_clay_configuration_get_state`, `op_clay_documents_open_document`,
+      `op_clay_packages_load_package`, `op_clay_packages_load_in_package_domain`,
+      `op_clay_language_server_authorize`, `op_clay_modes_classify_document`,
+      `op_clay_theme_set_theme`) are absent from both third-party lanes; the service
+      started exactly `2 × JS_RUNTIME_LANES_PER_DOMAIN` workers, i.e. every lane of
+      both domains comes from one construction path (`start_domain_runtime` loops
+      `RuntimeLane::ALL`; `init_runtime_extension(domain)` has a single production
+      call site in `create_js_runtime`; only the thread name and the lane heap cap
+      differ per lane). Lane isolation is scheduling-only — the domain stays the
+      trust boundary.
+    - `revoked_package_commands_refused_per_lane`: fixture is two third-party
+      packages (one inline provider served by the general lane's global registry,
+      one module-backed provider served by the latency lane) because a single
+      registration call claims every provider a manifest declares and the lane
+      follows that call's `moduleSpecifier`. After the production CLI revocation
+      sequence (`revoke_package_approval` then `disable`, launch.rs) both lanes
+      refuse with `Revoked` naming their own package (`@vendor/lanerevoke@0.1.0`,
+      `@vendor/lanerevokelat@0.1.0`) and `workers_started` is unchanged (a refusal is
+      host-side, it replaces no lane). Baseline with the gate disabled, captured by
+      mutation: both lanes already failed closed, but only *inside* the isolate —
+      `Runtime("Error: packages.package_not_enabled: package `@vendor/lanerevoke`
+      version `0.1.0` is not enabled")` raised by the generated provider module — so
+      the pre-change refusal was untyped, lane-shaped, and dependent on that module
+      continuing to call a provenance-checking op.
+    - `reload_shares_third_party_lanes_untouched`: after `production_reload`, the
+      third-party domain generation is unchanged, `workers_started` equals exactly
+      `JS_RUNTIME_LANES_PER_DOMAIN` (only the trusted domain's lanes were rebuilt),
+      the survived registration snapshot still carries both providers, and both
+      lanes serve from their original isolates while `workers_started` stays at that
+      number (no replacement, no replay).
+    - Layering kept auditable: `disabled_package_callback_publications_fail_closed`
+      now asserts both layers — a command pushed straight to the lane's mailbox
+      (bypassing the gate, i.e. already inside the isolate) still fails closed at op
+      ingress with `packages.package_not_enabled`, while the same request through
+      `invoke_parse_handler` returns the typed `Revoked`. Neither layer lost its
+      regression coverage.
+    - Enumerated suites from decision log 2026-07-21-0001, all passing on the pooled
+      runtime: 5 cross-domain validator tests (`oversize_payload_and_bad_deadline_…`,
+      `stale_requester_and_revoked_approval_rejected`,
+      `wrong_target_point_and_operation_denied`,
+      `enabled_requester_with_expanded_scope_denied`,
+      `mismatched_result_provenance_denied`), 21 js_runtime
+      denial/module-boundary/poison/replay/reload/revocation tests (including
+      `third_party_runtime_cannot_see_trusted_ops_or_admin_modules`,
+      `third_party_cannot_import_trusted_package_modules`,
+      `third_party_package_cannot_load_other_packages`,
+      `cross_domain_load_bridge_rejects_trusted_records`,
+      `third_party_termination_replaces_only_third_party_generation`,
+      `third_party_poison_replays_approved_graph_and_restores_providers`,
+      `third_party_poison_replay_skips_disabled_packages`,
+      `package_load_entry_allowlist_revokes_owned_entries`,
+      `trusted_reload_preserves_third_party_providers`,
+      `unapproved_third_party_package_never_executes_before_adoption`), plus
+      `reload_preserves_authority_denials_and_cleans_old_lsp_worker` and the three new
+      tests: 29/29 pass.
+    - Verification: `cargo test --lib --all` (frozen tree) all seven gate stages exit
+      0; serial `--test-threads=1` lib run green (1414 passed / 1 ignored). No JS API
+      change and no op-set change (next task stays verify-only).
+    - Evidence: `code-reviews/2026-09-18-plan127-baseline/logs/task6-trust-domain-suites.log`,
+      `.../task6-serial-lib-suite.log`, `.../task6-gates.log`,
+      `.../task6-stage-exit-codes.txt`, `.../run-stages-task6.sh`.
 
-- [ ] Execute and update the manual test plan (test-plan/)
+- [x] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
     - Functional: completion/typing modules re-run on a real Linux build with a third-party package registered; record pass/fail; add a step "completions remain responsive while a package parse handler runs" if a reproducible manual trigger exists (else record as automated-only with reason).
     - Performance: steps record perceived typing latency with packages active.
@@ -440,10 +532,89 @@ task.
       - `scripts/editor-performance-smoke.sh`.
   - Test Cases to Write:
     - Manual steps as described.
+  - Outcome (2026-09-19):
+    - Modules executed/amended: **04** (new E40), **09** (new P56), **11** (new
+      Q42). No existing step was deleted or weakened; each new step is
+      referenced exactly once in the parity ledger
+      (`docs/development/tauri-react-parity-ledger.json`) and
+      `cargo test --test protocol documentation_coverage` passes (12/12).
+    - Live run shape: isolated mode-700 root, private socket, bundled packages
+      only, portal-driven input (`computer-use-linux` `activate_window` /
+      `type_text` / `press_key`), AT-SPI probe for the tree and the popup, and
+      `CLAY_PERF_PROFILE=1` + `CLAY_PERF_REPORT_DIR` for measured numbers.
+    - E16/E18/E19/E39 re-run with a package registered (bundled `@clay/rust`,
+      65 KiB `review.rs`): typing `fn live_probe` / `let value = std.` echoed
+      immediately (2,798 → 2,827 chars, caret tracked); the `.` autocomplete
+      trigger opened `list box Completions at 507,183,250x130` with rows `rust`
+      (group), `as` (selected), `fn`, `fn function snippet`, `if`, `in`; the
+      editor reported `editable,focused,has-popup`; `Enter` accepted `as`
+      (2,827 → 2,829); a second trigger reopened the popup and `Escape` closed
+      it with no text change.
+    - New live step (4 E40 + 11 Q42): a ≥1 MiB markdown document with the
+      bundled `@clay/markdown` package parse handler registered for the mode.
+      Typing 19 characters echoed immediately (806 → 825 chars, caret 19) and
+      the measured acknowledgement was `server.edit_ack` p50 0.329 ms / p95
+      0.520 ms / max 0.520 ms, with parse work continuing in the background
+      (`syntax.parse.invocations` 6, `syntax.edit_to_publish` p50 61.6 ms; cold
+      first full parse of the 1 MiB debug-build document 63.2 s, recorded as a
+      parse-side ceiling, not input latency). No `js_runtime.command.superseded`
+      / `evicted` churn, which is the intended shape: real parse commands are
+      admitted and not superseded.
+    - Completion-under-a-held-lane half: **automated-only, reason recorded**. No
+      bundled package registers a JS completion provider (live completion items
+      come from the built-in host-side Rust provider), and a third-party package
+      cannot be enabled with `parse-document`/`completion-provider` because
+      those capability grants are recorded by
+      `PackageService::authorize_package`, which has no CLI/desktop/JS surface
+      yet (bundled packages get `authorize_bundled_defaults`, language servers
+      get `authorizeLanguageServer`). The lane behaviour stays pinned by
+      `latency_lane_unblocked_by_busy_general_lane` (4.1–24.9 ms under a 100–500
+      ms general-lane hold versus the ~454 ms single-worker baseline) and the
+      rest of the plan 127 scheduling suites.
+    - New negative check (9 P56) found while reaching for that trigger: a local
+      third-party fixture package declaring `parse-document`,
+      `completion-provider`, and `mode-registration` installed and adopted
+      cleanly (`Adopted @fixture/lane 0.1.0`), then `clay package enable` failed
+      closed with `MissingCapabilityGrant { capability: CompletionProvider }`;
+      the live app started, opened `demo.lane`, echoed 9 typed characters
+      (`v1 dirty`, 38 chars), applied no fixture mode/handler/provider, and
+      surfaced only the sanitized
+      `packages.load_failed: JavaScript runtime evaluation failed.` diagnostic.
+      This is the same host-side fail-closed contract the task-6 revocation gate
+      implements, now verified end-to-end from the CLI through the live client.
+    - Host ceilings recorded (not Clay defects): `Ctrl+Space` is consumed by this
+      host's GNOME input-source switch, so the fixtures also bind `Ctrl+J`; the
+      AT-SPI probe still cannot resolve sub-second paint, so no live
+      keypress→paint number is claimed (the measured server-side numbers above
+      carry the budget claim); `portal-shot.py` needs the Clay window activated
+      first or the crop can capture another window.
+    - Artifacts: `test-plan/artifacts/127-lane-scheduling/` with `README.md`,
+      `run-live.sh` (`fixture|completion|markdown`, perf-report wiring,
+      tree-kill teardown), `store-list.py`, `probe.py`, `portal-shot.py`,
+      `init-fixture.js`, `init-markdown.js`, both fixture packages, and the
+      evidence directories `grant-gate-live/`, `live-completion/`,
+      `live-markdown-parse-handler/`.
+    - Verification: `cargo test --test protocol` 223/223 pass (includes
+      `documentation_coverage` 12/12), `cargo test --lib -- --test-threads=1`
+      1,414 passed / 1 ignored, `cargo fmt --check` clean on the frozen tree.
+      `scripts/check.sh quick` (parallel lib run) trips the pre-existing baseline
+      red `coding_agent_clean_init_one_line_activates_working_defaults` — the same
+      parallel-ordering failure recorded in tasks 1, 3, and 6 and unaffected by
+      this task (it has no `src/` diff). Evidence:
+      `test-plan/artifacts/127-lane-scheduling/gates.log`.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: no public programmatic surface added or changed (scheduling is internal); verify via phase diff; any new Rust function stays `pub(crate)`.
+      - **Amended by execution (2026-09-19):** the diff shows exactly one public
+        surface change — an additive, optional `moduleSpecifier?: string` on the
+        completion-provider and language-intelligence provider registration
+        options (`runtime/js/completion.d.ts`, `runtime/js/language.d.ts`), added
+        by task 3 so a latency lane can materialize a handler by module import.
+        Absent-by-default, so every existing call shape keeps its previous
+        behavior. The amended criterion is: no public surface may be removed,
+        renamed, or made stricter for existing callers; additive optional fields
+        must be validated, documented, and registered.
     - Performance: none.
     - Code Quality: registry/doc-guard suites pass unchanged.
     - Security: package load/activation API behavior identical.
@@ -458,8 +629,64 @@ task.
       - Decision log 2026-05-08-1509.
   - Test Cases to Write:
     - None.
+  - Outcome (2026-09-19): verified, with one corrected acceptance criterion and
+    the missing reference-doc/inventory/registry sync completed. Evidence:
+    `code-reviews/2026-09-18-plan127-baseline/task8-js-api-surface.md`.
+    - **Public surface, by diff:** exactly one change — `moduleSpecifier?: string`
+      (optional) on `ServerRegisterCompletionProviderOptions` and
+      `ServerRegisterLanguageIntelligenceProviderOptions`; 13 added lines in
+      `runtime/js/`, 0 removed. Accepted-argument handling in
+      `src/server/ops/completion.rs` (+21) and
+      `src/server/ops/language_intelligence.rs` (+23): length-bounded to 512,
+      empty treated as absent, validated with
+      `PackageLoadEntryAllowlist::is_package_module` against the registering
+      package, rejected with
+      `completion.invalid_provider`/`language.invalid_provider: moduleSpecifier must
+      resolve to a loaded module owned by the package`. The LI op accepts it
+      top-level or nested in `provider` (mirroring `exportName`); the completion
+      op reads it top-level.
+    - **No new public Rust function or type:** the `pub (fn|struct|enum)` scan over
+      `git diff b04f46b -- src/` is empty; every plan 127 function is `pub(crate)`,
+      `pub(super)`, or private. The only new `pub` items are seven budget/metric
+      constants in `src/perf/{budgets,metrics}.rs`, which follow those modules'
+      existing `pub const` convention and are read by tests and benches.
+    - **No op added, renamed, or removed**, and `runtime/js/*.js` facades are
+      unchanged by plan 127; `src/server/ops/mod.rs` gains only the internal
+      mailbox sender type for third-party dispatch.
+    - **Package load/activation API behavior unchanged:** no diff in
+      `runtime/js/packages.js`, `runtime/js/packages.d.ts`, or
+      `src/server/ops/packages.rs`; manifest schema and error codes untouched.
+      Task 6's guard hardens runtime *dispatch* admission only (typed
+      `ClayRuntimeError::Revoked` instead of an isolate-level untyped
+      `packages.package_not_enabled`), proven by module 09 P56 live plus
+      `revoked_package_commands_refused_per_lane` and
+      `disabled_package_callback_publications_fail_closed`.
+    - **Docs sync (the work this task had to add):** `module`, `exportName`, and
+      `moduleSpecifier` are now documented on the completion provider page
+      (frontmatter + Options + Custom properties + Errors + Permissions and
+      security), `moduleSpecifier` on the language-intelligence page, matching
+      entries in `docs/reference/clay-js-api/api-inventory.toml`, and a
+      regenerated `docs/generated/clay-js-api-registry.json`
+      (`cargo run --bin update-doc-registry`, diff limited to those two entries,
+      still 145 entries).
+    - **Pre-existing drift found and fixed:** the completion page claimed JS
+      provider execution was not exposed and that `module` is rejected, while
+      `runtime/js/completion.js` has accepted a package-owned `module` +
+      `exportName` since before plan 127 (baseline `src/server/completion.rs`
+      already defines `JsCompletionProviderRegistration`). Page and inventory
+      notes now describe the module bridge accurately without weakening the
+      denied-authority list the registry guard enforces.
+    - **Gates:** `cargo test --test protocol` 223/223 (includes
+      `clay_js_api_inventory`, `clay_js_doc_registry`, `clay_js_facade_layout`,
+      `documentation_coverage`, `primitives_docs`), `cargo test --test
+      presentation` 62/62, `cargo fmt --check` clean.
+    - Attribution note: plan 127's baseline tree was committed mid-plan as
+      `66648e3` ("WIP"), so `git diff 66648e3` = tasks 5–7 and `git diff
+      b04f46b` = plan 126 + tasks 1–4; the `moduleSpecifier` hunks are attributable
+      to plan 127 by their `Plan 127 P1` TSDoc and by the plan document being the
+      only one that mentions the field (`plans/126-*.md`: 0 mentions).
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: the persistent-runtime wiki page(s) document lane scheduling, bounded queues, supersession, heap-limit restoration, and the process-wide two-domain constraint (A3) with invariants and test paths.
     - Performance: wiki notes lane/queue/heap budgets and their constants.
@@ -474,9 +701,147 @@ task.
       - `docs/wiki/modules/persistent-runtime-hardening.md` (tentative — locate via index), `docs/wiki/index.md`.
   - Test Cases to Write:
     - Manual wiki review.
+  - Outcome (2026-09-19): wiki updated and manually reviewed against the code.
+    - `docs/wiki/modules/persistent-runtime-hardening.md` (the page the index
+      already linked) gained a new **Worker Lanes, Queue Bounds, and Heap
+      Restoration (plan 127)** section: lane topology table (general vs latency
+      commands and their isolate budgets), routing rules (`moduleSpecifier`
+      decides the lane at registration time; package `Evaluate` is never
+      replayed into another lane; trusted latency lane has no cross-domain
+      bridge), per-lane poison/replacement, the bounded mailbox
+      (`JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY` = 64, stale-first eviction, only
+      `Completion`/`LanguageIntelligence` supersedable, guaranteed/delta
+      commands always admitted, `js_runtime.command.superseded` /
+      `.evicted`), heap-limit restoration (`remove_near_heap_limit_callback`
+      because v8 147.4.0 has no `set_heap_limit`, live-heap clamping, no
+      ratchet inheritance), a budgets/constants table, and a dedicated
+      **Lane Isolation Is Not a Trust Boundary** subsection (domains stay the
+      boundary; lanes share a domain's op set; revocation is lane-independent
+      and fails closed with `ClayRuntimeError::Revoked`; trusted reload leaves
+      third-party lanes untouched).
+    - Test paths added to the same page (lane scheduling, lane/domain
+      invariants, queue bounds, heap restoration) plus pointers to
+      `test-plan/artifacts/127-lane-scheduling/` and
+      `code-reviews/2026-09-18-plan127-baseline/task8-js-api-surface.md`.
+    - **A3 constraint documented:** two trust domains per process, each with two
+      lanes (four persistent workers per generation); lanes are scheduling-only
+      and add isolates *inside* a domain, they never change the trust split.
+      The `RuntimeLane::General`/`Latency` split is why the old "exactly two
+      persistent runtimes" invariant had to be corrected rather than silently
+      kept.
+    - Stale current-state statements fixed in the pages that carried them, so
+      the wiki no longer contradicts the code:
+      `docs/wiki/modules/embedded-js-runtime.md` (two `JsRuntime` → two domains
+      × two lanes; `DomainRuntime` mailbox/sender description; cross-domain
+      bridge target lane; per-lane poison + replay; document-analysis poisoning;
+      invariants; worker-start description; heap-limit stop-gap and restore;
+      language-intelligence invocation lane),
+      `docs/wiki/modules/parse-coordinator.md` (JS handlers run on the general
+      lane), `docs/development/tauri-react-primitive-migration.md:256`
+      ("exactly two persistent runtimes" → two trust domains, two lanes each).
+    - Cross-links added from `docs/wiki/modules/completion-snippet-expansion.md`
+      and `docs/wiki/modules/language-intelligence.md`, and the
+      `docs/wiki/index.md` row for the hardening page now names the lanes,
+      mailbox bounds, supersession, and heap restoration.
+    - Verification: `cargo test --test protocol documentation_coverage` 12/12
+      (the wiki contract test: every evergreen page linked from the index, every
+      intra-wiki link resolves, current-state pages name existing source paths),
+      plus a manual read-through of the new section against
+      `src/server/js_runtime/{mod,worker,error}.rs`, `src/perf/{budgets,metrics}.rs`,
+      and the cited test names.
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- **Latency lane scope is provider-registration-driven, not request-driven.**
+  Only completion and language-intelligence providers registered with a
+  package-owned `moduleSpecifier` get the latency lane; inline `module`
+  providers and every parse/analysis/evaluate command stay on the general lane.
+  Chosen because replaying package `Evaluate` side effects into a second isolate
+  would duplicate file writes, language-server spawns, and registrations.
+  Upgrade path: an explicit per-command lane hint if a future provider cannot
+  ship a module specifier.
+- **Supersession is stale-first eviction, not back-pressure.** At the 64-slot
+  supersedable bound the oldest same-key work is dropped for newer work instead
+  of rejecting the new request (`ClayRuntimeError::Superseded`; no `QueueFull`
+  variant shipped). Chosen because completion/LI requests are idempotent and
+  latency-sensitive; a rejected request would surface as a failed completion
+  while the dropped one was already stale. Guaranteed and delta-carrying
+  commands are never dropped, so no document version or registration is lost.
+- **The mailbox supersedes by linear scan rather than a secondary index map.**
+  The backlog is bounded at 64 per lane, so a scan is cheaper than maintaining
+  an index; no measured hotspot.
+- **The latency lane's heap ceiling is 32 MiB** (`JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES`),
+  below the 128 MiB general limit, because latency-lane work is request-scoped
+  provider evaluation rather than package load entries or document analysis.
+- **Heap-limit restoration is unconditional after every non-poisoned
+  evaluation**, using `remove_near_heap_limit_callback(configured)` because v8
+  147.4.0 exposes no `set_heap_limit` binding, and V8 clamps the restored limit
+  to the live heap — so the effective cap can sit above the configured value
+  while garbage is uncollected. Chosen over exposing a raw `set_heap_limit`
+  path; the ratchet value is never inherited, which is the property under test.
+- **The live manual step for "completions while a package parse handler runs"
+  is half-live.** The typing half ran live; the provider-lane half is
+  automated-only because no bundled package registers a JS completion provider
+  and third-party capability grants have no user-facing surface yet (module 09
+  P56). The behavior is pinned by `latency_lane_unblocked_by_busy_general_lane`
+  and the fixture pair in `test-plan/artifacts/127-lane-scheduling/` is ready for
+  the day a grant surface exists.
+- **Plan 127 added one public JS field** (optional `moduleSpecifier` on the two
+  provider registration option types) although the plan text claimed scheduling
+  was internal-only; recorded, validated, documented, and registered rather than
+  hidden (module 8 evidence).
+- **`Ctrl+Space` is bound to completion but consumed by GNOME input-source
+  switching on this host**, so the manual fixtures also bind `Ctrl+J`; no Clay
+  behavior was weakened for the host.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+
+All five further actions were dispositioned on 2026-09-20 (see
+`plans/136-Third-Party-Capability-Grants-and-Provider-Lane-Observability.md`
+for the ones that became work).
+
+- **Third-party capability grant surface — moved to plan 136** (tasks: review
+  the grant/lane primitives, implement `packages.authorize` end to end, add the
+  host CLI verb + `inspect` output, prove the grant → provider → latency-lane
+  path with a fixture, then the standard JS API / configuration /
+  example-config / launch-test / manual-test / wiki duties). The
+  in-app GUI grant surface stays out of plan 136's scope because it is app-UI
+  work that needs the prototype → explicit approval → implementation loop; it
+  is recorded in plan 136's Further Actions. Rationale unchanged: without a
+  grant, the latency lane cannot be exercised by any non-bundled package.
+- **Completion provider reference page rewrite — completed 2026-09-20.** The
+  page no longer frames the API as "Phase 18.19 inert metadata"; it leads with
+  the registration contract that actually ships (manifest
+  `clay.contributions.completionProviders` is the metadata source; the call's
+  options are `module`, `moduleSpecifier`, `exportName`), documents the
+  ignored metadata keys and the seven rejected authority fields, records the
+  Phase 27 provenance of the manifest contract, and its `custom_properties`,
+  `security`, and `agent_guidance` frontmatter now match the op. The same
+  falsehood class was fixed in `docs/reference/packages/creating-packages.md`
+  (Phase 18.11/18.18 sections claimed package authors cannot ship a handler and
+  that `module` is rejected). `api-inventory.toml` and the generated registry
+  were resynced; `cargo test --test protocol` and `cargo fmt --check` green.
+- **Wiki contract test — completed 2026-09-20.**
+  `tests/documentation_coverage.rs::plan127_wiki_pages_describe_lane_scheduling_and_the_trust_domain_constraint`
+  pins the lane/queue/heap/A3 markers on the persistent-runtime pages, the
+  cross-links from the completion, language-intelligence, and parse-coordinator
+  pages, and fails if any evergreen wiki page restates the pre-plan-127
+  topology (one worker per domain, "exactly two persistent `JsRuntime`").
+- **Completion page `module`/`exportName` frontmatter parity — addressed where
+  it existed, guarded in plan 136.** The audit behind the rewrite found the
+  page's option list was the *inflated* side of the drift (17 documented
+  options; 3 real ones), and that `triggers` was documented although the only
+  code that read it (`trigger_characters`) is dead — a finding now recorded in
+  plan 131's dead-code task. The general guard — a non-`never` option key
+  declared in `runtime/js/*.d.ts` must appear in the inventory and the page's
+  Options section — is plan 136's "Harden the Clay JS option-surface drift
+  guard" task, which also has to clean `runtime/js/completion.d.ts` first: the
+  typings still declare eleven options the op never reads, so TypeScript
+  autocomplete leads authors into the same silent-ignore trap the page had. A
+  faithful guard needs the option-type parsing that the
+  frontmatter↔inventory↔registry equality does not do.
+- **Lane occupancy measurement — moved to plan 136** ("Measure provider lane
+  occupancy and record the lane/tuning decision"): per-lane command counters in
+  the perf summary, a fixture measurement with the general lane busy, and a
+  recorded keep-or-tune decision for `JS_RUNTIME_LANES_PER_DOMAIN` and the
+  32 MiB latency ceiling. It needs plan 136's grant surface to have real
+  third-party latency-lane work to measure.

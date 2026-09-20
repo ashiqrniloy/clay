@@ -276,14 +276,6 @@ fn required_string(value: &Value, key: &str) -> Result<String, JsErrorBox> {
         })
 }
 
-fn string_or(value: &Value, key: &str, default: &str) -> String {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or(default)
-        .to_string()
-}
-
 fn routing_policy_name(policy: &RoutingPolicy) -> &'static str {
     match policy {
         RoutingPolicy::ServerFirst => "server-first",

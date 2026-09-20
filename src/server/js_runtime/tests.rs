@@ -386,13 +386,48 @@ async fn disabled_package_callback_publications_fail_closed() {
         trace_id: None,
         request_id: None,
     };
+    // Two independent layers, asserted separately (Plan 127 task 6):
+    // 1. A command that already reached the isolate must still fail closed at
+    //    op ingress (enabled-set lookup). Dispatched straight to the lane's
+    //    mailbox so this layer is exercised even if the host gate were gone.
+    let (response, receiver) = tokio::sync::oneshot::channel();
+    assert!(
+        service
+            .domain_lane_worker(
+                crate::packages::bundled::RuntimeDomain::ThirdParty,
+                RuntimeLane::General,
+            )
+            .sender
+            .send(super::worker::RuntimeCommand::Parse {
+                registration: registration.clone(),
+                notification: notification.clone(),
+                response,
+            })
+            .is_ok(),
+        "lane accepts a pre-gate command"
+    );
+    let error = receiver
+        .await
+        .expect("worker replies")
+        .expect_err("stale package callback must fail closed");
+    assert!(
+        error.to_string().contains("packages.package_not_enabled"),
+        "in-isolate op ingress must refuse a disabled package, got {error}"
+    );
+
+    // 2. The host gate refuses the same request with a typed error before any
+    //    lane work happens.
     let error = service
         .invoke_parse_handler(registration, notification)
         .await
         .unwrap_err();
     assert!(
-        error.to_string().contains("packages.package_not_enabled"),
-        "stale package callback must fail closed, got {error}"
+        matches!(
+            &error,
+            ClayRuntimeError::Revoked { package, version }
+                if package == "@vendor/stale" && version == "0.1.0"
+        ),
+        "host-side gate must refuse the stale registration, got {error:?}"
     );
 }
 
@@ -10892,8 +10927,9 @@ async fn persisted_removed_design_system_preference_falls_back_with_a_bounded_di
 
 #[tokio::test]
 async fn agent_facade_fails_closed_without_an_attached_host() {
-    // No AgentHostHandle::install_global() call in this test process section:
-    // the facade must fail closed with a typed error, not hang or leak authority.
+    // A default service wires no agent host into its lanes (Plan 130 A1): the
+    // facade must fail closed with a typed error, not hang or leak authority —
+    // and no other test in the process can hand it one.
     let result = ClayJsRuntimeService::default()
         .evaluate_controlled_module(
             r#"
@@ -10917,17 +10953,110 @@ async fn agent_facade_fails_closed_without_an_attached_host() {
     );
 }
 
+#[tokio::test]
+async fn lane_registration_queue_fails_closed_at_capacity() {
+    // Plan 130 A1: the lane queue keeps the host queue's fail-closed ceiling,
+    // so a runaway package load entry cannot queue unbounded while a runtime is
+    // still hostless (the declaration is refused, never silently dropped).
+    let cap = crate::server::agent::PENDING_REGISTRATION_CAP;
+    let service = ClayJsRuntimeService::default();
+    let state = service.test_op_state();
+    for index in 0..cap {
+        state
+            .queue_agent_registration("agentProfile.register", serde_json::json!({ "i": index }))
+            .expect("declarations below the ceiling queue");
+    }
+    assert!(
+        state
+            .queue_agent_registration("agentProfile.register", serde_json::json!({ "i": cap }))
+            .is_err(),
+        "the declaration over the ceiling fails closed"
+    );
+    assert_eq!(state.take_pending_agent_registrations().len(), cap);
+}
+
+#[tokio::test]
+async fn registrations_queued_hostless_hand_over_to_a_late_attached_host() {
+    use crate::server::agent::AgentHostHandle;
+
+    // Plan 130 A1: a hostless runtime (embedded worker / unit harness) keeps
+    // declarations on its own lane queue and hands them to the host's pending
+    // queue when the server attaches one — the old process-global handoff, now
+    // per-lane state. Applying them stays the host's job after initialize.
+    let service = ClayJsRuntimeService::default();
+    let state = service.test_op_state();
+    state
+        .queue_agent_registration("agentProfile.register", serde_json::json!({ "name": "p" }))
+        .expect("hostless lane queues the declaration");
+    assert_eq!(
+        state.take_pending_agent_registrations().len(),
+        1,
+        "the declaration waits on the lane queue"
+    );
+    state
+        .queue_agent_registration("skill.register", serde_json::json!({ "name": "s" }))
+        .expect("hostless lane queues the declaration");
+
+    let handle = AgentHostHandle::inert();
+    let host = handle.host();
+    state.set_agent_host(handle.clone());
+
+    assert!(
+        state.take_pending_agent_registrations().is_empty(),
+        "handoff drains the lane queue"
+    );
+    assert_eq!(
+        host.pending_registration_len().await,
+        1,
+        "the remaining declaration moved to the host's own queue, in order"
+    );
+    state.set_agent_host(handle);
+    assert_eq!(
+        host.pending_registration_len().await,
+        1,
+        "re-wiring the same lane does not duplicate the handoff"
+    );
+}
+
+#[tokio::test]
+async fn agent_host_wiring_reaches_every_lane_and_stays_per_service() {
+    use crate::packages::bundled::RuntimeDomain;
+    use crate::server::js_runtime::RuntimeLane;
+
+    // Plan 130 A1: the server-owned handle reaches every lane of the service it
+    // was installed on, and no other service in the process can see it.
+    let wired = ClayJsRuntimeService::default();
+    let host = crate::server::agent::AgentHostHandle::inert();
+    wired.set_agent_host(host.clone());
+    for domain in [RuntimeDomain::Trusted, RuntimeDomain::ThirdParty] {
+        for lane in RuntimeLane::ALL {
+            let lane_host = wired
+                .test_lane_op_state(domain, lane)
+                .agent_host()
+                .expect("every lane carries the server's host");
+            assert!(
+                lane_host.same_host(&host),
+                "lane {domain:?}/{lane:?} must carry the installed host"
+            );
+        }
+    }
+
+    let hostless = ClayJsRuntimeService::default();
+    assert!(
+        hostless.test_op_state().agent_host().is_err(),
+        "a hostless service fails closed instead of reaching another service's host"
+    );
+}
+
 // ---- Phase 2 @clay/coding-agent: default init.js loading experience ----
 
-/// Registration declarations may sit in the process-global queue (hostless
-/// runtime) or in the installed host's pending queue (a parallel test
-/// installed a global handle). Tests drain both.
-async fn drain_all_pending_registrations() -> Vec<crate::server::agent::PackageRegistration> {
-    let mut drained = crate::server::agent::take_pending_package_registrations();
-    if let Ok(host) = crate::server::agent::AgentHostHandle::global() {
-        drained.extend(host.take_pending_registrations().await);
-    }
-    drained
+/// Registration declarations queued by a hostless runtime (unit harness) live
+/// on that service's own lane op state (Plan 130 A1), so a test sees exactly
+/// its own declarations — never another test's.
+fn drain_all_pending_registrations(
+    service: &ClayJsRuntimeService,
+) -> Vec<crate::server::agent::PackageRegistration> {
+    service.test_op_state().take_pending_agent_registrations()
 }
 
 /// Clean-init drill (plan 108 task 6): a fresh `init.js` whose only statement
@@ -10940,8 +11069,9 @@ async fn drain_all_pending_registrations() -> Vec<crate::server::agent::PackageR
 #[tokio::test]
 async fn coding_agent_clean_init_one_line_activates_working_defaults() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
-    // Baseline: drop declarations queued by any earlier test.
-    let _ = drain_all_pending_registrations().await;
+    let service = ClayJsRuntimeService::default();
+    // Baseline: this lane starts with an empty queue (hostless service state).
+    let _ = drain_all_pending_registrations(&service);
 
     let root = config_fixture("coding-agent-clean-init");
     fs::write(
@@ -10953,7 +11083,6 @@ await loadPackage("@clay/coding-agent");
     )
     .unwrap();
 
-    let service = ClayJsRuntimeService::default();
     let result = service
         .load_configuration_from_root(root)
         .await
@@ -10978,7 +11107,7 @@ await loadPackage("@clay/coding-agent");
     // Registration declarations queued in contract order: no skill
     // declarations (skills come from disk discovery, not the package), the
     // coding profile without a skills field, ten profile tools.
-    let drained = drain_all_pending_registrations().await;
+    let drained = drain_all_pending_registrations(&service);
     assert!(
         !drained.iter().any(|entry| entry.method == "skill.register"),
         "no hardcoded skill declaration queues; disk discovery owns skills"
@@ -11052,7 +11181,8 @@ await loadPackage("@clay/coding-agent");
 #[tokio::test]
 async fn coding_agent_double_load_is_idempotent_within_one_generation() {
     let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
-    let _ = drain_all_pending_registrations().await;
+    let service = ClayJsRuntimeService::default();
+    let _ = drain_all_pending_registrations(&service);
 
     let root = config_fixture("coding-agent-double-load");
     fs::write(
@@ -11065,7 +11195,6 @@ await loadPackage("@clay/coding-agent");
     )
     .unwrap();
 
-    let service = ClayJsRuntimeService::default();
     service
         .load_configuration_from_root(root)
         .await
@@ -11454,9 +11583,12 @@ async fn module_backed_completion_provider(
     )
     .await
     .expect("module-backed provider fixture load");
+    // The op state's harvest is cumulative across the service, so select the
+    // registration this fixture's package owns rather than the first entry.
     let registration = evaluation
         .js_completion_providers
-        .first()
+        .iter()
+        .find(|registration| registration.package.manifest.name == package_name)
         .cloned()
         .expect("fixture must register a JS completion provider");
     assert!(
@@ -11464,6 +11596,312 @@ async fn module_backed_completion_provider(
         "fixture registration must carry the resolved module specifier"
     );
     (evaluation, registration)
+}
+
+/// Plan 127 task 6 fixture: two third-party packages — one registering an
+/// inline completion provider (served by the domain's general lane from the
+/// global handler registry) and one registering a module-backed provider
+/// (served by the latency lane through module materialization) — so one test
+/// can aim commands at both lanes with real registrations. One package cannot
+/// own both shapes: a registration call claims every provider the manifest
+/// declares, and the lane follows the call's `moduleSpecifier`.
+async fn lane_provider_pair(
+    service: &ClayJsRuntimeService,
+    base: &str,
+) -> [crate::server::completion::JsCompletionProviderRegistration; 2] {
+    let approved = vec![crate::packages::permissions::PackagePermission::CompletionProvider];
+
+    // General lane: inline handler, registered into the isolate's global
+    // handler registry (no module specifier).
+    let general_name = format!("@vendor/{base}");
+    let root = config_fixture("lane-inline-provider").join(base);
+    write_loadable_package(
+        &root,
+        r#"
+        import { serverRegisterCompletionProvider } from "clay:completion";
+        export default function load() {
+          serverRegisterCompletionProvider({
+            module: {
+              provideCompletion: async () => ({
+                status: "ok",
+                items: [{ label: "inline", insertText: "inline" }]
+              })
+            }
+          });
+        }
+        "#,
+    );
+    let package_json = test_package_json(
+        &general_name,
+        base,
+        &["completion-provider"],
+        serde_json::json!({
+            "completionProviders": [{
+                "id": format!("{base}.provider"),
+                "triggerCharacters": ["."],
+                "budgets": { "timeoutMs": 2_000, "maxItems": 8 }
+            }]
+        }),
+    );
+    ensure_synthetic_package_enabled(service, package_json.clone(), approved.clone(), None);
+    let load_specifier = format!("clay://packages/{general_name}/dist/load.js");
+    service
+        .test_op_state()
+        .load_entry_allowlist()
+        .record_for_package(
+            &load_specifier,
+            root.join("dist/load.js"),
+            root.clone(),
+            Some(&general_name),
+        );
+    let evaluation = evaluate_as_package(
+        service,
+        package_json,
+        approved.clone(),
+        &format!("const m = await import({load_specifier:?}); await m.default();"),
+    )
+    .await
+    .expect("inline provider fixture load");
+    let inline = evaluation
+        .js_completion_providers
+        .iter()
+        .find(|registration| registration.package.manifest.name == general_name)
+        .cloned()
+        .expect("inline fixture must register a provider");
+
+    // Latency lane: the module-backed registration shape the analyzer
+    // precedent and Plan 127 P1 introduced.
+    let latency_prefix = format!("{base}lat");
+    let (_, module_backed) = module_backed_completion_provider(
+        service,
+        &format!("@vendor/{latency_prefix}"),
+        &latency_prefix,
+        r#"
+        export function provideCompletion(_request, _window) {
+          return { status: "ok", items: [{ label: "module", insertText: "module" }] };
+        }
+        "#,
+    )
+    .await;
+
+    assert!(inline.module_specifier.is_none());
+    assert!(module_backed.module_specifier.is_some());
+    [inline, module_backed]
+}
+
+/// Plan 127 task 6: a registration left behind by a revoked/disabled package is
+/// refused identically at every lane. The host gate authenticates the command's
+/// package identity before the command reaches a lane, so the refusal is typed
+/// (`Revoked`) and costs no isolate work. Baseline with the gate disabled: both
+/// lanes already failed closed, but only inside the isolate, through whichever
+/// op the generated provider module happened to call
+/// (`Runtime("Error: packages.package_not_enabled ...")`) — neither typed nor
+/// lane-independent, and only reachable while that generated module keeps
+/// checking provenance.
+#[tokio::test]
+async fn revoked_package_commands_refused_per_lane() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+    let providers = lane_provider_pair(&service, "lanerevoke").await;
+    let [general_provider, latency_provider] = providers.clone();
+    let (request, window) = lane_completion_input("lanerevoke", 1, "lane");
+
+    // Both lanes serve while their package is enabled.
+    for (provider, expected) in [
+        (general_provider.clone(), "inline"),
+        (latency_provider.clone(), "module"),
+    ] {
+        let result = service
+            .invoke_completion_provider(provider, request.clone(), window.clone())
+            .await
+            .expect("enabled packages serve both lanes");
+        assert_eq!(result.items[0].label, expected);
+    }
+    let workers_before = service.workers_started();
+
+    // Production revocation sequence (`clay package revoke <name>`): the
+    // approval is revoked and the package disabled. The runtime keeps the
+    // coordinator's registration, which must now refuse in every lane.
+    {
+        let op_state = service.test_op_state();
+        let mut package_service = op_state
+            .package_service()
+            .lock()
+            .expect("package service mutex poisoned");
+        for package in ["@vendor/lanerevoke", "@vendor/lanerevokelat"] {
+            package_service
+                .revoke_package_approval(package)
+                .expect("approval revoke");
+            package_service.disable(package).expect("package disable");
+        }
+    }
+    for (provider, expected_package, lane) in [
+        (general_provider, "@vendor/lanerevoke", "general"),
+        (latency_provider, "@vendor/lanerevokelat", "latency"),
+    ] {
+        let error = service
+            .invoke_completion_provider(provider, request.clone(), window.clone())
+            .await
+            .expect_err("revoked package must not serve completions");
+        assert!(
+            matches!(
+                &error,
+                ClayRuntimeError::Revoked { package, version }
+                    if package == expected_package && version == "0.1.0"
+            ),
+            "{lane} lane must refuse with the typed revocation error, got {error:?}"
+        );
+    }
+    assert_eq!(
+        service.workers_started(),
+        workers_before,
+        "a refusal is host-side: no lane may be replaced"
+    );
+}
+
+/// Plan 127 task 6: a trusted reload rebuilds the trusted domain's lanes and
+/// shares the third-party domain's lanes untouched — both the general-lane
+/// (registry) and latency-lane (module) registrations keep serving from their
+/// original isolates, without starting or replacing a worker.
+#[tokio::test]
+async fn reload_shares_third_party_lanes_untouched() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+    let providers = lane_provider_pair(&service, "lanereload").await;
+    let third_party_generation_before =
+        service.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty);
+
+    let reloaded = ClayJsRuntimeService::production_reload(&service);
+    assert_eq!(
+        reloaded.domain_generation(crate::packages::bundled::RuntimeDomain::ThirdParty),
+        third_party_generation_before,
+        "trusted reload must not replace the third-party domain"
+    );
+    assert_eq!(
+        reloaded.workers_started(),
+        crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN as u64,
+        "reload rebuilds exactly the trusted domain's lanes through one construction path"
+    );
+
+    // Reload commit re-registers the survived third-party payload; both lanes
+    // must still answer from their untouched isolates.
+    let snapshot = reloaded.third_party_registrations_snapshot();
+    assert_eq!(snapshot.js_completion_providers.len(), providers.len());
+    let oracle = crate::server::completion::CompletionCoordinator::new();
+    reloaded
+        .register_completion_providers(&oracle, 5, &snapshot)
+        .expect("surviving third-party registrations re-register after reload");
+    let (request, window) = lane_completion_input("lanereload", 2, "lane");
+    for (provider, expected) in providers.into_iter().zip(["inline", "module"]) {
+        let result = reloaded
+            .invoke_completion_provider(provider, request.clone(), window.clone())
+            .await
+            .expect("surviving third-party lanes serve after a trusted reload");
+        assert_eq!(result.items[0].label, expected);
+    }
+    assert_eq!(
+        reloaded.workers_started(),
+        crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN as u64,
+        "serving both surviving lanes must not start a worker"
+    );
+}
+
+/// Plan 127 task 6: the installed op inventory of a running lane is the
+/// domain's op set — never a lane-specific one. Enumerated from inside each of
+/// the four live isolates through the real dispatch path, so it is ground
+/// truth for the running lanes rather than a claim about the wiring code.
+#[tokio::test]
+async fn lanes_share_their_domain_op_set() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    use crate::packages::bundled::RuntimeDomain;
+
+    async fn lane_op_names(
+        service: &ClayJsRuntimeService,
+        domain: RuntimeDomain,
+        lane: RuntimeLane,
+    ) -> Vec<String> {
+        let (response, receiver) = tokio::sync::oneshot::channel();
+        let evaluation = service
+            .dispatch_to_domain(
+                domain,
+                lane,
+                super::worker::RuntimeCommand::Evaluate {
+                    entry: RuntimeEntry::ControlledSource(
+                        "Deno.core.ops.op_clay_runtime_record(Object.keys(Deno.core.ops).sort().join(','));"
+                            .to_string(),
+                    ),
+                    workspace: None,
+                    runtime_document_id: 1,
+                    package_context: None,
+                    metric: "runtime.lane_op_names",
+                    response,
+                },
+                receiver,
+            )
+            .await
+            .expect("every lane accepts a controlled op-inventory probe");
+        evaluation
+            .op_records
+            .first()
+            .expect("op inventory probe records its result")
+            .split(',')
+            .map(str::to_string)
+            .collect()
+    }
+
+    let service = ClayJsRuntimeService::default();
+    let trusted_general =
+        lane_op_names(&service, RuntimeDomain::Trusted, RuntimeLane::General).await;
+    let trusted_latency =
+        lane_op_names(&service, RuntimeDomain::Trusted, RuntimeLane::Latency).await;
+    let third_party_general =
+        lane_op_names(&service, RuntimeDomain::ThirdParty, RuntimeLane::General).await;
+    let third_party_latency =
+        lane_op_names(&service, RuntimeDomain::ThirdParty, RuntimeLane::Latency).await;
+
+    let trusted_only: Vec<&String> = trusted_general
+        .iter()
+        .filter(|op| !third_party_general.contains(op))
+        .collect();
+    println!(
+        "PLAN127_LANES trusted_ops={} third_party_ops={} trusted_only={}",
+        trusted_general.len(),
+        third_party_general.len(),
+        trusted_only.len()
+    );
+    assert!(!trusted_general.is_empty() && !third_party_general.is_empty());
+    assert_eq!(
+        trusted_general, trusted_latency,
+        "both trusted lanes must install the trusted domain's op set"
+    );
+    assert_eq!(
+        third_party_general, third_party_latency,
+        "both third-party lanes must install the third-party domain's op set"
+    );
+    for op in [
+        "op_clay_runtime_ping",
+        "op_clay_configuration_get_state",
+        "op_clay_documents_open_document",
+        "op_clay_packages_load_package",
+        "op_clay_packages_load_in_package_domain",
+        "op_clay_language_server_authorize",
+        "op_clay_modes_classify_document",
+        "op_clay_theme_set_theme",
+    ] {
+        assert!(
+            trusted_general.iter().any(|name| name == op),
+            "trusted lane must install {op}"
+        );
+        assert!(
+            !third_party_latency.iter().any(|name| name == op),
+            "third-party latency lane must not install {op}"
+        );
+    }
+    assert_eq!(
+        service.workers_started(),
+        2 * crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN as u64,
+        "one construction path starts every lane of both domains"
+    );
 }
 
 /// Plan 127 P1 acceptance: a slow general-lane command must not head-of-line

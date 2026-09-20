@@ -1,0 +1,1 @@
+entry|Document editor|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible|270,160,696x786

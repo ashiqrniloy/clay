@@ -139,6 +139,186 @@ test("positions convert UTF-8, UTF-16, UTF-32, CRLF, and reject split scalars", 
   assert.throws(() => utf16.applyByteChange({ baseVersion: 1, version: 3, byteStart: 0, byteEnd: 0, text: "" }), /stale/);
 });
 
+function randomSequence(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+}
+
+// Naive line table: split on "\n", strip one trailing CR per line, keeping
+// each line's UTF-16/UTF-8 starts from a full rescan of the text.
+function naiveLines(text) {
+  const lines = [];
+  let start8 = 0;
+  let start16 = 0;
+  for (const part of text.split("\n")) {
+    const content = part.endsWith("\r") ? part.slice(0, -1) : part;
+    lines.push({ start8, start16, content, cr: part.length - content.length });
+    start8 += encodeUtf8(part).length + 1;
+    start16 += part.length + 1;
+  }
+  return lines;
+}
+
+// Scalar stops of one line's content, ending with its end-of-content stop.
+function scalarStops(content) {
+  const stops = [];
+  let bytes = 0;
+  let scalars = 0;
+  for (let at = 0; at < content.length; scalars += 1) {
+    const code = content.codePointAt(at);
+    stops.push({ index16: at, bytes, scalars });
+    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+    at += code > 0xffff ? 2 : 1;
+  }
+  stops.push({ index16: content.length, bytes, scalars });
+  return stops;
+}
+
+function assertMatchesOracle(document, expected, encoding) {
+  assert.equal(document.text, expected);
+  assert.deepEqual([...document.bytes], [...encodeUtf8(expected)]);
+  assert.equal(document.byteLength, encodeUtf8(expected).length);
+  const lines = naiveLines(expected);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const stops = scalarStops(line.content);
+    for (const stop of stops) {
+      const offset = line.start8 + stop.bytes;
+      const character = encoding === "utf-8" ? stop.bytes : encoding === "utf-32" ? stop.scalars : stop.index16;
+      assert.deepEqual(document.byteToPosition(offset), { line: index, character }, `${encoding} ${index}:${stop.bytes}`);
+      assert.equal(document.positionToByte({ line: index, character }), offset, `${encoding} ${index}:${character}`);
+    }
+    for (let stop = 0; stop + 1 < stops.length; stop += 1) {
+      for (let bytes = stops[stop].bytes + 1; bytes < stops[stop + 1].bytes; bytes += 1) {
+        assert.throws(() => document.byteToPosition(line.start8 + bytes), /UTF-8/, `${index} split ${bytes}`);
+      }
+    }
+    // Only a CRLF line has a byte past its convertible content (the LF).
+    if (line.cr === 1 && index + 1 < lines.length) {
+      assert.throws(() => document.byteToPosition(line.start8 + stops[stops.length - 1].bytes + 1), /line ending/);
+    }
+  }
+}
+
+test("position_roundtrip_after_incremental_edits", () => {
+  const seed = "fn main() {\n    let x = \"h\u00e9llo\";\r\n    // \ud83e\udd80 emoji\n\tlet y = 2;\n}\nlast\r";
+  const documents = ["utf-16", "utf-8", "utf-32"].map((encoding) => new VersionedDocument(seed, 1, encoding));
+  const random = randomSequence(0x1280);
+  const insertions = ["x", "\u00e9", "\ud83e\udd80", "\n", "a\r\nb", ""];
+  let expected = seed;
+  let version = 2;
+  for (let step = 0; step < 120; step += 1) {
+    const lines = naiveLines(expected);
+    const line = lines[(random() * lines.length) | 0];
+    const stops = scalarStops(line.content);
+    const at = (random() * stops.length) | 0;
+    const deleting = random() < 0.4 && at + 1 < stops.length;
+    const from = stops[at];
+    const to = deleting ? stops[at + 1] : from;
+    const inserted = deleting ? "" : insertions[(random() * insertions.length) | 0];
+    const byteStart = line.start8 + from.bytes;
+    const byteEnd = line.start8 + to.bytes;
+    const start16 = line.start16 + from.index16;
+    const end16 = line.start16 + to.index16;
+    for (const document of documents) {
+      document.applyByteChange({ baseVersion: document.version, version, byteStart, byteEnd, text: inserted });
+    }
+    expected = expected.slice(0, start16) + inserted + expected.slice(end16);
+    for (const document of documents) assertMatchesOracle(document, expected, document.encoding);
+    version += 1;
+  }
+});
+
+test("crlf_and_multibyte_lines_track", () => {
+  const text = "a\ud83e\udd80b\r\n\u00e7\r\nx\r";
+  const document = new VersionedDocument(text, 1);
+  assert.equal(document.text, text);
+  assert.deepEqual(document.byteToPosition(5), { line: 0, character: 3 });
+  assert.deepEqual(document.byteToPosition(6), { line: 0, character: 4 });
+  assert.equal(document.positionToByte({ line: 1, character: 1 }), 10);
+  assert.equal(document.positionToByte({ line: 2, character: 1 }), 13);
+  assert.throws(() => document.byteToPosition(2), /UTF-8/);
+  assert.throws(() => document.byteToPosition(7), /line ending/);
+  assert.throws(() => document.byteToPosition(11), /line ending/);
+  assert.throws(() => document.byteToPosition(14), /line ending/);
+  assert.throws(() => document.byteToPosition(15), /outside document/);
+  assertMatchesOracle(document, text, "utf-16");
+  document.applyByteChange({ baseVersion: 1, version: 2, byteStart: 1, byteEnd: 5, text: "x" });
+  assert.equal(document.text, "axb\r\n\u00e7\r\nx\r");
+  assertMatchesOracle(document, document.text, "utf-16");
+  document.applyByteChange({ baseVersion: 2, version: 3, byteStart: 1, byteEnd: 7, text: "Z" });
+  assert.equal(document.text, "aZ\r\nx\r");
+  assertMatchesOracle(document, document.text, "utf-16");
+});
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[sorted.length >> 1];
+}
+
+function sourceLines(targetBytes) {
+  const lines = [];
+  const ends = [];
+  let bytes = 0;
+  for (let index = 0; bytes < targetBytes; index += 1) {
+    const line = `const value${index} = { id: ${index}, label: "item ${index}" };`;
+    lines.push(line);
+    ends.push(bytes + line.length);
+    bytes += line.length + 1;
+  }
+  return { text: `${lines.join("\n")}\n`, ends };
+}
+
+function medianEditMs(text, ends, samples) {
+  const document = new VersionedDocument(text, 1);
+  let version = 1;
+  for (let warm = 0; warm < 5; warm += 1) {
+    const offset = ends[warm % ends.length];
+    document.applyByteChange({ baseVersion: version, version: version + 1, byteStart: offset, byteEnd: offset, text: "x" });
+    version += 1;
+  }
+  const timings = [];
+  for (let sample = 0; sample < samples; sample += 1) {
+    const offset = ends[(sample * 977) % ends.length];
+    const start = process.hrtime.bigint();
+    document.applyByteChange({ baseVersion: version, version: version + 1, byteStart: offset, byteEnd: offset, text: "x" });
+    timings.push(Number(process.hrtime.bigint() - start) / 1e6);
+    version += 1;
+  }
+  return median(timings);
+}
+
+test("edit_cost_flat_in_document_size", () => {
+  const small = sourceLines(64 * 1024);
+  const medium = sourceLines(1024 * 1024);
+  const large = sourceLines(4 * 1024 * 1024);
+  const smallMs = medianEditMs(small.text, small.ends, 41);
+  const mediumMs = medianEditMs(medium.text, medium.ends, 41);
+  const largeMs = medianEditMs(large.text, large.ends, 41);
+  assert.ok(mediumMs <= smallMs * 3 + 0.5, `1 MiB edit ${mediumMs} ms vs 64 KiB ${smallMs} ms`);
+  assert.ok(largeMs <= mediumMs * 4 + 0.5, `4 MiB edit ${largeMs} ms vs 1 MiB ${mediumMs} ms`);
+});
+
+test("long_single_line_does_not_regress", () => {
+  const text = "x".repeat(1024 * 1024);
+  const document = new VersionedDocument(text, 1);
+  const timings = [];
+  for (let index = 0; index < 11; index += 1) {
+    const start = process.hrtime.bigint();
+    document.byteToPosition((index + 1) * 65536);
+    timings.push(Number(process.hrtime.bigint() - start) / 1e6);
+  }
+  const medianMs = median(timings);
+  assert.ok(medianMs < 100, `1 MiB single-line byteToPosition median ${medianMs} ms`);
+  const start = process.hrtime.bigint();
+  assert.equal(document.positionToByte({ line: 0, character: text.length }), text.length);
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+  assert.ok(elapsedMs < 2000, `1 MiB single-line positionToByte ${elapsedMs} ms`);
+});
+
 test("file URIs stay within canonical root", () => {
   const uri = pathToFileUri("/tmp/a b", "src/🦀.rs");
   assert.equal(uri, "file:///tmp/a%20b/src/%F0%9F%A6%80.rs");

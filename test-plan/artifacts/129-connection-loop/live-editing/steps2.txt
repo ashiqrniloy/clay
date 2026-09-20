@@ -1,0 +1,15 @@
+focused role=entry name='Document editor' ifaces=Text,Action,Component chars=2798 caret=0 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2798 head='pub fn helper_000000() -> usize { 0 }\npu' tail='lper_000071() -> usize { 71 }\n'
+chars=2805 head='zzmark2pub fn helper_000000() -> usize {' tail='lper_000071() -> usize { 71 }\n'
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2805 caret=7 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2805 head='zzmark2pub fn helper_000000() -> usize {' tail='lper_000071() -> usize { 71 }\n'
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2805 caret=7 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2798 head='pub fn helper_000000() -> usize { 0 }\npu' tail='lper_000071() -> usize { 71 }\n'
+chars=2798 head='pub fn helper_000000() -> usize { 0 }\npu' tail='lper_000071() -> usize { 71 }\n'
+chars=2798 head='pub fn helper_000000() -> usize { 0 }\npu' tail='lper_000071() -> usize { 71 }\n'
+chars=2798 head='pub fn helper_000000' tail='1() -> usize { 71 }\n'
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2798 caret=0 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+focused role=entry name='Document editor' ifaces=Text,Action,Component chars=2798 caret=0 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2798 head='pub fn helper_000000' tail='1() -> usize { 71 }\n'
+chars=2798 head='pub fn helper_000000' tail='1() -> usize { 71 }\n'
+chars=2798 head='pub fn helper_000000' tail='1() -> usize { 71 }\n'

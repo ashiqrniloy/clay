@@ -1,0 +1,51 @@
+Plan 130 A0 — Clay JS API verification (verify-only; record "no JS API change")
+Date: 2026-09-20. Method: diff the public surface HEAD (66648e3) vs the decomposed work tree, then run the
+doc-guard suites and the registry update command. Commands below are reproducible from the repo root.
+
+1. Agent RPC method set (the daemon contract behind clay:agent)
+   $ python3 - <<'PY'  # host.ts+host/*.ts vs git show HEAD:clay-agent/src/host.ts
+   dotted method ids : HEAD 50 | work 50 | removed [] | added []
+   dispatch cases    : HEAD 51 | work 51 | removed [] | added []
+   -> identical (50 dotted ids, 51 cases): the refactor moved bodies, not methods
+
+2. Rust op wrappers and the methods they send
+   op_clay_agent_*   : removed [] added [] (11 ops)
+   method strings    : removed [] added []
+   -> the A1 ownership change threaded Rc<RefCell<OpState>> through the ops; the op set and the
+      RPC method names are unchanged
+
+3. JS facades and documentation
+   runtime/js/agent.js + agent.d.ts diff vs HEAD: none
+   docs/reference/clay-js-api/agent/*.md changed files: none (11 pages)
+   api-inventory.toml lines mentioning 'agent.': 0 (changes in that file are completion/language work)
+   generated registry agent.* entries: HEAD 11 | work 11 | changed none
+
+4. Registry / doc-guard suites (cargo test)
+   protocol   226 passed / 0 failed  — incl. 74 clay_js_api_inventory + clay_js_doc_registry +
+                                      clay_js_facade_layout tests and 14 documentation_coverage tests
+              named guards: generated_registry_is_current, clay_js_api_inventory_unchanged_or_documented,
+              plan109_coding_agent_client_command_docs_and_internal_rpc_boundary,
+              agent_configuration_options_are_documented_custom_properties_with_decision_defaults
+   presentation 62 passed / 0 failed  — incl. package_ui_conformance
+   security    152 passed / 0 failed  — incl. rust_visibility_api_mapping (internal agent/runtime
+                                      helpers must not acquire a public facade surface)
+   runtime      75 passed / 0 failed; lib 1421 passed / 1 ignored; main 9 passed
+   docs untouched by the run: md5 of api-inventory.toml and the generated registry identical before/after
+
+5. Registry update command is a no-op on this tree (artifacts are current)
+   $ cargo run --bin update-doc-registry   # then md5sum -c
+   docs/generated/clay-js-api-registry.json: OK (byte-identical before/after)
+
+Conclusion: NO JS API CHANGE. The agent host public programmatic surface — the 11 clay:agent exports,
+their RPC method names, the runtime/js facades, the docs and the generated registry — is byte-identical to
+HEAD; the doc-guard suites that pin that surface pass. One caveat already recorded in the manual-test
+record: agent_configuration_options_are_documented_custom_properties_with_decision_defaults pins
+`default:boolean=false` (decision 2157) for agent.setFullAutonomy while the daemon has been opt-out since
+the 2026-09-05 user decision (`params.fullAutonomy !== false`) — a docs/inventory-vs-code divergence for a
+fix-or-re-document decision, not a surface change introduced here.
+
+NOTE (2026-09-20): the `default:boolean=false` item recorded above as a finding is resolved by decision
+`decision-logs/2026-09-20-2049-agent-autonomy-default-on-and-resume-restores-recorded-autonomy.md` (user:
+"Default should be autonomy. User can configure to block autonomy"). The reference page and inventory now
+carry `default:boolean=true`, the daemon expressions are pinned by the same inventory gate, and the resume
+path restores the recorded autonomy. The original verification transcript above is kept unchanged.

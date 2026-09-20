@@ -1023,3 +1023,199 @@ fn plan125_wiki_pages_describe_the_one_palette_surface() {
         }
     }
 }
+
+/// Plan 127 wiki contract: lane scheduling, the bounded mailbox, heap-limit
+/// restoration, and the process-wide trust-domain constraint (review A3) must
+/// stay documented on the persistent-runtime pages, and no evergreen wiki page
+/// may still state the pre-plan-127 single-worker-per-domain topology. The
+/// archive pages are excluded: they are dated records of the topology they
+/// describe.
+#[test]
+fn plan127_wiki_pages_describe_lane_scheduling_and_the_trust_domain_constraint() {
+    let markers: [(&str, &str); 11] = [
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "RuntimeLane",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "remove_near_heap_limit_callback",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "not a trust boundary",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "plan 127",
+        ),
+        ("docs/wiki/modules/embedded-js-runtime.md", "latency lane"),
+        ("docs/wiki/modules/embedded-js-runtime.md", "plan 127"),
+        ("docs/wiki/index.md", "persistent-runtime-hardening.md"),
+        (
+            "docs/wiki/modules/parse-coordinator.md",
+            "general runtime lane",
+        ),
+        (
+            "docs/wiki/modules/completion-snippet-expansion.md",
+            "persistent-runtime-hardening.md",
+        ),
+        (
+            "docs/wiki/modules/language-intelligence.md",
+            "persistent-runtime-hardening.md",
+        ),
+    ];
+    for (page, marker) in markers {
+        assert!(
+            read(page).to_lowercase().contains(&marker.to_lowercase()),
+            "{page} is missing the Plan 127 marker {marker:?}"
+        );
+    }
+
+    // The topology plan 127 falsified: one persistent worker per domain, two
+    // total. Both the count and the "TWO dedicated worker threads" claim are
+    // now wrong (two lanes per domain, four workers per generation) and must
+    // not reappear on an evergreen page.
+    let stale = [
+        "exactly two persistent `JsRuntime`",
+        "starts TWO dedicated worker threads",
+        "exactly-two-persistent-runtimes topology",
+        "the persistent runtime worker and its registered timeout",
+    ];
+    let mut dirs = vec![
+        PathBuf::from("docs/wiki/modules"),
+        PathBuf::from("docs/wiki/flows"),
+    ];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(root().join(&dir)).expect("wiki dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                dirs.push(path.strip_prefix(root()).expect("relative").to_path_buf());
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root())
+                .expect("relative")
+                .to_string_lossy()
+                .into_owned();
+            let doc = read(&relative);
+            for claim in stale {
+                assert!(
+                    !doc.contains(claim),
+                    "{relative} still claims {claim:?}; plan 127 gave each domain a general and a latency lane"
+                );
+            }
+        }
+    }
+}
+
+/// Plan 129 wiki contract: the connection page must map every arm family to
+/// its handler entry point, describe the dispatch context and the
+/// handler-entry authorization boundary, and record the future-size work that
+/// came with the extraction, so the page stays usable as the answer to “where
+/// is this `ClientMessage` handled?”.
+#[test]
+fn plan129_wiki_pages_describe_the_dispatch_router_and_future_sizes() {
+    let markers: [(&str, &str); 12] = [
+        ("docs/wiki/modules/server-ipc-skeleton.md", "Plan 129"),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "handle_connection_loop",
+        ),
+        ("docs/wiki/modules/server-ipc-skeleton.md", "ConnectionCtx"),
+        ("docs/wiki/modules/server-ipc-skeleton.md", "ctx!"),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "documents::handle_save_document",
+        ),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "workspace::handle_open_selected_file",
+        ),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "tabs::handle_tab_command",
+        ),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "menus::handle_menu_activate",
+        ),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "runtime::handle_agent_command",
+        ),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "Authorization checks live at handler entry points",
+        ),
+        ("docs/wiki/modules/server-ipc-skeleton.md", "Box::pin"),
+        (
+            "docs/wiki/modules/server-ipc-skeleton.md",
+            "future-size-threshold",
+        ),
+    ];
+    for (page, marker) in markers {
+        assert!(
+            read(page).to_lowercase().contains(&marker.to_lowercase()),
+            "{page} is missing the Plan 129 marker {marker:?}"
+        );
+    }
+    assert!(
+        read("docs/wiki/index.md").contains("server-ipc-skeleton.md"),
+        "docs/wiki/index.md must link the connection page"
+    );
+}
+
+/// Plan 130 wiki contract: the daemon page must map the `clay-agent/src/host/*`
+/// concern modules behind the class facade, and the server page must describe
+/// injected ownership — the lane's op state holds the handle, a hostless lane
+/// fails closed, and registration declarations queue per lane before handing
+/// over to that lane's host. These are the two pages a developer reads to
+/// answer "who owns the agent host, and how does a runtime lane reach it?".
+#[test]
+fn plan130_wiki_pages_describe_host_modules_and_injected_ownership() {
+    let markers: [(&str, &str); 13] = [
+        ("docs/wiki/modules/clay-agent.md", "Plan 130"),
+        ("docs/wiki/modules/clay-agent.md", "clay-agent/src/host/"),
+        ("docs/wiki/modules/clay-agent.md", "host/internals.ts"),
+        ("docs/wiki/modules/clay-agent.md", "ClayAgentHost"),
+        ("docs/wiki/modules/clay-agent.md", "thin delegate"),
+        ("docs/wiki/modules/clay-agent.md", "type-only"),
+        ("docs/wiki/modules/clay-agent.md", "process-global"),
+        ("docs/wiki/modules/agent-process-manager.md", "Plan 130 A1"),
+        (
+            "docs/wiki/modules/agent-process-manager.md",
+            "AgentHostHandle",
+        ),
+        (
+            "docs/wiki/modules/agent-process-manager.md",
+            "set_agent_host",
+        ),
+        (
+            "docs/wiki/modules/agent-process-manager.md",
+            "queue_registration_now",
+        ),
+        (
+            "docs/wiki/modules/agent-process-manager.md",
+            "agent.unavailable: no agent host is attached",
+        ),
+        (
+            "docs/wiki/modules/agent-process-manager.md",
+            "PENDING_REGISTRATION_CAP",
+        ),
+    ];
+    for (page, marker) in markers {
+        assert!(
+            read(page).to_lowercase().contains(&marker.to_lowercase()),
+            "{page} is missing the Plan 130 marker {marker:?}"
+        );
+    }
+    let index = read("docs/wiki/index.md");
+    for page in ["modules/clay-agent.md", "modules/agent-process-manager.md"] {
+        assert!(index.contains(page), "docs/wiki/index.md must link {page}");
+    }
+}

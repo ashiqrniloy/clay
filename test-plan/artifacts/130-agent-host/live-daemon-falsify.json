@@ -1,0 +1,129 @@
+{
+  "root": "/tmp/clay-plan130-live",
+  "dataDir": "/tmp/clay-plan130-live/daemon-data",
+  "cwdA": "/tmp/clay-plan130-live/cwd-a",
+  "cwdB": "/tmp/clay-plan130-live/cwd-b",
+  "workspaceRoot": "/home/arn/Projects/clay",
+  "sessionId": "16ccad91-5c6e-46a9-bc59-33cb39632f0f",
+  "cloned": {
+    "sessionId": "b5f37638-3853-475f-ae05-5a9475334b58",
+    "leafId": "entry_ff641b8e-d32b-4a10-bf59-75d900cd6c25"
+  },
+  "results": [
+    {
+      "name": "daemon initialize (real build, isolated data dir)",
+      "result": "PASS",
+      "detail": "mock=true prism=0.7.0 mcpServers=1"
+    },
+    {
+      "name": "graft skill is not registered before any coding session",
+      "result": "PASS",
+      "detail": "fresh daemon: no graft binding"
+    },
+    {
+      "name": "session.new records the given workspace root and activates coding surfaces",
+      "result": "PASS",
+      "detail": "sessionId=16ccad91-5c6e-46a9-bc59-33cb39632f0f tools=22"
+    },
+    {
+      "name": "binding a coding session registers the graft skill",
+      "result": "PASS"
+    },
+    {
+      "name": "session.prompt streams to completion on the real daemon",
+      "result": "PASS",
+      "detail": "lastEvent=agent_finished events=9"
+    },
+    {
+      "name": "session.search finds this workspace's session",
+      "result": "PASS",
+      "detail": "hits=1"
+    },
+    {
+      "name": "session.search is a search, not a dump (no match ⇒ no hit)",
+      "result": "PASS"
+    },
+    {
+      "name": "session.resumable lists the session for its recorded root",
+      "result": "PASS",
+      "detail": "rows=1"
+    },
+    {
+      "name": "session.resumable is workspace-scoped (other root sees nothing)",
+      "result": "PASS",
+      "detail": "rows=0"
+    },
+    {
+      "name": "session.clone produces an independent persisted session",
+      "result": "PASS",
+      "detail": "clone=b5f37638-3853-475f-ae05-5a9475334b58"
+    },
+    {
+      "name": "session.fork keeps the session id at a different leaf",
+      "result": "PASS",
+      "detail": "leaf=entry_130f8e…"
+    },
+    {
+      "name": "session.setAutonomy toggles both ways",
+      "result": "PASS"
+    },
+    {
+      "name": "session.compact appends a compaction entry to the persisted session",
+      "result": "PASS",
+      "detail": "entries=3"
+    },
+    {
+      "name": "session.new without a root keeps the documented process.cwd() fallback",
+      "result": "PASS",
+      "detail": "root=/tmp/clay-plan130-live/cwd-a"
+    },
+    {
+      "name": "fresh daemon starts with no graft binding (restart really clears it)",
+      "result": "PASS",
+      "detail": "mock=true"
+    },
+    {
+      "name": "fresh daemon starts with lazy capabilities (nothing connected yet)",
+      "result": "PASS",
+      "detail": "mcpServers=0 extensions=0"
+    },
+    {
+      "name": "resumed session binds its RECORDED workspace root, not the daemon cwd",
+      "result": "PASS",
+      "detail": "root=/home/arn/Projects/clay (daemon cwd /tmp/clay-plan130-live/cwd-b)"
+    },
+    {
+      "name": "resume re-activates the workspace's graft binding (plan 130 A2)",
+      "result": "FAIL",
+      "detail": "graft skill missing after resume"
+    },
+    {
+      "name": "resume re-connects the workspace's MCP allow-list (plan 130 A2)",
+      "result": "FAIL",
+      "detail": "no MCP outcomes: []"
+    },
+    {
+      "name": "resume re-loads the graft extension for the recorded root",
+      "result": "FAIL",
+      "detail": "extensions=[]"
+    },
+    {
+      "name": "resumed session composes its system-prompt layers",
+      "result": "PASS",
+      "detail": "systemPrompt items=2"
+    },
+    {
+      "name": "resumed session restores an explicit autonomy state (documented reset, plan 130 task 3)",
+      "result": "PASS"
+    },
+    {
+      "name": "resumed session accepts a follow-up prompt on the restarted daemon",
+      "result": "PASS",
+      "detail": "lastEvent=agent_finished"
+    },
+    {
+      "name": "no reverse RPC was needed by the text-only mock provider",
+      "result": "PASS"
+    }
+  ]
+}

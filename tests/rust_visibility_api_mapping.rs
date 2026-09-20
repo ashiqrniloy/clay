@@ -85,10 +85,6 @@ fn internal_runtime_mechanics_are_not_public() {
         ("src/packages/approvals.rs", "pub enum ApprovalStoreError"),
         ("src/packages/bundled.rs", "pub enum RuntimeDomain"),
         ("src/packages/bundled.rs", "pub enum BundledTrustError"),
-        (
-            "src/server/cross_domain.rs",
-            "pub struct CrossDomainRequestEnvelope",
-        ),
         ("src/server/ops/mod.rs", "pub struct PackageContext"),
         ("src/server/output_router.rs", "pub struct OutputRouter"),
         ("src/server/workspace/mod.rs", "pub struct TargetIdentity"),

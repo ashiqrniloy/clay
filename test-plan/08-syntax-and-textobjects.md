@@ -191,3 +191,22 @@ No existing step was deleted or weakened.
 
 The zero parser queue in the manual harness means no syntax flow ran; it is
 not evidence that fling/jump scrolling had no parser work.
+
+## Plan 128 step (shared incremental position index)
+
+| # | Action | Expected |
+|---|---|---|
+| S35 | Open a Rust crate whose open document is large (a ~250 KiB module, then a ≥1 MiB file), then type into it and move the pointer over an identifier (`Ctrl+J` triggers completion) | Typing echoes without a stall and the language route stays alive on a document the analyzer accepts; a document over the package analysis limit fails closed with the limit note and keeps baseline syntax gestures working; no language request blocks the editor. |
+
+## Plan 128 Linux execution record (2026-09-20, task 4)
+
+Isolated live launch (`test-plan/artifacts/128-lsp-incremental-index/`, private
+HOME/XDG/socket/TMPDIR, `CLAY_PERF_PROFILE=1`), window-cropped captures retained.
+
+| Check | Result | Evidence |
+|---|---|---|
+| S35 (a) language route on an accepted document (4 KiB crate) | PASS live | rust-analyzer + proc-macro server spawned inside the private root, no analyzer failure, patches delivered (`bridge.patch_delivery` p50 0.089 ms / p95 0.121 ms); `screenshots/lsp-small-semantic.png`. Colour attribution is not claimed (the syntax tier paints function/namespace colours too). |
+| S35 (b) ≈250 KiB open document | FAIL live (pre-existing bound, found here) | The first semantic payload kills the analyzer: `lsp.invalid_semantic_tokens: bounded five-integer records required` (`logs/server-mid-semantic-bound.log`); status falls back to "Document analyzer stopped; baseline language support remains active." (`screenshots/mid-probe-semantic-bound.png`). Cause: `packages/lsp-shared/mapping.js` `MAX_SEMANTIC_TOKENS = 128` rejects any larger payload. |
+| S35 (c) ≥1 MiB open document | PASS fail-closed / plan's ≥1 MiB language-server leg unreachable | "Document exceeds the package analysis limit; baseline language support remains active." (`screenshots/large-analysis-limit.png`), no rust-analyzer process spawned (`DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES = 256 KiB`, `src/perf/budgets.rs:33`); a hover still issues a language request and gets `providerError` → "Language provider failed" (`frontend/src/editor/extensions/intelligence.ts:88`). |
+| S35 (d) typing echo / latency on the ≥1 MiB document | UNRESOLVED live (host input) | `Ctrl+End`, `Ctrl+B` and 60-char `type_text` bursts produced no document change (file mtime unchanged, typed marker absent, state stayed `clean`, no `edit_apply`/`edit_ack` samples). Readiness probe: `can_send_development_input: false` — the portal session has no remote-interaction permission. |
+| Diagnostics path (rust-analyzer `mismatched types` fixture) | Observation only | Fixture ships `let value: u32 = "text";`; no lint-gutter marker appears after ~30 s (pixel check + 5× zoom). The bridge does implement a diagnostics path, so this is a separate probe, not evidence for or against the position index. |

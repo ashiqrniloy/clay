@@ -3,14 +3,33 @@
 //! daemon handle; these ops fail closed when no agent host is attached and
 //! never grant filesystem/network/shell authority by existing.
 
-use deno_core::op2;
+use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Value, json};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-async fn agent_rpc(method: &str, params: Value) -> Result<String, JsErrorBox> {
-    let host = crate::server::agent::AgentHostHandle::global().map_err(|_| {
-        JsErrorBox::generic("agent.unavailable: no agent host is attached to this runtime")
-    })?;
+/// This lane's agent authority, injected by server construction (Plan 130 A1).
+/// No handle wired → fail closed naming the missing wiring; neither a process
+/// global nor a missing host ever grants authority.
+fn lane_host(
+    state: &Rc<RefCell<OpState>>,
+) -> Result<crate::server::agent::AgentHostHandle, JsErrorBox> {
+    state
+        .borrow()
+        .borrow::<std::sync::Arc<super::ClayOpState>>()
+        .agent_host()
+        .map_err(|_| {
+            JsErrorBox::generic("agent.unavailable: no agent host is attached to this runtime")
+        })
+}
+
+async fn agent_rpc(
+    state: &Rc<RefCell<OpState>>,
+    method: &str,
+    params: Value,
+) -> Result<String, JsErrorBox> {
+    let host = lane_host(state)?;
     let result = host
         .rpc(method, params)
         .await
@@ -165,17 +184,22 @@ fn validate_registration_shape(method: &str, params: &Value) -> Result<(), JsErr
 /// Registration path for package load entries. Validation first (fail
 /// closed, typed error). With a host attached: queue server-side while the
 /// daemon is down instead of spawning it or blocking on its boot. Without a
-/// host (hostless runtimes): queue process-global so the declaration
-/// applies when a host installs — a load entry never fails just because
-/// this runtime has no agent subsystem.
-async fn agent_registration_rpc(method: &str, params: Value) -> Result<String, JsErrorBox> {
+/// host (hostless runtimes): queue on this lane's own state so the declaration
+/// is handed over when a host is attached to the lane — a load entry never
+/// fails just because this runtime has no agent subsystem (plan 130 A1: no
+/// process-global authority or queue).
+async fn agent_registration_rpc(
+    state: &Rc<RefCell<OpState>>,
+    method: &str,
+    params: Value,
+) -> Result<String, JsErrorBox> {
     validate_registration_shape(method, &params)?;
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    match crate::server::agent::AgentHostHandle::global() {
+    match lane_host(state) {
         Ok(host) => {
             let result = host.rpc_or_queue(method, params).await;
             eprintln!("[agent-reg] {method} '{name}' host=live -> {result:?}");
@@ -186,7 +210,10 @@ async fn agent_registration_rpc(method: &str, params: Value) -> Result<String, J
         }
         Err(_) => {
             eprintln!("[agent-reg] {method} '{name}' host=absent -> queued");
-            crate::server::agent::queue_package_registration(method, params)
+            state
+                .borrow()
+                .borrow::<std::sync::Arc<super::ClayOpState>>()
+                .queue_agent_registration(method, params)
                 .map_err(|error| JsErrorBox::generic(format!("agent.rpc_failed: {error}")))?;
             Ok(r#"{"queued":true}"#.to_string())
         }
@@ -205,6 +232,7 @@ fn require_session(params: &Value) -> Result<String, JsErrorBox> {
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_set_autonomy(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -218,12 +246,14 @@ pub(super) async fn op_clay_agent_set_autonomy(
         // Disabling autonomy on an unknown/unlive session is a no-op success:
         // the fail-closed default already applies.
         return agent_rpc(
+            &state,
             "session.setAutonomy",
             json!({ "sessionId": session_id, "enabled": false }),
         )
         .await;
     }
     agent_rpc(
+        &state,
         "session.setAutonomy",
         json!({ "sessionId": session_id, "enabled": true }),
     )
@@ -233,6 +263,7 @@ pub(super) async fn op_clay_agent_set_autonomy(
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_compact_session(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -255,12 +286,13 @@ pub(super) async fn op_clay_agent_compact_session(
         };
         rpc_params["compactAfterTokens"] = json!(threshold);
     }
-    agent_rpc("session.compact", rpc_params).await
+    agent_rpc(&state, "session.compact", rpc_params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_search_sessions(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -285,12 +317,13 @@ pub(super) async fn op_clay_agent_search_sessions(
     }
     // Workspace scoping is server-owned: the daemon filters by the session's
     // stamped workspaceRoot; hits are metadata, never injected into context.
-    agent_rpc("session.search", rpc_params).await
+    agent_rpc(&state, "session.search", rpc_params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_resume_run(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -314,6 +347,7 @@ pub(super) async fn op_clay_agent_resume_run(
     // The daemon validates decision shape/version and refuses stale resumes;
     // this op only forwards user intent and adds no authority.
     agent_rpc(
+        &state,
         "run.resume",
         json!({ "sessionId": session_id, "runId": run_id, "decision": decision }),
     )
@@ -323,6 +357,7 @@ pub(super) async fn op_clay_agent_resume_run(
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_session_tree(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -345,6 +380,7 @@ pub(super) async fn op_clay_agent_session_tree(
         })?
         .to_string();
     agent_rpc(
+        &state,
         &format!("session.{method}"),
         json!({ "sessionId": session_id, "entryId": entry_id }),
     )
@@ -354,6 +390,7 @@ pub(super) async fn op_clay_agent_session_tree(
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_profile_register(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -361,12 +398,13 @@ pub(super) async fn op_clay_agent_profile_register(
     // The daemon validates the profile shape and fails closed on duplicates;
     // this op only forwards the package's inert profile declaration. Queued
     // (never spawned) while the daemon is down so load entries stay fast.
-    agent_registration_rpc("agentProfile.register", params).await
+    agent_registration_rpc(&state, "agentProfile.register", params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_skill_register(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -374,12 +412,13 @@ pub(super) async fn op_clay_agent_skill_register(
     // The daemon validates the skill shape (duplicate names fail closed);
     // this op only forwards the package's inert skill declaration. Queued
     // (never spawned) while the daemon is down so load entries stay fast.
-    agent_registration_rpc("skill.register", params).await
+    agent_registration_rpc(&state, "skill.register", params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_knowledge_set_options(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -388,24 +427,26 @@ pub(super) async fn op_clay_agent_knowledge_set_options(
     // (decision 2156); this op only forwards the configuration intent.
     // Queued (never spawned) while the daemon is down so a load entry
     // configuring knowledge options applies after the host initializes.
-    agent_registration_rpc("knowledge.setOptions", params).await
+    agent_registration_rpc(&state, "knowledge.setOptions", params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_run_set_options(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
         .map_err(|error| JsErrorBox::generic(format!("agent.invalid_params: {error}")))?;
     // Daemon owns policy caps (Prism 0.5.4: number | null, no product HARD).
     // Queued while the daemon is down so init.js never blocks on boot.
-    agent_registration_rpc("run.setOptions", params).await
+    agent_registration_rpc(&state, "run.setOptions", params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_command_register(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -413,12 +454,13 @@ pub(super) async fn op_clay_agent_command_register(
     // The daemon validates the handler name and duplicate names; this op only
     // forwards the package's inert command declaration. Queued (never
     // spawned) while the daemon is down so load entries stay fast.
-    agent_registration_rpc("command.register", params).await
+    agent_registration_rpc(&state, "command.register", params).await
 }
 
 #[op2]
 #[string]
 pub(super) async fn op_clay_agent_command_dispatch(
+    state: Rc<RefCell<OpState>>,
     #[string] params_json: String,
 ) -> Result<String, JsErrorBox> {
     let params: Value = serde_json::from_str(&params_json)
@@ -449,7 +491,7 @@ pub(super) async fn op_clay_agent_command_dispatch(
     // Live dispatch only: commands act on the daemon's session state, so this
     // op never queues — an unavailable daemon is a typed failure, not a
     // deferred execution (unlike inert registrations).
-    agent_rpc("command.dispatch", params).await
+    agent_rpc(&state, "command.dispatch", params).await
 }
 
 #[cfg(test)]

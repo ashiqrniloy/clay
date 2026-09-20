@@ -8763,3 +8763,182 @@ fn tab_state_binding_names_the_requesting_client_and_session() {
     let value: serde_json::Value = serde_json::from_str(&result_json).expect("json payload");
     assert_eq!(value["sessionId"], "");
 }
+
+/// Plan 129 task 3: crafted state for driving extracted handlers directly,
+/// without a socket, a server, or the connection loop. Handlers take only the
+/// context, so each one is independently callable from a test.
+struct DirectHandlerState {
+    codec: Codec,
+    client_id: u64,
+    document: Arc<Mutex<DocumentState>>,
+    workspace: Arc<Mutex<WorkspaceState>>,
+    behavior: Arc<Mutex<ActiveBehaviorManifest>>,
+    runtime_generation: super::RuntimeGenerationStore,
+    sdui: Arc<Mutex<StaticSduiState>>,
+    parse_coordinator: ParseCoordinator,
+    completion: crate::server::completion::CompletionCoordinator,
+    language_intelligence: LanguageIntelligenceCoordinator,
+    document_analysis: crate::server::document_analysis::DocumentAnalysisCoordinator,
+    menu_sessions: crate::server::menu_sessions::ServerMenuSessions,
+    bound_tab_id: Option<crate::protocol::TabId>,
+    bound_state: Arc<std::sync::Mutex<Option<super::TabServerState>>>,
+    tab_registry: Arc<Mutex<crate::server::tab_registry::TabRegistry>>,
+    tab_registry_tx: tokio::sync::broadcast::Sender<crate::protocol::TabRegistrySnapshot>,
+    _tab_registry_rx: tokio::sync::broadcast::Receiver<crate::protocol::TabRegistrySnapshot>,
+    pending_viewport_patches: std::collections::HashMap<
+        (
+            crate::protocol::DocumentId,
+            crate::protocol::ViewportRequestId,
+        ),
+        super::PendingViewportPatch,
+    >,
+    completion_tx: tokio::sync::mpsc::Sender<ServerMessage>,
+    _completion_rx: tokio::sync::mpsc::Receiver<ServerMessage>,
+    language_intelligence_tx: tokio::sync::mpsc::Sender<ServerMessage>,
+    _language_intelligence_rx: tokio::sync::mpsc::Receiver<ServerMessage>,
+    dropped_results: Arc<std::sync::atomic::AtomicU64>,
+    file_open_capabilities: super::FileOpenCapabilityPool,
+}
+
+impl DirectHandlerState {
+    fn new() -> Self {
+        let (tab_registry_tx, _tab_registry_rx) = tokio::sync::broadcast::channel(8);
+        let (completion_tx, _completion_rx) =
+            tokio::sync::mpsc::channel(crate::perf::budgets::CONNECTION_RESULT_LANE_CAPACITY);
+        let (language_intelligence_tx, _language_intelligence_rx) =
+            tokio::sync::mpsc::channel(crate::perf::budgets::CONNECTION_RESULT_LANE_CAPACITY);
+        Self {
+            codec: Codec::default(),
+            client_id: 1,
+            document: document_state(),
+            workspace: workspace_state(),
+            behavior: Arc::new(Mutex::new(
+                ActiveBehaviorManifest::new(BehaviorManifest::minimal_text_editing(1))
+                    .expect("minimal text editing manifest is valid"),
+            )),
+            runtime_generation: runtime_generation(),
+            sdui: sdui_state(),
+            parse_coordinator: parse_coordinator(),
+            completion: crate::server::completion::CompletionCoordinator::new(),
+            language_intelligence: language_intelligence_coordinator(),
+            document_analysis:
+                crate::server::document_analysis::DocumentAnalysisCoordinator::default(),
+            menu_sessions: crate::server::menu_sessions::ServerMenuSessions::new(),
+            bound_tab_id: None,
+            bound_state: Arc::new(std::sync::Mutex::new(None)),
+            tab_registry: Arc::new(Mutex::new(crate::server::tab_registry::TabRegistry::new())),
+            tab_registry_tx,
+            _tab_registry_rx,
+            pending_viewport_patches: std::collections::HashMap::new(),
+            completion_tx,
+            _completion_rx,
+            language_intelligence_tx,
+            _language_intelligence_rx,
+            dropped_results: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            file_open_capabilities: super::FileOpenCapabilityPool::new(),
+        }
+    }
+
+    fn ctx<'a>(
+        &'a mut self,
+        stream: &'a mut tokio::io::DuplexStream,
+    ) -> super::ConnectionCtx<'a, tokio::io::DuplexStream> {
+        super::ConnectionCtx {
+            codec: self.codec,
+            stream,
+            client_id: self.client_id,
+            document: &mut self.document,
+            workspace: &mut self.workspace,
+            behavior: &self.behavior,
+            runtime_generation: &self.runtime_generation,
+            sdui: &self.sdui,
+            parse_coordinator: &self.parse_coordinator,
+            completion: &self.completion,
+            language_intelligence: &self.language_intelligence,
+            document_analysis: &self.document_analysis,
+            reload_server: None,
+            file_open_capabilities: &mut self.file_open_capabilities,
+            menu_sessions: &mut self.menu_sessions,
+            bound_tab_id: &mut self.bound_tab_id,
+            bound_state: &self.bound_state,
+            tab_registry: &self.tab_registry,
+            tab_registry_tx: &self.tab_registry_tx,
+            pending_viewport_patches: &mut self.pending_viewport_patches,
+            completion_tx: &self.completion_tx,
+            language_intelligence_tx: &self.language_intelligence_tx,
+            dropped_results: &self.dropped_results,
+        }
+    }
+}
+
+#[tokio::test]
+async fn extracted_list_documents_handler_answers_without_the_loop() {
+    let mut state = DirectHandlerState::new();
+    let (mut server_side, mut peer) = duplex(64 * 1024);
+    {
+        let mut ctx = state.ctx(&mut server_side);
+        super::documents::handle_list_documents(&mut ctx)
+            .await
+            .expect("list documents writes its response");
+    }
+    let ServerMessage::DocumentList { documents } = state
+        .codec
+        .read_server_message(&mut peer)
+        .await
+        .expect("the handler wrote one response")
+    else {
+        panic!("list documents answers with the document list");
+    };
+    assert!(
+        documents.is_empty(),
+        "a fresh connection owns no documents: {documents:?}"
+    );
+}
+
+#[tokio::test]
+async fn extracted_launcher_handler_answers_without_the_loop() {
+    let mut state = DirectHandlerState::new();
+    let (mut server_side, mut peer) = duplex(64 * 1024);
+    {
+        let mut ctx = state.ctx(&mut server_side);
+        super::workspace::handle_list_launcher_entries(&mut ctx)
+            .await
+            .expect("launcher listing writes its response");
+    }
+    let ServerMessage::LauncherEntries { client_id, entries } = state
+        .codec
+        .read_server_message(&mut peer)
+        .await
+        .expect("the handler wrote one response")
+    else {
+        panic!("launcher listing answers with the launcher entries");
+    };
+    assert_eq!(client_id, state.client_id);
+    assert!(
+        entries.workspaces.is_empty() && entries.agents.is_empty(),
+        "no configuration root means the first-run empty launcher: {entries:?}"
+    );
+    assert_eq!(entries.pruned, 0);
+}
+
+#[tokio::test]
+async fn extracted_duplicate_hello_handler_rejects_without_the_loop() {
+    let mut state = DirectHandlerState::new();
+    let (mut server_side, mut peer) = duplex(64 * 1024);
+    {
+        let mut ctx = state.ctx(&mut server_side);
+        super::runtime::handle_duplicate_hello(&mut ctx)
+            .await
+            .expect("the duplicate-hello reply writes");
+    }
+    let ServerMessage::Error { code, message } = state
+        .codec
+        .read_server_message(&mut peer)
+        .await
+        .expect("the handler wrote one response")
+    else {
+        panic!("a second Hello answers with a protocol error");
+    };
+    assert_eq!(code, ProtocolErrorCode::InvalidMessage);
+    assert_eq!(message, "duplicate Hello message");
+}

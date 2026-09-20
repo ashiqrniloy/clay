@@ -13,18 +13,16 @@ use tokio::{
 use crate::perf::metrics::{MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder};
 use crate::protocol::ViewportRenderPatch;
 use crate::protocol::{
-    AgentClientCommand, AgentPickerKind, AgentServerMessage, ClientId, ClientMessage, DocumentId,
-    PROTOCOL_VERSION, ProtocolErrorCode, RuntimeDiagnostic, ServerMessage, TabCommand, TabId,
-    TabRegistrySnapshot, WorkspaceRootId,
+    AgentServerMessage, ClientId, ClientMessage, DocumentId, PROTOCOL_VERSION, ProtocolErrorCode,
+    RuntimeDiagnostic, ServerMessage, TabCommand, TabId, TabRegistrySnapshot, WorkspaceRootId,
     codec::{Codec, CodecError},
 };
 
 use super::{
-    RuntimeGenerationStore, TabServerState, agent_settings,
+    RuntimeGenerationStore, TabServerState,
     behavior::ActiveBehaviorManifest,
     document::DocumentState,
     language_intelligence::LanguageIntelligenceCoordinator,
-    launcher,
     menu_sessions::ServerMenuSessions,
     output_router::OutputRouter,
     parse_coordinator::ParseCoordinator,
@@ -126,10 +124,46 @@ impl Drop for ConnectionOutputSubscriptions {
 }
 
 /// Connection-local aggregation state for one atomic viewport request.
-struct PendingViewportPatch {
+pub(super) struct PendingViewportPatch {
     /// Scheduled parse windows still owed a terminal update.
     remaining: usize,
     patch: ViewportRenderPatch,
+}
+
+/// Per-message dispatch context for extracted connection handlers.
+///
+/// Handlers borrow the connection's shared state through this struct instead of
+/// repeating the loop's parameter list. Every field is a borrow, so a handler
+/// cannot outlive the connection state it serves, and the authorization helpers
+/// (`document_for_message`, capability consumption, tab-binding checks) stay
+/// inside the handler that needs them. Built per dispatched message: the loop's
+/// subscription `select!` arms keep using the connection's locals directly, and
+/// `TabCommand` rebinds `document`/`workspace` through the mutable handles.
+pub(super) struct ConnectionCtx<'a, S: AsyncWrite + Unpin> {
+    pub(super) codec: Codec,
+    pub(super) stream: &'a mut S,
+    pub(super) client_id: ClientId,
+    pub(super) document: &'a mut Arc<Mutex<DocumentState>>,
+    pub(super) workspace: &'a mut Arc<Mutex<WorkspaceState>>,
+    pub(super) behavior: &'a Arc<Mutex<ActiveBehaviorManifest>>,
+    pub(super) runtime_generation: &'a RuntimeGenerationStore,
+    pub(super) sdui: &'a Arc<Mutex<StaticSduiState>>,
+    pub(super) parse_coordinator: &'a ParseCoordinator,
+    pub(super) completion: &'a crate::server::completion::CompletionCoordinator,
+    pub(super) language_intelligence: &'a LanguageIntelligenceCoordinator,
+    pub(super) document_analysis: &'a crate::server::document_analysis::DocumentAnalysisCoordinator,
+    pub(super) reload_server: Option<&'a super::IpcServer>,
+    pub(super) file_open_capabilities: &'a mut FileOpenCapabilityPool,
+    pub(super) menu_sessions: &'a mut ServerMenuSessions,
+    pub(super) bound_tab_id: &'a mut Option<TabId>,
+    pub(super) bound_state: &'a Arc<std::sync::Mutex<Option<TabServerState>>>,
+    pub(super) tab_registry: &'a Arc<Mutex<TabRegistry>>,
+    pub(super) tab_registry_tx: &'a tokio::sync::broadcast::Sender<TabRegistrySnapshot>,
+    pub(super) pending_viewport_patches:
+        &'a mut HashMap<(DocumentId, crate::protocol::ViewportRequestId), PendingViewportPatch>,
+    pub(super) completion_tx: &'a tokio::sync::mpsc::Sender<ServerMessage>,
+    pub(super) language_intelligence_tx: &'a tokio::sync::mpsc::Sender<ServerMessage>,
+    pub(super) dropped_results: &'a Arc<AtomicU64>,
 }
 
 fn client_message_trace_id(message: &ClientMessage) -> Option<crate::protocol::PerformanceTraceId> {
@@ -278,47 +312,6 @@ fn unbound_tab_state_error() -> ServerMessage {
         code: ProtocolErrorCode::InvalidMessage,
         message: "connection is not bound to a live tab".to_string(),
     }
-}
-
-/// Launcher (plan 118 Part D): answer with the server-resolved entries. The
-/// rows are display data, so an absent data root yields the first-run state
-/// rather than an error; pruned recents surface as one bounded diagnostic.
-async fn write_launcher_entries<S>(
-    codec: Codec,
-    stream: &mut S,
-    reload_server: Option<&super::IpcServer>,
-    client_id: ClientId,
-) -> Result<(), CodecError>
-where
-    S: AsyncWrite + Unpin,
-{
-    let entries = reload_server
-        .map(|server| launcher::launcher_entries(server.configuration_root().as_deref()))
-        .unwrap_or_default();
-    if entries.pruned > 0 {
-        codec
-            .write_server_message(
-                stream,
-                &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::info(
-                    "launcher.recents_pruned",
-                    format!(
-                        "{} recent workspace(s) dropped: the folder no longer exists",
-                        entries.pruned
-                    ),
-                )),
-            )
-            .await?;
-    }
-    codec
-        .write_server_message(
-            stream,
-            &ServerMessage::LauncherEntries {
-                client_id,
-                entries: Box::new(entries),
-            },
-        )
-        .await?;
-    Ok(())
 }
 
 /// Phase 24.1: bounded diagnostic for menu intents naming a session this
@@ -601,72 +594,25 @@ where
     parse_coordinator.subscribe_document(default_document_id, client_id);
     document_analysis.subscribe_document(default_document_id, client_id);
     let first_message = codec.read_client_message(&mut stream).await?;
-    let mut file_open_capabilities = match first_message {
-        ClientMessage::Hello {
-            protocol_version,
-            client_name: _,
-        } if protocol_version == PROTOCOL_VERSION => {
-            send_welcome_snapshot_and_manifest(
-                &mut stream,
-                client_id,
-                &behavior,
-                &active_theme,
-                &runtime_diagnostics,
-                &runtime_generation,
-                if reload_server.is_none() {
-                    Some((&bootstrap_document, &bootstrap_workspace, &sdui))
-                } else {
-                    None
-                },
-                codec,
-            )
-            .await?;
-            // Phase 22.3: handshake replay of the current tab registry so a
-            // fresh/reconnecting connection learns the existing tabs.
-            let snapshot = tab_registry.lock().await.snapshot();
-            codec
-                .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
-                .await?;
-            // ponytail: per-connection capability token. Structural authority
-            // gate for single-file opens; not a hard boundary against a
-            // malicious same-user client that can also complete Hello. Full
-            // defense needs the long-term OS-verifiable picker exchange.
-            let mut file_open_capabilities = FileOpenCapabilityPool::new();
-            let initial_capability = file_open_capabilities.issue();
-            codec
-                .write_server_message(
-                    &mut stream,
-                    &ServerMessage::FileOpenCapabilityIssued {
-                        token: initial_capability,
-                    },
-                )
-                .await?;
-            file_open_capabilities
-        }
-        ClientMessage::Hello { .. } => {
-            codec
-                .write_server_message(
-                    &mut stream,
-                    &ServerMessage::Error {
-                        code: ProtocolErrorCode::UnsupportedProtocolVersion,
-                        message: "unsupported protocol version".to_string(),
-                    },
-                )
-                .await?;
-            return Ok(());
-        }
-        _ => {
-            codec
-                .write_server_message(
-                    &mut stream,
-                    &ServerMessage::Error {
-                        code: ProtocolErrorCode::InvalidMessage,
-                        message: "first client message must be Hello".to_string(),
-                    },
-                )
-                .await?;
-            return Ok(());
-        }
+    let Some(mut file_open_capabilities) = complete_first_message_handshake(
+        codec,
+        &mut stream,
+        client_id,
+        &behavior,
+        &active_theme,
+        &runtime_diagnostics,
+        &runtime_generation,
+        &tab_registry,
+        if reload_server.is_none() {
+            Some((&bootstrap_document, &bootstrap_workspace, &sdui))
+        } else {
+            None
+        },
+        first_message,
+    )
+    .await?
+    else {
+        return Ok(());
     };
 
     // Cancellation-safety: framed reads run in a dedicated pump task so a
@@ -707,6 +653,39 @@ where
             match $delivery.await? {
                 delivery::Flow::Continue => continue,
                 delivery::Flow::Close => return Ok(()),
+            }
+        };
+    }
+    // Plan 129: build the dispatch context for one extracted arm. Arms that
+    // rebind connection state (TabCommand) or index the loop's mutable maps do
+    // so through the context's `&mut` fields; the subscription `select!` arms
+    // above keep using the locals directly.
+    macro_rules! ctx {
+        () => {
+            ConnectionCtx {
+                codec,
+                stream: &mut stream,
+                client_id,
+                document: &mut document,
+                workspace: &mut workspace,
+                behavior: &behavior,
+                runtime_generation: &runtime_generation,
+                sdui: &sdui,
+                parse_coordinator: &parse_coordinator,
+                completion: &completion,
+                language_intelligence: &language_intelligence,
+                document_analysis: &document_analysis,
+                reload_server: reload_server.as_ref(),
+                file_open_capabilities: &mut file_open_capabilities,
+                menu_sessions: &mut menu_sessions,
+                bound_tab_id: &mut bound_tab_id,
+                bound_state: &bound_state,
+                tab_registry: &tab_registry,
+                tab_registry_tx: &tab_registry_tx,
+                pending_viewport_patches: &mut pending_viewport_patches,
+                completion_tx: &completion_tx,
+                language_intelligence_tx: &language_intelligence_tx,
+                dropped_results: &dropped_results,
             }
         };
     }
@@ -881,101 +860,68 @@ where
         match message {
             ClientMessage::Edit {
                 document_id,
-                client_id,
                 lease_id,
                 base_version,
                 behavior_version,
                 transaction_id,
                 operation,
+                ..
             } => {
                 documents::dispatch_edit_operation(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &runtime_generation,
-                    &document,
-                    &workspace,
-                    &completion,
-                    &language_intelligence,
-                    &document_analysis,
-                    &parse_coordinator,
-                    client_id,
-                    document_id,
-                    lease_id,
-                    base_version,
-                    behavior_version,
-                    transaction_id,
-                    operation,
+                    &mut ctx!(),
+                    documents::EditOperationParams {
+                        document_id,
+                        lease_id,
+                        base_version,
+                        behavior_version,
+                        transaction_id,
+                        operation,
+                    },
                 )
                 .await?;
             }
             ClientMessage::EditorIntent {
                 document_id,
-                client_id,
                 lease_id,
                 base_version,
                 behavior_version,
                 transaction_id,
                 intent,
-            } => {
-                let operation = match intent {
-                    crate::protocol::EditorIntent::InsertText { byte_offset, text } => {
-                        crate::protocol::EditOperation::Insert { byte_offset, text }
-                    }
-                    crate::protocol::EditorIntent::DeleteRange { start, end } => {
-                        crate::protocol::EditOperation::Delete { start, end }
-                    }
-                };
-                documents::dispatch_edit_operation(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &runtime_generation,
-                    &document,
-                    &workspace,
-                    &completion,
-                    &language_intelligence,
-                    &document_analysis,
-                    &parse_coordinator,
-                    client_id,
-                    document_id,
-                    lease_id,
-                    base_version,
-                    behavior_version,
-                    transaction_id,
-                    operation,
-                )
-                .await?;
-            }
-            ClientMessage::RequestResync {
-                document_id,
-                client_id,
                 ..
             } => {
-                documents::handle_request_resync(
-                    codec,
-                    &mut stream,
-                    &document,
-                    &workspace,
-                    client_id,
-                    document_id,
+                documents::dispatch_edit_operation(
+                    &mut ctx!(),
+                    documents::EditOperationParams {
+                        document_id,
+                        lease_id,
+                        base_version,
+                        behavior_version,
+                        transaction_id,
+                        operation: match intent {
+                            crate::protocol::EditorIntent::InsertText { byte_offset, text } => {
+                                crate::protocol::EditOperation::Insert { byte_offset, text }
+                            }
+                            crate::protocol::EditorIntent::DeleteRange { start, end } => {
+                                crate::protocol::EditOperation::Delete { start, end }
+                            }
+                        },
+                    },
                 )
                 .await?;
             }
+            ClientMessage::RequestResync { document_id, .. } => {
+                documents::handle_request_resync(&mut ctx!(), document_id).await?;
+            }
             ClientMessage::DocumentChunkRequest {
-                client_id,
                 document_id,
                 document_version,
                 offset,
                 max_bytes,
+                ..
             } => {
                 documents::handle_document_chunk_request(
-                    codec,
-                    &mut stream,
-                    &document,
-                    &workspace,
+                    &mut ctx!(),
                     documents::DocumentChunkRequestParams {
-                        client_id,
                         document_id,
                         document_version,
                         offset,
@@ -993,26 +939,23 @@ where
                 trace_id,
                 ..
             } => {
+                let mut ctx = ctx!();
                 let scheduled = documents::handle_viewport_render_request(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &runtime_generation,
-                    &workspace,
-                    &parse_coordinator,
-                    client_id,
-                    document_id,
-                    document_version,
-                    request_id,
-                    byte_start,
-                    byte_end,
-                    trace_id,
+                    &mut ctx,
+                    documents::ViewportRequestParams {
+                        document_id,
+                        document_version,
+                        request_id,
+                        byte_start,
+                        byte_end,
+                        trace_id,
+                    },
                 )
                 .await?;
                 // Latest request wins: a newer request for the same document
                 // supersedes any still-pending older patch (protocol v29).
                 documents::track_pending_viewport_request(
-                    &mut pending_viewport_patches,
+                    &mut *ctx.pending_viewport_patches,
                     document_id,
                     document_version,
                     request_id,
@@ -1021,569 +964,241 @@ where
                 );
             }
             ClientMessage::OpenDocument {
-                client_id,
                 workspace_root_id,
                 path,
+                ..
             } => {
-                documents::handle_open_document(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &runtime_generation,
-                    &workspace,
-                    &sdui,
-                    &parse_coordinator,
-                    &document_analysis,
-                    client_id,
-                    workspace_root_id,
-                    path,
-                )
-                .await?;
+                documents::handle_open_document(&mut ctx!(), workspace_root_id, path).await?;
             }
             ClientMessage::OpenSelectedFile {
-                client_id,
                 capability,
                 selected_path,
+                ..
             } => {
-                workspace::handle_open_selected_file(
-                    codec,
-                    &mut stream,
-                    &mut file_open_capabilities,
-                    &behavior,
-                    &runtime_generation,
-                    &workspace,
-                    &sdui,
-                    &parse_coordinator,
-                    &document_analysis,
-                    client_id,
-                    capability,
-                    selected_path,
-                )
-                .await?;
-            }
-            ClientMessage::ListAgentSettingsFiles { client_id } => {
-                // Agent settings page (plan 117): server-resolved listing;
-                // no config root ⇒ empty page, never an error.
-                let files = match reload_server.as_ref() {
-                    Some(server) => server
-                        .agent_settings_root(client_id)
-                        .await
-                        .map(|root| agent_settings::list_agent_settings_files(&root))
-                        .unwrap_or_default(),
-                    None => Vec::new(),
-                };
-                codec
-                    .write_server_message(
-                        &mut stream,
-                        &ServerMessage::AgentSettingsFiles { client_id, files },
-                    )
+                workspace::handle_open_selected_file(&mut ctx!(), capability, selected_path)
                     .await?;
             }
-            ClientMessage::ListLauncherEntries { client_id } => {
-                write_launcher_entries(codec, &mut stream, reload_server.as_ref(), client_id)
-                    .await?;
+            ClientMessage::ListAgentSettingsFiles { .. } => {
+                workspace::handle_list_agent_settings_files(&mut ctx!()).await?;
             }
-            ClientMessage::RemoveLauncherRecent { client_id, index } => {
-                if let Some(server) = reload_server.as_ref() {
-                    launcher::remove_recent_workspace(
-                        server.configuration_root().as_deref(),
-                        index,
-                    );
-                }
-                write_launcher_entries(codec, &mut stream, reload_server.as_ref(), client_id)
-                    .await?;
+            ClientMessage::ListLauncherEntries { .. } => {
+                workspace::handle_list_launcher_entries(&mut ctx!()).await?;
             }
-            ClientMessage::OpenAgentSettingsFile { client_id, name } => {
-                // Agent settings page (plan 117): the name is validated
-                // against the fixed delivered-file layout and resolved
-                // server-side; the open/save path is the ordinary selected-
-                // file document pipeline (no extra capability — the name
-                // carries no path authority).
-                let root = match reload_server.as_ref() {
-                    Some(server) => server.agent_settings_root(client_id).await,
-                    None => None,
-                };
-                let response = match root
-                    .map(|root| agent_settings::resolve_agent_settings_file(&root, &name))
-                    .unwrap_or_else(|| Err("agent config root unavailable".to_string()))
-                {
-                    Ok(path) => {
-                        workspace::open_selected_file_response(
-                            &workspace,
-                            path.display().to_string(),
-                            client_id,
-                        )
-                        .await
-                    }
-                    Err(message) => file_operation_failed(
-                        WorkspaceError::FileUnavailable {
-                            path: std::path::PathBuf::from(&name),
-                            source: std::io::Error::new(
-                                std::io::ErrorKind::PermissionDenied,
-                                message,
-                            ),
-                        },
-                        None,
-                        None,
-                    ),
-                };
-                documents::write_document_open_response(
-                    &codec,
-                    &mut stream,
-                    response,
-                    &behavior,
-                    &runtime_generation,
-                    &workspace,
-                    &sdui,
-                    &parse_coordinator,
-                    &document_analysis,
-                    client_id,
-                )
-                .await?;
+            ClientMessage::RemoveLauncherRecent { index, .. } => {
+                workspace::handle_remove_launcher_recent(&mut ctx!(), index).await?;
+            }
+            ClientMessage::OpenAgentSettingsFile { name, .. } => {
+                workspace::handle_open_agent_settings_file(&mut ctx!(), name).await?;
             }
             ClientMessage::AddSelectedWorkspaceRoot {
-                client_id,
                 capability,
                 selected_path,
+                ..
             } => {
                 workspace::handle_add_selected_workspace_root(
-                    codec,
-                    &mut stream,
-                    &mut file_open_capabilities,
-                    &workspace,
-                    &document,
-                    &sdui,
-                    reload_server.as_ref(),
-                    client_id,
+                    &mut ctx!(),
                     capability,
                     selected_path,
                 )
                 .await?;
             }
             ClientMessage::SaveDocument {
-                client_id,
                 document_id,
                 known_version,
+                ..
             } => {
-                documents::handle_save_document(
-                    codec,
-                    &mut stream,
-                    &workspace,
-                    client_id,
-                    document_id,
-                    known_version,
-                )
-                .await?;
+                documents::handle_save_document(&mut ctx!(), document_id, known_version).await?;
             }
             ClientMessage::ReloadDocument {
-                client_id,
                 document_id,
                 known_version,
                 force,
+                ..
             } => {
-                documents::handle_reload_document(
-                    codec,
-                    &mut stream,
-                    &workspace,
-                    &completion,
-                    &language_intelligence,
-                    &document_analysis,
-                    client_id,
-                    document_id,
-                    known_version,
-                    force,
-                )
-                .await?;
+                documents::handle_reload_document(&mut ctx!(), document_id, known_version, force)
+                    .await?;
             }
             ClientMessage::CloseDocument {
-                client_id,
-                document_id,
-                force,
+                document_id, force, ..
             } => {
-                documents::handle_close_document(
-                    codec,
-                    &mut stream,
-                    &workspace,
-                    &parse_coordinator,
-                    &completion,
-                    &language_intelligence,
-                    &document_analysis,
-                    client_id,
-                    document_id,
-                    force,
-                )
-                .await?;
+                documents::handle_close_document(&mut ctx!(), document_id, force).await?;
             }
-            ClientMessage::GetDocumentStatus {
-                client_id,
-                document_id,
-            } => {
-                documents::handle_get_document_status(
-                    codec,
-                    &mut stream,
-                    &workspace,
-                    client_id,
-                    document_id,
-                )
-                .await?;
+            ClientMessage::GetDocumentStatus { document_id, .. } => {
+                documents::handle_get_document_status(&mut ctx!(), document_id).await?;
             }
-            ClientMessage::ListDocuments { client_id } => {
-                documents::handle_list_documents(codec, &mut stream, &workspace, client_id).await?;
+            ClientMessage::ListDocuments { .. } => {
+                documents::handle_list_documents(&mut ctx!()).await?;
             }
-            ClientMessage::TabCommand { client_id, command } => {
-                match tabs::handle_tab_command(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    &bound_state,
-                    &mut document,
-                    &mut workspace,
-                    &sdui,
-                    &tab_registry,
-                    &tab_registry_tx,
-                    reload_server.as_ref(),
-                    client_id,
-                    command,
-                    &mut bound_tab_id,
-                )
-                .await?
-                {
+            ClientMessage::TabCommand { command, .. } => {
+                match tabs::handle_tab_command(&mut ctx!(), command).await? {
                     tabs::TabDispatch::Continue => {}
                     tabs::TabDispatch::CloseConnection => return Ok(()),
                 }
             }
             ClientMessage::MenuQueryUpdate {
-                client_id,
                 session_id,
                 query,
                 scope,
+                ..
             } => {
-                menus::handle_menu_query_update(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    client_id,
-                    session_id,
-                    query,
-                    scope,
-                    reload_server.as_ref().map(|server| &server.agent),
-                    bound_tab_id,
-                )
-                .await?;
+                menus::handle_menu_query_update(&mut ctx!(), session_id, query, scope).await?;
             }
-            ClientMessage::MenuBackspace {
-                client_id,
-                session_id,
-            } => {
-                menus::handle_menu_backspace(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    client_id,
-                    session_id,
-                    reload_server.as_ref().map(|server| &server.agent),
-                    bound_tab_id,
-                )
-                .await?;
+            ClientMessage::MenuBackspace { session_id, .. } => {
+                menus::handle_menu_backspace(&mut ctx!(), session_id).await?;
             }
             ClientMessage::MenuSelectionMove {
-                client_id,
-                session_id,
-                delta,
+                session_id, delta, ..
             } => {
-                menus::handle_menu_selection_move(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    client_id,
-                    session_id,
-                    delta,
-                )
-                .await?;
+                menus::handle_menu_selection_move(&mut ctx!(), session_id, delta).await?;
             }
             ClientMessage::MenuActivate {
-                client_id,
-                session_id,
-                kind,
+                session_id, kind, ..
             } => {
-                menus::handle_menu_activate(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    &behavior,
-                    &runtime_generation,
-                    &document,
-                    &workspace,
-                    &sdui,
-                    &parse_coordinator,
-                    &document_analysis,
-                    &tab_registry,
-                    &tab_registry_tx,
-                    reload_server.as_ref(),
-                    client_id,
-                    session_id,
-                    kind,
-                    bound_tab_id,
-                )
-                .await?;
+                menus::handle_menu_activate(&mut ctx!(), session_id, kind).await?;
             }
-            ClientMessage::MenuCancel {
-                client_id,
-                session_id,
-            } => {
-                menus::handle_menu_cancel(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    client_id,
-                    session_id,
-                )
-                .await?;
+            ClientMessage::MenuCancel { session_id, .. } => {
+                menus::handle_menu_cancel(&mut ctx!(), session_id).await?;
             }
             ClientMessage::SduiAction {
                 ui_version, intent, ..
             } => {
-                runtime::handle_sdui_action(
-                    codec,
-                    &mut stream,
-                    &sdui,
-                    &workspace,
-                    &document,
-                    &behavior,
-                    &runtime_generation,
-                    &parse_coordinator,
-                    &document_analysis,
-                    &mut menu_sessions,
-                    &tab_registry,
-                    reload_server.as_ref(),
-                    client_id,
-                    ui_version,
-                    intent,
-                    bound_tab_id,
-                )
-                .await?;
+                runtime::handle_sdui_action(&mut ctx!(), ui_version, intent).await?;
             }
             ClientMessage::CommandIntent {
-                client_id,
                 document_id,
                 behavior_version,
                 command_id,
+                ..
             } => {
                 runtime::handle_command_intent(
-                    codec,
-                    &mut stream,
-                    &mut menu_sessions,
-                    &behavior,
-                    &runtime_generation,
-                    &document,
-                    &workspace,
-                    &sdui,
-                    &tab_registry,
-                    reload_server.as_ref(),
-                    client_id,
+                    &mut ctx!(),
                     document_id,
                     behavior_version,
                     command_id,
-                    bound_tab_id,
                 )
                 .await?;
             }
             ClientMessage::CompletionRequest { mut request } => {
-                runtime::handle_completion_request(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &runtime_generation,
-                    &document,
-                    &workspace,
-                    &completion,
-                    &document_analysis,
-                    &completion_tx,
-                    &dropped_results,
-                    client_id,
-                    &mut request,
-                )
-                .await?;
+                runtime::handle_completion_request(&mut ctx!(), &mut request).await?;
             }
             ClientMessage::LanguageIntelligenceRequest { mut request } => {
-                runtime::handle_language_intelligence_request(
-                    codec,
-                    &mut stream,
-                    &behavior,
-                    &document,
-                    &workspace,
-                    &language_intelligence,
-                    &language_intelligence_tx,
-                    &dropped_results,
-                    client_id,
-                    &mut request,
-                )
-                .await?;
+                runtime::handle_language_intelligence_request(&mut ctx!(), &mut request).await?;
             }
             ClientMessage::RuntimeGenerationInstalled {
                 client_id: ack_client_id,
                 runtime_generation_id,
             } => {
                 runtime::handle_runtime_generation_installed(
-                    &runtime_generation,
+                    &mut ctx!(),
                     ack_client_id,
-                    client_id,
                     runtime_generation_id,
                 )
                 .await;
             }
             ClientMessage::SelectionQueryRequest { request } => {
-                documents::handle_selection_query_request(
-                    codec,
-                    &mut stream,
-                    &workspace,
-                    &document,
-                    &parse_coordinator,
-                    &runtime_generation,
-                    client_id,
-                    &request,
-                )
-                .await?;
+                documents::handle_selection_query_request(&mut ctx!(), &request).await?;
             }
             ClientMessage::Hello { .. } => {
-                codec
-                    .write_server_message(
-                        &mut stream,
-                        &ServerMessage::Error {
-                            code: ProtocolErrorCode::InvalidMessage,
-                            message: "duplicate Hello message".to_string(),
-                        },
-                    )
-                    .await?;
+                runtime::handle_duplicate_hello(&mut ctx!()).await?;
             }
-            ClientMessage::Agent { client_id, command } => {
-                if let Some(server) = reload_server.as_ref() {
-                    // Plan 109 I3: a panel model/provider/agent selection
-                    // (dropdown) applies through the same book path as the
-                    // Command Centre picker, with the connection's bound tab
-                    // so the per-workspace selection (I2) is written.
-                    match &*command {
-                        AgentClientCommand::Select { kind, id }
-                            if matches!(
-                                kind,
-                                AgentPickerKind::Model
-                                    | AgentPickerKind::Provider
-                                    | AgentPickerKind::Agent
-                            ) =>
-                        {
-                            // `unwrap_or(client_id)` is the same tab the
-                            // panel's own mount (TabState) resolves, so the
-                            // selection lands on the tab its STATE belongs to.
-                            let tab = server
-                                .tab_registry
-                                .lock()
-                                .await
-                                .tab_for_client(client_id)
-                                .unwrap_or(client_id);
-                            server.agent.select_picker(*kind, id, Some(tab)).await;
-                        }
-                        // Plan 109 I8: OM worker model selection — the same
-                        // per-workspace book path plus the daemon's
-                        // per-session `session.om.set`.
-                        AgentClientCommand::SelectWorker {
-                            worker,
-                            id,
-                            session_id,
-                        } => {
-                            // Same tab resolution as the panel's own mount: a
-                            // bare `tab_for_client` can be `None` while the
-                            // panel still holds this tab's session, which sent
-                            // the book broadcast at a session-less snapshot and
-                            // wiped the Memory tab.
-                            let tab = server
-                                .tab_registry
-                                .lock()
-                                .await
-                                .tab_for_client(client_id)
-                                .unwrap_or(client_id);
-                            server
-                                .agent
-                                .select_worker(*worker, id, session_id.clone(), Some(tab))
-                                .await;
-                        }
-                        // Plan 117: the panel's resume — the same rich
-                        // load the picker uses (full transcript + trio +
-                        // tab rebind), tab-resolved client-side then
-                        // broadcast so the view's relay applies it. The
-                        // old dispatch path had no tab (no rebind) and
-                        // broadcast an entry-less snapshot that wiped the
-                        // restored transcript.
-                        AgentClientCommand::ResumeSession { session_id } => {
-                            let tab = server
-                                .tab_registry
-                                .lock()
-                                .await
-                                .tab_for_client(client_id)
-                                .unwrap_or(client_id);
-                            let snapshot = server.agent.resume_tab(tab, session_id, None).await;
-                            server.agent.broadcast(snapshot);
-                        }
-                        // Plan 117 follow-up: the coding-agent pane's mount
-                        // STATE — the tab's branch + daemon environment
-                        // (skills, MCP outcomes) before any prompt, so the
-                        // status row and the pinned cards are populated on a
-                        // freshly opened surface.
-                        AgentClientCommand::TabState => {
-                            let tab = server
-                                .tab_registry
-                                .lock()
-                                .await
-                                .tab_for_client(client_id)
-                                .unwrap_or(client_id);
-                            let snapshot = server.agent.tab_state_snapshot(tab).await;
-                            // Written on this connection before the broadcast
-                            // snapshot, so the tab's store has adopted its
-                            // session by the time the snapshot's STATE and
-                            // MESSAGES events arrive.
-                            let bound = session_bound_message(client_id, tab, &snapshot.session_id);
-                            codec
-                                .write_server_message(
-                                    &mut stream,
-                                    &ServerMessage::Agent(Box::new(bound)),
-                                )
-                                .await?;
-                            server
-                                .agent
-                                .broadcast(AgentServerMessage::Snapshot(snapshot));
-                        }
-                        // Plan 117: the panel's recent-sessions list —
-                        // labeled, workspace-scoped, bounded.
-                        AgentClientCommand::ResumableSessions => {
-                            let tab = server
-                                .tab_registry
-                                .lock()
-                                .await
-                                .tab_for_client(client_id)
-                                .unwrap_or(client_id);
-                            let sessions = server.agent.resumable_for_tab(tab, 5).await;
-                            server.agent.broadcast(AgentServerMessage::AgentRpc {
-                                code: "session.resumable".into(),
-                                result_json: serde_json::json!({ "sessions": sessions })
-                                    .to_string(),
-                            });
-                        }
-                        _ => server.agent.dispatch(*command),
-                    }
-                } else {
-                    codec
-                        .write_server_message(
-                            &mut stream,
-                            &ServerMessage::Agent(Box::new(AgentServerMessage::Diagnostic {
-                                code: "agent.unavailable".to_string(),
-                                message: "agent host is not attached to this connection"
-                                    .to_string(),
-                            })),
-                        )
-                        .await?;
-                }
+            ClientMessage::Agent { command, .. } => {
+                runtime::handle_agent_command(&mut ctx!(), command).await?;
             }
         }
     }
+}
+/// First-message handshake. A matching `Hello` earns the welcome snapshot,
+/// the tab-registry replay, and this connection's initial file-open
+/// capability; a mismatched protocol version or a non-`Hello` first message is
+/// answered with one bound error and ends the connection (`None`).
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "the handshake snapshots the server-owned state handles the client needs"
+)]
+async fn complete_first_message_handshake<S>(
+    codec: Codec,
+    mut stream: &mut S,
+    client_id: ClientId,
+    behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
+    active_theme: &Arc<Mutex<Option<crate::protocol::ActiveTheme>>>,
+    runtime_diagnostics: &Arc<Mutex<RuntimeDiagnosticStore>>,
+    runtime_generation: &RuntimeGenerationStore,
+    tab_registry: &Arc<Mutex<TabRegistry>>,
+    legacy_bootstrap: Option<(
+        &Arc<Mutex<DocumentState>>,
+        &Arc<Mutex<WorkspaceState>>,
+        &Arc<Mutex<StaticSduiState>>,
+    )>,
+    first_message: ClientMessage,
+) -> Result<Option<FileOpenCapabilityPool>, CodecError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let file_open_capabilities = match first_message {
+        ClientMessage::Hello {
+            protocol_version,
+            client_name: _,
+        } if protocol_version == PROTOCOL_VERSION => {
+            send_welcome_snapshot_and_manifest(
+                &mut stream,
+                client_id,
+                behavior,
+                active_theme,
+                runtime_diagnostics,
+                runtime_generation,
+                legacy_bootstrap,
+                codec,
+            )
+            .await?;
+            // Phase 22.3: handshake replay of the current tab registry so a
+            // fresh/reconnecting connection learns the existing tabs.
+            let snapshot = tab_registry.lock().await.snapshot();
+            codec
+                .write_server_message(&mut stream, &ServerMessage::TabRegistry(snapshot))
+                .await?;
+            // ponytail: per-connection capability token. Structural authority
+            // gate for single-file opens; not a hard boundary against a
+            // malicious same-user client that can also complete Hello. Full
+            // defense needs the long-term OS-verifiable picker exchange.
+            let mut file_open_capabilities = FileOpenCapabilityPool::new();
+            let initial_capability = file_open_capabilities.issue();
+            codec
+                .write_server_message(
+                    &mut stream,
+                    &ServerMessage::FileOpenCapabilityIssued {
+                        token: initial_capability,
+                    },
+                )
+                .await?;
+            file_open_capabilities
+        }
+        ClientMessage::Hello { .. } => {
+            codec
+                .write_server_message(
+                    &mut stream,
+                    &ServerMessage::Error {
+                        code: ProtocolErrorCode::UnsupportedProtocolVersion,
+                        message: "unsupported protocol version".to_string(),
+                    },
+                )
+                .await?;
+            return Ok(None);
+        }
+        _ => {
+            codec
+                .write_server_message(
+                    &mut stream,
+                    &ServerMessage::Error {
+                        code: ProtocolErrorCode::InvalidMessage,
+                        message: "first client message must be Hello".to_string(),
+                    },
+                )
+                .await?;
+            return Ok(None);
+        }
+    };
+    Ok(Some(file_open_capabilities))
 }
 
 #[allow(

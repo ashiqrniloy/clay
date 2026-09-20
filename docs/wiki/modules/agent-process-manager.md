@@ -20,6 +20,11 @@ diagnostic, not a hang. Package runtimes never receive this type. If the daemon
 actor exits, `forget_running` clears only its own stale channel so the next
 command respawns the daemon and can resume persisted sessions.
 
+The server also owns the **authority handle**: an `AgentHostHandle` it injects
+into every JavaScript runtime lane's `ClayOpState` (plan 130 A1). Nothing is
+process-global, so two `IpcServer`s in one process route agent ops to their own
+hosts and a lane's authority is exactly the handle it was wired with.
+
 ## Responsibilities
 
 - Resolve Node (`CLAY_NODE` or `PATH`) and `clay-agent/dist/main.js`
@@ -49,6 +54,28 @@ command respawns the daemon and can resume persisted sessions.
 `IpcServer::new` stores `AgentHost::for_server(configuration_root)`. Tests that
 build a stub server use `AgentHost::inert()`, which returns
 `agent.unavailable` without spawn.
+
+**Plan 130 A1 — injected ownership, fail-closed hostless lanes, per-lane
+registration queue.** Server construction reaches the runtime service once:
+`RuntimeGenerationStore::initial(handle)` → `ClayJsRuntimeService::set_agent_host`
+→ `wire_runtime_publishers`, which calls `ClayOpState::set_agent_host` on every
+domain lane (trusted/third-party × general/latency). Replacement workers from a
+poison restart start unwired and travel the same path, so a lane never loses the
+server's host. `set_agent_host` is idempotent and hands over anything the lane
+queued before the wiring existed (`take_pending_agent_registrations` →
+`AgentHostHandle::queue_registration_now`, stopping at a full host queue exactly
+as the removed process-global drain did).
+
+Agent ops resolve the host from their own lane (`lane_host(state)`); a lane
+without one fails closed with
+`agent.unavailable: no agent host is attached to this runtime`, never with a
+fallback to another server's host. The package-facing registration ops are the
+one deliberate exception: with no host they queue the declaration on that lane's
+own `ClayOpState` (bounded by `PENDING_REGISTRATION_CAP`, 64) and answer
+`{"queued": true}`, so a package load entry never fails just because its runtime
+has no agent subsystem. The host keeps its own pending queue of the same size
+for declarations addressed while its daemon is still starting, drained in order
+after the first `initialize` handshake.
 
 `dispatch` clones the host and `tokio::spawn`s `run`. `run` calls `ensure_running`:
 create `--data-dir`, load or create a 0600 `vault.passphrase`, spawn, send
@@ -85,7 +112,16 @@ server.agent.dispatch(AgentClientCommand::Prompt {
 - Agent runtime state (book, vault, sessions, passphrase) belongs to exactly one
   Clay root: never a shared temp directory, and never the developer's real
   profile from a unit test.
-- `src/server/ops` and `src/server/js_runtime` must not name `AgentHost`.
+- No process-global agent authority may exist: `AGENT_HOST_AUTHORITY`,
+  `PENDING_PACKAGE_REGISTRATIONS` and `install_global` are gone; the handle
+  lives in the server's state graph and in each lane's `ClayOpState`, and
+  `tests/agent_protocol.rs::agent_authority_is_server_state_not_a_process_global`
+  keeps it that way.
+- `src/server/ops` and `src/server/js_runtime` must not name the daemon owner
+  `AgentHost`; they carry the opaque `AgentHostHandle` and resolve it per lane,
+  failing closed when their lane has no host.
+- Registration declarations queue per lane (bounded), then hand over to that
+  lane's host — never to a process-wide queue, and never across servers.
 - stderr is drained and discarded so a full pipe cannot stall the child.
 - `# ponytail: global AgentHost lock, per-session queues if prompt throughput matters`
 
@@ -103,11 +139,18 @@ server.agent.dispatch(AgentClientCommand::Prompt {
   `for_server_moves_a_legacy_agent_data_dir_under_the_per_agent_root`, and
   `tab_state_snapshot_skips_a_profile_the_daemon_does_not_have` pin the root
   resolution and the profile-availability fallback.
-- `cargo test --test protocol -- agent_protocol`
+- `cargo test --test protocol -- agent_protocol` — incl.
+  `agent_authority_is_server_state_not_a_process_global` (no process-global
+  authority or queue, the lane op state owns the handle) and
+  `two_servers_in_one_process_own_independent_agent_hosts`.
 - `cargo test --test editor -- agent_daemon_work_is_absent`
+- `cargo test --test protocol -- plan130_wiki_pages_describe_host_modules_and_injected_ownership`
+  — keeps this page and [clay-agent Daemon](clay-agent.md) describing the
+  injected ownership and the host module map.
 
 ## Related
 
 - [Phase 25 Agent Protocol](../modules/agent-protocol.md)
 - [clay-agent Daemon](clay-agent.md)
+- [Persistent Runtime Hardening](../modules/persistent-runtime-hardening.md) — the lane topology the handle is injected into
 - [Server IPC Skeleton](server-ipc-skeleton.md)

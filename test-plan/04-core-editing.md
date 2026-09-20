@@ -205,6 +205,12 @@ explicit rather than inferred from static screenshots.
 |---|--------|----------|
 | E39 | With the ≥4 MiB `review.rs` fixture open (module 03 F56), type a word prefix and press `Ctrl+Space`; move the selection with `ArrowDown` and accept with `Enter`; then repeat and dismiss with `Escape`; finally type a no-match prefix (`zzzz`) and press `Ctrl+Space` again | The modeless popup opens at the caret with the provider's items (`@clay/rust`: keyword `fn` plus the `fn` snippet), the editor keeps focus and reports `has-popup`, and the popup width/row caps of E16 still hold. Accepting inserts the selected item's text (snippet expanded) at the caret; `Escape` closes the popup with no text change; a no-match prefix returns `Empty` — no popup, no blocking panel, no dialog. Opening, dismissing, and accepting must not scale with document size (see module 11 Q41). |
 
+## Plan 127 package-parse-handler responsiveness step
+
+| # | Action | Expected |
+|---|--------|----------|
+| E40 | With a bundled package parse handler registered for the open mode (`@clay/markdown` on a ≥1 MiB `notes.md`), type a burst of characters and then trigger completion (`Ctrl+J` on hosts where the compositor owns `Ctrl+Space`; `Ctrl+Space` elsewhere) | Input never waits for parser work: every keystroke echoes immediately, the caret tracks the text, and the editor stays focusable and scrollable while the parse handler keeps working in the background (measured acknowledgement on a 1,052,070-byte document: `server.edit_ack` p50 0.33 ms / p95 0.52 ms for 19 keystrokes, module 11 Q42). The completion popup opens modelessly at the caret without waiting for parse work, keeps the editor focused (`has-popup`), and dismisses with `Escape` with no text change; a mode without a completion provider (markdown) returns `Empty` — no popup, no blocking panel, no dialog. Negative: no input stall, no lost keystroke, no orphan loading state. Provider scheduling behind a held lane is automated-only (`latency_lane_unblocked_by_busy_general_lane`; see the plan 127 execution record for the reachability reason). |
+
 ## Plan 099 delayed-syntax editing steps
 
 | # | Action | Expected |
@@ -239,6 +245,26 @@ re-verified on this branch:
 | E38 automated companion | PASS | Same suite plus the protocol/runtime `large_document` tests (chunk bounds, resync, no-history/remount invariants) green on this branch (task 6 full run). |
 | E37/E38 live typing | UNRESOLVED | `computer-use-linux doctor` 2026-09-01: no capable input backend (`can_send_development_input=false`). Unchanged from Plan 098/099 records; not a Plan 105 regression. |
 
+## Plan 127 execution record (2026-09-19, task 7)
+
+Plan 127 split each runtime domain into a general lane and a latency lane,
+bounded the worker command queues, restored the heap limit after near-heap
+recovery, and gated commands from revoked or ungranted packages host-side.
+Live run: isolated mode-700 root, bundled packages only, portal-driven keyboard
+input (`computer-use-linux` `type_text`/`press_key`), AT-SPI probe.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| E16/E18/E19/E39 (bundled `@clay/rust` active, 65 KiB `review.rs`) | PASS live | Typing `fn live_probe` and `let value = std.` echoed immediately (2,798 → 2,827 chars, caret tracked); the `.` trigger opened the completion popup (`list box Completions` at `507,183,250x130`, rows `rust` group / `as` selected / `fn` / `fn function snippet` / `if` / `in`), editor reported `editable,focused,has-popup`; `Enter` accepted `as` (2,827 → 2,829 chars); a second trigger opened the popup again and `Escape` closed it with no text change (2,830 chars from the trigger keystroke only). `Ctrl+Space` itself is consumed by this host's GNOME input-source switch — recorded as a host ceiling, not a Clay defect; the `.` autocomplete trigger and `Ctrl+J` both work. Artifacts: `test-plan/artifacts/127-lane-scheduling/live-completion/` (`window-popup.png`, `tree-popup.txt`, `server.log`, `client.log`, `clay-server-perf-summary.json`). |
+| E40 (bundled `@clay/markdown` parse handler on a 1,052,070-byte `notes.md`) | PASS live (typing) / PASS automated (provider lane) | Typing `typed while parsing` echoed immediately (806 → 825 chars, caret 19) with the package parse handler registered for the mode; the editor stayed focused and the popup path stayed responsive (`Empty` for markdown, which has no completion provider). The provider-lane half — a latency-lane provider that keeps answering while a package parse handler holds the general lane — has no live trigger on this build and is carried by `latency_lane_unblocked_by_busy_general_lane` (4.1–24.9 ms completion latency under a 100–500 ms general-lane hold versus the ~454 ms single-worker baseline, `code-reviews/2026-09-18-plan127-baseline/README.md`). Reachability reason: no bundled package registers a JS completion provider, and a third-party package cannot be enabled with `parse-document`/`completion-provider` because those capability grants have no user-facing surface yet (module 09 P56). Artifacts: `test-plan/artifacts/127-lane-scheduling/live-markdown-parse-handler/`. |
+| Automated companions | PASS | `server::js_runtime::tests::latency_lane_unblocked_by_busy_general_lane`, `lane_poison_replaces_only_that_lane`, `third_party_lane_denies_trusted_ops`, `lanes_share_their_domain_op_set`, `queue_bounded_under_flood`, `distinct_documents_never_superseded`, `queue_evicts_oldest_at_capacity`, `near_heap_limit_recovers_with_original_cap`, `revoked_package_commands_refused_per_lane`, `reload_shares_third_party_lanes_untouched`; full serial lib suite 1,414 passed / 1 ignored on the frozen tree. |
+
+Harness: `test-plan/artifacts/127-lane-scheduling/run-live.sh` (isolated launch,
+`fixture|completion|markdown` modes, `CLAY_PERF_PROFILE` + `CLAY_PERF_REPORT_DIR`
+wired, tree-kill teardown), `probe.py` and `portal-shot.py` (copied from the plan
+126 artifact set), `init-markdown.js`, plus the two fixture packages described in
+the plan 127 artifact README.
+
 ## Plan 126 execution record (2026-09-19, task 6)
 
 | Steps | Result | Evidence |
@@ -247,3 +273,38 @@ re-verified on this branch:
 | E39 (accept on a ≥4 MiB document) | PASS live | `ArrowDown` + `Enter` accepted the snippet: document head went from `fn…` to `fn name(args) {    }pub fn helper_000000…` (2,761 → 2,779 chars, caret 7), popup rows 0, editor still focused. `test-plan/artifacts/126-access-paths/live-large-completion/` holds `screenshot.png` (popup open over the 4.2 MB document), `accessibility-popup.txt`, `accessibility-accepted.txt`, `editor.txt`, `escape-dismissal.txt`, `empty-result.txt`, `accept-result.txt`, `drive.txt`. |
 | E39 latency | UNRESOLVED live (probe resolution) | The popup is present at the first AT-SPI observation after the keypress, but the probe's tree walk costs ~0.9 s warm (~15 s per fresh process) over D-Bus, so no live keypress→paint number is claimed. Server-side completion round trip on the same 4 MiB document is the measured evidence: ~161 µs median with constant per-request allocation (module 11 Q41). |
 | Automated companion | PASS | `cargo test --lib -- --test-threads=1 static_completion_on_large_document_matches_small_document_results` — a 4 MiB document returns exactly the small-document items, so result parity is pinned independently of the live run. |
+
+## Plan 129 connection-loop decomposition execution record (2026-09-20)
+
+Regression-only pass over the refactored connection dispatcher (pure refactor:
+`handle_connection_loop` now routes all 31 arms to per-family handlers; no
+user-visible behavior intended). Isolated live launch
+(`test-plan/artifacts/129-connection-loop/run-live.sh start editing`, 65 KiB
+`review.rs`, bundled `@clay/rust` + completion fixture), portal keyboard input,
+every step verified against the live AT-SPI tree.
+
+Note: the accessible editor text is a bounded window (~2.7–2.8k chars) that
+follows the caret, so recorded character counts are window sizes, not document
+sizes; every comparison below is like-for-like inside one window.
+
+| Step | Result | Evidence |
+|---|---|---|
+| E1 (typing, graphemes) | PARTIAL live | ASCII echo exact: `AB` and `zzmark2` inserted at the caret with the head, caret, and count advancing together (2,798 → 2,801 / 2,805). The non-ASCII/grapheme leg is UNRESOLVED: the portal keyboard path never delivered `é` or `🎉` (`émoji 🎉` produced `moji ` — the dropped characters never reached the app), so no grapheme claim is made. |
+| E2 (Backspace/Delete) | PASS live | Character-granular: `Backspace` removed the trailing space (2,803 → 2,802), `Delete` removed the character at the caret (`mojiub…`, 2,802 → 2,801). |
+| E3 (indent inheritance) | PASS live | `Enter` on the 4-space-indented comment line kept the block indent on the new line (trailing whitespace on the split line trimmed; net +1 char, caret at the new line). |
+| E4 (comment continuation) | **FAIL live** | `Enter` at the end of `    // caret-here comment line` produced `\n    ` — indentation only, no `// ` continuation, although `@clay/rust` declares `"comments":[{"linePrefix":"//","continuePrefix":"// "}]`. `frontend/src/editor/extensions/behavior.ts::applyEnterRule` handles only `continueLineMarkers`/`insertNewlineOnly`/default indent, and `continuePrefix` has no consumer anywhere in `frontend/src` (only the type at `extensions/types.ts:155`; `controller.ts:723` reads `linePrefix` for toggle-comment). Documentation claims the opposite (`docs/reference/packages/creating-packages.md`: “`continuePrefix` controls comment continuation after Enter”; `docs/wiki/modules/behavior-runtime-registration.md`). Pre-existing (no commit ever implemented it) and client-local, i.e. **not** caused by the connection-loop refactor — recorded as a defect to fix or re-document. |
+| E5 (electric outdent) | PASS live | `}` typed on a 4-space-indented line snapped to column 0 (2,702 → 2,699: four spaces replaced by the brace). |
+| E6 (pair handling) | PASS live | `(` inserted `()` with the caret inside (+2 chars); the following `)` skipped over the auto-close with no text change. |
+| E7 (Tab width) | PASS live | `Tab` at line start inserted exactly 4 spaces for the rust mode (`tabSpaces: 4`; 2,701 → 2,705). |
+| E8 (undo/redo) | PARTIAL live | Undo PASS twice: `Ctrl+Z` removed `AB` then the earlier stray `k` (2,801 → 2,799 → 2,798) and a second run undid `zzmark2` (2,805 → 2,798) with the caret restored. Redo UNRESOLVED: `Ctrl+Shift+Z` never landed (portal keystrokes dropped, see the host ceiling below), so redo is not claimed live. |
+| E9 (history branching) | UNRESOLVED live | Needs more consecutive keystrokes than this host's input path delivered this run; covered by the editor history suite. |
+| E16/E18/E19/E39 (completion) | UNRESOLVED live | The completion trigger needs a keypress sequence the portal path could not deliver after the first burst, and the editor node exposes no `EditableText` on this host (module 126 ceiling), so the popup was not re-driven. The refactor moved the `CompletionRequest`/completion-lane code without changing it; fresh automated companions below, and the last live completion passes remain the plan 126/127 records (they predate plan 129). |
+| Automated companions (fresh on the refactored tree) | PASS | `cargo test --lib connection::` 96 passed; `cargo test --lib completion::` 31 passed; `frontend` `npx vitest run src/editor` 9 files / 75 tests passed (editor extensions, position map, hot-path invariants); `cargo test --lib control_center` 28 passed. Artifact log: `test-plan/artifacts/129-connection-loop/automated-companions.txt`. |
+
+Host ceiling observed this run: `xdg-desktop-portal-gnome` segfaults on
+RemoteDesktop keyboard sessions (journal `xdg-desktop-portal-gnome.service:
+Main process exited, code=dumped, status=11/SEGV`), dropping the in-flight
+keystroke; keystrokes land only in short bursts after a fresh app launch.
+Steps are recorded UNRESOLVED rather than inferred. Artifacts:
+`test-plan/artifacts/129-connection-loop/live-editing/` (`steps.txt`,
+`steps2.txt`, `screenshot-edited-tail.png`, `server.log`, `client.log`).

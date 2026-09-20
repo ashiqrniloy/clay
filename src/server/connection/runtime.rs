@@ -10,13 +10,12 @@ use crate::{
     packages::commands::CommandRegistry,
     perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
     protocol::{
-        AgentServerMessage, BehaviorManifest, ClientId, CompletionProvenance, CompletionRequest,
-        CompletionResultSet, CompletionStatus, CompletionTrigger, DocumentId,
-        LanguageIntelligenceFeature, LanguageIntelligencePayload, LanguageIntelligenceResult,
-        LanguageIntelligenceStatus, ProtocolErrorCode, SduiActionArgument, SduiActionIntent,
-        SduiActionSource, SduiActionValue, ServerMessage, TabId,
-        codec::{Codec, CodecError},
-        completion::estimated_result_payload_bytes,
+        AgentClientCommand, AgentPickerKind, AgentServerMessage, BehaviorManifest, ClientId,
+        CompletionProvenance, CompletionRequest, CompletionResultSet, CompletionStatus,
+        CompletionTrigger, DocumentId, LanguageIntelligenceFeature, LanguageIntelligencePayload,
+        LanguageIntelligenceResult, LanguageIntelligenceStatus, ProtocolErrorCode,
+        SduiActionArgument, SduiActionIntent, SduiActionSource, SduiActionValue, ServerMessage,
+        codec::CodecError, completion::estimated_result_payload_bytes,
     },
     server::{
         agent_picker::picker_kind_for_command,
@@ -25,25 +24,20 @@ use crate::{
             CommandExecutor, OPEN_PATH_BROWSER_COMMAND_ID,
         },
         completion::{
-            CompletionCoordinator, CompletionProviderMeta, apply_exclusive_suppression,
-            completion_prefix_matches, completion_recency_rank, score_completion_item,
+            CompletionProviderMeta, apply_exclusive_suppression, completion_prefix_matches,
+            completion_recency_rank, score_completion_item,
         },
         document::DocumentState,
-        document_analysis::DocumentAnalysisCoordinator,
         language_intelligence::{
-            LanguageIntelligenceCoordinator, LanguageIntelligenceCoordinatorError,
-            LanguageIntelligenceDocumentWindow,
+            LanguageIntelligenceCoordinatorError, LanguageIntelligenceDocumentWindow,
         },
-        menu_sessions::ServerMenuSessions,
         sdui::{StaticSduiState, sdui_action_response},
-        tab_registry::TabRegistry,
         workspace::WorkspaceState,
     },
 };
 
-use crate::server::{IpcServer, RuntimeGenerationStore};
-
 use super::{
+    ConnectionCtx,
     documents::{document_for_message, write_document_open_response},
     menus::open_command_centre_session,
     session_bound_message,
@@ -86,7 +80,13 @@ pub(super) async fn execute_command_intent(
             "settings.open" | "settings.close"
         );
         if let Some(server) = reload_server {
-            match persist_settings_change(server, &validated.command_id, &request.arguments).await {
+            match Box::pin(persist_settings_change(
+                server,
+                &validated.command_id,
+                &request.arguments,
+            ))
+            .await
+            {
                 Ok(PersistOutcome::Reloaded(outcome)) => {
                     if !outcome.reloaded {
                         return outcome
@@ -158,7 +158,7 @@ pub(super) async fn execute_command_intent(
                 message: "runtime reload service is unavailable".to_string(),
             });
         };
-        return match server.execute_reload_command(request).await {
+        return match Box::pin(server.execute_reload_command(request)).await {
             Ok(outcome) if outcome.reloaded => {
                 if let Some(diagnostic) = outcome.diagnostics.into_iter().next() {
                     Some(ServerMessage::RuntimeDiagnostic(diagnostic))
@@ -306,7 +306,10 @@ pub(super) async fn persist_settings_change(
         _ => false,
     };
     if should_reload {
-        let outcome = server.reload_runtime_generation().await;
+        // Plan 129 P4: box the reload future so the settings-persistence,
+        // command-intent, and connection-loop futures that await this helper
+        // stay small (clippy::large_futures).
+        let outcome = Box::pin(server.reload_runtime_generation()).await;
         Ok(PersistOutcome::Reloaded(outcome))
     } else {
         Ok(PersistOutcome::Acknowledged)
@@ -614,39 +617,62 @@ pub(super) fn static_package_completion_result(
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
 
-pub(super) async fn handle_runtime_generation_installed(
-    runtime_generation: &RuntimeGenerationStore,
+pub(super) async fn handle_runtime_generation_installed<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
     ack_client_id: ClientId,
-    client_id: ClientId,
     runtime_generation_id: u64,
-) {
-    let _ = runtime_generation
-        .note_runtime_generation_installed(ack_client_id, client_id, runtime_generation_id)
+) where
+    S: AsyncWrite + Unpin,
+{
+    let _ = ctx
+        .runtime_generation
+        .note_runtime_generation_installed(ack_client_id, ctx.client_id, runtime_generation_id)
         .await;
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
-pub(super) async fn handle_sdui_action<S>(
-    codec: Codec,
-    stream: &mut S,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    document: &Arc<Mutex<DocumentState>>,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    parse_coordinator: &crate::server::parse_coordinator::ParseCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    menu_sessions: &mut ServerMenuSessions,
-    tab_registry: &Arc<Mutex<TabRegistry>>,
-    reload_server: Option<&IpcServer>,
-    client_id: ClientId,
-    ui_version: u64,
-    intent: SduiActionIntent,
-    bound_tab_id: Option<TabId>,
+/// A second `Hello` on an established connection is a client protocol error:
+/// answer with one bound diagnostic and keep serving (the identity boundary
+/// and handshake already ran).
+pub(super) async fn handle_duplicate_hello<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    ctx.codec
+        .write_server_message(
+            ctx.stream,
+            &ServerMessage::Error {
+                code: ProtocolErrorCode::InvalidMessage,
+                message: "duplicate Hello message".to_string(),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+pub(super) async fn handle_sdui_action<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+    ui_version: u64,
+    intent: SduiActionIntent,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let sdui = ctx.sdui;
+    let workspace = &*ctx.workspace;
+    let document = &*ctx.document;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let parse_coordinator = ctx.parse_coordinator;
+    let document_analysis = ctx.document_analysis;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let tab_registry = ctx.tab_registry;
+    let reload_server = ctx.reload_server;
+    let client_id = ctx.client_id;
+    let bound_tab_id = *ctx.bound_tab_id;
     let package_action = runtime_generation
         .latest_runtime_snapshot_for(client_id)
         .await
@@ -810,27 +836,27 @@ where
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_command_intent<S>(
-    codec: Codec,
-    stream: &mut S,
-    menu_sessions: &mut ServerMenuSessions,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    tab_registry: &Arc<Mutex<TabRegistry>>,
-    reload_server: Option<&IpcServer>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     document_id: DocumentId,
     behavior_version: crate::protocol::BehaviorVersion,
     command_id: String,
-    bound_tab_id: Option<TabId>,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let menu_sessions = &mut *ctx.menu_sessions;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let document = &*ctx.document;
+    let workspace = &*ctx.workspace;
+    let sdui = ctx.sdui;
+    let tab_registry = ctx.tab_registry;
+    let reload_server = ctx.reload_server;
+    let client_id = ctx.client_id;
+    let bound_tab_id = *ctx.bound_tab_id;
     // Commands never receive previous-generation grace. The gate protects
     // manifest-coupled routing below (client-UI + document commands): the
     // client must not act on a stale manifest view. Server-owned catalogue
@@ -947,24 +973,24 @@ fn manifest_allows_client_ui(manifest: &BehaviorManifest, command_id: &str) -> b
     })
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_completion_request<S>(
-    codec: Codec,
-    stream: &mut S,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    runtime_generation: &RuntimeGenerationStore,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    completion: &CompletionCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    completion_tx: &tokio::sync::mpsc::Sender<ServerMessage>,
-    dropped_results: &Arc<std::sync::atomic::AtomicU64>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     request: &mut CompletionRequest,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let behavior = ctx.behavior;
+    let runtime_generation = ctx.runtime_generation;
+    let document = &*ctx.document;
+    let workspace = &*ctx.workspace;
+    let completion = ctx.completion;
+    let document_analysis = ctx.document_analysis;
+    let completion_tx = ctx.completion_tx;
+    let dropped_results = ctx.dropped_results;
+    let client_id = ctx.client_id;
     request.client_id = client_id;
     if let Err(rejection) = request.validate() {
         codec
@@ -1095,22 +1121,22 @@ where
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_language_intelligence_request<S>(
-    codec: Codec,
-    stream: &mut S,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    document: &Arc<Mutex<DocumentState>>,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    language_intelligence: &LanguageIntelligenceCoordinator,
-    language_intelligence_tx: &tokio::sync::mpsc::Sender<ServerMessage>,
-    dropped_results: &Arc<std::sync::atomic::AtomicU64>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     request: &mut crate::protocol::LanguageIntelligenceRequest,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
+    let codec = ctx.codec;
+    let stream: &mut S = &mut *ctx.stream;
+    let behavior = ctx.behavior;
+    let document = &*ctx.document;
+    let workspace = &*ctx.workspace;
+    let language_intelligence = ctx.language_intelligence;
+    let language_intelligence_tx = ctx.language_intelligence_tx;
+    let dropped_results = ctx.dropped_results;
+    let client_id = ctx.client_id;
     // Stamp the connection's client identity; ignore any client-supplied
     // client_id so results cannot be forged across clients.
     request.client_id = client_id;
@@ -1231,6 +1257,142 @@ where
                 )
                 .await?;
         }
+    }
+    Ok(())
+}
+
+/// Plan 109/117: coding-agent panel messages. Tab-scoped commands (picker
+/// selection, worker model, resume, mount STATE, recent sessions) resolve the
+/// connection's tab through the registry and apply through the agent book
+/// paths; everything else dispatches to the host unchanged. A connection with
+/// no agent host attached gets one bounded diagnostic.
+pub(super) async fn handle_agent_command<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+    command: Box<AgentClientCommand>,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let codec = ctx.codec;
+    let mut stream: &mut S = &mut *ctx.stream;
+    let client_id = ctx.client_id;
+    let reload_server = ctx.reload_server;
+    if let Some(server) = reload_server.as_ref() {
+        // Plan 109 I3: a panel model/provider/agent selection
+        // (dropdown) applies through the same book path as the
+        // Command Centre picker, with the connection's bound tab
+        // so the per-workspace selection (I2) is written.
+        match &*command {
+            AgentClientCommand::Select { kind, id }
+                if matches!(
+                    kind,
+                    AgentPickerKind::Model | AgentPickerKind::Provider | AgentPickerKind::Agent
+                ) =>
+            {
+                // `unwrap_or(client_id)` is the same tab the
+                // panel's own mount (TabState) resolves, so the
+                // selection lands on the tab its STATE belongs to.
+                let tab = server
+                    .tab_registry
+                    .lock()
+                    .await
+                    .tab_for_client(client_id)
+                    .unwrap_or(client_id);
+                server.agent.select_picker(*kind, id, Some(tab)).await;
+            }
+            // Plan 109 I8: OM worker model selection — the same
+            // per-workspace book path plus the daemon's
+            // per-session `session.om.set`.
+            AgentClientCommand::SelectWorker {
+                worker,
+                id,
+                session_id,
+            } => {
+                // Same tab resolution as the panel's own mount: a
+                // bare `tab_for_client` can be `None` while the
+                // panel still holds this tab's session, which sent
+                // the book broadcast at a session-less snapshot and
+                // wiped the Memory tab.
+                let tab = server
+                    .tab_registry
+                    .lock()
+                    .await
+                    .tab_for_client(client_id)
+                    .unwrap_or(client_id);
+                server
+                    .agent
+                    .select_worker(*worker, id, session_id.clone(), Some(tab))
+                    .await;
+            }
+            // Plan 117: the panel's resume — the same rich
+            // load the picker uses (full transcript + trio +
+            // tab rebind), tab-resolved client-side then
+            // broadcast so the view's relay applies it. The
+            // old dispatch path had no tab (no rebind) and
+            // broadcast an entry-less snapshot that wiped the
+            // restored transcript.
+            AgentClientCommand::ResumeSession { session_id } => {
+                let tab = server
+                    .tab_registry
+                    .lock()
+                    .await
+                    .tab_for_client(client_id)
+                    .unwrap_or(client_id);
+                let snapshot = server.agent.resume_tab(tab, session_id, None).await;
+                server.agent.broadcast(snapshot);
+            }
+            // Plan 117 follow-up: the coding-agent pane's mount
+            // STATE — the tab's branch + daemon environment
+            // (skills, MCP outcomes) before any prompt, so the
+            // status row and the pinned cards are populated on a
+            // freshly opened surface.
+            AgentClientCommand::TabState => {
+                let tab = server
+                    .tab_registry
+                    .lock()
+                    .await
+                    .tab_for_client(client_id)
+                    .unwrap_or(client_id);
+                let snapshot = server.agent.tab_state_snapshot(tab).await;
+                // Written on this connection before the broadcast
+                // snapshot, so the tab's store has adopted its
+                // session by the time the snapshot's STATE and
+                // MESSAGES events arrive.
+                let bound = session_bound_message(client_id, tab, &snapshot.session_id);
+                codec
+                    .write_server_message(&mut stream, &ServerMessage::Agent(Box::new(bound)))
+                    .await?;
+                server
+                    .agent
+                    .broadcast(AgentServerMessage::Snapshot(snapshot));
+            }
+            // Plan 117: the panel's recent-sessions list —
+            // labeled, workspace-scoped, bounded.
+            AgentClientCommand::ResumableSessions => {
+                let tab = server
+                    .tab_registry
+                    .lock()
+                    .await
+                    .tab_for_client(client_id)
+                    .unwrap_or(client_id);
+                let sessions = server.agent.resumable_for_tab(tab, 5).await;
+                server.agent.broadcast(AgentServerMessage::AgentRpc {
+                    code: "session.resumable".into(),
+                    result_json: serde_json::json!({ "sessions": sessions }).to_string(),
+                });
+            }
+            _ => server.agent.dispatch(*command),
+        }
+    } else {
+        codec
+            .write_server_message(
+                &mut stream,
+                &ServerMessage::Agent(Box::new(AgentServerMessage::Diagnostic {
+                    code: "agent.unavailable".to_string(),
+                    message: "agent host is not attached to this connection".to_string(),
+                })),
+            )
+            .await?;
     }
     Ok(())
 }

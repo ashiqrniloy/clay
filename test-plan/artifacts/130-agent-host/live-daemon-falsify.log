@@ -1,0 +1,28 @@
+PASS  daemon initialize (real build, isolated data dir) — mock=true prism=0.7.0 mcpServers=1
+[daemon-a] agentProfile.register 'coding' applied
+PASS  graft skill is not registered before any coding session — fresh daemon: no graft binding
+PASS  session.new records the given workspace root and activates coding surfaces — sessionId=7f8fac00-a6b7-41b6-80a0-dd2581a12437 tools=22
+PASS  binding a coding session registers the graft skill
+PASS  session.prompt streams to completion on the real daemon — lastEvent=agent_finished events=9
+PASS  session.search finds this workspace's session — hits=1
+PASS  session.search is a search, not a dump (no match ⇒ no hit)
+PASS  session.resumable lists the session for its recorded root — rows=1
+PASS  session.resumable is workspace-scoped (other root sees nothing) — rows=0
+PASS  session.clone produces an independent persisted session — clone=3cd16f24-9e1c-45ec-8c16-ff20a09a2f44
+PASS  session.fork keeps the session id at a different leaf — leaf=entry_a76b94…
+PASS  session.setAutonomy toggles both ways
+PASS  session.compact appends a compaction entry to the persisted session — entries=3
+PASS  session.new without a root keeps the documented process.cwd() fallback — root=/tmp/clay-plan130-live/cwd-a
+[daemon-b] agentProfile.register 'coding' applied
+PASS  fresh daemon starts with no graft binding (restart really clears it) — mock=true
+PASS  fresh daemon starts with lazy capabilities (nothing connected yet) — mcpServers=0 extensions=0
+PASS  resumed session binds its RECORDED workspace root, not the daemon cwd — root=/home/arn/Projects/clay (daemon cwd /tmp/clay-plan130-live/cwd-b)
+FAIL  resume re-activates the workspace's graft binding (plan 130 A2) — graft skill missing after resume
+FAIL  resume re-connects the workspace's MCP allow-list (plan 130 A2) — no MCP outcomes: []
+FAIL  resume re-loads the graft extension for the recorded root — extensions=[]
+PASS  resumed session composes its system-prompt layers — systemPrompt items=2
+PASS  session.setAutonomy works on the resumed session — off; a resumed live record starts non-autonomous (see the automated resume case)
+PASS  resumed session accepts a follow-up prompt on the restarted daemon — lastEvent=agent_finished
+PASS  no reverse RPC was needed by the text-only mock provider
+
+21/24 live daemon legs passed

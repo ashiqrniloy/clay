@@ -761,9 +761,11 @@ await loadConfigurationModule({
 //   // qmdPath: "/usr/local/bin/qmd",
 // });
 //
-// // Full autonomy (decision 2157) defaults to false: gated tool calls
-// // (out-of-workspace writes, shell metacharacters, …) require approval.
-// // Enable only per session, only by explicit user choice:
+// // Full autonomy defaults to ON (decision 2026-09-20-2049): gated tool
+// // calls (out-of-workspace writes, shell metacharacters, …) run without an
+// // approval prompt. Block it per session when you want approvals back —
+// // `setFullAutonomy` is the opt-out, and the session records the choice
+// // (a resumed session restores it):
 // await setFullAutonomy({ sessionId, enabled: false });
 //
 // // Manual compaction. strategy: "default" (local, secret-redacting),

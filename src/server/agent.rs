@@ -290,12 +290,24 @@ pub struct AgentHost {
     inner: Arc<Inner>,
 }
 
-static AGENT_HOST_AUTHORITY: std::sync::OnceLock<AgentHostHandle> = std::sync::OnceLock::new();
+/// A registration declaration queued while no agent host was wired to a
+/// runtime lane (hostless harnesses, embedded workers). The lane hands these
+/// to the host when the server attaches one, preserving order; they apply
+/// after its first initialize handshake. Plan 130 A1: this queue is per-lane
+/// server state (`ClayOpState`), never a process global.
+#[derive(Debug, Clone)]
+pub(crate) struct PackageRegistration {
+    pub method: String,
+    pub params: Value,
+}
 
-/// Process-global authority cell for the `agent` JS ops. One clay-agent child
-/// per server means one authority per process; the server installs it at
-/// startup and every JS runtime worker reads the same handle. Unset → ops
-/// fail closed.
+/// Bound on a lane's and the host's deferred registration queue (same cap for
+/// both: a queue that can only grow is a leak).
+pub(crate) const PENDING_REGISTRATION_CAP: usize = 64;
+
+/// Server-owned agent authority handle (Plan 130 A1): the server constructs
+/// it, keeps it in its state graph, and injects it into each JS runtime lane's
+/// op state. A lane without a handle fails closed.
 #[derive(Clone)]
 pub struct AgentHostHandle(Arc<AgentHost>);
 
@@ -305,86 +317,39 @@ impl std::fmt::Debug for AgentHostHandle {
     }
 }
 
-/// A registration declaration queued before any agent host exists (hostless
-/// runtimes: unit harnesses, embedded workers). Applied to the host when one
-/// installs. `install_global` drains this into the host's own pending queue.
-#[derive(Debug, Clone)]
-pub(crate) struct PackageRegistration {
-    pub method: String,
-    pub params: Value,
-}
-
-static PENDING_PACKAGE_REGISTRATIONS: std::sync::Mutex<Vec<PackageRegistration>> =
-    std::sync::Mutex::new(Vec::new());
-
-const PENDING_REGISTRATION_CAP: usize = 64;
-
-/// Queue a registration declaration with no host attached. Package load
-/// entries never fail just because this runtime has no agent host: the
-/// declaration applies when a host installs (see [`install_global`]).
-pub(crate) fn queue_package_registration(method: &str, params: Value) -> Result<(), AgentError> {
-    let mut pending = PENDING_PACKAGE_REGISTRATIONS
-        .lock()
-        .map_err(|_| AgentError::ServiceStopped)?;
-    if pending.len() >= PENDING_REGISTRATION_CAP {
-        return Err(AgentError::ServiceStopped);
-    }
-    pending.push(PackageRegistration {
-        method: method.to_string(),
-        params,
-    });
-    Ok(())
-}
-
-/// Drain every queued package registration (test/introspection and
-/// install-time handoff).
-pub(crate) fn take_pending_package_registrations() -> Vec<PackageRegistration> {
-    PENDING_PACKAGE_REGISTRATIONS
-        .lock()
-        .map(|mut pending| pending.drain(..).collect())
-        .unwrap_or_default()
-}
-
 impl AgentHostHandle {
     pub(crate) fn new(host: AgentHost) -> Self {
         Self(Arc::new(host))
     }
 
-    /// Install the process-global authority. First install wins; later
-    /// servers in the same process (tests) keep the first handle. Package
-    /// registrations queued while no host existed move into the host's own
-    /// pending queue, preserving order, and apply after its first
-    /// initialize handshake.
-    pub(crate) fn install_global(host: AgentHost) {
-        let handle = Self::new(host.clone());
-        let _ = AGENT_HOST_AUTHORITY.set(handle);
-        // Move anything queued before the host existed into the host's own
-        // pending queue, preserving order; they apply after its first
-        // initialize handshake. No registration op can run before server
-        // construction installs the authority, so one drain after the set
-        // covers every queued entry.
-        let drained = take_pending_package_registrations();
-        if !drained.is_empty()
-            && let Ok(mut pending) = host.inner.pending_registrations.try_lock()
-        {
-            for registration in drained {
-                let (reply_tx, _reply_rx) = oneshot::channel();
-                pending.push(HostCommand::Rpc {
-                    method: registration.method,
-                    params: registration.params,
-                    reply: reply_tx,
-                });
-            }
-        }
+    /// Test-only handle to an inert host (never runs a daemon), so harnesses
+    /// that must not name `AgentHost` can still wire one in.
+    #[cfg(test)]
+    pub(crate) fn inert() -> Self {
+        Self::new(AgentHost::inert())
     }
 
-    /// Process-global authority, or a fail-closed error naming the missing
-    /// wiring. Never grants authority by existing.
-    pub(crate) fn global() -> Result<Self, AgentError> {
-        AGENT_HOST_AUTHORITY
-            .get()
-            .cloned()
-            .ok_or(AgentError::ServiceStopped)
+    /// Test-only view of the host behind the handle.
+    #[cfg(test)]
+    pub(crate) fn host(&self) -> AgentHost {
+        self.0.as_ref().clone()
+    }
+
+    /// Test/introspection identity check: two handles route to one host.
+    #[cfg(test)]
+    pub(crate) fn same_host(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0.inner, &other.0.inner)
+    }
+
+    /// Move one declaration onto this host's own pending queue without
+    /// awaiting: the wiring path runs before any RPC can be in flight, so an
+    /// uncontended `try_lock` is the whole cost (Plan 130 A1).
+    pub(crate) fn queue_registration_now(
+        &self,
+        method: String,
+        params: Value,
+    ) -> Result<(), AgentError> {
+        self.0.queue_registration_now(method, params)
     }
 
     /// Forward a raw daemon RPC (e.g. `session.setAutonomy`). Errors and
@@ -399,11 +364,6 @@ impl AgentHostHandle {
         params: Value,
     ) -> Result<Value, AgentError> {
         self.0.rpc_or_queue(method, params).await
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn take_pending_registrations(&self) -> Vec<PackageRegistration> {
-        self.0.take_pending_registrations().await
     }
 }
 
@@ -946,7 +906,6 @@ impl AgentHost {
     }
 
     async fn queue_registration(&self, method: &str, params: Value) -> Result<Value, AgentError> {
-        const PENDING_REGISTRATION_CAP: usize = 64;
         let mut pending = self.inner.pending_registrations.lock().await;
         if pending.len() >= PENDING_REGISTRATION_CAP {
             return Err(AgentError::ServiceStopped);
@@ -960,21 +919,29 @@ impl AgentHost {
         Ok(json!({ "queued": true }))
     }
 
-    /// Drain the host's pending registration queue (test/introspection).
-    /// Entries come back as plain declarations.
-    #[cfg(test)]
-    pub(crate) async fn take_pending_registrations(&self) -> Vec<PackageRegistration> {
-        let pending = self.inner.pending_registrations.lock().await;
-        pending
-            .iter()
-            .filter_map(|command| match command {
-                HostCommand::Rpc { method, params, .. } => Some(PackageRegistration {
-                    method: method.clone(),
-                    params: params.clone(),
-                }),
-                HostCommand::Shutdown => None,
-            })
-            .collect()
+    /// Move one declaration onto this host's own pending queue without
+    /// awaiting (the lane-wiring handoff). Full or contended queue → fail
+    /// closed, exactly like the async path at capacity.
+    pub(crate) fn queue_registration_now(
+        &self,
+        method: String,
+        params: Value,
+    ) -> Result<(), AgentError> {
+        let mut pending = self
+            .inner
+            .pending_registrations
+            .try_lock()
+            .map_err(|_| AgentError::ServiceStopped)?;
+        if pending.len() >= PENDING_REGISTRATION_CAP {
+            return Err(AgentError::ServiceStopped);
+        }
+        let (reply_tx, _reply_rx) = oneshot::channel();
+        pending.push(HostCommand::Rpc {
+            method,
+            params,
+            reply: reply_tx,
+        });
+        Ok(())
     }
 
     /// Test/introspection accessor: queued registration count.

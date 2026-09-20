@@ -1,0 +1,13 @@
+== plan 127 task 7 verification (docs-only change set) ==
+run at 2026-09-19T17:57:57Z
+-- cargo test --lib -- --test-threads=1 --
+.......................
+test result: ok. 1414 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 55.77s
+
+-- cargo test --test protocol --
+................................................test manual_smoke_docs::plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states has been running for over 60 seconds
+.
+test result: ok. 223 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 70.03s
+
+-- cargo fmt --check --
+fmt exit=0

@@ -228,6 +228,18 @@ No performance budget was raised. Wide/narrow/large-type screenshots are under `
 |---|--------|----------|
 | Q41 | On the ≥4 MiB fixture (module 03 F56), trigger completion (`Ctrl+Space` after a word prefix), move the selection, accept with `Enter`, then repeat and dismiss with `Escape` | The popup appears without a perceptible stall and the editor stays responsive: the completion request/response round trip on a 4 MiB document stays in the sub-millisecond range with per-request allocation independent of document size (the O(document) copy this step guards against was removed by plan 126 task 3). Negative: no document-sized allocation spike, no input wait for the provider, no stale popup after dismissal. |
 
+## Plan 127 lane-scheduling typing-latency step
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q42 | Open a ≥1 MiB markdown document with `@clay/markdown` loaded (its parse handler is registered for the mode), type a burst of keystrokes, then stop the server with `SIGTERM` and read the perf summary (`CLAY_PERF_PROFILE=1`, `CLAY_PERF_REPORT_DIR`) | Typing stays local and immediate while parse catches up: `server.edit_ack` p50 0.33 ms / p95 0.52 ms / max 0.52 ms for 19 keystrokes on a 1,052,070-byte document, with `syntax.parse.*` continuing in the background (`syntax.parse.invocations` 6, `syntax.edit_to_publish` p50 61.6 ms) and no `js_runtime.command.superseded`/`evicted` churn (parse commands are deliberately not supersedable). Advisory only — the blocking budgets stay with the module-11 envelope checks. Negative: no keystroke waits for parser or runtime work, no typing long task, no queue-driven stall. Ceiling: the first cold full parse of a 1 MiB markdown document in a debug build is seconds-scale (`syntax.edit_to_publish` max 63.2 s in this run) — that is parse-side feel, not input latency, and is recorded rather than budgeted. |
+
+## Plan 128 large-document typing and language-route step
+
+| # | Action | Expected |
+|---|--------|----------|
+| Q43 | Open a ≥1 MiB Rust file, type a burst of keystrokes, then move the pointer over an identifier and trigger completion (`Ctrl+J`); repeat on documents the analyzer accepts (a ≈4 KiB crate, then a crate with a ≈250 KiB open module) | Typing echoes with no stall and the language route stays live on an accepted document; a document over the package analysis limit fails closed with the limit note while baseline syntax gestures stay responsive; no language request blocks typing. Read `server.edit_ack` p50/p95 from the perf summary (`CLAY_PERF_PROFILE=1`, `CLAY_PERF_REPORT_DIR`). |
+
 ## Phase 28.7 P2 visual and interaction recapture (2026-08-21)
 
 UI preflight used the UI guidance current at execution time, category `accessibility`, selected
@@ -368,6 +380,14 @@ row-activation legs of Q13/Q31/Q40 remain UNRESOLVED live; the numbers that are
 claimed (geometry, veil deltas, halo profile, scroll bounds) come from pixel
 probes on window-cropped captures. Wall-clock budgets stay advisory as always.
 
+## Plan 127 execution record (2026-09-19, task 7)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| Q42 | PASS measured + PASS live presence | Live isolated run on a generated 1,052,070-byte `notes.md` with `@clay/markdown` active: 19 keystrokes were typed through the portal and acknowledged with `server.edit_ack` p50 329,027 ns (0.33 ms) / p95 520,442 ns (0.52 ms) / max 0.52 ms; `server.document.apply_edit` p50 0.08 ms; parse work continued in the background (`syntax.parse.invocations` 6, `syntax.parse.full` 6, `syntax.decoration.chunks` 5, `syntax.edit_to_publish` p50 61.6 ms / max 63.2 s cold). Source: `test-plan/artifacts/127-lane-scheduling/live-markdown-parse-handler/clay-server-perf-summary.json` (full metric list, 407 retained events, 0 dropped). |
+| Lane and queue budgets | PASS (automated) | Plan 127's scheduling budgets are pinned by tests, not by live timing: latency lane heap cap `JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES = 32 MiB` (`lane_heap_limits_stay_within_the_configured_budget`), supersedable backlog `JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY = 64` (`queue_bounded_under_flood`, `queue_evicts_oldest_at_capacity`), and lane occupancy `JS_RUNTIME_LANES_PER_DOMAIN = 2` (`lanes_share_their_domain_op_set`). Counters `js_runtime.command.superseded` / `js_runtime.command.evicted` are exported in the perf summary. |
+| Live keypress→paint timing for the lane split | UNRESOLVED (probe resolution + reachability) | The AT-SPI probe's tree walk (~0.9 s warm) cannot resolve a lane handoff, and no live completion provider exists behind the split (no bundled JS completion package; third-party capability grants have no user-facing surface — module 09 P56). The measured evidence is the automated harness in `code-reviews/2026-09-18-plan127-baseline/README.md` (4.1–24.9 ms versus ~454 ms) plus Q42's input numbers above. |
+
 ## Plan 126 execution record (2026-09-19, task 6)
 
 | Steps | Result | Evidence |
@@ -375,3 +395,19 @@ probes on window-cropped captures. Wall-clock budgets stay advisory as always.
 | Q41 | PASS live (presence) / PASS measured (server path) | Live on the 4,231,903-byte document the popup opened at the caret and accepted a snippet (module 04 E39). Server-side measurement on the same size class: completion round trip ~161 µs median (down from 427–569 µs before plan 126 task 3) with 31,118 bytes allocated per request on 4 MiB — identical to the 64 KiB case, i.e. no O(document) work. Source: `code-reviews/2026-09-18-plan126-baseline/README.md` (task-3 after-measurements). |
 | Q41 latency resolution | Ceiling recorded | The live AT-SPI probe cannot resolve sub-second paint timing (one full tree walk is ~0.9 s warm, ~15 s per fresh process), so the live leg claims presence/acceptance, not a frame number; the measured server round trip above is the budget evidence. |
 | Automated companion | PASS | `static_completion_on_large_document_matches_small_document_results` (4 MiB result parity) plus `language_intelligence_window_budget_honored` (window budget on a large multibyte document) are green in the lib suite; `cargo test --test runtime large_document::` covers the 50 MiB open/edit/save path. |
+
+## Plan 128 execution record (2026-09-20, task 4)
+
+The question added by plan 128 is "does the typing/LSP route stay flat in document
+size once the shared position index is incremental". The measured half was taken
+automated (adapter probe, below); the live half split into a pass on the accepted
+size class, a hard fail on the first document big enough to exercise a real
+semantic payload, and a fail-closed at the size the plan asked about.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| Q43 live (typing responsiveness, LSP route, ≥1 MiB) | UNRESOLVED live (host input) | No keystroke reached the document: `Ctrl+End`, `Ctrl+B` (the status bar's own lane toggle) and 60-char bursts left the file mtime, the word count and the `clean` state untouched, and the perf summary has no `edit_apply`/`edit_ack` samples. Readiness probe: `can_send_development_input: false` (portal session without remote-interaction permission). The earlier plan-126/127 typing records were made on this host while that session was granted, so this is a host state, not a build property. |
+| Q43 measured (edit + refresh cost through the adapter) | PASS measured | `code-reviews/2026-09-19-plan128-task3/`: edit+refresh median went 2.805 / 13.388 / 37.293 / 289.619 ms (HEAD worktree) → 0.029 / 0.039 / 0.030 / 0.026 ms at 64 KiB / 256 KiB / 1 MiB / 8 MiB; `VersionedDocument#applyByteChange` itself is 0.014–0.021 ms with no size term. |
+| Q43 live (language route on an accepted document) | PASS live (presence only) | 4 KiB crate: rust-analyzer + proc-macro server spawned in the private root, no analyzer failure, `bridge.patch_delivery` p50 0.089 ms / p95 0.121 ms. |
+| Q43 live (≥1 MiB LSP features) | FAIL fail-closed (pre-existing, two independent bounds) | `DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES = 256 KiB` (`src/perf/budgets.rs:33`) keeps the analyzer from starting, so hover/completion cannot resolve there; below that cap `MAX_SEMANTIC_TOKENS = 128` (`packages/lsp-shared/mapping.js:3`) kills the worker on the first real semantic payload (observed at ≈250 KiB). Plan 128's index makes both bounds cheap to raise, but neither is part of this plan. |
+| Live frame timing | Not claimed | AT-SPI probe resolution (~0.9 s per tree walk) is coarser than the event, and this run produced no keystrokes at all. |

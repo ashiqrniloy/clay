@@ -1,0 +1,10 @@
+
+** (clay-desktop:3523940): CRITICAL **: 19:58:05.945: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3523940): CRITICAL **: 19:58:26.281: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3523940): CRITICAL **: 19:59:13.870: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3523940): CRITICAL **: 20:01:04.361: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3523940): CRITICAL **: 20:01:51.911: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed

@@ -7,12 +7,14 @@ use tokio::{io::AsyncWrite, sync::Mutex};
 
 use crate::{
     protocol::{
-        ClientId, DocumentId, DocumentMetadata, DocumentVersion, ServerMessage, WorkspaceRootId,
+        ClientId, DocumentId, DocumentMetadata, DocumentVersion, RuntimeDiagnostic, ServerMessage,
+        WorkspaceRootId,
         codec::{Codec, CodecError},
     },
     server::{
+        agent_settings,
         document::DocumentState,
-        document_analysis::DocumentAnalysisCoordinator,
+        launcher,
         menu_sessions::ServerMenuSessions,
         sdui::StaticSduiState,
         workspace::{
@@ -23,11 +25,7 @@ use crate::{
     shell::{file_browser::FileBrowserState, transient_menu::TransientMenuSession},
 };
 
-use crate::server::IpcServer;
-
-use super::{
-    FileOpenCapabilityPool, documents::write_document_open_response, file_operation_failed,
-};
+use super::{ConnectionCtx, documents::write_document_open_response, file_operation_failed};
 
 pub(super) async fn path_browser_relist(
     menu_sessions: &mut ServerMenuSessions,
@@ -299,35 +297,27 @@ pub(super) async fn open_selected_file_response(
 
 // ---------- coordinator loop handlers (Plan 090 task 2 extraction) ----------
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_open_selected_file<S>(
-    codec: Codec,
-    stream: &mut S,
-    file_open_capabilities: &mut FileOpenCapabilityPool,
-    behavior: &Arc<Mutex<crate::server::behavior::ActiveBehaviorManifest>>,
-    runtime_generation: &super::RuntimeGenerationStore,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    parse_coordinator: &crate::server::parse_coordinator::ParseCoordinator,
-    document_analysis: &DocumentAnalysisCoordinator,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     capability: String,
     selected_path: String,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let authorized = file_open_capabilities.consume(&capability);
+    let authorized = ctx.file_open_capabilities.consume(&capability);
     // Replenish one pending token regardless of outcome so a legitimate
     // client can retry or open another file.
     let replenish = ServerMessage::FileOpenCapabilityIssued {
-        token: file_open_capabilities.issue(),
+        token: ctx.file_open_capabilities.issue(),
     };
     if !authorized {
-        codec.write_server_message(stream, &replenish).await?;
-        codec
+        ctx.codec
+            .write_server_message(ctx.stream, &replenish)
+            .await?;
+        ctx.codec
             .write_server_message(
-                stream,
+                ctx.stream,
                 &ServerMessage::RuntimeDiagnostic(crate::protocol::RuntimeDiagnostic::error(
                     "client.selected_file_open.unauthorized",
                     "OpenSelectedFile requires a valid server-issued file-open capability token.",
@@ -336,49 +326,45 @@ where
             .await?;
         return Ok(());
     }
-    let response = open_selected_file_response(workspace, selected_path, client_id).await;
+    let response = open_selected_file_response(ctx.workspace, selected_path, ctx.client_id).await;
     write_document_open_response(
-        &codec,
-        stream,
+        &ctx.codec,
+        ctx.stream,
         response,
-        behavior,
-        runtime_generation,
-        workspace,
-        sdui,
-        parse_coordinator,
-        document_analysis,
-        client_id,
+        ctx.behavior,
+        ctx.runtime_generation,
+        ctx.workspace,
+        ctx.sdui,
+        ctx.parse_coordinator,
+        ctx.document_analysis,
+        ctx.client_id,
     )
     .await?;
-    codec.write_server_message(stream, &replenish).await?;
+    ctx.codec
+        .write_server_message(ctx.stream, &replenish)
+        .await?;
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the connection loop's context handles
 pub(super) async fn handle_add_selected_workspace_root<S>(
-    codec: Codec,
-    stream: &mut S,
-    file_open_capabilities: &mut FileOpenCapabilityPool,
-    workspace: &Arc<Mutex<WorkspaceState>>,
-    document: &Arc<Mutex<DocumentState>>,
-    sdui: &Arc<Mutex<StaticSduiState>>,
-    reload_server: Option<&IpcServer>,
-    client_id: ClientId,
+    ctx: &mut ConnectionCtx<'_, S>,
     capability: String,
     selected_path: String,
 ) -> Result<(), CodecError>
 where
     S: AsyncWrite + Unpin,
 {
-    let authorized = file_open_capabilities.consume(&capability);
+    let authorized = ctx.file_open_capabilities.consume(&capability);
     let replenish = ServerMessage::FileOpenCapabilityIssued {
-        token: file_open_capabilities.issue(),
+        token: ctx.file_open_capabilities.issue(),
     };
     if !authorized {
-        codec.write_server_message(stream, &replenish).await?;
-        codec
+        ctx.codec
+            .write_server_message(ctx.stream, &replenish)
+            .await?;
+        ctx.codec
             .write_server_message(
-                stream,
+                ctx.stream,
                 &ServerMessage::RuntimeDiagnostic(crate::protocol::RuntimeDiagnostic::error(
                     "client.selected_folder_open.unauthorized",
                     "AddSelectedWorkspaceRoot requires a valid server-issued selected-path capability token.",
@@ -387,33 +373,168 @@ where
             .await?;
         return Ok(());
     }
-    let workspace_pane_visible = match reload_server {
+    let workspace_pane_visible = match ctx.reload_server {
         Some(server) => server
-            .state_for_client(client_id)
+            .state_for_client(ctx.client_id)
             .await
             .is_some_and(|state| state.workspace_pane_visible()),
         None => true,
     };
     // Launcher (plan 118 Part D): the folder dialog is an explicit open, so
     // the picked folder leads the recents list. Best-effort.
-    if let Some(server) = reload_server {
-        crate::server::launcher::record_recent_workspace(
+    if let Some(server) = ctx.reload_server {
+        launcher::record_recent_workspace(
             server.configuration_root().as_deref(),
             std::path::Path::new(&selected_path),
         );
     }
     for message in add_selected_workspace_root_messages(
-        workspace,
-        document,
-        sdui,
-        client_id,
+        ctx.workspace,
+        ctx.document,
+        ctx.sdui,
+        ctx.client_id,
         workspace_pane_visible,
         selected_path,
     )
     .await
     {
-        codec.write_server_message(stream, &message).await?;
+        ctx.codec.write_server_message(ctx.stream, &message).await?;
     }
-    codec.write_server_message(stream, &replenish).await?;
+    ctx.codec
+        .write_server_message(ctx.stream, &replenish)
+        .await?;
     Ok(())
+}
+
+/// Launcher (plan 118 Part D): answer with the server-resolved entries. The
+/// rows are display data, so an absent data root yields the first-run state
+/// rather than an error; pruned recents surface as one bounded diagnostic.
+async fn write_launcher_entries<S>(ctx: &mut ConnectionCtx<'_, S>) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let entries = ctx
+        .reload_server
+        .map(|server| launcher::launcher_entries(server.configuration_root().as_deref()))
+        .unwrap_or_default();
+    if entries.pruned > 0 {
+        ctx.codec
+            .write_server_message(
+                ctx.stream,
+                &ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::info(
+                    "launcher.recents_pruned",
+                    format!(
+                        "{} recent workspace(s) dropped: the folder no longer exists",
+                        entries.pruned
+                    ),
+                )),
+            )
+            .await?;
+    }
+    ctx.codec
+        .write_server_message(
+            ctx.stream,
+            &ServerMessage::LauncherEntries {
+                client_id: ctx.client_id,
+                entries: Box::new(entries),
+            },
+        )
+        .await?;
+    Ok(())
+}
+
+pub(super) async fn handle_list_launcher_entries<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    write_launcher_entries(ctx).await
+}
+
+pub(super) async fn handle_remove_launcher_recent<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+    index: u32,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    if let Some(server) = ctx.reload_server {
+        launcher::remove_recent_workspace(server.configuration_root().as_deref(), index);
+    }
+    write_launcher_entries(ctx).await
+}
+
+/// Agent settings page (plan 117): server-resolved listing; no config root ⇒
+/// empty page, never an error.
+pub(super) async fn handle_list_agent_settings_files<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let files = match ctx.reload_server {
+        Some(server) => server
+            .agent_settings_root(ctx.client_id)
+            .await
+            .map(|root| agent_settings::list_agent_settings_files(&root))
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    ctx.codec
+        .write_server_message(
+            ctx.stream,
+            &ServerMessage::AgentSettingsFiles {
+                client_id: ctx.client_id,
+                files,
+            },
+        )
+        .await
+}
+
+/// Agent settings page (plan 117): the name is validated against the fixed
+/// delivered-file layout and resolved server-side; the open/save path is the
+/// ordinary selected-file document pipeline (no extra capability — the name
+/// carries no path authority).
+pub(super) async fn handle_open_agent_settings_file<S>(
+    ctx: &mut ConnectionCtx<'_, S>,
+    name: String,
+) -> Result<(), CodecError>
+where
+    S: AsyncWrite + Unpin,
+{
+    let root = match ctx.reload_server {
+        Some(server) => server.agent_settings_root(ctx.client_id).await,
+        None => None,
+    };
+    let response = match root
+        .map(|root| agent_settings::resolve_agent_settings_file(&root, &name))
+        .unwrap_or_else(|| Err("agent config root unavailable".to_string()))
+    {
+        Ok(path) => {
+            open_selected_file_response(ctx.workspace, path.display().to_string(), ctx.client_id)
+                .await
+        }
+        Err(message) => file_operation_failed(
+            WorkspaceError::FileUnavailable {
+                path: PathBuf::from(&name),
+                source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, message),
+            },
+            None,
+            None,
+        ),
+    };
+    write_document_open_response(
+        &ctx.codec,
+        ctx.stream,
+        response,
+        ctx.behavior,
+        ctx.runtime_generation,
+        ctx.workspace,
+        ctx.sdui,
+        ctx.parse_coordinator,
+        ctx.document_analysis,
+        ctx.client_id,
+    )
+    .await
 }

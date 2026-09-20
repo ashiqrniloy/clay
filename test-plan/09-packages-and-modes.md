@@ -258,6 +258,19 @@ executes no code; `background`/`scale` never change the protocol wire shape
 |---|--------|----------|
 | P55 | From a package script, call `serverOpenDocument` (or `serverReloadDocument`) for a workspace file larger than the 256 KiB package documents budget (`DOCUMENTS_OP_MAX_DOCUMENT_BYTES`) | The call fails with the typed `documents.document_too_large` code instead of handing the file to JavaScript. The surfaced diagnostic is sanitized (`Document/workspace operation failed server validation.` in the status bar; the code in the server diagnostics/log), carries no path and no document text, and the client keeps working: the same file stays open and editable through the client's chunked transfer path, which the package budget never gates. Negative: no oversized text in the diagnostic, no orphan loading state, no client open refusal. |
 
+## Plan 127 capability-grant fail-closed step
+
+| # | Action | Expected |
+|---|--------|----------|
+| P56 | Install a local third-party package that declares `parse-document`/`completion-provider` in `clay.permissions`, adopt it (`clay package adopt`), then reference it from `~/.clay/init.js` with `await loadPackage("@vendor/…")` without a capability grant | The package never executes: `clay package enable` fails closed with `MissingCapabilityGrant { package_name: …, capability: CompletionProvider }`, the app still starts, the fixture document opens, and typing works. No mode contribution, parse handler, completion provider, or lane command appears. The only surfaced diagnostic is the sanitized `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.` in the server log/status — no path, no package name, no code executed. Negative: no mode badge, no provider group in the popup, no crash, no half-applied contribution. |
+
+## Plan 127 execution record (2026-09-19, task 7)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| P56 | PASS live | A local fixture package (`@fixture/lane`, declaring `parse-document` + `completion-provider` + `mode-registration`) was seeded into the isolated store with the same command shape Clay's pnpm backend runs (`pnpm add <path>` in `~/.clay/packages`, because `clay install` accepts only `npm:` specs) and adopted through Clay's own verb: `clay package adopt @fixture/lane` → `Adopted @fixture/lane 0.1.0 / capabilities: completion-provider, mode-registration, parse-document`. `clay package enable` then failed closed: `Error: MissingCapabilityGrant { package_name: "@fixture/lane", capability: CompletionProvider }`. The live app launched with the fixture `init.js` (`await loadPackage("@fixture/lane")`), logged `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.`, opened `demo.lane`, echoed 9 typed characters (`v1 dirty`, 38 chars), and showed no fixture mode, handler, or provider. Artifacts: `test-plan/artifacts/127-lane-scheduling/grant-gate-live/` (`enable.log`, `server.log`, `tree.txt`, `window.png`) and the fixture packages under `test-plan/artifacts/127-lane-scheduling/`. |
+| Ceiling recorded | Reachability limit | Capability grants for non-bundled packages are recorded by `PackageService::authorize_package`, which today has no CLI/desktop/JS surface (bundled packages get `authorize_bundled_defaults`; language servers get `authorizeLanguageServer`). Until such a surface exists, a live third-party package cannot register a parse handler or completion provider, so the plan 127 lane-scheduling manual step cannot use a third-party fixture (module 04 E40 records the same reason). |
+
 ## Phase 26 Linux execution record (2026-08-19)
 
 | Checks | Result | Evidence |

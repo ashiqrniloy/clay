@@ -1,0 +1,2 @@
+EXIT=1 elapsed=4s
+EXIT=0 elapsed=353s

@@ -253,7 +253,8 @@ one matrix area (or cross-cutting section) below:
 - Budgets: `src/perf/budgets.rs` constants remain the named budgets; Phase 4+
   adds equivalent frontend checks rather than raising or dropping limits
   (ledger row `performance.budgets.feel`).
-- Trust domains: exactly two persistent runtimes, compiled bundled inventory,
+- Trust domains: exactly two trust domains (each with two worker lanes —
+  general + latency — since plan 127), compiled bundled inventory,
   cross-domain envelopes, adoption/replacement records — untouched by this
   migration (ledger row `security.trust-domains`). Tauri capabilities add a new
   deny-by-default boundary around the webview; broad filesystem/shell/process

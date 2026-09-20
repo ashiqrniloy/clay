@@ -169,6 +169,7 @@ cargo test --test protocol performance_protocol::
 ## Related
 
 - [Phase 18.20 Primitive Review](../archive/phase18.20-language-intelligence-primitive-review.md)
+- [Persistent Runtime Hardening](persistent-runtime-hardening.md) — plan 127 routes providers registered with a `moduleSpecifier` to the domain's latency lane, so a busy general lane cannot delay them.
 - [Language Server Process Service](language-server-process-service.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Command Registry](command-registry.md)

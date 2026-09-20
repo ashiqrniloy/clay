@@ -204,4 +204,13 @@ decisions, not oversights.
 - To be filled after tasks are completed and tests pass.
 
 ## Further Actions
-- To be filled after task completion with improvements, rationale, and priority.
+
+- **Git stale-polling surface has no production caller** (delegated from plan 131
+  task 5; priority: low): `GIT_STATUS_POLL_INTERVAL`,
+  `GitStatusCache::refresh_stale_workspace`, and
+  `GitDiscoveryService::discover_workspace_statuses` are `#[cfg(test)]` since plan
+  131, while the live paths are `list_cached` + explicit `refresh_root`
+  (`git.serverListGitStatuses`, `git.serverRefreshGitStatus`). Resolve it in this
+  plan's hygiene pass: delete the polling surface with its tests (the wiki already
+  records reality), or schedule a real poll interval — do not keep a test-only
+  poll that the documentation had described as live.

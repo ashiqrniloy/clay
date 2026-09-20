@@ -15,7 +15,6 @@ use crate::protocol::{
     ParseInputEdit, ParsePoint, ParsePolicy, ParseWindowSnapshot, ProtocolErrorCode,
     RegionLockConflict, RegionLockId, ServerMessage, TransactionId, bounded_document_chunk_bytes,
 };
-use crate::server::locks::ranges_overlap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EditableLease {
@@ -1037,7 +1036,7 @@ impl RegionLock {
     fn overlaps(&self, affected_range: AffectedRange) -> bool {
         match affected_range {
             AffectedRange::Insert { offset } => offset >= self.start && offset < self.end,
-            AffectedRange::Span { start, end } => ranges_overlap(start, end, self.start, self.end),
+            AffectedRange::Span { start, end } => start < self.end && self.start < end,
         }
     }
 

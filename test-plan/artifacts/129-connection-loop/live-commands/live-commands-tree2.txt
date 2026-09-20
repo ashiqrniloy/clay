@@ -1,0 +1,210 @@
+depth|role|states|name|text|extents|ifaces
+1|application||clay-desktop||-1,-1,-1x-1|
+2|frame|active,enabled,resizable,sensitive,showing,visible|Clay||0,0,1332x1203|Component
+3|panel|enabled,sensitive,showing,visible|||26,23,1280x47|Component
+4|panel|enabled,sensitive,showing,visible|||26,23,1280x47|Component
+5|filler|enabled,horizontal,sensitive,showing,visible|||1186,23,114x46|Component
+6|separator|enabled,sensitive,vertical|||-2147483648,-2147483648,1x1|Component
+6|button|enabled,sensitive,showing,visible|Minimise||1186,31,34x30|Action,Component
+6|button|enabled,sensitive,showing,visible|Maximise||1226,31,34x30|Action,Component
+6|button|enabled,sensitive,showing,visible|Close||1266,31,34x30|Action,Component
+5|filler|enabled,sensitive,showing,vertical,visible|||631,37,69x17|Component
+6|label|enabled,multi-line,sensitive,showing,visible|Clay||631,37,69x17|Text,Component
+6|label|enabled,multi-line,sensitive|||-2147483648,-2147483648,1x1|Text,Component
+3|filler|enabled,sensitive,showing,vertical,visible|||26,70,1280x1104|Component
+4|filler||||26,70,1280x1104|Component
+5|filler||||26,70,1280x1104|Component
+6|scroll pane|enabled,focusable,focused,sensitive|||26,70,1280x1104|Action,Component
+7|document web|enabled,focusable,focused,sensitive,showing,visible|Clay||26,70,1280x1104|Action,Component
+8|landmark|enabled,sensitive,showing,visible|||26,70,1280x40|Action,Component
+9|section|enabled,sensitive,showing,visible|||46,86,7x7|Text,Action,Component
+9|section|enabled,sensitive,showing,visible|||60,82,35x15|Text,Action,Component
+9|page tab list|enabled,horizontal,selectable,sensitive,showing,visible|Window tabs||111,74,79x31|Action,Component
+10|page tab|enabled,focusable,selectable,selected,sensitive,showing,visible|workspace||111,74,79x31|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|New tab||191,72,35x35|Action,Component
+9|landmark|enabled,sensitive,showing,visible|Application controls||1152,73,142x33|Action,Component
+10|button|enabled,focusable,sensitive,showing,visible|Control Center||1152,73,33x33|Action,Component
+10|page tab list|enabled,horizontal,selectable,sensitive,showing,visible|Tab view||1188,75,106x29|Action,Component
+11|page tab|enabled,focusable,selectable,selected,sensitive,showing,visible|Workspace||1193,80,61x19|Action,Component
+11|page tab|enabled,focusable,selectable,sensitive,showing,visible|Agent||1253,80,36x19|Action,Component
+8|landmark|enabled,sensitive,showing,visible|Clay workspace||26,110,1280x1036|Action,Component
+9|section|enabled,sensitive,visible|||25,110,941x1036|Text,Action,Component
+10|section|enabled,sensitive,visible|||25,110,941x1036|Text,Action,Component
+11|button|enabled,focusable,sensitive,showing,visible|Hide file browser||237,110,32x32|Action,Component
+11|label|enabled,sensitive,visible|||25,149,1x1|Text,Action,Component
+11|entry|editable,enabled,focusable,selectable-text,sensitive,showing,single-line,visible|Filter files||26,150,219x36|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||253,155,17x26|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||258,160,7x16|Text,Action,Component
+11|list box|enabled,focusable,sensitive,showing,vertical,visible|Server-driven items||26,194,243x919|Action,Component
+12|list item|enabled,focusable,sensitive,showing,visible|commands.rs||26,194,243x35|Action,Component
+11|panel|enabled,sensitive,visible|||26,1113,243x10|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||153,1121,23x25|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||158,1126,13x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||179,1126,32x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||218,1121,19x25|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||223,1126,9x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||240,1126,30x15|Text,Action,Component
+11|landmark|enabled,sensitive,showing,visible|||270,110,696x836|Action,Component
+12|landmark|enabled,sensitive,showing,visible|Pane 1||270,110,696x836|Action,Component
+13|section|enabled,sensitive,showing,visible|Document state||593,122,60x26|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||598,127,10x16|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||621,127,26x16|Text,Action,Component
+13|button|enabled,expandable,focusable,sensitive,showing,visible|Open||660,118,52x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Undo||713,118,52x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Redo||766,118,51x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Reload||817,119,33x32|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Save||851,118,73x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Close||926,119,32x32|Action,Component
+13|landmark|enabled,sensitive,showing,visible|Editor commands.rs||270,160,696x786|Action,Component
+14|section|enabled,sensitive,visible|||270,160,696x10|Text,Action,Component
+14|section|enabled,focusable,sensitive,showing,visible|||270,160,696x786|Text,Action,Component
+15|entry|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible|Document editor||270,160,696x786|Text,Action,Component
+11|footer|enabled,sensitive,showing,visible|Agent lane||270,946,696x200|Action,Component
+12|form|enabled,sensitive,showing,visible|||270,947,696x175|Action,Component
+13|label|enabled,sensitive,showing,visible|||297,1059,1x1|Text,Action,Component
+13|entry|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,visible|Message||297,966,642x48|Text,Action,Component
+13|combo box|has-popup,showing,visible|Attach an agent Agent type||297,1026,107x34|Action,Component
+13|dialog|enabled,sensitive,showing,visible|Commands||288,531,660x420|Action,Component
+14|panel|enabled,sensitive,showing,visible|Scope||800,544,136x29|Text,Action,Component
+15|toggle button|enabled,focusable,pressed,sensitive,showing,visible|All||805,549,21x19|Action,Component
+15|toggle button|enabled,focusable,sensitive,showing,visible|Session||825,549,45x19|Action,Component
+15|toggle button|enabled,focusable,sensitive,showing,visible|Shell||869,549,32x19|Action,Component
+15|toggle button|enabled,focusable,sensitive,showing,visible|Files||900,549,31x19|Action,Component
+14|list box|enabled,sensitive,showing,vertical,visible|Commands||289,586,658x306|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/branch server-first — @clay/coding-agent@0.1.0||301,-2170,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/clone server-first — @clay/coding-agent@0.1.0||301,-2138,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/compact server-first — @clay/coding-agent@0.1.0||301,-2106,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/discard server-first — @clay/coding-agent@0.1.0||301,-2074,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/fork server-first — @clay/coding-agent@0.1.0||301,-2042,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/n server-first — @clay/coding-agent@0.1.0||301,-2010,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/new server-first — @clay/coding-agent@0.1.0||301,-1978,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/open-session server-first — @clay/coding-agent@0.1.0||301,-1946,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/open-session-as-fork server-first — @clay/coding-agent@0.1.0||301,-1914,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/resume server-first — @clay/coding-agent@0.1.0||301,-1882,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|/tree server-first — @clay/coding-agent@0.1.0||301,-1850,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 1 client — built-in Ctrl+1||301,-1818,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 2 client — built-in Ctrl+2||301,-1777,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 3 client — built-in Ctrl+3||301,-1736,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 4 client — built-in Ctrl+4||301,-1695,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 5 client — built-in Ctrl+5||301,-1654,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 6 client — built-in Ctrl+6||301,-1613,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 7 client — built-in Ctrl+7||301,-1572,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 8 client — built-in Ctrl+8||301,-1531,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Activate Tab 9 client — built-in Ctrl+9||301,-1490,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Add Equal Pane client — built-in Ctrl+Shift+\||301,-1449,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Browse Filesystem server-first — built-in Ctrl+X Ctrl+F||301,-1408,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Choose Agent server-first — built-in||301,-1367,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Choose Model server-first — built-in||301,-1335,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Choose Provider server-first — built-in||301,-1303,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Close Coding Agent server-first — @clay/coding-agent@0.1.0||301,-1271,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Close Pane client — built-in Ctrl+Alt+W||301,-1239,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Close Tab client — built-in Ctrl+Shift+W||301,-1198,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Code Actions server-first — built-in||301,-1157,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Coding Agent server-first — @clay/coding-agent@0.1.0||301,-1125,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Configure Provider server-first — built-in||301,-1093,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Cycle Reasoning Effort server-first — @clay/coding-agent@0.1.0 Shift+Tab||301,-1061,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Dismiss Language Result server-first — built-in||301,-1020,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Explain Active Mode server-first — built-in||301,-988,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Focus Active Document server-first — built-in||301,-956,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Focus Next Pane client — built-in Ctrl+Alt+→||301,-924,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Focus Previous Pane client — built-in Ctrl+Alt+←||301,-883,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Go to Definition server-first — built-in||301,-842,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Hover server-first — built-in||301,-810,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Insert Markdown Heading server-first — @clay/markdown@0.1.0 Ctrl+Alt+1||301,-778,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|List Active Modes server-first — built-in||301,-737,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|List Git Statuses server-first — built-in||301,-705,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Pane Next client — built-in Ctrl+Alt+]||301,-673,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Pane Previous client — built-in Ctrl+Alt+[||301,-632,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab Left client — built-in Ctrl+Shift+[||301,-591,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab Right client — built-in Ctrl+Shift+]||301,-550,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 1 client — built-in Ctrl+Shift+1||301,-509,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 2 client — built-in Ctrl+Shift+2||301,-468,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 3 client — built-in Ctrl+Shift+3||301,-427,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 4 client — built-in Ctrl+Shift+4||301,-386,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 5 client — built-in Ctrl+Shift+5||301,-345,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 6 client — built-in Ctrl+Shift+6||301,-304,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 7 client — built-in Ctrl+Shift+7||301,-263,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 8 client — built-in Ctrl+Shift+8||301,-222,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Move Tab to Position 9 client — built-in Ctrl+Shift+9||301,-181,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Navigate Definition server-first — built-in||301,-140,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|New Tab client — built-in Ctrl+T||301,-108,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Next Tab client — built-in Ctrl+Tab||301,-67,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Open Control Center server-first — built-in Ctrl+X Ctrl+O||301,-26,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Open Directory server-first — built-in||301,15,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Open File server-first — built-in||301,47,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Open File by Name server-first — built-in||301,79,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Open Recent Document server-first — built-in||301,111,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Preview Edit (Deferred) server-first — built-in||301,143,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Previous Tab client — built-in Ctrl+Shift+Tab||301,175,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Refresh Git Status server-first — built-in||301,216,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Refresh Workspace server-first — built-in||301,248,634x32|Action,Component
+15|list item|enabled,focusable,selected,sensitive,visible|Reload Configuration and Packages server-first-with-lock — built-in Ctrl+Shift+R||301,280,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Resize Pane Down client — built-in Ctrl+Alt+Shift+↓||301,321,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Resize Pane Left client — built-in Ctrl+Alt+Shift+←||301,362,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Resize Pane Right client — built-in Ctrl+Alt+Shift+→||301,403,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Resize Pane Up client — built-in Ctrl+Alt+Shift+↑||301,444,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Resume Session server-first — built-in||301,485,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Reveal in File Tree server-first — built-in||301,517,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Search Sessions server-first — built-in||301,549,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Signature Help server-first — built-in||301,581,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Split Pane Down client — built-in||301,613,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Split Pane Horizontal client — built-in Ctrl+-||301,645,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Split Pane Right client — built-in||301,686,634x32|Action,Component
+15|list item|enabled,focusable,focused,sensitive,showing,visible|Split Pane Vertical client — built-in Ctrl+\||301,718,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Toggle Agent Lane client — built-in Ctrl+X Ctrl+P||301,759,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Toggle File Browser server-first — built-in Ctrl+B||301,800,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Toggle JavaScript Line Comment server-first — @clay/javascript@0.1.0||301,841,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,showing,visible|Toggle Markdown Comment server-first — @clay/markdown@0.1.0||301,873,634x32|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Toggle Markdown List server-first — @clay/markdown@0.1.0 Ctrl+Shift+8||301,905,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Toggle Markdown Preview server-first — @clay/markdown@0.1.0 Ctrl+Shift+M||301,946,634x41|Action,Component
+15|list item|enabled,focusable,sensitive,visible|Toggle Rust Line Comment server-first — @clay/rust@0.1.0||301,987,634x32|Action,Component
+14|footer|enabled,sensitive,showing,visible|||289,892,658x58|Action,Component
+15|status bar|enabled,sensitive,showing,visible|87 results|87 results|301,912,78x18|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||706,909,22x25|Text,Action,Component
+16|section|enabled,sensitive,showing,visible|||711,914,12x15|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||731,913,53x16|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||803,909,19x25|Text,Action,Component
+16|section|enabled,sensitive,showing,visible|||808,914,9x15|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||826,913,21x16|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||866,909,29x25|Text,Action,Component
+16|section|enabled,sensitive,showing,visible|||871,914,19x15|Text,Action,Component
+15|section|enabled,sensitive,showing,visible|||897,913,34x16|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||292,1081,16x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||297,1086,6x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||311,1086,52x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||370,1081,17x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||375,1086,7x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||390,1086,88x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||485,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||490,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||508,1086,24x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||538,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||543,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||560,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||565,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||582,1086,37x15|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|Session environment||270,1122,696x24|Text,Action,Component
+9|landmark|enabled,sensitive,showing,visible|Document outline||966,110,340x1036|Action,Component
+10|section|enabled,sensitive,showing,visible|||1046,132,7x16|Text,Action,Component
+10|button|enabled,focusable,sensitive,showing,visible|Hide outline||1260,124,32x32|Action,Component
+10|description list|enabled,sensitive,showing,visible|||967,166,339x114|Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,167,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,166,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,188,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,187,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,209,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,208,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,230,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,229,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,251,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,250,244x15|Text,Action,Component
+10|separator|showing,visible|||967,280,339x1|Text,Action,Component
+10|paragraph|enabled,sensitive,showing,visible|||967,281,339x833|Text,Action,Component
+8|landmark|enabled,sensitive,showing,visible|||26,1146,1280x28|Action,Component
+9|section|enabled,sensitive,showing,visible|||38,1151,70x18|Text,Action,Component
+9|status bar|enabled,sensitive,showing,visible|||224,1145,331x31|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|hide lane Ctrl X P||583,1144,162x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|palette Ctrl X O||758,1144,147x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|files Ctrl B||918,1144,109x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|hide outline Ctrl I||1040,1144,164x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|filter /||1217,1144,78x33|Action,Component

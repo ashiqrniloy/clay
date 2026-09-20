@@ -870,7 +870,8 @@ pub enum AgentClientCommand {
         model: String,
         /// Deferred Phase 1 passthrough: daemon-side workspace/autonomy
         /// parameters. `None` keeps the daemon defaults (process cwd root,
-        /// autonomy off).
+        /// autonomy on — a session is autonomous unless this says `false`;
+        /// decision 2026-09-20-2049).
         workspace_root: Option<String>,
         full_autonomy: Option<bool>,
         /// Observational Memory worker model defaults for the new session

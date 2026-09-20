@@ -91,7 +91,7 @@ Phase 18.21 replaces the text-only `send`/`read` with exact byte `sendBytes`/`re
 
 `LanguageServerError` distinguishes unauthorized/mismatched sessions, unknown sessions, too many sessions, payload overflow, spawn/I/O failure, timeout, child exit, and invalid roots. Facade ops translate failures to stable Clay error codes and do not expose raw process handles or unrestricted stderr.
 
-Every operation first rechecks the current grant in the op layer, then the central router rechecks package name, contribution ID, and descriptor fingerprint immediately before actor ingress. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which removes and signals every owned actor; runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_generation_resources`. Actor stop signals interrupt an in-flight read/write and are not queued behind ordinary actor commands.
+Every operation first rechecks the current grant in the op layer, then the central router rechecks package name, contribution ID, and descriptor fingerprint immediately before actor ingress. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which removes and signals every owned actor; runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_trusted_generation_resources`. Actor stop signals interrupt an in-flight read/write and are not queued behind ordinary actor commands.
 
 ## Primitive Coverage
 
@@ -150,6 +150,6 @@ cargo test --test editor editor_performance_invariants::
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [Package Loading](package-loading.md)
-- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `shutdown_all` kills and reaps all previous-generation language-server sessions after atomic commit; `shutdown_generation_resources` delegates through `ClayJsRuntimeService`.
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `shutdown_all` kills and reaps all previous-generation language-server sessions after atomic commit; `shutdown_trusted_generation_resources` delegates through `ClayJsRuntimeService`.
 - [Package Security Reference](../../reference/primitives/package-security.md)
 - [LSP 3.17 Bridge Contract](../../reference/primitives/language-intelligence.md)

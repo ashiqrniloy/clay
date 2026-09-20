@@ -3,7 +3,8 @@
 ## Source
 
 - `clay-agent/src/main.ts`
-- `clay-agent/src/host.ts`
+- `clay-agent/src/host.ts` (RPC surface and concern-module facade, plan 130)
+- `clay-agent/src/host/*.ts` (`internals`, `skills`, `context-mentions`, `providers`, `integrations`, `agent-roots`, `om`, `session-build`, `session-tree`, `sessions`, `session-run`, `commands`)
 - `clay-agent/src/providers.ts`
 - `clay-agent/src/rpc.ts`
 - `clay-agent/src/redact.ts`
@@ -59,6 +60,11 @@ daemon event mapping, durable-run approvals) and `agent/mcp.rs` owns the MCP
 allow-list plus the cached daemon inventory (commands, extensions, skills, MCP
 connect outcomes, provider/model/profile/session catalogs). The split is
 mechanical: no behavior moved with the lines.
+
+The daemon half is decomposed the same way (plan 130 task 2): `host.ts` keeps
+the `ClayAgentHost` class as the RPC surface and the shared contract, and each
+concern lives in `clay-agent/src/host/<concern>.ts` as plain functions that
+take the host, with one thin delegate per former method (map below).
 
 Node floor and event-mapping rule (plan 120): the daemon requires Node >= 22
 (`MIN_NODE` in `main.ts` — a private startup guard, not an `init.js` option),
@@ -254,6 +260,51 @@ A session id that cannot form a valid Prism scope id (charset
 `[A-Za-z0-9._:/-]{1,128}`, no `..`) fails the prompt closed before any
 provider turn; no scope entry is written.
 
+## Host module map (plan 130)
+
+`clay-agent/src/host.ts` (≈1.2k lines after the split) is the RPC dispatcher,
+the class contract, and nothing else. Every concern is a module under
+`clay-agent/src/host/`:
+
+| Module | Concern |
+| --- | --- |
+| `host/internals.ts` | Shared types, limits, request validators, byte/path/JSON helpers, `LiveSession`, and the per-process OM worker override |
+| `host/skills.ts` | Skill discovery and directory scanning, `skills.json` gating, prompt layers, seeded agent skill files |
+| `host/context-mentions.ts` | Context-inspector categories and `@`-mention resolution |
+| `host/providers.ts` | Provider/model catalogs, model search, credential storage and keychain resolution |
+| `host/integrations.ts` | Wiki and graft knowledge-base enablement, knowledge tool sets, workspace binding |
+| `host/agent-roots.ts` | Per-agent-root config, agent-type resolution, MCP/Obscura capability activation, per-root MCP allow-lists |
+| `host/om.ts` | Observational Memory worker selection and validation, persistence, activity log |
+| `host/session-build.ts` | System-prompt layers, tool assembly, supervisor + attention compiler, run options, `recreateSessionModel` |
+| `host/session-tree.ts` | Branch checkout, branch summaries, session-tree rendering |
+| `host/sessions.ts` | Session lifecycle RPCs (`session.new/list/load/resume/delete/fork/clone/checkpoint/search/resumable/setAgent`) and resume activation |
+| `host/session-run.ts` | The run loop (`session.prompt/cancel/steer/compact/setAutonomy`, `run.resume`), durable-run state, OM work scopes |
+| `host/commands.ts` | Agent profile and command registration, `environment.list`, slash-command dispatch |
+
+The split is deliberately mechanical, because the surface it hides is the
+daemon's whole contract:
+
+- The class is the contract. Modules take `host: ClayAgentHost` and reach
+  members directly, so the members the modules share are `readonly` but no
+  longer `private`; `host.ts` keeps one delegate per moved method so the RPC
+  dispatcher, the tests, and error messages read exactly as before.
+- Modules import the class **type-only** (`import type { ClayAgentHost }`), so
+  there is no runtime import cycle; `internals.ts` is the leaf every module may
+  import and it imports no sibling.
+- No behavior moved with the lines: `session.prompt`, `createSession`,
+  `contextCategories`, `runHostCommand` and `sessionTreeSummary` were then
+  decomposed into named helpers during the same plan, keeping every function
+  under the 80-line budget.
+
+No public programmatic surface changed with the split — the RPC method set, the
+`clay:agent` facade, the API docs and the generated registry are identical to
+the pre-decomposition revision (verified in the plan 130 Clay JS API step).
+
+The other half of plan 130 is server-side ownership: the `AgentHostHandle` is
+constructed by the server and injected into every runtime lane's `ClayOpState`,
+never held in a process global — see
+[Agent Process Manager](agent-process-manager.md#how-it-works).
+
 ## Responsibilities
 
 - Stdio JSON-RPC wrapping `createAgent` / `createAgentSession` / `AgentEvent`.
@@ -445,10 +496,14 @@ user-held lease fails the tool closed.
 
 Acceptance policy (decision 2157): workspace writes and reads are free;
 out-of-workspace writes, delete/move, and shell metacharacter commands are
-permission-gated. Gate checks run before the tool executes; with
-`fullAutonomy: true` (host-set only, default false) gated calls skip the
-prompt. `interruptBeforeTool: true` means gated calls suspend the durable
-run and surface as `pendingDecisions` even before the gate prompt.
+permission-gated. Gate checks run before the tool executes; autonomy is the
+opt-out (decision 2026-09-20-2049): a session is created with
+`fullAutonomy: true` unless its caller blocks it, and with autonomy on gated
+calls take the policy's allow path instead of the prompt. With autonomy off,
+`interruptBeforeTool: true` makes gated calls suspend the durable run and
+surface as `pendingDecisions` even before the gate prompt. Autonomy is
+session state — `session.setAutonomy` re-arms either way at any point — and
+a resumed session restores the value recorded at `session.new`.
 
 Inline gating rides the reverse-RPC approval bridge (Phase 2):
 `approval.request` (mutation gate) and `approval.askUserDecision` surface to
@@ -536,7 +591,7 @@ projection.
   not its profile: every session in a workspace shares one profile, so the
   picker rendered N identical rows. The daemon stamps that prompt (first five
   words, bounded) on the session's **first** entry's `label` through the store
-  seam (`labelFirstPromptStore` in `clay-agent/src/host.ts`); Prism's session
+  seam (`labelFirstPromptStore` in `clay-agent/src/host/internals.ts`); Prism's session
   search reads the *newest non-null* label, so one stamp keeps the identity
   stable for the session's whole life and later prompts never re-label it.
   Only entries with no `parentId` are eligible, which is stateless (no
@@ -564,7 +619,13 @@ projection.
   session and silently abandoned the one the user had just opened. The binding
   is now keyed by `(agent type, workspace root)` and the resume records the
   session's root with it (plan 119 SC-6), which is also what agent tool calls
-  resolve their file access against (`AgentHost::session_workspace_root`).
+  resolve their file access against (`AgentHost::session_workspace_root`). The
+  daemon side matches: `ensureLive` restores a session's tools from its
+  **recorded** workspace key (never the restarted daemon's cwd — cwd is the
+  fallback for pre-workspace records only) and re-activates that workspace's
+  capabilities and default graft binding, because a restarted daemon has
+  neither and a resumed coding session would otherwise come up without its
+  MCP, browser and graft tools (plan 130 A2).
 
 ## How It Works
 
@@ -823,7 +884,9 @@ catalog is convenience, not authority; the provider rejects bad ids).
 - No `process.env` secrets: provider credentials come from the encrypted
   vault / OS keychain through the stored credential resolver.
 - Write authority: workspace writes are free, out-of-workspace writes are
-  gated (decision 2157); all document mutations route through the server's
+  gated only when the session's autonomy is off — the default is on
+  (decisions 2157 and 2026-09-20-2049), so a caller who wants prompts must
+  block autonomy explicitly; all document mutations route through the server's
   lease/CAS path (`apply_edit`) regardless of caller.
 - Search hits are redacted metadata and never auto-injected into agent
   context.
@@ -886,6 +949,8 @@ catalog is convenience, not authority; the provider rejects bad ids).
   an existing session then resumes it on its recorded workspace root.
 - Only the session's first entry is labelled, so a session's `/resume`
   identity never drifts to its latest prompt.
+- No function in `clay-agent/src/host*` exceeds the 80-line budget, and the
+  daemon's RPC method set is unchanged by the plan-130 split.
 - No ACP, AG-UI, or Antigravity dependencies. Phase 1 pins coding-tools,
   web-tools, memory, and mcp; import only `/compaction/llm` and
   `/compaction/observational-memory` from memory (no wiki/graft/rag).
@@ -897,18 +962,20 @@ User-facing host controls are exposed through the trusted-only
 `src/server/ops/agent.rs`): `compact`, `searchSessions`,
 `setFullAutonomy`, `resumeRun`, and `sessionTree`. Each op forwards to the
 daemon's validated RPC and fails closed with `agent.unavailable` when no
-agent host is installed (process-global `AgentHostHandle`, installed at
-server startup). The package-facing registration ops
+agent host is wired into its runtime lane (the server constructs the
+`AgentHostHandle` and injects it into every lane's op state — plan 130 A1;
+nothing process-global ever grants authority). The package-facing registration ops
 (`profileRegister`, `skillRegister`) are the exception: malformed
-declarations fail closed with `agent.invalid_params`, but a missing host
-queues the declaration process-globally (`PENDING_PACKAGE_REGISTRATIONS`)
-and `install_global` moves it into the host's pending queue, where it
+declarations fail closed with `agent.invalid_params`, but a lane with no host
+queues the declaration on its own op state (bounded) and the wiring step moves
+it into the host's pending queue, where it
 applies right after the daemon's first initialize handshake — package
 load entries never fail or block for a missing host or daemon. The package (third-party) extension registers none of
 these ops and cannot import `clay:agent`. Rust protocol additions:
 `AgentClientCommand::{SetAutonomy, SearchSessions, RunResume}` and
 `AgentServerMessage::AgentRpc`; `session.setAutonomy` toggles the live
-session's `fullAutonomy` flag (default false, host-set only). Plan 121 adds no
+session's `fullAutonomy` flag (host-set only; on unless the session's creator
+blocked it — decision 2026-09-20-2049). Plan 121 adds no
 public facade or configuration key: `session.prompt.toolNames` is a daemon RPC
 run option, while `wiki_ingest` and the graft commands are capabilities of the
 existing knowledge binding.

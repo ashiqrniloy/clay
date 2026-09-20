@@ -464,3 +464,27 @@ typed query, an arrow move, `Enter`, `Alt+Enter`, or a row click is recorded as
 UNRESOLVED live and carried by the named automated/fixture legs. The retired
 centered-era rows (K54–K59, K70, K75) keep their semantics under the plan-124 +
 plan-125 supersession notes; no step was deleted or weakened.
+
+## Plan 129 connection-loop decomposition execution record (2026-09-20)
+
+Regression-only pass over the refactored connection dispatcher. This execution
+exercised the Control Center round trip through AT-SPI actions (the shell
+exposes a real `palette Ctrl X O` button and the palette rows expose
+`DoAction`), on a fresh profile (`run-live.sh start commands`, no init.js).
+
+| Step | Result | Evidence |
+|---|---|---|
+| K19/K29/K30 (open + catalogue) | PASS live | AT-SPI `press` on the shell's `palette Ctrl X O` button opened the Control Center: `list box "Commands"` with **88 rows** — built-ins (`Reload Configuration and Packages server-first-with-lock — built-in Ctrl+Shift+R`, `Open Control Center server-first — built-in Ctrl+X Ctrl+O`, `Split Pane Vertical client — built-in Ctrl+\`, …), the `shell.client*` family (`Activate Tab 1…9`, `New Tab`, `Close Pane`, `Focus Next Pane`, …), and package commands with provenance/detail (`/compact server-first — @clay/coding-agent@0.1.0`, `Toggle Rust Line Comment server-first — @clay/rust@0.1.0`). One catalogue snapshot pushed for the open. Artifacts: `live-commands/live-commands.txt`, `live-commands-tree2.txt`. |
+| K22/K35 (activate a server command) | PASS live | AT-SPI activation of the `Reload Configuration and Packages` row executed `runtime.reloadConfiguration`: the server re-ran `init.js` (`[daemon] agentProfile.register 'coding' applied`, `command.register '/compact' → Err(Rpc("duplicate command"))`), the client stayed connected with no `Session lost`, and the palette kept rendering after the generation replacement. The server-side cancel/replay ordering is pinned by `runtime_generation_replacement_cancels_open_control_center` (fresh run: 28 `control_center` tests passed). Artifacts: `live-commands/live-commands-server-before.log`, `server-after-reload.log`. |
+| K21 (MenuSelectionMove) | PARTIAL live | The activated row reported `focused,selected`; relative move/wrap semantics remain covered by the automated menu tests (no arrow keystrokes were deliverable). |
+| K33/K34 (client shell bridge) | UNRESOLVED live | AT-SPI activation of `Split Pane Vertical` returned `True` from `DoAction` but produced no second pane/`Pane 2` node, so the AT-SPI row path is not equivalent to `Enter` for client-first commands; the bridge stays pinned by `control_center_shell_activation_sends_shell_command_request`. |
+| K20/K23/K24/K31/K38/K42 (query/arrow/Enter/Escape/no-leak) | UNRESOLVED live | Every leg needs typed keys or arrows; this host's `xdg-desktop-portal-gnome` segfaults on RemoteDesktop keyboard sessions, dropping keystrokes (an `Escape` attempt left the palette open with a portal crash logged). Carried by `control_center_opens_filters_activates_and_cancels`, `catalogue_snapshot_is_not_rebuilt_for_query_updates`, `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`, and the shell keep-open assertions. |
+| K1–K18, K60–K68 (bindings, chords, sequences) | UNRESOLVED live | Same input ceiling; the sequence-chord fixture (`init-chords.js`) is prepared in the artifact harness for a host that can deliver two-stroke chords. Automated companions unchanged: `route_key_sequence_*`, `configuration_bind_key_prefix_collision_is_rejected`. |
+| Automated companions (fresh on the refactored tree) | PASS | `cargo test --lib control_center` 28 passed; `cargo test --lib connection::` 96 passed. |
+
+This record refines the plan-125 ceiling note (“palette rows expose no usable
+action”): rows do expose `DoAction` on this host, and server-first activation
+provably works, but client-first rows are not driven by it — so the ceiling
+stands for the shell-bridge legs rather than for all row activation.
+No step was deleted or weakened. Artifacts:
+`test-plan/artifacts/129-connection-loop/live-commands/`.

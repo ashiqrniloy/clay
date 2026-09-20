@@ -227,7 +227,7 @@ export function inlayHintsToClay(hints, document) {
     const label = sanitizeInlayLabel(inlayLabelText(hint?.label));
     if (!label || !hint?.position) continue;
     const offset = document.positionToByte(hint.position);
-    const end = document.bytes.length;
+    const end = document.byteLength;
     if (end === 0) continue;
     const byteStart = offset < end ? offset : end - 1;
     const byteEnd = byteStart + 1;

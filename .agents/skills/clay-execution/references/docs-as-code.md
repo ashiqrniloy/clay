@@ -23,6 +23,16 @@ Each inspectable Clay JS API Markdown page must include: what it does, why/when 
 
 When a plan adds or changes server-side Rust public functions or public programmatic behavior, identify: which Clay JS API exposes each Rust public function (or why it is private/`pub(crate)`); which Markdown file documents it and where it is linked from the master index; how the generated registry is updated; which `cargo test` coverage test fails if the function/API/docs/index link/registry entry/lookup is missing or stale; how users and agents discover it (stable ID, kind, owner, JS module/export, backing Rust path, op name, tag); whether the changed user-facing configuration surface must be added to the canonical example configuration `examples/init.js` (mandatory per-plan task, see `create-plan/references/clay.md`); which `test-plan/` module files need new/updated manual steps for user-visible behavior changes (mandatory per-plan manual test plan task; index and coverage matrix in `test-plan/index.md`).
 
+### Decided Defaults: Docs and Code Move Together
+
+When the documented default of a public option and the code that implements it disagree, that is a **decision**, not a doc fix: stop, put the choice to the user, log it (`create-decision-log`), then update both sides in the same change and pin them with one gate that reads both.
+
+- The gate must assert the documented value (Markdown frontmatter / inventory `custom_properties`) **and** the code expression that produces it (the daemon's default check, the constant), so neither side can drift alone. Read the code side from source text or re-run the generator — the point is that one test fails when either half changes.
+- Supersede, never rewrite history: the old decision log stays immutable; the new log states what it supersedes (e.g. the toggle default) and what still stands from it (the policy the toggle switches).
+- Sweep every surface that restates the default: reference page (frontmatter + body), `api-inventory.toml`, generated registry (`cargo run --bin update-doc-registry`), `examples/config/init.js`, code comments/DTO docs, the code wiki, `test-plan/` steps that warned about the divergence.
+- Record the risk side in the reference page, not just the happy path: if the new default removes a gate, say in plain language what now runs unprompted and how a user restores it.
+- Sources: `decision-logs/2026-09-20-2049-agent-autonomy-default-on-and-resume-restores-recorded-autonomy.md`; the gate is `tests/clay_js_api_inventory.rs::agent_configuration_options_are_documented_custom_properties_with_decision_defaults`.
+
 ### Anti-Patterns
 
 Free-floating docs not linked from the master Markdown index; raw Rust public functions or raw `Deno.core.ops.op_*` calls as the user-facing API; Clay JS APIs without Markdown docs/examples/options/authority boundaries; a separately authored registry as source of truth; AI/tool capabilities implicit only in source; tests that pass when APIs/docs/index links/registry entries/lookup are missing; `examples/init.js` drifting behind the implemented surface; manual verification steps living only in plan documents or chat history instead of `test-plan/` module files.

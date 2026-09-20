@@ -298,6 +298,14 @@ pub(crate) struct ClayOpState {
     language_server_authority_sealed: AtomicBool,
     language_server_process: crate::server::language_server::LanguageServerProcessService,
     load_entry_allowlist: Arc<PackageLoadEntryAllowlist>,
+    /// Plan 130 A1: server-owned agent host authority for this lane, injected
+    /// at server build (and re-injected after a poison restart / reload).
+    /// `None` = no agent subsystem: facades fail closed and registrations
+    /// queue here (bounded) instead of in a process global.
+    agent_host: Mutex<Option<crate::server::agent::AgentHostHandle>>,
+    /// Declarations queued while this lane had no agent host. Handed to the
+    /// host's own pending queue when one is attached, preserving order.
+    pending_agent_registrations: Mutex<Vec<crate::server::agent::PackageRegistration>>,
 }
 
 impl std::fmt::Debug for ClayOpState {
@@ -412,13 +420,9 @@ impl ClayOpState {
             language_server_process:
                 crate::server::language_server::LanguageServerProcessService::new(),
             load_entry_allowlist,
+            agent_host: Mutex::new(None),
+            pending_agent_registrations: Mutex::new(Vec::new()),
         }
-    }
-
-    /// Runtime trust domain for this state.
-    #[cfg(test)]
-    pub(crate) fn domain(&self) -> crate::packages::bundled::RuntimeDomain {
-        self.domain
     }
 
     /// Set/clear the executing-package provenance. Host-only: called by the
@@ -600,16 +604,6 @@ impl ClayOpState {
         Ok(record)
     }
 
-    /// Whether an executing-package context is present (without requiring the
-    /// package to be enabled). Used by gates that distinguish package callers
-    /// from trusted user-configuration callers.
-    pub(crate) fn has_current_package(&self) -> bool {
-        self.current_package
-            .lock()
-            .expect("current package mutex poisoned")
-            .is_some()
-    }
-
     /// Whether execution is currently inside package code: a `loadPackage`
     /// loadEntry activation or a host-invoked package callback (parse,
     /// completion, analysis). Tracked as a nesting depth because controlled
@@ -617,7 +611,7 @@ impl ClayOpState {
     /// attribution stamp (`current_package`) intentionally outlives
     /// activations so later package-facing calls still attribute correctly;
     /// gates that must distinguish package callers from user configuration
-    /// therefore use this flag, not `has_current_package`.
+    /// therefore use this flag.
     pub(crate) fn in_package_activation(&self) -> bool {
         self.package_activation_depth.load(Ordering::Acquire) > 0
     }
@@ -655,6 +649,74 @@ impl ClayOpState {
             .replicated_active_editor_mode
             .lock()
             .expect("replicated active editor mode mutex poisoned") = mode_id;
+    }
+
+    /// Plan 130 A1: attach the server-owned agent authority to this lane.
+    /// Declarations queued while no host existed move into the host's own
+    /// pending queue, preserving order, and apply after its first initialize
+    /// handshake. Idempotent: a later re-wire of the same lane finds an empty
+    /// queue.
+    pub(crate) fn set_agent_host(&self, host: crate::server::agent::AgentHostHandle) {
+        let drained = self.take_pending_agent_registrations();
+        {
+            let mut slot = self.agent_host.lock().expect("agent host mutex poisoned");
+            *slot = Some(host.clone());
+        }
+        for registration in drained {
+            // Full/unavailable host queue: stop handing over, exactly as the
+            // removed process-global drain did. Declarations are inert.
+            if host
+                .queue_registration_now(registration.method, registration.params)
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    /// This lane's agent authority, or a fail-closed error naming the missing
+    /// wiring (`ServiceStopped`). Never grants authority by existing.
+    pub(crate) fn agent_host(
+        &self,
+    ) -> Result<crate::server::agent::AgentHostHandle, crate::server::agent::AgentError> {
+        self.agent_host
+            .lock()
+            .map_err(|_| crate::server::agent::AgentError::ServiceStopped)?
+            .clone()
+            .ok_or(crate::server::agent::AgentError::ServiceStopped)
+    }
+
+    /// Queue a registration declaration for a lane with no host attached
+    /// (hostless harnesses/embedded runtimes: a package load entry never fails
+    /// just because this runtime has no agent subsystem). Bounded.
+    pub(crate) fn queue_agent_registration(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(), crate::server::agent::AgentError> {
+        let mut pending = self
+            .pending_agent_registrations
+            .lock()
+            .map_err(|_| crate::server::agent::AgentError::ServiceStopped)?;
+        if pending.len() >= crate::server::agent::PENDING_REGISTRATION_CAP {
+            return Err(crate::server::agent::AgentError::ServiceStopped);
+        }
+        pending.push(crate::server::agent::PackageRegistration {
+            method: method.to_string(),
+            params,
+        });
+        Ok(())
+    }
+
+    /// Drain this lane's queued declarations (host handoff and test
+    /// introspection).
+    pub(crate) fn take_pending_agent_registrations(
+        &self,
+    ) -> Vec<crate::server::agent::PackageRegistration> {
+        self.pending_agent_registrations
+            .lock()
+            .map(|mut pending| pending.drain(..).collect())
+            .unwrap_or_default()
     }
 
     pub(crate) fn set_editor_command_publisher(
@@ -1688,11 +1750,13 @@ impl ClayOpState {
             .store(value, std::sync::atomic::Ordering::Relaxed);
     }
 
+    #[cfg(test)]
     pub(crate) fn explicit_icon_pack_active(&self) -> bool {
         self.explicit_icon_pack_active
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    #[cfg(test)]
     pub(crate) fn explicit_design_system_active(&self) -> bool {
         self.explicit_design_system_active
             .load(std::sync::atomic::Ordering::Relaxed)

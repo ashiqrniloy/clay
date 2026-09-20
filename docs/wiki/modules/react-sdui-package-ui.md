@@ -158,10 +158,7 @@ Packages still author only manifest data:
 - **Panel/component/overlay/input/pane-content contributions**:
   `src/server/ui.rs`; existing manifest and `clay:ui` registration validators.
   No new facade, permission, manifest key, or package setup step.
-- **Trust domains**: `src/packages/bundled.rs`, `src/server/js_runtime`, and
-  `src/server/cross_domain.rs`; exact inventory/provenance only, typed bounded
-  cross-domain values, user-approved mutation, third-party replacement remains
-  third-party.
+- **Trust domains**: `src/packages/bundled.rs` and `src/server/js_runtime`; exact inventory/provenance only, typed bounded cross-domain values, user-approved mutation, third-party replacement remains third-party. (Plan 131 deleted the unwired `src/server/cross_domain.rs` envelope validator.)
 - **Action execution**: frontend emits only `ClientMessage::SduiAction`; Tauri
   stamps client identity and the server rechecks command, provenance,
   permission, context, argument budget, and freshness.

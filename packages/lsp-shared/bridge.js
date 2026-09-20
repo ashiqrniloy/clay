@@ -196,7 +196,7 @@ export function createLspBridge({
       documentId,
       documentVersion: version,
       currentDocumentVersion: version,
-      viewport: { byteStart: 0, byteEnd: entry.document.bytes.length },
+      viewport: { byteStart: 0, byteEnd: entry.document.byteLength },
       source: diagnosticSource,
       spans: diagnosticsToClay(items, entry.document),
     });
@@ -259,7 +259,7 @@ export function createLspBridge({
       documentId,
       documentVersion: version,
       currentDocumentVersion: version,
-      viewport: { byteStart: 0, byteEnd: entry.document.bytes.length },
+      viewport: { byteStart: 0, byteEnd: entry.document.byteLength },
       spans: semanticTokensToClay(data, client.capabilities.semanticLegend, entry.document),
     });
   }
@@ -267,7 +267,7 @@ export function createLspBridge({
   async function refreshInlays(documentId, version) {
     if (!features?.includes("inlayHint") || !client.capabilities.inlayHint) return;
     const entry = exactDocument(documentId, version);
-    const end = entry.document.bytes.length;
+    const end = entry.document.byteLength;
     const response = await client.request("textDocument/inlayHint", {
       textDocument: { uri: entry.uri },
       range: {

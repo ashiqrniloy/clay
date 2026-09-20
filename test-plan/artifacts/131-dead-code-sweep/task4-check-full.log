@@ -1,0 +1,219 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1251 security advisories (from /home/arn/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (605 crate dependencies)
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+
+warning: 9 allowed warnings found
+== [fmt] cargo fmt --check
+== [check] cargo check --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+== [clippy] cargo clippy --all-targets -- -D warnings
+    Checking clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.97s
+== [test] cargo test --all-targets --quiet
+
+running 1411 tests
+....................................................................................... 87/1411
+....................................................................................... 174/1411
+....................................................................................... 261/1411
+....................................................................................... 348/1411
+....................................................................................... 435/1411
+....................................................................................... 522/1411
+...................................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1789924256079346511/.git/
+..[main (root-commit) e4dcc90] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.. 609/1411
+.Initialized empty Git repository in /tmp/clay-git-discovery-parent-1789924256104934453/.git/
+Initialized empty Git repository in /tmp/clay-git-discovery-detached-1789924256106250309/.git/
+...[main (root-commit) e4dcc90] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at e4dcc90 initial
+..Initialized empty Git repository in /tmp/clay-git-discovery-repo-1789924256141505469/.git/
+[main (root-commit) e4dcc90] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+...Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1789924256175380882/.git/
+.............................................................................. 696/1411
+Initialized empty Git repository in /tmp/clay-git-facade-1789924256543995211/repo/.git/
+[main (root-commit) e4dcc90] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.........................Initialized empty Git repository in /tmp/clay-git-package-load-1789924257145447063/repo/.git/
+.[main (root-commit) c0f26eb] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+............................................................. 783/1411
+.........................i............................................................. 870/1411
+....................................................................................... 957/1411
+....................................................................................... 1044/1411
+....................................................................................... 1131/1411
+....................................................................................... 1218/1411
+....................................................................................... 1305/1411
+....................................................................................... 1392/1411
+...................
+test result: ok. 1410 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.69s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+....................................................test manual_smoke_docs::plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states has been running for over 60 seconds
+.
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 69.66s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.90s
+
+
+running 152 tests
+....................................................................................... 87/152
+.................................................................
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.05s
+
+Gnuplot not found, using plotters backend
+Testing protocol_codec_payloads/hello_roundtrip
+Success
+Testing protocol_codec_payloads/client_edit/16
+Success
+Testing protocol_codec_payloads/client_edit/1024
+Success
+Testing protocol_codec_payloads/client_edit/16384
+Success
+Testing protocol_codec_payloads/initial_document_64k
+Success
+
+Testing client_edit_queue_pressure/1
+Success
+Testing client_edit_queue_pressure/64
+Success
+Testing client_edit_queue_pressure/256
+Success
+
+Testing server_document_acknowledgements/1
+Success
+Testing server_document_acknowledgements/16
+Success
+Testing server_document_acknowledgements/128
+Success
+
+Testing server_stale_edit_rejections/1
+Success
+Testing server_stale_edit_rejections/16
+Success
+Testing server_stale_edit_rejections/128
+Success
+
+== [bench-compile] cargo bench --no-run
+   Compiling clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `bench` profile [optimized] target(s) in 1m 35s
+  Executable benches src/lib.rs (target/release/deps/clay-f8cf2532024fffae)
+  Executable benches src/main.rs (target/release/deps/clay-6b461e20e77d8d1b)
+  Executable benches src/bin/clay-server.rs (target/release/deps/clay_server-5838042e858116c7)
+  Executable benches src/bin/update-doc-registry.rs (target/release/deps/update_doc_registry-0a7086bab1bb1e44)
+  Executable benches/protocol_server_baselines.rs (target/release/deps/protocol_server_baselines-e3abb9182ec51262)
+== [bindings] scripts/check-bindings.sh
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.08s
+
+webview bindings up to date
+full check PASSED

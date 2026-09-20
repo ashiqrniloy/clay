@@ -237,7 +237,7 @@
       "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_set_autonomy",
       "name": "setFullAutonomy",
       "user_facing_name": "Set Agent Full Autonomy",
-      "summary": "Toggle full autonomy for one live agent session; default false, host-set only.",
+      "summary": "Toggle full autonomy for one live agent session; on by default, host-set only.",
       "owner": "server",
       "phase": "Phase 1",
       "visibility": "public",
@@ -247,12 +247,12 @@
         {
           "name": "default",
           "type": "boolean",
-          "default": "false",
-          "description": "The autonomy default itself — full autonomy is off unless explicitly enabled by a user action (decision 2157). Documented as a property, not a settable option; there is no \"default autonomy\" key in init.js."
+          "default": "true",
+          "description": "The autonomy default itself — sessions are fully autonomous unless a caller explicitly blocks it (decision 2026-09-20-2049, superseding the \"off by default\" part of decision 2157). Documented as a property, not a settable option; there is no \"default autonomy\" key in init.js."
         }
       ],
-      "security": "Autonomy defaults to false and only the host side can change it; no agent-facing tool can flip this flag. Enabling it skips approval prompts for gated tool calls in that session. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `agent.setFullAutonomy` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Never enable full autonomy on a user's behalf without an explicit user action; the default is approval-gated.",
+      "security": "Autonomy is on by default and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls — out-of-workspace writes, delete/move, and shell-metacharacter commands — run without an approval prompt in that session, and a fresh session inherits the same default. Callers who want prompts must block autonomy explicitly (`fullAutonomy: false` at creation, or this API with `enabled: false`). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.setFullAutonomy` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Autonomy defaults to on: do not change it on a user's behalf in either direction, and never re-enable it after a user block without an explicit user action.",
       "lookup_tags": ["agent", "autonomy", "approval", "permissions", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -857,100 +857,34 @@
       "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
       "name": "serverRegisterCompletionProvider",
       "user_facing_name": "Register Completion Provider",
-      "summary": "Register package-provided completion metadata and bounded static keyword/snippet items for Clay's server-side completion framework. Phase 18.19 adds inert snippet text-format, exclusive provider claim, and structured item descriptors.",
+      "summary": "Registers the completion providers declared in a package's `clay.contributions.completionProviders` manifest entries and optionally binds a package-owned handler module (`module` or `moduleSpecifier` plus `exportName`) that Clay invokes itself under the per-provider timeout. A `moduleSpecifier` handler runs on the domain's latency lane (plan 127); provider metadata, items, and budgets stay manifest-declared data.",
       "owner": "server",
-      "phase": "Phase 18.19",
+      "phase": "Phase 27",
       "visibility": "public",
       "permissions": ["completion-provider"],
       "key_bindings": [],
       "custom_properties": [
         {
-          "name": "packageManifest",
+          "name": "module",
           "type": "object",
           "default": "optional",
-          "description": "Full package.json-shaped manifest; when provided, Clay validates its completionProviders metadata directly."
+          "description": "Package-owned module object whose `exportName` export receives completion requests. Clay invokes that export itself on the domain's general runtime lane; the function value never crosses the op boundary and no callback, cross-package module, command, or native handle is accepted."
         },
         {
-          "name": "packageName",
+          "name": "exportName",
           "type": "string",
-          "default": "required-without-packageManifest",
-          "description": "Package name used for provenance when a load entry passes one provider descriptor."
+          "default": "provideCompletion",
+          "description": "Export of `module` (or `moduleSpecifier`) that Clay invokes, max 128 chars. Ignored when neither handler binding is present."
         },
         {
-          "name": "packagePrefix",
+          "name": "moduleSpecifier",
           "type": "string",
-          "default": "required-without-packageManifest",
-          "description": "Package apiPrefix used for provider ID ownership and provenance."
-        },
-        {
-          "name": "permissions",
-          "type": "string[]",
-          "default": "required-without-packageManifest",
-          "description": "Must include completion-provider."
-        },
-        {
-          "name": "completionProvider",
-          "type": "object",
-          "default": "required-without-packageManifest",
-          "description": "Inert completion provider descriptor matching clay.contributions.completionProviders."
-        },
-        {
-          "name": "providerId",
-          "type": "string",
-          "default": "required-without-completionProvider",
-          "description": "Package-prefixed provider ID such as example.words."
-        },
-        {
-          "name": "triggerCharacters",
-          "type": "string[]",
-          "default": "[]",
-          "description": "Inert trigger characters. They request completion but never execute callbacks."
-        },
-        {
-          "name": "wordBoundaryChars",
-          "type": "string[]",
-          "default": "core-buffer-word-boundaries",
-          "description": "Inert word-boundary characters used by providers to split tokens."
-        },
-        {
-          "name": "items",
-          "type": "(string|object)[]",
-          "default": "[]",
-          "description": "Bounded inert static keyword/snippet items. Strings become both label and insertText with textFormat plainText; structured objects carry label, insertText, optional detail, and optional textFormat."
-        },
-        {
-          "name": "exclusive",
-          "type": "boolean",
-          "default": "false",
-          "description": "When true and this provider matches at the highest priority tier, suppresses all strictly lower-priority matching providers while preserving equal-priority peers."
-        },
-        {
-          "name": "textFormat",
-          "type": "plainText\"|\"snippet",
-          "default": "plainText",
-          "description": "Per-item text format. Snippet items carry inert LSP placeholder syntax expanded client-local on accept."
-        },
-        {
-          "name": "priority",
-          "type": "number",
-          "default": "0",
-          "description": "Higher priority providers are considered first; ties are deterministic by ID."
-        },
-        {
-          "name": "timeoutMs",
-          "type": "number",
-          "default": "500",
-          "description": "Provider timeout budget, bounded to 1..=5000."
-        },
-        {
-          "name": "maxItems",
-          "type": "number",
-          "default": "64",
-          "description": "Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS."
+          "default": "optional",
+          "description": "Package-owned module specifier (max 512 chars), typically `import.meta.resolve(\"./provider.js\")`. When present the provider runs on the domain's latency lane by importing that module in the lane's isolate, so a busy parse, analysis, or configuration lane cannot delay completions. Must resolve to a loaded module owned by the registering package."
         }
       ],
-      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
-      "agent_guidance": "Use `completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
+      "security": "Requires completion-provider permission and a package record whose `clay.contributions.completionProviders` entries passed package-record validation (package-owned IDs, unique IDs and item labels, payload budget, inert trigger/boundary metadata, item/budget bounds). Optionally accepts a package-owned `module` object or package-owned `moduleSpecifier` whose `exportName` export Clay invokes itself on the runtime worker under the per-provider timeout budget; the op validates specifier ownership against the package's loaded-module allowlist and never receives a function value, callback, or native handle. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function, client JavaScript, native handles, raw ops, non-package module references, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
+      "agent_guidance": "Declare provider metadata, trigger characters, items, and budgets in `package.json` under `clay.contributions.completionProviders` — this call never reads those fields from its options object. Use the options only to bind a package-owned handler module. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, another package's modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
       "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
@@ -2545,7 +2479,7 @@
       "js_module": "clay:folding",
       "js_export": "serverPublishFoldingRanges",
       "js_facade": "runtime/js/folding.js::serverPublishFoldingRanges",
-      "backing_rust": "src/server/folding.rs::FoldingRangeRegistry::publish_ranges",
+      "backing_rust": "src/server/folding.rs::validate_folding_publication",
       "deno_op": "op_clay_folding_publish_ranges",
       "deno_op_path": "src/server/ops/folding.rs::op_clay_folding_publish_ranges",
       "name": "serverPublishFoldingRanges",
@@ -2951,7 +2885,7 @@
       "deno_op_path": "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider",
       "name": "serverRegisterLanguageIntelligenceProvider",
       "user_facing_name": "Register Language Intelligence Provider",
-      "summary": "Register a feature-tagged language-intelligence provider (hover, definition, code action, signature help) under `parse-document` authority for cancellable UI-reactive requests.",
+      "summary": "Register a feature-tagged language-intelligence provider (hover, definition, code action, signature help) under `parse-document` authority for cancellable UI-reactive requests; plan 127 adds an optional moduleSpecifier that routes a module-backed handler to the runtime's latency lane.",
       "owner": "server",
       "phase": "Phase 18.20",
       "visibility": "public",
@@ -3023,6 +2957,12 @@
           "type": "object",
           "default": "optional",
           "description": "Token-keyed module object for JS-backed providers; never a cross-package or native handle."
+        },
+        {
+          "name": "moduleSpecifier",
+          "type": "string",
+          "default": "optional",
+          "description": "Package-owned module specifier (max 512 chars), typically `import.meta.resolve(\"./provider.js\")`. When present the provider runs on the domain's latency lane via module import; omit it to keep an inline `module` handler on the general lane."
         }
       ],
       "security": "Requires parse-document. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript. Providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields are rejected. Hover/definition/code-action/signature results are inert validated data with UTF-8 byte offsets; no commands auto-execute. Code-action edits are inert versioned previews in Phase 18.20. Provider provenance is stamped by the coordinator, not trusted from provider output.",

@@ -65,8 +65,8 @@ generation, document, and selected grammar.
 5. The session worker acquires one permit from `SyntaxExecutor` and runs native
    `ParseHandler::parse_blocking` inside `spawn_blocking`. Native parser CPU is
    therefore off Tokio workers and at most `SYNTAX_EXECUTOR_MAX_JOBS` jobs run
-   concurrently. Package-JavaScript handlers continue through the persistent
-   runtime worker and its registered timeout.
+   concurrently. Package-JavaScript handlers continue through the domain's
+   general runtime lane (see [Persistent Runtime Hardening](persistent-runtime-hardening.md#worker-lanes-queue-bounds-and-heap-restoration-plan-127)) and its registered timeout.
 6. A running job is not interrupted mid-parse. When it finishes, `finish_task`
    checks session sequence, document version, handler generation, provenance,
    and request state. Superseded/stale output is discarded. A superseded,

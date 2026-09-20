@@ -409,6 +409,56 @@ another window overlaps it, the PNG is discarded and only the a11y tree and
 metadata are kept (this happened once during the run and is recorded in the
 artifact directory).
 
+## Plan 127 manual-test-plan execution record (2026-09-19, task 7)
+
+Plan 127 changed runtime scheduling only (two lanes per domain, bounded
+per-lane command queues with supersession, heap-limit restoration after
+near-heap recovery, and a host-side revocation gate). Modules executed/amended:
+**04** (new E40), **09** (new P56), **11** (new Q42). No existing step was
+deleted or weakened, and every new step is referenced exactly once in the parity
+ledger (`cargo test --test protocol documentation_coverage` passes).
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 04 E16/E18/E19/E39 (bundled `@clay/rust`, 65 KiB `review.rs`) | PASS live | Portal-driven typing (`fn live_probe`, `let value = std.`) echoed immediately; the `.` autocomplete trigger opened the popup (`list box Completions`, group `rust`, `as` selected, `fn`, `fn function snippet`), `Enter` accepted `as`, a second trigger reopened it and `Escape` closed it with no text change. `Ctrl+Space` is consumed by this host's GNOME input-source switch (host ceiling, not a Clay defect). |
+| 04 E40 + 11 Q42 (bundled `@clay/markdown` parse handler, 1,052,070-byte `notes.md`) | PASS live (typing) + PASS measured | Typing echoed immediately on a 1 MiB document with a package parse handler registered for the mode: `server.edit_ack` p50 0.33 ms / p95 0.52 ms for 19 keystrokes, parse continuing in the background. The provider-lane half (a latency-lane provider answering while a package parse handler holds the general lane) is automated-only — see the reachability ceiling below. |
+| 09 P56 (third-party fixture with ungrantable capabilities) | PASS live | `clay package adopt` succeeded, `clay package enable` failed closed (`MissingCapabilityGrant { capability: CompletionProvider }`), the app started, the document opened, typing worked, and no package code ran. Only the sanitized `packages.load_failed: JavaScript runtime evaluation failed.` diagnostic surfaced. |
+| Launch gate (module 01 L-series) | PASS live | Isolated mode-700 root, fixture-only config, private socket: `Connected`, workspace listed, document opened, no package contribution applied. |
+
+**Reachability ceiling (recorded, not a false pass).** The plan asks for a live
+step "completions remain responsive while a package parse handler runs". The
+typing half is live above; the completion-under-a-held-lane half has no live
+trigger on this build: no bundled package registers a JS completion provider
+(the shipped completion items come from the built-in host-side Rust provider),
+and a third-party package cannot be enabled with `parse-document`/
+`completion-provider` because those capability grants are recorded by
+`PackageService::authorize_package`, which has no CLI/desktop/JS surface yet
+(bundled packages get `authorize_bundled_defaults`, language servers get
+`authorizeLanguageServer`). The lane behaviour is therefore pinned by
+`latency_lane_unblocked_by_busy_general_lane` and the rest of the plan 127
+scheduling suites (4.1–24.9 ms completion latency under a 100–500 ms
+general-lane hold versus the ~454 ms single-worker baseline,
+`code-reviews/2026-09-18-plan127-baseline/README.md`), plus a ready-to-run
+fixture pair (`@fixture/lane`, `@fixture/laneblocked`) for the day a grant
+surface exists.
+
+Artifacts: `test-plan/artifacts/127-lane-scheduling/` — `run-live.sh`
+(isolated launch: `fixture|completion|markdown` modes, `CLAY_PERF_PROFILE` +
+`CLAY_PERF_REPORT_DIR` wired, tree-kill teardown), `store-list.py`, `probe.py`
+and `portal-shot.py` (AT-SPI dump/editor/focus/completion probe; portal
+screenshot cropped to the Clay window), `init-fixture.js`, `init-markdown.js`,
+the fixture packages (`fixture-package/` module-backed provider,
+`fixture-package-inline/` inline-provider A/B), `grant-gate-live/`,
+`live-completion/`, `live-markdown-parse-handler/`, and the README that records
+how the store was seeded (`pnpm add <path>` in `~/.clay/packages`) and why.
+
+**Host note (unchanged ceilings).** Input synthesis works through the
+xdg-desktop-portal remote-desktop keyboard session
+(`computer-use-linux` `type_text`/`press_key`) once the Clay window is
+activated; `Ctrl+Space` is consumed by GNOME input-source switching, so the
+fixtures also bind `Ctrl+J`. The AT-SPI probe still cannot resolve sub-second
+paint, so no live keypress→paint number is claimed for completion.
+
 ## Module map
 
 | # | Module file | Covers | Deep-reference doc |
@@ -416,14 +466,14 @@ artifact directory).
 | 01 | [Launch and connection](01-launch-and-connection.md) | server/client lifecycle, lease, read-only observer, restart, status line, and the empty-tab landing (plan 118: the bundled `@clay/launcher` panel when its package is loaded — `Start`, Workspaces/Agents panes, recents, handoffs — versus the Clay-owned `Start with a file or folder` fallback when no empty-tab contribution is installed; L12/L12a/L14a/L14b + negative checks) | `docs/development/launch-and-gui-smoke.md` |
 | 02 | [Configuration (init.js)](02-configuration-init-js.md) | init.js evaluation, modular loading, diagnostics, live reload, watcher auto-reload, default reload chord, planned-API denial, install-appended load line (C30–C34) | `docs/reference/clay-js-api/configuration.md`, `examples/` tree, `tests/fixtures/configuration/plan080-manual/` |
 | 03 | [Files and workspace](03-files-and-workspace.md) | open/save/reload, dirty state, conflicts, sanitized file-browser/workspace labels, hidden-pane toggle, `Ctrl+O` while hidden, multi-document (incl. pane-scoped switcher, duplicate-open focus routing), Path Browser (24.3): seed fallback, fuzzy filter, descend/ascend/direct jump, invalid-path recovery, file open + duplicate-open focus + active-pane targeting, `Alt+Enter` current-tab workspace load, cancellation, tab-switch/reload dismissal, native-dialog fallback, navigation-no-grant/symlink/cross-tab security checks, centered-era modal surface/accessibility/containment (24.4 — plan 124 re-anchored the path session to the composer-width sheet; the module carries the supersession note); plan 125 makes it a mode of the one palette session (`mode=path`, the `/` sigil only in catalogue/path modes, `Esc` cancels) | `docs/development/file-open-save-reload-workflow.md`, `docs/reference/clay-js-api/configuration.md` (Phase 24.3 review) |; plan 126 adds F56 (≥4 MiB review fixture: bounded accessible text, chunked open, analysis-limit status note) |
-| 04 | [Core editing](04-core-editing.md) | typing, undo/redo, clipboard, newline/indent rules, IME preedit, completion projection/ranking, Phase 28 comment/list/heading transforms and inlay toggle, bounded AT-SPI/AccessKit editable-text semantics | `docs/reference/clay-js-api/editor/` command docs, `docs/development/accessibility.md` |; plan 126 adds E39 (completion trigger/accept/dismiss on a ≥4 MiB document) |
+| 04 | [Core editing](04-core-editing.md) | typing, undo/redo, clipboard, newline/indent rules, IME preedit, completion projection/ranking, Phase 28 comment/list/heading transforms and inlay toggle, bounded AT-SPI/AccessKit editable-text semantics | `docs/reference/clay-js-api/editor/` command docs, `docs/development/accessibility.md` |; plan 126 adds E39 (completion trigger/accept/dismiss on a ≥4 MiB document); plan 127 adds E40 (typing/completion responsiveness while a bundled package parse handler works a ≥1 MiB document) |
 | 05 | [Movement and selection](05-movement-and-selection.md) | word/paragraph/line movement, sticky column, line/word selection, prose vs code | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 06 | [Multi-cursor editing](06-multi-cursor.md) | Ctrl+D match selection, column select, add-cursor, cursor undo, escape priority | `docs/development/manual-editor-capabilities-test-plan.md` |
 | 07 | [Caret and typography](07-caret-and-typography.md) | caret shape/blink, width, ligature policies per font role, user-owned hierarchy, large/small UI typography and theme contrast | `docs/development/manual-editor-capabilities-test-plan.md` |
-| 08 | [Syntax and text objects](08-syntax-and-textobjects.md) | grammar highlighting, textobject/smart-select, engine tiers, advisory degrade, Phase 28 folding ranges, link intent, and inlay overlays | `docs/development/manual-editor-capabilities-test-plan.md`, `docs/reference/primitives/ui-chrome-primitives.md` |
-| 09 | [Packages and modes](09-packages-and-modes.md) | package loading, mode classification/activation, settings UI, theme switching, clipped/scrollable package panels, state/disabled/provenance semantics, Phase 27 inspect/preset/one-line load, Phase 28 behavior/keymap/LSP contributions, package install/remove/list/update CLI + adopt boundary + binary provisioning (P43–P54) | `docs/development/launch-and-gui-smoke.md`, `docs/reference/packages/creating-packages.md`, `docs/development/distribution.md` |; plan 126 adds P55 (package `documents.open`/`reload` over the 256 KiB op budget returns the typed `documents.document_too_large` diagnostic without gating the client path) |
+| 08 | [Syntax and text objects](08-syntax-and-textobjects.md) | grammar highlighting, textobject/smart-select, engine tiers, advisory degrade, Phase 28 folding ranges, link intent, and inlay overlays; plan 128 adds S35 (typing and language-route behaviour on a large open document, including the fail-closed size-cap and stopped-analyzer states) | `docs/development/manual-editor-capabilities-test-plan.md`, `docs/reference/primitives/ui-chrome-primitives.md` |
+| 09 | [Packages and modes](09-packages-and-modes.md) | package loading, mode classification/activation, settings UI, theme switching, clipped/scrollable package panels, state/disabled/provenance semantics, Phase 27 inspect/preset/one-line load, Phase 28 behavior/keymap/LSP contributions, package install/remove/list/update CLI + adopt boundary + binary provisioning (P43–P54) | `docs/development/launch-and-gui-smoke.md`, `docs/reference/packages/creating-packages.md`, `docs/development/distribution.md` |; plan 126 adds P55 (package `documents.open`/`reload` over the 256 KiB op budget returns the typed `documents.document_too_large` diagnostic without gating the client path); plan 127 adds P56 (an adopted third-party package whose declared capability has no grant surface never executes: `clay package enable` fails closed with `MissingCapabilityGrant` and only a sanitized diagnostic surfaces) |
 | 10 | [Keybindings and commands](10-keybindings-and-commands.md) | bindKey override, unbind, deny-by-default, execution push channel, Global-scope tab command bindings (22.4), Control Center menu round trip + tab-switch dismissal (24.1), Control Center command execution mode (24.2), Path Browser keybinding surface (24.3), centered modal surface/accessibility/input containment (24.4), sequence chords (24.5), Phase 28 client-command aliases/package keymaps, and the plan 124 lane toggle + `/` palette session (K92–K99; the centered-era K54–K59/K70/K75 rows carry a supersession note); plan 125 adds the palette stage flows and the centered-sheet retirement (K100–K108: picker rows in the one sheet, `Esc`/`Alt+←` stage back, `Alt+↵` secondary activation, the shielded credential stage, draft hygiene across modes, the retired centered anchor, inert picker command ids) | `docs/development/manual-editor-capabilities-test-plan.md`, `docs/reference/primitives/shell-layout-strategy.md`, `docs/reference/clay-js-api/keybindings/bind-key.md` |
-| 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel, window-model budgets (22.6: pane paint / tab switch / decoration aggregate), centered Command Centre rendering feel (24.4: one panel + scrim, width clamping, no duplicate overlays, no blur jank), Command Centre open/filter feel + chord pending feel (24.5 advisory budgets), completion popup feel/caps (Plan 087), Plan 088 responsive/high-DPI/typography geometry, Phase 28 fold/link/inlay/ranking budgets, and the plan 124 palette anchoring note (Q11 chord = `Ctrl+X Ctrl+O`); plan 125 amends the centered-era feel rows to the shipped palette surface and adds the halo profile + stage-transition checks (Q39–Q40) | `docs/development/performance.md` |; plan 126 adds Q41 (completion on a ≥4 MiB document: presence/accept live, sub-millisecond server round trip, no O(document) allocation) |
+| 11 | [Performance](11-performance.md) | large files, scroll/type latency, parse feel, window-model budgets (22.6: pane paint / tab switch / decoration aggregate), centered Command Centre rendering feel (24.4: one panel + scrim, width clamping, no duplicate overlays, no blur jank), Command Centre open/filter feel + chord pending feel (24.5 advisory budgets), completion popup feel/caps (Plan 087), Plan 088 responsive/high-DPI/typography geometry, Phase 28 fold/link/inlay/ranking budgets, and the plan 124 palette anchoring note (Q11 chord = `Ctrl+X Ctrl+O`); plan 125 amends the centered-era feel rows to the shipped palette surface and adds the halo profile + stage-transition checks (Q39–Q40) | `docs/development/performance.md` |; plan 126 adds Q41 (completion on a ≥4 MiB document: presence/accept live, sub-millisecond server round trip, no O(document) allocation); plan 127 adds Q42 (perceived typing latency with packages active: measured edit-ack p50/p95 on a ≥1 MiB markdown document with a package parse handler registered); plan 128 adds Q43 (typing/language-route responsiveness on a ≥1 MiB document after the shared position index became incremental: adapter cost flat in size and measured, live typing leg blocked by host input consent) |
 | 12 | [Platform: Windows](12-platform-windows.md) | MSVC toolchain, named pipes, native dialogs | `docs/development/windows.md` |
 | 13 | [Window splits](13-window-splits.md) | split/close/add-equal/move/resize panes, pane focus policies, per-pane document views + concurrent modes (22.2), Phase 22.8 per-tab multi-document isolation, shell keybinding overrides (per active tab since 22.3), direction-named split aliases (22.7), per-tab persistence cross-check (22.5), pane a11y roles + split/pane announcements (22.6), and the plan 124 lane-chrome geometry + palette-veil steps (S47–S49); plan 125 amends S47 to the confined lane (defect D7, fixed 2026-09-18 by the plan-126 rail work: the workspace sidebar is the shell's own full-height left rail and the lane is the pane's strip), adds S50 for rail/lane independence (defect D9 fixed) and records the palette confinement numbers | `docs/reference/primitives/shell-layout-strategy.md`, `docs/development/accessibility.md` |
 | 14 | [Tabs (independent client views)](14-tabs.md) | tab bar, selected-root tab binding and per-tab workspace/document isolation (22.8), open/switch/close tabs, per-tab connections + split trees + documents, edit isolation, dirty-guarded close, keyboard tab management incl. numbered activate/move + confirm close (22.4), reconnect + restart reclaim, window-state persistence incl. restore/failure/hostile-file steps (22.5), tab a11y (TabList/Tab roles, activate/create/close announcements) + cross-tab grant isolation/denial checks (22.6/22.8), tab-bar overflow scroll (22.7), active-typography geometry and sanitized tab labels (Plan 088), single-tab match-today, and the plan 124 per-tab lane state steps (T79–T82); plan 125 adds the default-agent adoption and typable-lane steps (T83–T84) | `docs/reference/primitives/shell-layout-strategy.md`, `docs/wiki/modules/react-tabs-and-splits.md`, `docs/wiki/modules/tabs-and-clients.md`, `docs/development/accessibility.md` |
@@ -470,7 +520,7 @@ artifact directory).
 | Plan 102 UI design systems (selection, switching, fallback/revocation recovery) | 15, 02 (C16–C18 watcher reload), 09 (adoption/revocation), 11 (switch latency) |
 | Plan 098 chunked document loading | 01 (L23–L24), 03 (F48–F52), 11 (Q34–Q37) |
 | Plan 099 server-authoritative editor performance and manual matrix | 01 (L25–L26), 03 (F53–F54), 04 (E37–E38), 08 (S33–S34), 11 (M1–M7), 13 (D20–D21), 14 (T77–T78); deep reference: `docs/development/performance.md` |
-| Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16, 02 (C24 raw-op denial still applies) |
+| Agent host configuration surfaces (`clay:agent` facades, autonomy/compaction defaults, init.js agent section, MCP/Obscura fail-closed wiring) | 16 (incl. A25: resume binds the recorded workspace root and re-activates its capabilities/graft binding), 02 (C24 raw-op denial still applies) |
 | Plan 109 coding-agent defects/UX + Prism 0.5.0 (I2–I10, R1–R3) | 17 (C1–C20, C-N1–N4), 16 (host config), 10 (effort + file-browser bindings), 14 (per-tab workspace binding), 01 (launch gate) |
 | Plan 113 Prism 0.5.1 kernel request construction (host stopgap deleted, `RunOptions.thinkingLevel`) | 17 (C21–C23), 16 (0.5.1 pins via agent_protocol pin asserts) |
 | Plan 119 editor/agent remediation (large-document throughput, MCP connect floor, workspace-scoped sessions, Coding Agent decomposition/review) | 03 (F55), 11 (Q34–Q37), 17 (C41–C44, C-N14); existing two-tab shell coverage remains in 14 |
@@ -479,7 +529,9 @@ artifact directory).
 | Plan 121 follow-up auto-compaction + graft deep model | 17 (C50–C52) |
 | Plan 123 Prism 0.7 per-prompt work-scopes on OM coding runs (automated-only, no new chrome) | 16 (work-scope record; existing A-steps unchanged), 17 (Plan 123 note; existing agent steps unchanged) |
 | Plan 124 persistent agent lane + composer palette (shell chrome, `/` palette, retired centered command sheet) | 10 (K92–K99; K64/K70/K84 + `Ctrl+X Ctrl+O` chord references amended), 13 (S47–S49), 14 (T79–T82), 16 (A21–A22), 17 (C38 amended, C57–C64), 03 (path-browser note), 11 (Q-series note + Q11 chord), 15 (UI-DS-37 fixture note), 01 launch gate |
+| Plan 130 agent-host decomposition + resume binding (injected lane authority, `clay-agent/src/host/*`, resumed sessions re-activate capabilities/graft) | 16 (A25 new, A1–A24 regression), 17 (C43 extended, C41–C44) |
 | Plan 126 document access-path hardening (rope-window completion/language intelligence, documents-op budget, mode-cache LRU, single-lock release) | 03 (F56), 04 (E39), 09 (P55), 11 (Q41); automated companions: lib `connection`/`workspace`/`js_runtime` tests, `cargo test --test runtime large_document::`, `performance_budgets` pins |
+| Plan 127 JS runtime lane scheduling, bounded command queues, heap-limit restore, revocation gate | 04 (E40), 09 (P56), 11 (Q42); automated companions: `latency_lane_unblocked_by_busy_general_lane`, `lane_poison_replaces_only_that_lane`, `third_party_lane_denies_trusted_ops`, `lanes_share_their_domain_op_set`, `queue_bounded_under_flood`, `queue_evicts_oldest_at_capacity`, `near_heap_limit_recovers_with_original_cap`, `revoked_package_commands_refused_per_lane`, `reload_shares_third_party_lanes_untouched`; baselines in `code-reviews/2026-09-18-plan127-baseline/` |
 
 ## Plan 097 Phase 9 Linux execution record (2026-08-23)
 
@@ -754,3 +806,102 @@ added to modules 02, 03, 09, 14, 15, and 17. No manual test step was deleted
 or weakened. The task 15 performance observation (bounded server logs, no
 reload loops) and the one-run transient first-reload `theme.load_failed`
 flake are recorded in module 18's ceilings section.
+
+## Plan 129 connection-loop decomposition execution record (2026-09-20)
+
+Regression-only manual pass over the pure refactor that turned
+`handle_connection_loop` into a dispatcher (all 31 `ClientMessage` arms route to
+per-family handlers in `src/server/connection/{documents,menus,tabs,workspace,runtime}.rs`)
+and boxed the cold reload paths to clear the `large_futures` warnings. Modules
+[04](04-core-editing.md), [06](06-multi-cursor.md), [07](07-caret-and-typography.md),
+and [10](10-keybindings-and-commands.md) were re-run on a freshly rebuilt Linux
+build (`cargo build --bins` + `cargo build --bins -p clay-desktop`, both stamped
+14:34/14:35) through a new isolated harness
+(`test-plan/artifacts/129-connection-loop/`).
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 04 E2/E3/E5/E6/E7 (editing mechanics) | PASS live | Isolated 65 KiB `review.rs` + bundled `@clay/rust`: Backspace/Delete char-granular, Enter indents the new line, `}` electric-outdents to column 0, `(`/`)` pair insert + skip-over, Tab = 4 spaces — each verified by exact AT-SPI character counts. |
+| 04 E1 ASCII typing, E8 undo | PASS live; non-ASCII + redo UNRESOLVED | `AB`/`zzmark2` insert at the caret; `Ctrl+Z` restores text and caret twice. `é`/`🎉` never reached the app through the portal keyboard path, and `Ctrl+Shift+Z` was dropped — recorded UNRESOLVED, not inferred. |
+| 04 E4 comment continuation | **FAIL live (defect found)** | `Enter` on a `//` line continues indentation but never the `//` prefix, although `@clay/rust` declares `continuePrefix: "// "` and the docs promise it. `frontend/src/editor/extensions/behavior.ts::applyEnterRule` has no comment branch and `continuePrefix` has no consumer in `frontend/src`. Pre-existing and client-local, **not** caused by this refactor; recorded for a fix-or-re-document decision. |
+| 06 X1–X15 (multi-cursor) | UNRESOLVED live; PASS automated | Client-local CodeMirror operations; fresh `npx vitest run src/editor` 9 files / 75 tests passed on the refactored tree. |
+| 07 T9 ligatures + invalid-caret negative | PASS live | Rest-state capture shows joined Fira Code ligatures under the 16 px pin; `clientSetCursorStyle({shape:"triangle"})` produced `clay server configuration failed [editor.invalid_set_cursor_style]` with the app still up. Caret-shape paint and layout-reload steps UNRESOLVED (no caret without real input). T25's gutter expectation is stale: the full-bleed editor has no line-number gutter by design (`docs/wiki/modules/react-shell.md`). |
+| 10 K19/K29/K30, K22/K35 (Control Center round trip) | PASS live | AT-SPI `press` on the shell's `palette Ctrl X O` button opened the Control Center with 88 catalogue rows (built-ins + `shell.client*` + package commands with provenance); activating `Reload Configuration and Packages` executed `runtime.reloadConfiguration` (init.js re-ran, client stayed connected, no `Session lost`). |
+| 10 query/arrow/Escape/chord steps (K20/K21/K23/K24/K31/K33/K34/K38/K42/K60–K68) | UNRESOLVED live | Keyboard/arrow legs and the client shell bridge need key delivery; AT-SPI row `DoAction` is not an `Enter` substitute for client-first rows. Fresh automated companions: `cargo test --lib control_center` 28 passed. |
+| Fresh automated regression on the crafted tree | PASS | `cargo test --lib connection::` 96 passed; `cargo test --lib completion::` 31 passed; `cargo test --lib control_center` 28 passed; frontend `vitest run src/editor` 75 passed. |
+
+New host ceiling recorded by this execution: `xdg-desktop-portal-gnome`
+segfaults on RemoteDesktop keyboard sessions (`code=dumped, status=11/SEGV`,
+`g_hash_table_lookup` assertion), so keystrokes land only in short bursts after
+a fresh app launch and every longer interactive sequence is recorded UNRESOLVED
+with its reason instead of being inferred. No manual step was deleted or
+weakened. Artifacts, including the harness, per-run probe logs, screenshots, and
+the finding details: `test-plan/artifacts/129-connection-loop/`.
+
+
+## Plan 130 agent-host decomposition execution record (2026-09-20)
+
+Regression pass over the agent-host ownership change (the agent-host handle is
+injected into each runtime lane; no process-global authority, per-lane
+registration queue, `ClayAgentHost` split into `clay-agent/src/host/*.ts` with no
+function above the 80-line budget) plus the one behavior fix it carried: a
+resumed coding session re-activates its recorded workspace's capabilities and
+graft binding (module [16](16-agent-host.md) A25, module
+[17](17-coding-agent-parity.md) C43). Fresh Linux build: `target/debug/clay`
+19:36, `clay-desktop` 19:37, `clay-agent/dist` 19:37, `frontend/dist` unchanged
+(no frontend source newer than its 2026-09-18 build).
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 16 A1–A4 (config level) | PASS live | `node --check examples/config/init.js`; section 12 documents the six `clay:agent` exports with commented-only examples; inventory defaults (`compactAfterTokens:number=80000`, `default:boolean=false`); no credential option or secret-shaped string in `examples/`. Stale `examples/init.js` paths and the "five exports" count in the steps were corrected |
+| 16 A5–A7 (autonomy) | PASS automated + **expectation corrected (finding)** | Steps asserted the stale "approvals on by default (decision 2157)"; creation is actually opt-out (`fullAutonomy !== false`, user decision 2026-09-05, test `session.setAutonomy toggles full autonomy; default stays true`) while `docs/reference/clay-js-api/agent/set-full-autonomy.md` + the inventory still document `default:boolean=false`, and a resumed session starts non-autonomous because `ensureLive` writes its live record with `fullAutonomy: false`. Rows corrected; the doc-vs-code divergence is recorded for a fix-or-re-document decision |
+| 16 A8–A20 (compaction/OM, search, tree, fork/clone, MCP/Obscura, toolNames) | PASS automated + live where drivable | Real-daemon protocol probe (`live-daemon.log`, 24 legs): prompt to `agent_finished`, workspace-scoped `session.search` (hit / no-hit), `session.resumable` root scoping, `session.clone`, `session.fork`, `session.setAutonomy` both ways, `session.compact` + persisted entry, allow-listed MCP connect (`connected:true, tools:2`), Obscura hidden. `session.checkpoint` stays automated-only (needs a document backend) |
+| 16 A25 / 17 C43 (resume binding, **new step**) | PASS live + automated, falsified | Session recorded in workspace B (real graft repo), daemon restarted in an unrelated cwd resumes it: `session.resume` reports B, graft skill/tool re-bound, `environment.list` shows the graft extension + MCP re-connected. Removing the activation fails exactly those three legs (`live-daemon-falsify.log`); `clay-agent` case `resumed session binds its tools to the recorded workspace root, not the daemon cwd` |
+| 16/17 lane + palette steps (C57–C64, K92–K99, A21–A24) | PASS live via AT-SPI, no input synthesis | Isolated launch (`CLAY_AGENT_MOCK=1`, canonical example config): `Agent lane`, `Message` entry, `Coding Agent Agent type` picker at rest; palette opened from the status-bar button lists every daemon slash command (`/resume`, `/branch`, `/fork`, … `server-first — @clay/coding-agent@0.1.0`); `Session` scope narrows to those 14 rows; lane hide/restore verified by node counts (`test-plan/artifacts/130-agent-host/gui/`) |
+| Composer typing, send, approval drill, session create/resume from the lane | UNRESOLVED live | Standing host ceilings (no `/dev/uinput`, no `xdotool`/`ydotool`, portal keyboard crash loop recorded by plan 129) plus no provider credentials in an isolated profile — the lane sits in `no provider configured · Settings · Providers` (`[agent] ensure_tab_session(1): empty selection`). Every step keeps its automated leg; the resume semantics are covered live at protocol level |
+| Clay JS API surface (plan 130 verify-only step) | PASS — **no JS API change** | Diffed against pre-decomposition `HEAD`: identical daemon method set (50 dotted ids, 51 dispatch cases) and 11 `op_clay_agent_*` wrappers, `runtime/js/agent.js` + `.d.ts` diff 0 lines, all 11 `agent/*.md` pages and their 11 generated-registry entries deep-equal, `update-doc-registry` a byte-identical no-op. The 74 `clay_js_*` + 14 `documentation_coverage` guards pass (the latter forced one ledger row for the new A25 step), as does `rust_visibility_api_mapping`. Full record: `test-plan/artifacts/130-agent-host/js-api-verification.txt` |
+| Code wiki (plan 130) | PASS, pinned | `clay-agent.md` gained the host module map (12 modules behind the class facade + contract rules) and the server page the injected-ownership/queue/fail-closed text; `embedded-js-runtime.md` names the single per-lane wiring point; both index entries updated. New guard `documentation_coverage::plan130_wiki_pages_describe_host_modules_and_injected_ownership`; the 11 `agent/*.md` backing-path citations were audited (still true as delegates) and the one moved wiki citation (`labelFirstPromptStore` → `host/internals.ts`) corrected |
+| Autonomy default (decision 2026-09-20-2049) | PASS automated + **decided** | The plan-130 pass recorded a docs-vs-code divergence on `agent.setFullAutonomy` (`default:boolean=false` documented, opt-out in the daemon) and a resumed session coming back non-autonomous. User decision: "Default should be autonomy. User can configure to block autonomy" → docs/inventory/registry/example config/wiki moved to `default:boolean=true`, `ensureLive` restores the recorded autonomy, and `tests/clay_js_api_inventory.rs` pins both the documented default and the daemon expressions. `test-plan/16-agent-host.md` A5–A7 state the resolved policy |
+| Regression suites | PASS | `cargo test` 0 failures (lib 1421 pass / 1 ignored; presentation 62; protocol 226 incl. `agent_protocol::*`/`agent_session_isolation::*`; runtime 75; security 152); fresh `clay-agent npm test` 182 tests (181 pass / 1 skip / 0 fail); `frontend vitest run src/agent src/shell` 11 files / 125 tests |
+| Authority ownership (plan 130 A1) | PASS live + automated | Live server log: each registration resolves the **lane's injected host** (`[agent-reg] … host=live -> Ok({"queued": true})`, i.e. the A1 ownership path — not the `host=absent` per-lane-queue branch) and the daemon then reports `[daemon] … applied`; `server::tests::two_servers_in_one_process_own_independent_agent_hosts`, `agent_protocol::initialize_handshake_carries_the_built_mcp_allow_list` |
+
+Ceilings and follow-ups recorded by this run (no step deleted or weakened):
+
+- **Portal screenshots for the isolated client are not available on this host.**
+  The portal screenshot surface exposes only the currently visible
+  workspace/monitor while the isolated client opens on another workspace, so the
+  plan-126/129 `portal-shot.py` copy cropped an unrelated desktop window. That
+  image was deleted before it entered the repo — no screenshot from this run is
+  retained. `test-plan/artifacts/130-agent-host/portal-shot.py` is now hardened
+  (Clay's live AT-SPI frame is the crop source, a compositor rect is trusted
+  only when it lies inside that frame, and it exits 2 without writing a PNG when
+  the geometry disagrees or the crop escapes the screenshot); it refused every
+  capture attempt, which is why the live evidence is AT-SPI trees + action
+  results. **Follow-up:** the copies in `test-plan/artifacts/126-*/`, `127-*/`
+  and `129-*/` still trust the compositor listing alone and can retain another
+  window's pixels; copy this directory's version forward.
+- Load-sensitive flakes seen once each, neither plan-130 related and both green
+  standalone and in the serial rerun: `server::config_watch::tests::watcher_detects_new_and_deleted_watched_files`
+  (2 of 3 inotify events while three suites ran in parallel) and
+  `clay-agent`'s `resumable list is workspace-scoped, most-recent first, and bounded`
+  (timestamp tie; 0 failures over the following 13 runs).
+- **Autonomy default: documentation and code disagree.** `session.new` without
+  `fullAutonomy` creates an **autonomous** session (approvals opt-out;
+  `clay-agent/src/host/sessions.ts`, user decision 2026-09-05), and
+  `session.setAutonomy toggles full autonomy; default stays true` pins it, while
+  module 16 A5–A7, `docs/reference/clay-js-api/agent/set-full-autonomy.md` and
+  `api-inventory.toml` all still say `default:boolean=false` (decision 2157).
+  Separately, a **resumed** session comes up non-autonomous: `ensureLive`
+  creates the session from the recorded autonomy but writes the live record with
+  `fullAutonomy: false` (the oddity flagged by plan 130 task 3; now pinned by the
+  A2 resume test). Steps corrected, divergence recorded — needs a doc-or-code
+  decision, no behavior changed by this pass.
+- Path/step staleness fixed rather than carried: module 16 A1–A3 now name
+  `examples/config/init.js` (the example tree moved under `examples/config/`),
+  and A2 counts the six `clay:agent` exports (`agent.knowledgeSetOptions` was
+  missing from the list).
+
+Artifacts: `test-plan/artifacts/130-agent-host/` (`README.md`, `live-daemon.log`
++ `.json`, `live-daemon-falsify.log` + `.json`, `live-daemon.mjs`, `gui/`,
+`gui-live.sh`, `probe.py`, hardened `portal-shot.py`, `automated-legs.txt`,
+`config-legs.txt`).

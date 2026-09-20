@@ -44,9 +44,9 @@ pub(crate) struct PackageLoadEntryAllowlist {
 }
 
 impl PackageLoadEntryAllowlist {
-    /// Record an opaque validated `loadEntry` specifier with its absolute on-disk
-    /// path and validated package root. Called by the resolver op after
-    /// `PackageService::enable` succeeds.
+    /// Test-only convenience wrapper: record a validated `loadEntry` specifier
+    /// with its absolute path and package root, without package ownership.
+    #[cfg(test)]
     pub(crate) fn record(
         &self,
         opaque_specifier: &str,
@@ -90,6 +90,13 @@ impl PackageLoadEntryAllowlist {
 
     /// Withdraw all module entries owned by a package. Returns the number of
     /// removed entries for audit diagnostics.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "withdrawal capability for the disable/revoke path; no production caller yet (plan 131 task 4 finding)"
+        )
+    )]
     pub(crate) fn revoke_package(&self, package_name: &str) -> usize {
         let mut entries = self
             .entries

@@ -1502,9 +1502,9 @@ deno_op = "op_clay_completion_register_completion_provider"
 deno_op_path = "src/server/ops/completion.rs::op_clay_completion_register_completion_provider"
 documentation_path = "docs/reference/clay-js-api/completion/server-register-completion-provider.md"
 key_bindings = []
-custom_properties = ["packageManifest:object=optional", "packageName:string=required-without-packageManifest", "packagePrefix:string=required-without-packageManifest", "permissions:string[]=completion-provider", "completionProvider:object=required-without-packageManifest", "providerId:string=package-prefixed", "triggerCharacters:string[]=inert", "wordBoundaryChars:string[]=inert", "items:string-or-structured-item=bounded-static-text-or-snippet", "exclusive:boolean=false", "textFormat:plainText-or-snippet=plainText", "priority:number=0", "timeoutMs:number=500", "maxItems:number=64"]
+custom_properties = ["module:object=optional", "exportName:string=provideCompletion", "moduleSpecifier:string=optional"]
 permissions = ["completion-provider"]
-security_notes = "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs, trigger metadata, timeout/item budgets, and inert load-time metadata. The Phase 18.19 public API registers inert keyword/snippet items; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, executable-snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
+security_notes = "Requires completion-provider permission and a package record whose clay.contributions.completionProviders entries passed package-record validation (package-owned IDs, unique IDs and item labels, payload budget, inert trigger/boundary metadata, item and budget bounds). The call reads no provider metadata from its options: it registers the providers the manifest declares, optionally binding a package-owned module object or package-owned moduleSpecifier whose exportName export Clay invokes itself on the runtime worker under the per-provider timeout, so no callback, function value, or raw authority crosses the boundary; an inline module runs on the domain general lane and moduleSpecifier is materialized on the domain latency lane, and moduleSpecifier must resolve to a loaded package-owned module. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function, client JavaScript, native handles, raw ops, non-package module references, executable-snippets, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority."
 current_rust_owner = "src/server/ops/completion.rs; src/server/completion.rs::CompletionProviderMeta"
 registry_public = true
 
@@ -1589,7 +1589,7 @@ authority = "server-first-folding-range-publication"
 runtime_path = "server-first-op-wrapper"
 hot_path_policy = "Folding range publication is background/UI-reactive and viewport-aware; local expand/collapse state is client-local after validated ranges arrive."
 facade_path = "runtime/js/folding.js::serverPublishFoldingRanges"
-backing_rust = "src/server/folding.rs::FoldingRangeRegistry::publish_ranges"
+backing_rust = "src/server/folding.rs::validate_folding_publication"
 deno_op = "op_clay_folding_publish_ranges"
 deno_op_path = "src/server/ops/folding.rs::op_clay_folding_publish_ranges"
 documentation_path = "docs/reference/clay-js-api/folding/server-publish-folding-ranges.md"
@@ -1597,7 +1597,7 @@ key_bindings = []
 custom_properties = ["documentId:number=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=package-context"]
 permissions = ["render-folding"]
 security_notes = "Requires render-folding permission and server validation of document version, byte ranges, nesting, payload size, and package provenance; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
-current_rust_owner = "src/server/folding.rs::FoldingRangeRegistry; src/protocol/folding.rs::FoldingRangeSet"
+current_rust_owner = "src/server/folding.rs::validate_folding_publication; src/protocol/folding.rs::FoldingRangeSet"
 registry_public = true
 
 [[api]]
@@ -2900,9 +2900,9 @@ deno_op = "op_clay_language_register_intelligence_provider"
 deno_op_path = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider"
 documentation_path = "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md"
 key_bindings = []
-custom_properties = ["packageName:string=required", "packageVersion:string=required", "packagePrefix:string=required", "permissions:string[]=required", "id:string=required", "modes:string[]=optional", "features:string[]=required", "priority:number=0", "exportName:string=provideLanguageIntelligence", "timeoutMs:number=500", "module:object=optional"]
+custom_properties = ["packageName:string=required", "packageVersion:string=required", "packagePrefix:string=required", "permissions:string[]=required", "id:string=required", "modes:string[]=optional", "features:string[]=required", "priority:number=0", "exportName:string=provideLanguageIntelligence", "timeoutMs:number=500", "module:object=optional", "moduleSpecifier:string=optional"]
 permissions = ["parse-document"]
-security_notes = "Requires parse-document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields rejected; results are inert validated data; code-action edits are preview-only in Phase 18.20; provider provenance stamped by coordinator."
+security_notes = "Requires parse-document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields rejected and a moduleSpecifier must resolve to a loaded package-owned module (top-level or inside provider), which routes the handler to the domain latency lane; results are inert validated data; code-action edits are preview-only in Phase 18.20; provider provenance stamped by coordinator."
 current_rust_owner = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider; src/server/language_intelligence.rs"
 registry_public = true
 
@@ -3618,9 +3618,9 @@ deno_op = "op_clay_agent_set_autonomy"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_set_autonomy"
 documentation_path = "docs/reference/clay-js-api/agent/set-full-autonomy.md"
 key_bindings = []
-custom_properties = ["default:boolean=false"]
+custom_properties = ["default:boolean=true"]
 permissions = ["agent-host"]
-security_notes = "Autonomy defaults to false and only the host side can change it; no agent-facing tool can flip this flag. Enabling it skips approval prompts for gated tool calls in that session. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
+security_notes = "Autonomy is on by default (decision 2026-09-20-2049) and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls (out-of-workspace writes, delete/move, shell metacharacters) run without an approval prompt in that session, and a fresh session inherits the same default; callers who want prompts block autonomy explicitly with fullAutonomy:false at session.new or agent.setFullAutonomy({enabled:false}). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSetAutonomy"
 registry_public = true
 

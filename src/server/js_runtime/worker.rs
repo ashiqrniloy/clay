@@ -138,6 +138,42 @@ pub(crate) enum RuntimeCommand {
     UpdateActiveEditorMode(Option<String>),
 }
 
+impl RuntimeCommand {
+    /// Plan 127 task 6: the host-stamped package identity a command claims,
+    /// taken from the registration the host minted rather than from any
+    /// package-supplied string. `None` for host/configuration commands, which
+    /// carry no package provenance.
+    pub(super) fn package_identity(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Evaluate {
+                package_context: Some(context),
+                ..
+            } => Some((&context.package_name, &context.package_version)),
+            Self::Parse { registration, .. } => Some((
+                &registration.package.manifest.name,
+                &registration.package.manifest.version,
+            )),
+            Self::Completion { registration, .. } => Some((
+                &registration.package.manifest.name,
+                &registration.package.manifest.version,
+            )),
+            Self::DocumentAnalysis { registration, .. } => Some((
+                &registration.package.manifest.name,
+                &registration.package.manifest.version,
+            )),
+            Self::LanguageIntelligence { registration, .. } => Some((
+                &registration.package.manifest.name,
+                &registration.package.manifest.version,
+            )),
+            Self::Evaluate {
+                package_context: None,
+                ..
+            }
+            | Self::UpdateActiveEditorMode(_) => None,
+        }
+    }
+}
+
 /// Host-stamped identity of one removable unit of work (Plan 127 P2). Built
 /// only from host-owned fields: the protocol request envelope (client +
 /// document) and the runtime's own registration token — never a

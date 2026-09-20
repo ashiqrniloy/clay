@@ -663,7 +663,8 @@ fn inventory_paths_are_repository_relative() {
 
 #[test]
 fn agent_configuration_options_are_documented_custom_properties_with_decision_defaults() {
-    // Plan 107 task 12 + decisions 2157/2158: autonomy default, compaction
+    // Plan 107 task 12 + decisions 2157/2158/2026-09-20-2049: autonomy
+    // default (opt-out, on), compaction
     // strategy, and OM compactAfterTokens must be documented Clay JS API
     // custom properties (not hidden config keys), with the decision
     // defaults stated in the inventory itself.
@@ -685,8 +686,26 @@ fn agent_configuration_options_are_documented_custom_properties_with_decision_de
     assert!(
         autonomy
             .get("custom_properties")
-            .contains("default:boolean=false"),
-        "decision 2157: full autonomy defaults to false"
+            .contains("default:boolean=true"),
+        "decision 2026-09-20-2049: full autonomy defaults to on (opt-out)"
+    );
+    // The documented default is only worth pinning if the daemon agrees: a
+    // session is autonomous unless its creator passed `fullAutonomy: false`,
+    // and the resume path must restore the recorded value rather than a
+    // hardcoded one. Both sides of the doc-vs-code divergence are gated here
+    // so neither can drift alone.
+    let sessions_ts = fs::read_to_string(root().join("clay-agent/src/host/sessions.ts")).unwrap();
+    assert!(
+        sessions_ts.contains("params.fullAutonomy !== false"),
+        "the daemon default must stay opt-out (decision 2026-09-20-2049)"
+    );
+    assert!(
+        sessions_ts.contains("const fullAutonomy = metadata.fullAutonomy !== false;"),
+        "a resumed session must restore the autonomy recorded with it"
+    );
+    assert!(
+        !sessions_ts.contains("fullAutonomy: false,\n    observationalMemory"),
+        "ensureLive must not hardcode the live record's autonomy to false"
     );
 
     let compact = entries

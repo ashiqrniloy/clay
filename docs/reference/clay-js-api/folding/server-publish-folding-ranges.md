@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:folding"
 js_export: serverPublishFoldingRanges
 js_facade: runtime/js/folding.js::serverPublishFoldingRanges
-backing_rust: src/server/folding.rs::FoldingRangeRegistry::publish_ranges
+backing_rust: src/server/folding.rs::validate_folding_publication
 deno_op: op_clay_folding_publish_ranges
 deno_op_path: src/server/ops/folding.rs::op_clay_folding_publish_ranges
 name: serverPublishFoldingRanges

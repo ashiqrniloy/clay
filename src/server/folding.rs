@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::packages::permissions::PackagePermission;
 use crate::packages::record::PackageRecord;
 use crate::perf::budgets::FOLDING_RANGE_PAYLOAD_BUDGET_BYTES;
@@ -90,61 +88,6 @@ fn validate_folding_set(
         });
     }
     Ok(set)
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default)]
-pub(crate) struct FoldingRangeRegistry {
-    documents: BTreeMap<DocumentId, DocumentFolds>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default, Clone)]
-struct DocumentFolds {
-    version: DocumentVersion,
-    by_provenance: BTreeMap<String, Vec<FoldingRange>>,
-}
-
-#[allow(dead_code)]
-impl FoldingRangeRegistry {
-    pub(crate) fn publish_ranges(
-        &mut self,
-        set: FoldingRangeSet,
-    ) -> Result<FoldingRangeSet, FoldingValidationError> {
-        let set = validate_folding_set(set, None)?;
-        self.store(set)
-    }
-
-    pub(crate) fn store(
-        &mut self,
-        set: FoldingRangeSet,
-    ) -> Result<FoldingRangeSet, FoldingValidationError> {
-        let entry = self.documents.entry(set.document_id).or_default();
-        if set.document_version < entry.version {
-            return Err(FoldingValidationError::StaleDocumentVersion);
-        }
-        if set.document_version > entry.version {
-            entry.by_provenance.clear();
-            entry.version = set.document_version;
-        }
-        entry
-            .by_provenance
-            .insert(set.package_prefix.clone(), set.ranges.clone());
-        Ok(self.merged(set.document_id).expect("just stored"))
-    }
-
-    pub(crate) fn merged(&self, document_id: DocumentId) -> Option<FoldingRangeSet> {
-        let entry = self.documents.get(&document_id)?;
-        let mut ranges: Vec<FoldingRange> =
-            entry.by_provenance.values().flatten().cloned().collect();
-        ranges.sort_by_key(|range| (range.byte_start, std::cmp::Reverse(range.byte_end)));
-        Some(FoldingRangeSet {
-            document_id,
-            document_version: entry.version,
-            package_prefix: "merged".to_string(),
-            ranges,
-        })
-    }
 }
 
 pub(crate) fn folds_from_syntax_tree(
