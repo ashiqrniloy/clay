@@ -139,27 +139,24 @@ pub(crate) struct ClayJsRuntimeService {
     workers_started: Arc<AtomicU64>,
     trusted: DomainRuntime,
     third_party: DomainRuntime,
-    /// Follow-up round (`editor-control`): bounded publisher for gated
+    /// Follow-up round (`editor-control`): bounded advisory lane for gated
     /// programmatic editor-command execution requests. Shared by both domain
-    /// workers (each op state holds a sender clone) and subscribed by every
-    /// connection loop. Survives `production_reload`.
-    editor_commands: tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>,
-    /// Plan 071 caret-transport fix: runtime caret override channel plus the
+    /// workers and subscribed by every connection loop. Survives
+    /// `production_reload`.
+    editor_commands: crate::server::fanout::Fanout<crate::protocol::EditorCommandRequest>,
+    /// Plan 071 caret-transport fix: runtime caret override lane plus the
     /// current-value store shared by both domain workers. Survives
     /// `production_reload` so one subscription covers reloads; the store
     /// feeds connection initial sync and lag replay.
-    caret_styles: tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>,
-    caret_style_state: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>,
-    /// Phase 26: user-owned editor wrap-policy override channel plus the
+    caret_styles: crate::server::fanout::StateFanout<Option<crate::protocol::CaretStyle>>,
+    /// Phase 26: user-owned editor wrap-policy override lane plus the
     /// current-value store. Survives `production_reload`; the store feeds
     /// connection initial sync and lag replay. Trusted-domain only.
-    editor_layouts: tokio::sync::broadcast::Sender<Option<crate::protocol::WrapPolicy>>,
-    editor_layout_state: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::WrapPolicy>>>,
-    /// Phase 22.1: shell-preferences channel plus the current-value store.
+    editor_layouts: crate::server::fanout::StateFanout<Option<crate::protocol::WrapPolicy>>,
+    /// Phase 22.1: shell-preferences lane plus the current-value store.
     /// Same lifetime semantics as `caret_styles`: survives reloads, feeds
     /// connection initial sync and lag replay.
-    shell_preferences: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
-    shell_preferences_state: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
+    shell_preferences: crate::server::fanout::StateFanout<crate::protocol::ShellPreferences>,
     /// Plan 130 A1: server-owned agent host handle, installed into every lane
     /// op state (hostless services — unit harnesses, embedded runtimes — leave
     /// it `None` and fail closed). Carried across `production_reload` and
@@ -291,11 +288,8 @@ impl ClayJsRuntimeService {
             third_party: current.third_party.clone(),
             editor_commands: current.editor_commands.clone(),
             caret_styles: current.caret_styles.clone(),
-            caret_style_state: std::sync::Arc::clone(&current.caret_style_state),
             editor_layouts: current.editor_layouts.clone(),
-            editor_layout_state: std::sync::Arc::clone(&current.editor_layout_state),
             shell_preferences: current.shell_preferences.clone(),
-            shell_preferences_state: std::sync::Arc::clone(&current.shell_preferences_state),
             agent_host: std::sync::Arc::clone(&current.agent_host),
         };
         // Same wiring as a fresh service: the rebuilt trusted lanes attach to
@@ -344,23 +338,23 @@ impl ClayJsRuntimeService {
             &load_entry_allowlist,
             &workers_started,
         );
-        let (editor_commands, _) = tokio::sync::broadcast::channel(16);
+        // Plan 132: the four host lanes are `Fanout`/`StateFanout` pairs, so
+        // construction, reload, and op-state wiring carry one handle each
+        // instead of a sender plus a store mutex.
+        let editor_commands = crate::server::fanout::Fanout::new(16);
         // Plan 071 caret-transport fix: runtime caret override lane.
-        let (caret_styles, _) = tokio::sync::broadcast::channel(4);
-        let caret_style_state =
-            std::sync::Arc::new(std::sync::Mutex::new(None::<crate::protocol::CaretStyle>));
+        let caret_styles = crate::server::fanout::StateFanout::new(4, None);
         // Phase 26: user-owned editor wrap-policy override lane. Trusted
         // domain only (the op is not registered in the package extension),
         // but the channel is shared so a reload keeps one subscription.
-        let (editor_layouts, _) = tokio::sync::broadcast::channel(4);
-        let editor_layout_state =
-            std::sync::Arc::new(std::sync::Mutex::new(None::<crate::protocol::WrapPolicy>));
+        let editor_layouts = crate::server::fanout::StateFanout::new(4, None);
         // Phase 22.1: shell-preferences lane.
-        let (shell_preferences, _) = tokio::sync::broadcast::channel(4);
-        let shell_preferences_state =
-            std::sync::Arc::new(std::sync::Mutex::new(crate::protocol::ShellPreferences {
+        let shell_preferences = crate::server::fanout::StateFanout::new(
+            4,
+            crate::protocol::ShellPreferences {
                 pane_focus_policy: "click".to_string(),
-            }));
+            },
+        );
         let service = Self {
             evaluations: Arc::new(AtomicU64::new(0)),
             mode_activation_cache: Arc::new(std::sync::Mutex::new(ModeActivationCache::default())),
@@ -378,11 +372,8 @@ impl ClayJsRuntimeService {
             third_party,
             editor_commands,
             caret_styles,
-            caret_style_state,
             editor_layouts,
-            editor_layout_state,
             shell_preferences,
-            shell_preferences_state,
             agent_host: std::sync::Arc::new(std::sync::Mutex::new(None)),
         };
         // Wire shared host channels into every lane plus the cross-domain
@@ -431,7 +422,6 @@ impl ClayJsRuntimeService {
     ) -> tokio::sync::broadcast::Receiver<crate::protocol::EditorCommandRequest> {
         self.editor_commands.subscribe()
     }
-
     /// Plan 071 caret-transport fix: subscribe to runtime caret override
     /// updates (`None` clears). Shared across generations.
     pub(crate) fn subscribe_caret_styles(
@@ -443,10 +433,7 @@ impl ClayJsRuntimeService {
     /// Current runtime caret override for connection initial sync and lag
     /// replay.
     pub(crate) fn caret_style_override(&self) -> Option<crate::protocol::CaretStyle> {
-        *self
-            .caret_style_state
-            .lock()
-            .expect("caret style state mutex poisoned")
+        self.caret_styles.current()
     }
 
     /// Phase 26: subscribe to user-owned editor wrap-policy override updates
@@ -460,10 +447,7 @@ impl ClayJsRuntimeService {
     /// Current editor wrap-policy override for connection initial sync and
     /// lag replay.
     pub(crate) fn editor_layout_override(&self) -> Option<crate::protocol::WrapPolicy> {
-        *self
-            .editor_layout_state
-            .lock()
-            .expect("editor layout state mutex poisoned")
+        self.editor_layouts.current()
     }
 
     /// Phase 22.1: subscribe to shell-preferences updates.
@@ -475,10 +459,7 @@ impl ClayJsRuntimeService {
 
     /// Current shell preferences for connection initial sync and lag replay.
     pub(crate) fn shell_preferences(&self) -> crate::protocol::ShellPreferences {
-        self.shell_preferences_state
-            .lock()
-            .expect("shell preferences state mutex poisoned")
-            .clone()
+        self.shell_preferences.current()
     }
     fn domain(&self, domain: crate::packages::bundled::RuntimeDomain) -> &DomainRuntime {
         match domain {
@@ -557,18 +538,15 @@ impl ClayJsRuntimeService {
         worker
             .op_state
             .set_editor_command_publisher(self.editor_commands.clone());
-        worker.op_state.set_caret_style_publisher(
-            self.caret_styles.clone(),
-            std::sync::Arc::clone(&self.caret_style_state),
-        );
-        worker.op_state.set_editor_layout_publisher(
-            self.editor_layouts.clone(),
-            std::sync::Arc::clone(&self.editor_layout_state),
-        );
-        worker.op_state.set_shell_preferences_publisher(
-            self.shell_preferences.clone(),
-            std::sync::Arc::clone(&self.shell_preferences_state),
-        );
+        worker
+            .op_state
+            .set_caret_style_publisher(self.caret_styles.clone());
+        worker
+            .op_state
+            .set_editor_layout_publisher(self.editor_layouts.clone());
+        worker
+            .op_state
+            .set_shell_preferences_publisher(self.shell_preferences.clone());
     }
 
     /// Wire every domain lane to the shared host channels and the

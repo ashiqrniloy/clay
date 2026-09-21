@@ -621,6 +621,11 @@ Real Linux/Wayland execution used isolated `clay server <temp-socket>` and `clay
 - Steps are numbered `<module><step>` (e.g. `E3`) so failures can cite them.
 - "Expected" columns describe the product contract; visual judgments
   (smoothness, glyph shape, blink rhythm) are part of the check.
+- Caret and blink evidence must be a **burst capture** (at least four frames
+  spanning one blink cycle), never a single frame: a single frame lands on
+  either blink phase and reads as a false "override not applied". A live lane
+  value and an initial-sync value must be checked separately — the initial-sync
+  path can drop an override the live path paints.
 - Restart = `cargo run` again; live reload = settings appearance switch
   (module 02) unless stated otherwise.
 
@@ -905,3 +910,52 @@ Artifacts: `test-plan/artifacts/130-agent-host/` (`README.md`, `live-daemon.log`
 + `.json`, `live-daemon-falsify.log` + `.json`, `live-daemon.mjs`, `gui/`,
 `gui-live.sh`, `probe.py`, hardened `portal-shot.py`, `automated-legs.txt`,
 `config-legs.txt`).
+
+## Plan 132 fanout/DTO-dedup execution record (2026-09-21, task 5)
+
+Regression-only manual pass over plan 132: the five state lanes now share
+`StateFanout<T>`/`Fanout<T>` (`src/server/fanout.rs`), the typography and
+runtime-generation lanes publish through `Fanout`, and the Tauri bridge DTO
+transcription was deduplicated behind ts-rs projections plus `From`/`TryFrom`
+destructures. No user-visible change was intended, so modules
+[04](04-core-editing.md) (core editing), [07](07-caret-and-typography.md)
+(caret/typography/wrap), [10](10-keybindings-and-commands.md) (editor
+commands), [13](13-window-splits.md) (pane focus) and
+[15](15-ui-design-systems.md) (design system/theme) were re-run on a freshly
+rebuilt Linux build (`target/debug/clay` + `clay-desktop`, both 16:46/17:05
+stamps) through a new isolated harness
+(`test-plan/artifacts/132-fanout-dedup/live/`, modelled on the plan 129/130
+harnesses). No step was added, deleted or weakened: every divergence found is a
+pre-existing client gap, not a lane regression.
+
+| Modules/steps | Result | Evidence |
+|---|---|---|
+| 04 E1/E8 + 07 T9/T20 (typing, undo, ligatures, typography pin) | PASS live | Real `wtype` keystrokes into the webview: `AB` typed → editor chars 107→109, caret 0→2; `Ctrl+Z` → 107/0. The ligature sample renders joined glyphs (`⇒ ≠ = →`) under the 16 px pin. `live/caret/01..03*.png` |
+| 07 T1/T5/T23/T24 (caret override + column wrap, live lane delivery) | PASS live, burst-verified | The caret override set from init.js does not paint on a fresh connect (client drops pre-view messages, finding 1) but **does** paint after `Ctrl+Shift+R` re-runs init.js on the live channel: burst captures show the 8 px override frame, byte-identical to the stashed pre-change build's frame (`sha256 67e737f3…`). `columnCap: 40` wraps into a centered 40 ch column after the reload. `live/caret/08..10*.png`, `live/wrap/01`, `live/wrap/03-column40-after-reload.png` |
+| 07 T22 + wrap `none`/`viewport` overrides | **FAIL live (pre-existing client defect)** | `wrapPolicy: "none"` never applies: `controller.ts:661-672` tests `"none" in wrap` on the string serde emits for a unit variant, so the handler throws and the override is dropped. `{"column": N}` (an object) works. Module 07 T22's "no wrap" default also needs the mode manifest (`@clay/rust`) loaded. `live/wrap/02-none.png`, `live/wrap/03-none-after-reload.png` |
+| 07 T2/T3/T5 wording (`blink`, `hollow`) | **stale expectation (pre-existing)** | `hollow` appears only in the generated DTO and nothing reads `blink`, so the client caret always blinks (verified by alternating frames) and never renders a hollow block. `live/caret/caret-blink-*.png`, `caret-solid-*.png` |
+| 07 T8 negative (invalid caret shape) | PASS live | `clientSetCursorStyle({shape:"triangle"})` → `clay server configuration failed [editor.invalid_set_cursor_style]`, editor unaffected and still connected. `live/caret-invalid/server.log` |
+| 10/04 editor-command lane (advisory, no replay) | PASS live | init.js's `clientExecuteEditorCommand` is published before the client subscribes → dropped (caret stays 0, the Advice policy the plan preserved); after `Ctrl+Shift+R` re-runs init.js with the client connected the command arrives and executes (caret 0→2, `agentProfile.register` 1→2). `live/editing/editor-command-server.log` |
+| 13 S14/S17 (pane focus policy) | UNRESOLVED live / PASS automated | The Rust client forwards `ClientConnectionEvent::ShellPreferences`, but no frontend module consumes `paneFocusPolicy`, so moving the pointer across the divider cannot switch panes. Server side pinned by `set_pane_focus_policy_publishes_shell_preferences` + `shell_preferences_default_to_click_when_unset`. `live/panes/status-*.png` |
+| 15 theme + design-system activation | PASS live (partial) | The shipped fixture activates `@clay/design-instrument` + `@clay/theme-gruvbox-material-dark` + dark appearance with no diagnostics and the shell renders styled (workspace chip in the theme's green, not the default blue) — i.e. the design-system snapshot projections still drive `--clay-ds-*`. The fixture's SDUI panel does not surface on the empty tab under this harness, and `scripts/capture-ui-review.sh`'s portal screenshot step is blocked by an interactive "Allow Apps to Take Screenshots?" prompt on this host (observed and dismissed); captures here use grim. `design-system/design-system-dark.png`, `design-system/dark/*` |
+| Fresh automated companions | PASS | `cargo test --lib`: `server::fanout` 4, `caret` 6, `typography` 17, `editor_layout` 3, `shell_preferences` 2, `connection::` 96; `cargo test -p clay-desktop --test dto_roundtrips` 16; frontend `vitest run src/theme src/editor src/shell` 173. `live/automated-companions.txt` |
+
+Findings recorded by this pass (no behavior changed; each needs a
+fix-or-re-document decision):
+
+- **Initial-sync caret override is dropped client-side** (`controller.ts:628`
+  returns while `this.view` is null). Reproduced on the stashed pre-change
+  build, so it predates plan 132.
+- **Unit wrap policies throw** in `controller.ts:661-672` (`in` on a string) —
+  `wrapPolicy: "none"`/`"viewport"` from init.js cannot apply.
+- **`hollow` and `blink` caret fields are delivered but unread**, so module
+  07's T2/T3/T5 expectations are stale.
+- **`paneFocusPolicy` has no frontend consumer**, so module 13's S14/S17 stay
+  unobservable live.
+- **Method note:** caret shape evidence must be a burst capture; a single
+  frame lands on either blink phase and reads as a false "override not
+  applied".
+
+Artifacts: `test-plan/artifacts/132-fanout-dedup/` (`README.md` with the
+harness, per-leg evidence and the finding details; `live/` run harness,
+fixtures and captures; `design-system/`).

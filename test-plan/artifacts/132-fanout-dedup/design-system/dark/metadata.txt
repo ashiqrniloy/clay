@@ -1,0 +1,10 @@
+fixture=ui-review-design-system
+config_source=tests/fixtures/configuration/ui-review-design-system/init.js
+window_requested_size=default
+theme=fixture-default
+appearance=fixture-default
+drive_steps=none
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi

@@ -1,0 +1,197 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1256 security advisories (from /home/arn/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (605 crate dependencies)
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+
+warning: 9 allowed warnings found
+== [fmt] cargo fmt --check
+== [check] cargo check --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+== [clippy] cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+== [test] cargo test --all-targets --quiet
+
+running 1416 tests
+....................................................................................... 87/1416
+....................................................................................... 174/1416
+....................................................................................... 261/1416
+....................................................................................... 348/1416
+....................................................................................... 435/1416
+....................................................................................... 522/1416
+...................................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1789994057275155840/.git/
+...[main (root-commit) f5ffaa4] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+. 609/1416
+Initialized empty Git repository in /tmp/clay-git-discovery-parent-1789994057299866534/.git/
+.Initialized empty Git repository in /tmp/clay-git-discovery-detached-1789994057321599455/.git/
+...[main (root-commit) f5ffaa4] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at f5ffaa4 initial
+.Initialized empty Git repository in /tmp/clay-git-discovery-repo-1789994057366049704/.git/
+....[main (root-commit) f5ffaa4] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1789994057383943084/.git/
+............................................................................Initialized empty Git repository in /tmp/clay-git-facade-1789994058068377832/repo/.git/
+.[main (root-commit) 6bcc8ff] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+. 696/1416
+..................................Initialized empty Git repository in /tmp/clay-git-package-load-1789994058790286651/repo/.git/
+[main (root-commit) 6bcc8ff] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+..................................................... 783/1416
+..........................i............................................................ 870/1416
+....................................................................................... 957/1416
+....................................................................................... 1044/1416
+....................................................................................... 1131/1416
+....................................................................................... 1218/1416
+....................................................................................... 1305/1416
+....................................................................................... 1392/1416
+........................
+test result: ok. 1415 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 15.32s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+....................................................test manual_smoke_docs::plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states has been running for over 60 seconds
+.
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 304.08s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.42s
+
+
+running 152 tests
+....................................................................................... 87/152
+........................................................... 146/152
+agent_session_isolation::two_workspaces_keep_their_agent_writes_in_their_own_root --- FAILED
+.....
+failures:
+
+---- agent_session_isolation::two_workspaces_keep_their_agent_writes_in_their_own_root stdout ----
+server log:
+clay server listening on /tmp/clay-arn/clay-smoke-sc6-1022849-0.sock
+[agent] sdui agent.submit from client 2 tab 1 -> snapshot
+[agent] sdui agent.submit from client 3 tab 2 -> snapshot
+[agent] sdui agent.submit from client 3 tab 2 -> snapshot
+
+thread 'agent_session_isolation::two_workspaces_keep_their_agent_writes_in_their_own_root' (1022855) panicked at tests/suites/../agent_session_isolation.rs:595:5:
+the probe against the closed session was rejected: write mock-session-1 ok 
+write mock-session-1 err path outside workspace roots
+write mock-session-2 err path outside workspace roots
+write mock-session-2 ok 
+write mock-session-2 err path outside workspace roots
+write mock-session-2 ok 
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    agent_session_isolation::two_workspaces_keep_their_agent_writes_in_their_own_root
+
+test result: FAILED. 151 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.32s
+
+error: test failed, to rerun pass `--test security`
+FAILED at stage: test
+EXIT=101 ELAPSED=379s

@@ -1,0 +1,131 @@
+== cargo test --all-targets --quiet
+
+running 1411 tests
+....................................................................................... 87/1411
+....................................................................................... 174/1411
+....................................................................................... 261/1411
+....................................................................................... 348/1411
+....................................................................................... 435/1411
+....................................................................................... 522/1411
+...............................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1789944442233332338/.git/
+[main (root-commit) 7d7d602] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+....Initialized empty Git repository in /tmp/clay-git-discovery-parent-1789944442277464186/.git/
+.Initialized empty Git repository in /tmp/clay-git-discovery-detached-1789944442290176901/.git/
+[main (root-commit) 7d7d602] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at 7d7d602 initial
+... 609/1411
+..Initialized empty Git repository in /tmp/clay-git-discovery-repo-1789944442326665592/.git/
+..[main (root-commit) 7d7d602] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1789944442344189717/.git/
+............................................................................Initialized empty Git repository in /tmp/clay-git-facade-1789944442771494920/repo/.git/
+[main (root-commit) 7d7d602] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+...... 696/1411
+..............................Initialized empty Git repository in /tmp/clay-git-package-load-1789944443433896471/repo/.git/
+[main (root-commit) 5041a7d] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+......................................................... 783/1411
+......................i................................................................ 870/1411
+....................................................................................... 957/1411
+....................................................................................... 1044/1411
+....................................................................................... 1131/1411
+....................................................................................... 1218/1411
+....................................................................................... 1305/1411
+....................................................................................... 1392/1411
+...................
+test result: ok. 1410 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.04s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+.....................................................
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.03s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.63s
+
+
+running 152 tests
+....................................................................................... 87/152
+.................................................................
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+
+Gnuplot not found, using plotters backend
+Testing protocol_codec_payloads/hello_roundtrip
+Success
+Testing protocol_codec_payloads/client_edit/16
+Success
+Testing protocol_codec_payloads/client_edit/1024
+Success
+Testing protocol_codec_payloads/client_edit/16384
+Success
+Testing protocol_codec_payloads/initial_document_64k
+Success
+
+Testing client_edit_queue_pressure/1
+Success
+Testing client_edit_queue_pressure/64
+Success
+Testing client_edit_queue_pressure/256
+Success
+
+Testing server_document_acknowledgements/1
+Success
+Testing server_document_acknowledgements/16
+Success
+Testing server_document_acknowledgements/128
+Success
+
+Testing server_stale_edit_rejections/1
+Success
+Testing server_stale_edit_rejections/16
+Success
+Testing server_stale_edit_rejections/128
+Success
+
+TEST_EXIT=0
+== cargo bench --no-run
+BENCH_EXIT=0
+== scripts/check-bindings.sh
+error: proc macro panicked
+  --> src-tauri/src/lib.rs:71:16
+   |
+71 |         .build(tauri::generate_context!())
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: message: The `frontendDist` configuration is set to `"../frontend/dist"` but this path doesn't exist
+
+error: could not compile `clay-desktop` (lib test) due to 1 previous error
+BINDINGS_EXIT=101
+ELAPSED=368s

@@ -18,6 +18,7 @@ pub mod diagnostics;
 pub(crate) mod document;
 pub(crate) mod document_analysis;
 mod facades;
+pub(crate) mod fanout;
 pub(crate) mod folding; // FOLDING_RANGE_PAYLOAD_BUDGET_BYTES
 pub(crate) mod git;
 mod js_runtime;
@@ -160,27 +161,33 @@ impl RuntimeGeneration {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeGenerationStore {
+    /// The live generation (service, evaluation, diagnostics). Not a lane: the
+    /// runtime-state fanout signals generation changes, this holds the state.
     current: Arc<Mutex<RuntimeGeneration>>,
     typography: ActiveTypographyState,
     runtime_state: ActiveRuntimeStateFanout,
     behavior_grace: BehaviorGraceState,
 }
 
-/// Latest committed runtime snapshot and bounded live-update channel.
+/// Latest committed runtime snapshot and bounded live-update lane.
+///
+/// Deliberately not a `StateFanout`: the lane carries only the generation id
+/// while the store holds the snapshot, which is narrowed per client on read
+/// (`for_client`), so publish value and channel value differ by design. The
+/// acknowledgement map is per-client state, not a current value either.
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRuntimeStateFanout {
     latest: Arc<Mutex<Option<RuntimeStateSnapshot>>>,
-    updates: broadcast::Sender<RuntimeGenerationId>,
+    updates: fanout::Fanout<RuntimeGenerationId>,
     acknowledgements:
         Arc<Mutex<std::collections::HashMap<crate::protocol::ClientId, RuntimeGenerationId>>>,
 }
 
 impl Default for ActiveRuntimeStateFanout {
     fn default() -> Self {
-        let (updates, _) = broadcast::channel(RUNTIME_STATE_BROADCAST_CAPACITY);
         Self {
             latest: Arc::new(Mutex::new(None)),
-            updates,
+            updates: fanout::Fanout::new(RUNTIME_STATE_BROADCAST_CAPACITY),
             acknowledgements: Arc::new(Mutex::new(std::collections::HashMap::new())),
         }
     }
@@ -205,7 +212,7 @@ impl ActiveRuntimeStateFanout {
     pub(crate) async fn publish(&self, snapshot: RuntimeStateSnapshot) {
         let generation = snapshot.runtime_generation_id;
         *self.latest.lock().await = Some(snapshot);
-        let _ = self.updates.send(generation);
+        self.updates.publish(generation);
     }
 
     /// Record a client install acknowledgement. Spoofed client IDs, future
@@ -247,19 +254,25 @@ impl ActiveRuntimeStateFanout {
     }
 }
 
-/// Server-owned active typography and bounded live-update channel.
+/// Server-owned active typography and bounded live-update lane.
+///
+/// The lane is a `Fanout`, but the store is deliberately not a `StateFanout`:
+/// `IpcServer::commit_runtime_generation` holds this guard across its six-state
+/// conflict check and broadcasts only after the other guards drop, so the
+/// store's write and its send are two separate steps that a lane's
+/// publish-and-record API cannot express. `replace` is the one caller that
+/// pairs them, and it sends after dropping the guard for the same reason.
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveTypographyState {
     current: Arc<Mutex<crate::protocol::ActiveTypography>>,
-    updates: broadcast::Sender<crate::protocol::ActiveTypography>,
+    updates: fanout::Fanout<crate::protocol::ActiveTypography>,
 }
 
 impl Default for ActiveTypographyState {
     fn default() -> Self {
-        let (updates, _) = broadcast::channel(16);
         Self {
             current: Arc::new(Mutex::new(crate::protocol::ActiveTypography::default())),
-            updates,
+            updates: fanout::Fanout::new(16),
         }
     }
 }
@@ -274,7 +287,9 @@ impl ActiveTypographyState {
     }
 
     /// Replace all profiles only after complete validation. Equal profiles keep
-    /// their revision and emit no duplicate client event.
+    /// their revision and emit no duplicate client event. Validation, compare,
+    /// revision bump, and store write all happen under the store lock, so two
+    /// concurrent replacements cannot claim the same revision.
     #[cfg(test)]
     pub(crate) async fn replace(
         &self,
@@ -295,7 +310,7 @@ impl ActiveTypographyState {
         typography.revision = current.revision.saturating_add(1);
         *current = typography.clone();
         drop(current);
-        let _ = self.updates.send(typography.clone());
+        self.updates.publish(typography.clone());
         Ok(Some(typography))
     }
 }
@@ -1683,11 +1698,10 @@ impl IpcServer {
         drop(sdui);
         drop(behavior);
         if typography_changed {
-            let _ = self
-                .runtime_generation
+            self.runtime_generation
                 .typography
                 .updates
-                .send(candidate.active_typography);
+                .publish(candidate.active_typography);
         }
         self.runtime_generation
             .publish_runtime_snapshot(candidate.runtime_snapshot)

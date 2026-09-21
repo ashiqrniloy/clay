@@ -1,0 +1,34 @@
+### diff mentions of the lane JS APIs (must be none):
+1160:-    /// appearance override set by `clientSetCursorStyle`. Wired by the JS
+1164:+    /// set by `clientSetCursorStyle` (broadcast + last-known value for
+1192:-    /// `setPaneFocusPolicy`. Wired by the JS runtime service for both domains;
+1196:+    /// `setPaneFocusPolicy` (broadcast + last-known value). Wired by the JS
+
+### public Rust surface added by the diff (must be none / pub(crate) only):
+(none)
+
+### new file visibility:
+16:pub(crate) struct Fanout<T> {
+22:    pub(crate) fn new(capacity: usize) -> Self {
+29:    pub(crate) fn publish(&self, value: T) {
+33:    pub(crate) fn subscribe(&self) -> broadcast::Receiver<T> {
+68:pub(crate) struct StateFanout<T> {
+75:    pub(crate) fn new(capacity: usize, initial: T) -> Self {
+83:    pub(crate) fn publish(&self, value: T) {
+89:    pub(crate) fn current(&self) -> T {
+93:    pub(crate) fn subscribe(&self) -> broadcast::Receiver<T> {
+
+=== guard suites ===
+....................................................................................... 174/227
+.....................................................
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.80s
+
+
+=== JS API surface untouched ===
+git status --porcelain -- runtime/ docs/reference/clay-js-api/ docs/generated/ api-inventory:
+(empty)
+
+=== update-doc-registry is a no-op on the checked-in registry ===
+updated /home/arn/Projects/clay/docs/generated/clay-js-api-registry.json
+git status --porcelain -- docs/ after running the updater:
+(empty = checked-in artifacts already current)

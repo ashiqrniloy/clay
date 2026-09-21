@@ -55,7 +55,7 @@ export type {
   DecorationSet,
   DecorationSpan,
   DecorationTarget,
-  DesignSystemProvenanceDto,
+  DesignSystemProvenance,
   DesignSystemSnapshotDto,
   DesignSystemVariableValueDto,
   DiagnosticSet,

@@ -1323,6 +1323,8 @@ impl ResolvedUiDesignSystem {
     Deserialize,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DesignSystemProvenance {
     pub package_name: String,
     pub package_version: String,

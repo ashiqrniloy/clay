@@ -260,6 +260,10 @@ where
 /// workspace/tab/menu lock held; a failed listing keeps the session open in
 /// its sticky error state (recoverable input) rather than failing the
 /// intent. Returns `None` only when the session vanished while listing.
+#[allow(
+    clippy::result_large_err,
+    reason = "callers send the protocol rejection message directly; boxing the cold validation error would complicate that path"
+)]
 pub(super) async fn validate_edit_behavior_version(
     behavior: &Arc<Mutex<ActiveBehaviorManifest>>,
     runtime_generation: &RuntimeGenerationStore,

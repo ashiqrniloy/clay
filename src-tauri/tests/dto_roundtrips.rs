@@ -197,6 +197,7 @@ fn client_samples() -> Vec<ClientMessage> {
             client_id: 2,
             session_id: menu_session_id(),
             query: "rea".into(),
+            scope: None,
         },
         ClientMessage::MenuBackspace {
             client_id: 2,
@@ -655,6 +656,27 @@ fn theme_and_typography_snapshots_round_trip() {
     assert_eq!(parsed, typography);
 }
 
+/// The bridge's typography DTO is a newtype over the protocol type (plan 132
+/// U1), so its wire JSON must equal the source's exactly. This is the one claim
+/// a type cannot state: a divergence here would mean the webview contract
+/// silently reshapes the source type.
+#[test]
+fn typography_dto_is_a_transparent_projection_of_the_protocol_type() {
+    use clay_desktop_lib::bridge::TypographySnapshotDto;
+    let typography = clay::protocol::ActiveTypography {
+        revision: 9,
+        monospace: font_profile(),
+        proportional: font_profile(),
+        ui: font_profile(),
+        hierarchy: Default::default(),
+    };
+    let dto = TypographySnapshotDto::from(&typography);
+    assert_eq!(
+        serde_json::to_value(&dto).unwrap(),
+        serde_json::to_value(&typography).unwrap()
+    );
+}
+
 #[test]
 fn wrap_policy_and_tab_registry_round_trip() {
     let registry = TabRegistrySnapshot {
@@ -855,6 +877,43 @@ fn design_system_snapshot_dto_round_trip_and_variables() {
     assert_eq!(
         json["variables"][format!("{key_str}.transitionDuration")]["value"],
         150.0
+    );
+
+    // Field-set drift guard (plan 132 U1). The projection impls destructure
+    // their source exhaustively, so a field added to, renamed in, or removed
+    // from `ResolvedComponentRecipe`/`ShadowLayer` already fails the build. The
+    // class left is a *serde* rename on the source, which keeps Rust field names
+    // and would silently reshape the webview contract: compare wire key sets,
+    // with `inset` the only key a shadow layer may drop.
+    fn wire_keys(value: &serde_json::Value) -> std::collections::BTreeSet<String> {
+        value.as_object().expect("object").keys().cloned().collect()
+    }
+    let source_recipe = &ads.recipes[&custom_key];
+    let projected = &json["recipes"][&key_str];
+    assert_eq!(
+        wire_keys(projected),
+        wire_keys(&serde_json::to_value(source_recipe).unwrap()),
+        "recipe field set drifted from ResolvedComponentRecipe"
+    );
+    // A shadow layer crosses with two deliberate deltas: `color_role` arrives
+    // unwrapped as `color`, and `inset` never crosses.
+    let mut source_shadow = wire_keys(&serde_json::to_value(&source_recipe.shadow[0]).unwrap());
+    source_shadow.remove("inset");
+    source_shadow.remove("colorRole");
+    source_shadow.insert("color".to_string());
+    assert_eq!(
+        wire_keys(&projected["shadow"][0]),
+        source_shadow,
+        "shadow field set drifted from ShadowLayer"
+    );
+    let mut source_highlight =
+        wire_keys(&serde_json::to_value(source_recipe.inner_highlight.as_ref().unwrap()).unwrap());
+    source_highlight.remove("colorRole");
+    source_highlight.insert("color".to_string());
+    assert_eq!(
+        wire_keys(&projected["innerHighlight"]),
+        source_highlight,
+        "inner highlight field set drifted from InnerHighlight"
     );
 
     // Roundtrip deserialize from JSON

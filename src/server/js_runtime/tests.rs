@@ -12606,3 +12606,58 @@ async fn queue_evicts_oldest_at_capacity() {
     );
     let _ = fs::remove_dir_all(config_fixture("lane-module-provider"));
 }
+
+/// Plan 132: lane channel capacities are transport contract, not an
+/// implementation detail — a lane that silently grows its buffer changes
+/// which overflow a slow connection sees. 16 for the advisory editor-command
+/// lane, 4 for each state lane.
+#[tokio::test]
+async fn lane_channel_capacities_are_preserved() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    let service = ClayJsRuntimeService::default();
+
+    let mut commands = service.subscribe_editor_commands();
+    for index in 0..17 {
+        service
+            .editor_commands
+            .publish(crate::protocol::EditorCommandRequest {
+                command_id: format!("editor.fixture{index}"),
+                package_prefix: "fixture".to_string(),
+                mode_id: "clay.default".to_string(),
+            });
+    }
+    assert!(
+        matches!(
+            commands.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(1))
+        ),
+        "editor-command lane buffers exactly 16"
+    );
+
+    let mut carets = service.subscribe_caret_styles();
+    let mut layouts = service.subscribe_editor_layout();
+    let mut preferences = service.subscribe_shell_preferences();
+    for _ in 0..5 {
+        service.caret_styles.publish(None);
+        service.editor_layouts.publish(None);
+        service
+            .shell_preferences
+            .publish(crate::protocol::ShellPreferences {
+                pane_focus_policy: "click".to_string(),
+            });
+    }
+    // Five publishes into a capacity-4 lane drop exactly one message; a lane
+    // that grew its buffer would not report `Lagged` at all.
+    assert!(matches!(
+        carets.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(1))
+    ));
+    assert!(matches!(
+        layouts.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(1))
+    ));
+    assert!(matches!(
+        preferences.try_recv(),
+        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(1))
+    ));
+}

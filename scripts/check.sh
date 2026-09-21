@@ -2,7 +2,8 @@
 # Clay supported check wrapper (Linux host).
 #   scripts/check.sh quick  — non-release quick feedback: fmt + library unit tests
 #   scripts/check.sh full   — serial release gate under one repo-local lock
-#                             (includes the generated-webview-binding staleness
+#                             (root `clay` stages, the `clay-desktop` desktop
+#                             crate, and the generated-webview-binding staleness
 #                             guard, scripts/check-bindings.sh)
 #   scripts/check.sh report — advisory target-size/executable report
 set -eu
@@ -74,6 +75,16 @@ case "${1:-}" in
         run_stage clippy cargo clippy --all-targets -- -D warnings
         run_stage test cargo test --all-targets --quiet
         run_stage bench-compile cargo bench --no-run
+        # `clay-desktop` is a separate workspace member, so every stage above
+        # selects only the root `clay` package. Without these two the desktop
+        # crate's integration tests (dto_roundtrips, bridge_session,
+        # config_security, adoption_probe) are compiled by no local gate, and a
+        # stale fixture can sit broken unnoticed (plan 132 follow-up). Both
+        # stages need `frontend/dist` to exist (the Tauri build script requires
+        # it), which the bindings stage below needs as well — build the frontend
+        # first (`npm run build --prefix frontend`).
+        run_stage desktop-clippy cargo clippy -p clay-desktop --all-targets -- -D warnings
+        run_stage desktop-test cargo test -p clay-desktop --all-targets --quiet
         # Last: this stage compiles `clay` with the codegen-only feature, which
         # is a different flavor than the stages above and would otherwise force
         # them to rebuild.

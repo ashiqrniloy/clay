@@ -10,11 +10,14 @@ use clay::client::{ClientConnectionEvent, ClientInitialState};
 use clay::editor::theme::{StyleRegistry, color_hex};
 use clay::protocol::{
     ActiveDesignSystem, ActiveTypography, BehaviorManifest, ClientId, DecorationKind,
-    DocumentAccess, DocumentId, DocumentVersion, FontProfile, Modifiers, PackageUiProvenance,
-    PackageUiTrustDomain, RuntimeDiagnostic, RuntimeStateSnapshot, SduiTree, TabId, TokenType,
-    UiTypographyHierarchy,
+    DocumentAccess, DocumentId, DocumentVersion, EmptyTabContent, Modifiers,
+    PackageComponentContent, PackageOverlayContent, PackagePanelContent, PackageUiProvenance,
+    PackageUiSnapshot, RuntimeDiagnostic, RuntimeStateSnapshot, SduiTree, TabId, TokenType,
 };
-use clay::shell::design_system::ThemeColorRef;
+use clay::shell::design_system::{
+    DesignSystemProvenance, InnerHighlight, ResolvedComponentRecipe, ShadowLayer, ThemeColorRef,
+};
+use clay::shell::icons::{ActiveIconPack, IconGeometry, IconPath};
 use clay::shell::theme::{ThemeTokenValueDto, density_spacing_scale, resolve_theme_token_snapshot};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -170,27 +173,18 @@ impl ThemeSnapshotDto {
 
 /// Frontend-facing typography projection: user-owned profiles plus hierarchy
 /// scales; the adapter computes variant sizes once per install.
+///
+/// Newtype projection of [`ActiveTypography`] (plan 132 U1): the bridge owns no
+/// typography field of its own, so the contract cannot drift from the source,
+/// and serde's newtype rule keeps the wire JSON identical to the source's.
 #[derive(Serialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
-pub struct TypographySnapshotDto {
-    pub revision: u64,
-    pub monospace: FontProfile,
-    pub proportional: FontProfile,
-    pub ui: FontProfile,
-    pub hierarchy: UiTypographyHierarchy,
-}
+pub struct TypographySnapshotDto(pub ActiveTypography);
 
 impl From<&ActiveTypography> for TypographySnapshotDto {
     fn from(active: &ActiveTypography) -> Self {
-        Self {
-            revision: active.revision,
-            monospace: active.monospace.clone(),
-            proportional: active.proportional.clone(),
-            ui: active.ui.clone(),
-            hierarchy: active.hierarchy,
-        }
+        Self(active.clone())
     }
 }
 
@@ -208,12 +202,30 @@ pub struct InitialDocumentDto {
 
 impl InitialDocumentDto {
     pub(crate) fn from_initial_state(state: &ClientInitialState) -> Self {
+        // Exhaustive destructure (no `..`): a field added to, renamed in, or
+        // removed from `ClientInitialState` breaks the build *here*, where the
+        // webview projection lives, instead of silently never crossing.
+        //
+        // The four ignored fields are carried elsewhere in the bootstrap
+        // (`client_id`, `behavior_manifest`, `active_theme`,
+        // `active_typography`), so they are deliberately not part of this DTO.
+        let ClientInitialState {
+            client_id: _,
+            document_id,
+            document_version,
+            head,
+            access,
+            behavior_manifest: _,
+            active_theme: _,
+            active_typography: _,
+            workspace_root,
+        } = state;
         Self {
-            document_id: state.document_id,
-            version: state.document_version,
-            head: state.head.clone(),
-            access: state.access.clone(),
-            workspace_root: state.workspace_root.clone(),
+            document_id: *document_id,
+            version: *document_version,
+            head: head.clone(),
+            access: access.clone(),
+            workspace_root: workspace_root.clone(),
         }
     }
 }
@@ -227,20 +239,9 @@ pub struct DesignSystemSnapshotDto {
     pub specifier: String,
     pub schema_version: u32,
     pub generation: u64,
-    pub provenance: DesignSystemProvenanceDto,
+    pub provenance: DesignSystemProvenance,
     pub recipes: BTreeMap<String, ComponentRecipeDto>,
     pub variables: BTreeMap<String, DesignSystemVariableValueDto>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
-#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
-pub struct DesignSystemProvenanceDto {
-    pub package_name: String,
-    pub package_version: String,
-    pub api_prefix: String,
-    pub trust_domain: PackageUiTrustDomain,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -320,6 +321,104 @@ pub enum DesignSystemVariableValueDto {
     TransformPreset(String),
 }
 
+impl From<&ShadowLayer> for ShadowLayerDto {
+    fn from(layer: &ShadowLayer) -> Self {
+        // Exhaustive destructure (no `..`): a field added to, renamed in, or
+        // removed from `ShadowLayer` breaks the build here. `inset` is the one
+        // deliberate narrowing — the webview has no inset-shadow rendering, so
+        // it never crosses.
+        let ShadowLayer {
+            x,
+            y,
+            blur,
+            spread,
+            color_role,
+            opacity,
+            inset: _,
+        } = layer;
+        Self {
+            x: *x,
+            y: *y,
+            blur: *blur,
+            spread: *spread,
+            color: color_role.0.clone(),
+            opacity: *opacity,
+        }
+    }
+}
+
+impl From<&InnerHighlight> for InnerHighlightDto {
+    fn from(highlight: &InnerHighlight) -> Self {
+        // Exhaustive destructure, as above.
+        let InnerHighlight {
+            color_role,
+            opacity,
+            width,
+        } = highlight;
+        Self {
+            color: color_role.0.clone(),
+            opacity: *opacity,
+            width: *width,
+        }
+    }
+}
+
+impl From<&ResolvedComponentRecipe> for ComponentRecipeDto {
+    fn from(recipe: &ResolvedComponentRecipe) -> Self {
+        // The single definition of the recipe contract: exhaustive destructure
+        // (no `..`) pins all 21 fields to the resolved recipe, so a new recipe
+        // field cannot silently miss the webview. Color-role unwrapping and
+        // enum → string conversion happen once, here — the variables table and
+        // every other consumer read this DTO instead of re-deriving them.
+        let ResolvedComponentRecipe {
+            background_color,
+            background_opacity,
+            text_color,
+            border_color,
+            border_width,
+            border_style,
+            border_radius,
+            padding,
+            gap,
+            shadow,
+            backdrop_blur,
+            backdrop_saturate,
+            inner_highlight,
+            opacity,
+            outline_color,
+            outline_width,
+            outline_offset,
+            outline_style,
+            transition_duration,
+            transition_timing,
+            transform_preset,
+        } = recipe;
+        Self {
+            background_color: background_color.0.clone(),
+            background_opacity: *background_opacity,
+            text_color: text_color.0.clone(),
+            border_color: border_color.0.clone(),
+            border_width: *border_width,
+            border_style: border_style.as_str().to_string(),
+            border_radius: *border_radius,
+            padding: padding.clone(),
+            gap: gap.clone(),
+            shadow: shadow.iter().map(ShadowLayerDto::from).collect(),
+            backdrop_blur: *backdrop_blur,
+            backdrop_saturate: *backdrop_saturate,
+            inner_highlight: inner_highlight.as_ref().map(InnerHighlightDto::from),
+            opacity: *opacity,
+            outline_color: outline_color.0.clone(),
+            outline_width: *outline_width,
+            outline_offset: *outline_offset,
+            outline_style: outline_style.as_str().to_string(),
+            transition_duration: *transition_duration,
+            transition_timing: transition_timing.as_str().to_string(),
+            transform_preset: transform_preset.as_str().to_string(),
+        }
+    }
+}
+
 impl DesignSystemSnapshotDto {
     pub fn resolve(active: &ActiveDesignSystem) -> Result<Self, String> {
         active
@@ -333,212 +432,133 @@ impl DesignSystemSnapshotDto {
             let key_str = key.to_key_string();
 
             // Strict color denial check: reject concrete literal colors and invalid roles
-            if !ThemeColorRef::is_valid_color_role(&recipe.background_color.0) {
-                return Err(format!(
-                    "color denial: invalid background_color `{}` in recipe `{key_str}`",
-                    recipe.background_color.0
-                ));
-            }
-            if !ThemeColorRef::is_valid_color_role(&recipe.text_color.0) {
-                return Err(format!(
-                    "color denial: invalid text_color `{}` in recipe `{key_str}`",
-                    recipe.text_color.0
-                ));
-            }
-            if !ThemeColorRef::is_valid_color_role(&recipe.border_color.0) {
-                return Err(format!(
-                    "color denial: invalid border_color `{}` in recipe `{key_str}`",
-                    recipe.border_color.0
-                ));
-            }
-            if !ThemeColorRef::is_valid_color_role(&recipe.outline_color.0) {
-                return Err(format!(
-                    "color denial: invalid outline_color `{}` in recipe `{key_str}`",
-                    recipe.outline_color.0
-                ));
-            }
-
-            let mut shadow_dtos = Vec::with_capacity(recipe.shadow.len());
-            for s in &recipe.shadow {
-                if !ThemeColorRef::is_valid_color_role(&s.color_role.0) {
+            for (field, color) in [
+                ("background_color", &recipe.background_color),
+                ("text_color", &recipe.text_color),
+                ("border_color", &recipe.border_color),
+                ("outline_color", &recipe.outline_color),
+            ] {
+                if !ThemeColorRef::is_valid_color_role(&color.0) {
                     return Err(format!(
-                        "color denial: invalid shadow color `{}` in recipe `{key_str}`",
-                        s.color_role.0
+                        "color denial: invalid {field} `{}` in recipe `{key_str}`",
+                        color.0
                     ));
                 }
-                shadow_dtos.push(ShadowLayerDto {
-                    x: s.x,
-                    y: s.y,
-                    blur: s.blur,
-                    spread: s.spread,
-                    color: s.color_role.0.clone(),
-                    opacity: s.opacity,
-                });
             }
-
-            let inner_highlight_dto = match &recipe.inner_highlight {
-                Some(ih) => {
-                    if !ThemeColorRef::is_valid_color_role(&ih.color_role.0) {
-                        return Err(format!(
-                            "color denial: invalid inner_highlight color `{}` in recipe `{key_str}`",
-                            ih.color_role.0
-                        ));
-                    }
-                    Some(InnerHighlightDto {
-                        color: ih.color_role.0.clone(),
-                        opacity: ih.opacity,
-                        width: ih.width,
-                    })
+            for layer in &recipe.shadow {
+                if !ThemeColorRef::is_valid_color_role(&layer.color_role.0) {
+                    return Err(format!(
+                        "color denial: invalid shadow color `{}` in recipe `{key_str}`",
+                        layer.color_role.0
+                    ));
                 }
-                None => None,
-            };
+            }
+            if let Some(highlight) = &recipe.inner_highlight
+                && !ThemeColorRef::is_valid_color_role(&highlight.color_role.0)
+            {
+                return Err(format!(
+                    "color denial: invalid inner_highlight color `{}` in recipe `{key_str}`",
+                    highlight.color_role.0
+                ));
+            }
 
-            let recipe_dto = ComponentRecipeDto {
-                background_color: recipe.background_color.0.clone(),
-                background_opacity: recipe.background_opacity,
-                text_color: recipe.text_color.0.clone(),
-                border_color: recipe.border_color.0.clone(),
-                border_width: recipe.border_width,
-                border_style: recipe.border_style.as_str().to_string(),
-                border_radius: recipe.border_radius,
-                padding: recipe.padding.clone(),
-                gap: recipe.gap.clone(),
-                shadow: shadow_dtos.clone(),
-                backdrop_blur: recipe.backdrop_blur,
-                backdrop_saturate: recipe.backdrop_saturate,
-                inner_highlight: inner_highlight_dto.clone(),
-                opacity: recipe.opacity,
-                outline_color: recipe.outline_color.0.clone(),
-                outline_width: recipe.outline_width,
-                outline_offset: recipe.outline_offset,
-                outline_style: recipe.outline_style.as_str().to_string(),
-                transition_duration: recipe.transition_duration,
-                transition_timing: recipe.transition_timing.as_str().to_string(),
-                transform_preset: recipe.transform_preset.as_str().to_string(),
-            };
-            recipes.insert(key_str.clone(), recipe_dto);
-
-            // Populate variables table with deterministic sorted keys
-            variables.insert(
-                format!("{key_str}.backgroundColor"),
-                DesignSystemVariableValueDto::ThemeColorRole(recipe.background_color.0.clone()),
-            );
-            variables.insert(
-                format!("{key_str}.backgroundOpacity"),
-                DesignSystemVariableValueDto::Opacity(recipe.background_opacity),
-            );
-            variables.insert(
-                format!("{key_str}.textColor"),
-                DesignSystemVariableValueDto::ThemeColorRole(recipe.text_color.0.clone()),
-            );
-            variables.insert(
-                format!("{key_str}.borderColor"),
-                DesignSystemVariableValueDto::ThemeColorRole(recipe.border_color.0.clone()),
-            );
-            variables.insert(
-                format!("{key_str}.borderWidth"),
-                DesignSystemVariableValueDto::BorderWidth(recipe.border_width),
-            );
-            variables.insert(
-                format!("{key_str}.borderStyle"),
-                DesignSystemVariableValueDto::BorderStyle(recipe.border_style.as_str().to_string()),
-            );
-            variables.insert(
-                format!("{key_str}.borderRadius"),
-                DesignSystemVariableValueDto::Radius(recipe.border_radius),
-            );
-            if let Some(ref p) = recipe.padding {
-                variables.insert(
-                    format!("{key_str}.padding"),
-                    DesignSystemVariableValueDto::SpacingToken(p.clone()),
-                );
-            }
-            if let Some(ref g) = recipe.gap {
-                variables.insert(
-                    format!("{key_str}.gap"),
-                    DesignSystemVariableValueDto::SpacingToken(g.clone()),
-                );
-            }
-            if !shadow_dtos.is_empty() {
-                variables.insert(
-                    format!("{key_str}.shadow"),
-                    DesignSystemVariableValueDto::Shadow(shadow_dtos),
-                );
-            }
-            if recipe.backdrop_blur > 0.0 {
-                variables.insert(
-                    format!("{key_str}.backdropBlur"),
-                    DesignSystemVariableValueDto::BackdropBlur(recipe.backdrop_blur),
-                );
-            }
-            if (recipe.backdrop_saturate - 1.0).abs() > f64::EPSILON {
-                variables.insert(
-                    format!("{key_str}.backdropSaturate"),
-                    DesignSystemVariableValueDto::BackdropSaturate(recipe.backdrop_saturate),
-                );
-            }
-            if let Some(ih) = inner_highlight_dto {
-                variables.insert(
-                    format!("{key_str}.innerHighlight"),
-                    DesignSystemVariableValueDto::InnerHighlight(ih),
-                );
-            }
-            if (recipe.opacity - 1.0).abs() > f64::EPSILON {
-                variables.insert(
-                    format!("{key_str}.opacity"),
-                    DesignSystemVariableValueDto::Opacity(recipe.opacity),
-                );
-            }
-            variables.insert(
-                format!("{key_str}.outlineColor"),
-                DesignSystemVariableValueDto::ThemeColorRole(recipe.outline_color.0.clone()),
-            );
-            variables.insert(
-                format!("{key_str}.outlineWidth"),
-                DesignSystemVariableValueDto::Dimension(recipe.outline_width),
-            );
-            variables.insert(
-                format!("{key_str}.outlineOffset"),
-                DesignSystemVariableValueDto::Dimension(recipe.outline_offset),
-            );
-            variables.insert(
-                format!("{key_str}.outlineStyle"),
-                DesignSystemVariableValueDto::OutlineStyle(
-                    recipe.outline_style.as_str().to_string(),
-                ),
-            );
-            variables.insert(
-                format!("{key_str}.transitionDuration"),
-                DesignSystemVariableValueDto::MotionDuration(recipe.transition_duration),
-            );
-            variables.insert(
-                format!("{key_str}.transitionTiming"),
-                DesignSystemVariableValueDto::TransitionTiming(
-                    recipe.transition_timing.as_str().to_string(),
-                ),
-            );
-            variables.insert(
-                format!("{key_str}.transformPreset"),
-                DesignSystemVariableValueDto::TransformPreset(
-                    recipe.transform_preset.as_str().to_string(),
-                ),
-            );
+            // Single projection site for the recipe contract; the variables
+            // table reads the projected DTO, never the source recipe again.
+            let recipe_dto = ComponentRecipeDto::from(recipe);
+            variables.extend(design_system_variables(&key_str, &recipe_dto));
+            recipes.insert(key_str, recipe_dto);
         }
 
         Ok(Self {
             specifier: active.specifier.clone(),
             schema_version: active.schema_version,
             generation: active.generation,
-            provenance: DesignSystemProvenanceDto {
-                package_name: active.provenance.package_name.clone(),
-                package_version: active.provenance.package_version.clone(),
-                api_prefix: active.provenance.api_prefix.clone(),
-                trust_domain: active.provenance.trust_domain,
-            },
+            provenance: active.provenance.clone(),
             recipes,
             variables,
         })
     }
+}
+
+/// Flat `recipe.field` variables table the frontend's CSS custom properties
+/// read (plan 110). Projected from the DTO, so color-role unwrapping and
+/// enum → string conversion happen once in `ComponentRecipeDto::from`.
+fn design_system_variables(
+    key: &str,
+    recipe: &ComponentRecipeDto,
+) -> Vec<(String, DesignSystemVariableValueDto)> {
+    use DesignSystemVariableValueDto as Value;
+    let mut variables: Vec<(String, DesignSystemVariableValueDto)> = Vec::new();
+    let mut push = |field: &str, value: Value| variables.push((format!("{key}.{field}"), value));
+    push(
+        "backgroundColor",
+        Value::ThemeColorRole(recipe.background_color.clone()),
+    );
+    push(
+        "backgroundOpacity",
+        Value::Opacity(recipe.background_opacity),
+    );
+    push(
+        "textColor",
+        Value::ThemeColorRole(recipe.text_color.clone()),
+    );
+    push(
+        "borderColor",
+        Value::ThemeColorRole(recipe.border_color.clone()),
+    );
+    push("borderWidth", Value::BorderWidth(recipe.border_width));
+    push(
+        "borderStyle",
+        Value::BorderStyle(recipe.border_style.clone()),
+    );
+    push("borderRadius", Value::Radius(recipe.border_radius));
+    if let Some(padding) = &recipe.padding {
+        push("padding", Value::SpacingToken(padding.clone()));
+    }
+    if let Some(gap) = &recipe.gap {
+        push("gap", Value::SpacingToken(gap.clone()));
+    }
+    if !recipe.shadow.is_empty() {
+        push("shadow", Value::Shadow(recipe.shadow.clone()));
+    }
+    if recipe.backdrop_blur > 0.0 {
+        push("backdropBlur", Value::BackdropBlur(recipe.backdrop_blur));
+    }
+    if (recipe.backdrop_saturate - 1.0).abs() > f64::EPSILON {
+        push(
+            "backdropSaturate",
+            Value::BackdropSaturate(recipe.backdrop_saturate),
+        );
+    }
+    if let Some(highlight) = &recipe.inner_highlight {
+        push("innerHighlight", Value::InnerHighlight(highlight.clone()));
+    }
+    if (recipe.opacity - 1.0).abs() > f64::EPSILON {
+        push("opacity", Value::Opacity(recipe.opacity));
+    }
+    push(
+        "outlineColor",
+        Value::ThemeColorRole(recipe.outline_color.clone()),
+    );
+    push("outlineWidth", Value::Dimension(recipe.outline_width));
+    push("outlineOffset", Value::Dimension(recipe.outline_offset));
+    push(
+        "outlineStyle",
+        Value::OutlineStyle(recipe.outline_style.clone()),
+    );
+    push(
+        "transitionDuration",
+        Value::MotionDuration(recipe.transition_duration),
+    );
+    push(
+        "transitionTiming",
+        Value::TransitionTiming(recipe.transition_timing.clone()),
+    );
+    push(
+        "transformPreset",
+        Value::TransformPreset(recipe.transform_preset.clone()),
+    );
+    variables
 }
 
 /// Resolved active icon-pack projection consumed by the frontend icon store
@@ -552,7 +572,7 @@ pub struct IconPackSnapshotDto {
     pub specifier: String,
     pub schema_version: u32,
     pub generation: u64,
-    pub provenance: DesignSystemProvenanceDto,
+    pub provenance: DesignSystemProvenance,
     pub icons: BTreeMap<String, IconGeometryDto>,
 }
 
@@ -575,46 +595,50 @@ pub struct IconPathDto {
     pub opacity: Option<f64>,
 }
 
+impl From<&IconPath> for IconPathDto {
+    fn from(path: &IconPath) -> Self {
+        // Exhaustive destructure (no `..`): `commands` is consumed by `to_d()`,
+        // so the bounded d-string stays the only geometry that crosses.
+        let IconPath {
+            commands: _,
+            opacity,
+        } = path;
+        Self {
+            d: path.to_d(),
+            opacity: opacity.map(f64::from),
+        }
+    }
+}
+
+impl From<&IconGeometry> for IconGeometryDto {
+    fn from(geometry: &IconGeometry) -> Self {
+        // Exhaustive destructure, as above.
+        let IconGeometry { view_box, paths } = geometry;
+        Self {
+            view_box: view_box.map(f64::from),
+            paths: paths.iter().map(IconPathDto::from).collect(),
+        }
+    }
+}
+
 impl IconPackSnapshotDto {
     /// Validate before publication and project defensively; an invalid pack
     /// snapshot is rejected (never silently truncated) so the webview keeps
     /// its last authorized state.
-    pub fn resolve(active: &clay::shell::icons::ActiveIconPack) -> Result<Self, String> {
+    pub fn resolve(active: &ActiveIconPack) -> Result<Self, String> {
         active
             .validate()
             .map_err(|error| format!("icon pack validation failed: {error}"))?;
-        let icons = active
-            .icons
-            .iter()
-            .map(|(key, geometry)| {
-                let paths = geometry
-                    .paths
-                    .iter()
-                    .map(|path| IconPathDto {
-                        d: path.to_d(),
-                        opacity: path.opacity.map(f64::from),
-                    })
-                    .collect();
-                let view_box = [
-                    f64::from(geometry.view_box[0]),
-                    f64::from(geometry.view_box[1]),
-                    f64::from(geometry.view_box[2]),
-                    f64::from(geometry.view_box[3]),
-                ];
-                Ok((key.clone(), IconGeometryDto { view_box, paths }))
-            })
-            .collect::<Result<BTreeMap<_, _>, String>>()?;
         Ok(Self {
             specifier: active.specifier.clone(),
             schema_version: active.schema_version,
             generation: active.generation,
-            provenance: DesignSystemProvenanceDto {
-                package_name: active.provenance.package_name.clone(),
-                package_version: active.provenance.package_version.clone(),
-                api_prefix: active.provenance.api_prefix.clone(),
-                trust_domain: active.provenance.trust_domain,
-            },
-            icons,
+            provenance: active.provenance.clone(),
+            icons: active
+                .icons
+                .iter()
+                .map(|(key, geometry)| (key.clone(), IconGeometryDto::from(geometry)))
+                .collect(),
         })
     }
 }
@@ -726,82 +750,143 @@ impl RuntimeSnapshotDto {
     }
 }
 
+/// Parses one package-supplied component tree. The webview never receives the
+/// JSON string; an invalid component fails the whole projection (never a
+/// partially parsed UI).
+fn parse_component(component_json: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str(component_json).map_err(|_| "invalid package component".to_string())
+}
+
+impl PackageSurfaceDto {
+    /// The one surface projection: empty-tab landings and named component
+    /// surfaces share it, so the two source shapes cannot drift apart.
+    fn parse(
+        id: &str,
+        component_json: &str,
+        action_targets: &[String],
+        provenance: &PackageUiProvenance,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            id: id.to_string(),
+            component: parse_component(component_json)?,
+            action_targets: action_targets.to_vec(),
+            provenance: provenance.clone(),
+        })
+    }
+}
+
+impl TryFrom<&EmptyTabContent> for PackageSurfaceDto {
+    type Error = String;
+
+    fn try_from(entry: &EmptyTabContent) -> Result<Self, String> {
+        // Exhaustive destructure (no `..`): a field added to, renamed in, or
+        // removed from the source breaks the build here. `package_name` is the
+        // deliberate narrowing — provenance already carries identity.
+        let EmptyTabContent {
+            id,
+            package_name: _,
+            component_json,
+            action_targets,
+            provenance,
+        } = entry;
+        Self::parse(id, component_json, action_targets, provenance)
+    }
+}
+
+impl TryFrom<&PackageComponentContent> for PackageSurfaceDto {
+    type Error = String;
+
+    fn try_from(entry: &PackageComponentContent) -> Result<Self, String> {
+        // Exhaustive destructure, as above.
+        let PackageComponentContent {
+            id,
+            component_json,
+            action_targets,
+            provenance,
+        } = entry;
+        Self::parse(id, component_json, action_targets, provenance)
+    }
+}
+
+impl TryFrom<&PackagePanelContent> for PackagePanelDto {
+    type Error = String;
+
+    fn try_from(entry: &PackagePanelContent) -> Result<Self, String> {
+        // Exhaustive destructure, as above.
+        let PackagePanelContent {
+            id,
+            slot,
+            visibility,
+            component_json,
+            action_targets,
+            provenance,
+        } = entry;
+        Ok(Self {
+            id: id.clone(),
+            slot: slot.clone(),
+            visibility: visibility.clone(),
+            component: parse_component(component_json)?,
+            action_targets: action_targets.clone(),
+            provenance: provenance.clone(),
+        })
+    }
+}
+
+impl TryFrom<&PackageOverlayContent> for PackageOverlayDto {
+    type Error = String;
+
+    fn try_from(entry: &PackageOverlayContent) -> Result<Self, String> {
+        // Exhaustive destructure, as above.
+        let PackageOverlayContent {
+            id,
+            anchor,
+            focus_policy,
+            dismissal_policy,
+            component_json,
+            action_targets,
+            provenance,
+        } = entry;
+        Ok(Self {
+            id: id.clone(),
+            anchor: anchor.clone(),
+            focus_policy: focus_policy.clone(),
+            dismissal_policy: dismissal_policy.clone(),
+            component: parse_component(component_json)?,
+            action_targets: action_targets.clone(),
+            provenance: provenance.clone(),
+        })
+    }
+}
+
 impl PackageUiSnapshotDto {
-    fn parse(snapshot: clay::protocol::PackageUiSnapshot) -> Result<Self, String> {
-        let parse = |component: &str| {
-            serde_json::from_str(component).map_err(|_| "invalid package component".to_string())
-        };
-        let empty_tab = snapshot
-            .empty_tab
-            .map(|entry| -> Result<PackageSurfaceDto, String> {
-                Ok(PackageSurfaceDto {
-                    id: entry.id,
-                    component: parse(&entry.component_json)?,
-                    action_targets: entry.action_targets,
-                    provenance: entry.provenance,
-                })
-            })
-            .transpose()?;
-        let panels = snapshot
-            .panels
-            .into_iter()
-            .map(|entry| {
-                Ok(PackagePanelDto {
-                    id: entry.id,
-                    slot: entry.slot,
-                    visibility: entry.visibility,
-                    component: parse(&entry.component_json)?,
-                    action_targets: entry.action_targets,
-                    provenance: entry.provenance,
-                })
-            })
-            .collect::<Result<_, String>>()?;
-        let overlays = snapshot
-            .overlays
-            .into_iter()
-            .map(|entry| {
-                Ok(PackageOverlayDto {
-                    id: entry.id,
-                    anchor: entry.anchor,
-                    focus_policy: entry.focus_policy,
-                    dismissal_policy: entry.dismissal_policy,
-                    component: parse(&entry.component_json)?,
-                    action_targets: entry.action_targets,
-                    provenance: entry.provenance,
-                })
-            })
-            .collect::<Result<_, String>>()?;
-        let components = snapshot
-            .components
-            .into_iter()
-            .map(|entry| -> Result<PackageSurfaceDto, String> {
-                Ok(PackageSurfaceDto {
-                    id: entry.id,
-                    component: parse(&entry.component_json)?,
-                    action_targets: entry.action_targets,
-                    provenance: entry.provenance,
-                })
-            })
-            .collect::<Result<_, String>>()?;
-        let surfaces = snapshot
-            .surfaces
-            .into_iter()
-            .map(|entry| -> Result<PackageSurfaceDto, String> {
-                Ok(PackageSurfaceDto {
-                    id: entry.id,
-                    component: parse(&entry.component_json)?,
-                    action_targets: entry.action_targets,
-                    provenance: entry.provenance,
-                })
-            })
-            .collect::<Result<_, String>>()?;
+    fn parse(snapshot: PackageUiSnapshot) -> Result<Self, String> {
         Ok(Self {
             version: snapshot.version,
-            empty_tab,
-            surfaces,
-            panels,
-            overlays,
-            components,
+            empty_tab: snapshot
+                .empty_tab
+                .as_ref()
+                .map(PackageSurfaceDto::try_from)
+                .transpose()?,
+            surfaces: snapshot
+                .surfaces
+                .iter()
+                .map(PackageSurfaceDto::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+            panels: snapshot
+                .panels
+                .iter()
+                .map(PackagePanelDto::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+            overlays: snapshot
+                .overlays
+                .iter()
+                .map(PackageOverlayDto::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
+            components: snapshot
+                .components
+                .iter()
+                .map(PackageSurfaceDto::try_from)
+                .collect::<Result<Vec<_>, _>>()?,
             input_routes: snapshot.input_routes,
         })
     }

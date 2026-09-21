@@ -153,7 +153,7 @@ pub async fn session_request(
     if let Err(error) = &result {
         eprintln!(
             "[bridge] session_request failed: {error} :: {}",
-            &payload.chars().take(160).collect::<String>()
+            payload.chars().take(160).collect::<String>()
         );
     }
     result

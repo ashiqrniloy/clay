@@ -193,42 +193,29 @@ pub(crate) struct ClayOpState {
     /// document-scoped manifest of its own. Always `None`-irrelevant on the
     /// trusted worker.
     replicated_active_editor_mode: Mutex<Option<String>>,
-    /// Follow-up round (`editor-control`): bounded publisher for gated
+    /// Follow-up round (`editor-control`): advisory lane for gated
     /// programmatic editor-command execution requests. Wired by the JS
     /// runtime service for both domains; `None` in unit-test states.
     editor_command_publisher:
-        Mutex<Option<tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>>>,
-    /// Plan 071 caret-transport fix: bounded publisher for the runtime caret
-    /// appearance override set by `clientSetCursorStyle`. Wired by the JS
-    /// runtime service for both domains; `None` in unit-test states.
+        Mutex<Option<crate::server::fanout::Fanout<crate::protocol::EditorCommandRequest>>>,
+    /// Plan 071 caret-transport fix: runtime caret appearance override lane
+    /// set by `clientSetCursorStyle` (broadcast + last-known value for
+    /// connection initial sync and lag replay). Wired by the JS runtime
+    /// service for both domains; `None` in unit-test states.
     caret_style_publisher:
-        Mutex<Option<tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>>>,
-    /// Shared last-known caret override (service-owned, both domains write
-    /// through it) so connection initial sync and lag replay can resend the
-    /// current value.
-    caret_style_store:
-        Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>>>,
-    /// Phase 26: bounded publisher for the user-owned editor wrap-policy
-    /// override set by `setEditorLayout`. Wired by the JS runtime service for
-    /// the trusted domain only; `None` in unit-test states. Packages cannot
-    /// forge this override (the op is registered in the trusted extension
-    /// only, so third-party workers cannot resolve it).
+        Mutex<Option<crate::server::fanout::StateFanout<Option<crate::protocol::CaretStyle>>>>,
+    /// Phase 26: user-owned editor wrap-policy override lane set by
+    /// `setEditorLayout` (broadcast + last-known value). Wired by the JS
+    /// runtime service for the trusted domain only; `None` in unit-test
+    /// states. Packages cannot forge this override (the op is registered in
+    /// the trusted extension only, so third-party workers cannot resolve it).
     editor_layout_publisher:
-        Mutex<Option<tokio::sync::broadcast::Sender<Option<crate::protocol::WrapPolicy>>>>,
-    /// Shared last-known editor wrap override (service-owned) so connection
-    /// initial sync and lag replay can resend the current value.
-    editor_layout_store:
-        Mutex<Option<std::sync::Arc<std::sync::Mutex<Option<crate::protocol::WrapPolicy>>>>>,
-    /// Phase 22.1: bounded publisher for shell-level user preferences set by
-    /// `setPaneFocusPolicy`. Wired by the JS runtime service for both domains;
-    /// `None` in unit-test states.
+        Mutex<Option<crate::server::fanout::StateFanout<Option<crate::protocol::WrapPolicy>>>>,
+    /// Phase 22.1: shell-level user preferences lane set by
+    /// `setPaneFocusPolicy` (broadcast + last-known value). Wired by the JS
+    /// runtime service for both domains; `None` in unit-test states.
     shell_preferences_publisher:
-        Mutex<Option<tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>>>,
-    /// Shared last-known shell preferences (service-owned, both domains write
-    /// through it) so connection initial sync and lag replay can resend the
-    /// current value.
-    shell_preferences_store:
-        Mutex<Option<std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>>>,
+        Mutex<Option<crate::server::fanout::StateFanout<crate::protocol::ShellPreferences>>>,
     runtime_records: Mutex<Vec<String>>,
     published_sdui_tree: Mutex<Option<crate::protocol::SduiTree>>,
     published_decoration_set: Mutex<Option<DecorationSet>>,
@@ -406,11 +393,8 @@ impl ClayOpState {
             replicated_active_editor_mode: Mutex::new(None),
             editor_command_publisher: Mutex::new(None),
             caret_style_publisher: Mutex::new(None),
-            caret_style_store: Mutex::new(None),
             editor_layout_publisher: Mutex::new(None),
-            editor_layout_store: Mutex::new(None),
             shell_preferences_publisher: Mutex::new(None),
-            shell_preferences_store: Mutex::new(None),
             third_party_commands: Mutex::new(None),
             third_party_latency_commands: Mutex::new(None),
             package_service,
@@ -721,12 +705,12 @@ impl ClayOpState {
 
     pub(crate) fn set_editor_command_publisher(
         &self,
-        sender: tokio::sync::broadcast::Sender<crate::protocol::EditorCommandRequest>,
+        fanout: crate::server::fanout::Fanout<crate::protocol::EditorCommandRequest>,
     ) {
         *self
             .editor_command_publisher
             .lock()
-            .expect("editor command publisher mutex poisoned") = Some(sender);
+            .expect("editor command publisher mutex poisoned") = Some(fanout);
     }
 
     /// Publish a gated editor-command execution request to connected clients.
@@ -736,31 +720,25 @@ impl ClayOpState {
         &self,
         request: crate::protocol::EditorCommandRequest,
     ) -> bool {
-        let Some(sender) = self
+        let publishers = self
             .editor_command_publisher
             .lock()
-            .expect("editor command publisher mutex poisoned")
-            .clone()
-        else {
+            .expect("editor command publisher mutex poisoned");
+        let Some(fanout) = publishers.as_ref() else {
             return false;
         };
-        let _ = sender.send(request);
+        fanout.publish(request);
         true
     }
 
     pub(crate) fn set_caret_style_publisher(
         &self,
-        sender: tokio::sync::broadcast::Sender<Option<crate::protocol::CaretStyle>>,
-        store: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::CaretStyle>>>,
+        fanout: crate::server::fanout::StateFanout<Option<crate::protocol::CaretStyle>>,
     ) {
         *self
             .caret_style_publisher
             .lock()
-            .expect("caret style publisher mutex poisoned") = Some(sender);
-        *self
-            .caret_style_store
-            .lock()
-            .expect("caret style store mutex poisoned") = Some(store);
+            .expect("caret style publisher mutex poisoned") = Some(fanout);
     }
 
     /// Publish the runtime caret appearance override (`None` clears it) to
@@ -770,41 +748,27 @@ impl ClayOpState {
         &self,
         style: Option<crate::protocol::CaretStyle>,
     ) -> bool {
-        if let Some(store) = self
-            .caret_style_store
-            .lock()
-            .expect("caret style store mutex poisoned")
-            .clone()
-        {
-            *store.lock().expect("caret style state mutex poisoned") = style;
-        }
-        let Some(sender) = self
+        let publishers = self
             .caret_style_publisher
             .lock()
-            .expect("caret style publisher mutex poisoned")
-            .clone()
-        else {
+            .expect("caret style publisher mutex poisoned");
+        let Some(fanout) = publishers.as_ref() else {
             return false;
         };
-        let _ = sender.send(style);
+        fanout.publish(style);
         true
     }
 
-    /// Phase 26: wire the editor wrap-policy override broadcast channel and
-    /// shared store. Called by the JS runtime service for the trusted domain.
+    /// Phase 26: wire the editor wrap-policy override lane. Called by the JS
+    /// runtime service for the trusted domain.
     pub(crate) fn set_editor_layout_publisher(
         &self,
-        sender: tokio::sync::broadcast::Sender<Option<crate::protocol::WrapPolicy>>,
-        store: std::sync::Arc<std::sync::Mutex<Option<crate::protocol::WrapPolicy>>>,
+        fanout: crate::server::fanout::StateFanout<Option<crate::protocol::WrapPolicy>>,
     ) {
         *self
             .editor_layout_publisher
             .lock()
-            .expect("editor layout publisher mutex poisoned") = Some(sender);
-        *self
-            .editor_layout_store
-            .lock()
-            .expect("editor layout store mutex poisoned") = Some(store);
+            .expect("editor layout publisher mutex poisoned") = Some(fanout);
     }
 
     /// Publish the runtime editor wrap-policy override (`None` clears it) to
@@ -814,41 +778,27 @@ impl ClayOpState {
         &self,
         wrap: Option<crate::protocol::WrapPolicy>,
     ) -> bool {
-        if let Some(store) = self
-            .editor_layout_store
-            .lock()
-            .expect("editor layout store mutex poisoned")
-            .clone()
-        {
-            *store.lock().expect("editor layout state mutex poisoned") = wrap;
-        }
-        let Some(sender) = self
+        let publishers = self
             .editor_layout_publisher
             .lock()
-            .expect("editor layout publisher mutex poisoned")
-            .clone()
-        else {
+            .expect("editor layout publisher mutex poisoned");
+        let Some(fanout) = publishers.as_ref() else {
             return false;
         };
-        let _ = sender.send(wrap);
+        fanout.publish(wrap);
         true
     }
 
-    /// Phase 22.1: wire the shell-preferences broadcast channel and shared
-    /// store. Called by the JS runtime service for both domains.
+    /// Phase 22.1: wire the shell-preferences lane. Called by the JS runtime
+    /// service for both domains.
     pub(crate) fn set_shell_preferences_publisher(
         &self,
-        sender: tokio::sync::broadcast::Sender<crate::protocol::ShellPreferences>,
-        store: std::sync::Arc<std::sync::Mutex<crate::protocol::ShellPreferences>>,
+        fanout: crate::server::fanout::StateFanout<crate::protocol::ShellPreferences>,
     ) {
         *self
             .shell_preferences_publisher
             .lock()
-            .expect("shell preferences publisher mutex poisoned") = Some(sender);
-        *self
-            .shell_preferences_store
-            .lock()
-            .expect("shell preferences store mutex poisoned") = Some(store);
+            .expect("shell preferences publisher mutex poisoned") = Some(fanout);
     }
 
     /// Phase 22.1: publish shell-level user preferences to connected clients
@@ -857,25 +807,14 @@ impl ClayOpState {
         &self,
         preferences: crate::protocol::ShellPreferences,
     ) -> bool {
-        if let Some(store) = self
-            .shell_preferences_store
-            .lock()
-            .expect("shell preferences store mutex poisoned")
-            .clone()
-        {
-            *store
-                .lock()
-                .expect("shell preferences state mutex poisoned") = preferences.clone();
-        }
-        let Some(sender) = self
+        let publishers = self
             .shell_preferences_publisher
             .lock()
-            .expect("shell preferences publisher mutex poisoned")
-            .clone()
-        else {
+            .expect("shell preferences publisher mutex poisoned");
+        let Some(fanout) = publishers.as_ref() else {
             return false;
         };
-        let _ = sender.send(preferences);
+        fanout.publish(preferences);
         true
     }
 

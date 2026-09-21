@@ -30,7 +30,7 @@ patch's decoration/diagnostic/fold members independently.
 
 | Module         | Responsibility                                                                                                       |
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `dto.rs`       | `BootstrapDto`, runtime/theme/typography snapshots, `DesignSystemSnapshotDto`/`DesignSystemProvenanceDto` (Plan 102), and `BridgeEnvelope`.                                                    |
+| `dto.rs`       | `BootstrapDto`, runtime/theme/typography snapshots, `DesignSystemSnapshotDto`/`DesignSystemProvenance` (Plan 102), and `BridgeEnvelope`.                                                    |
 | `errors.rs`    | Sanitized `{ code, message }` errors with `MAX_REQUEST_BYTES = 512 KiB` request protection.                          |
 | `session.rs`   | Single live client session, handshake/reconnect generations, request parsing, client-id stamping, and event pumping. |
 | `forwarder.rs` | Live FIFO lane (capacity 512), whole viewport-patch latest-wins slots, lifecycle bypass, and delivery metrics.       |
@@ -50,6 +50,39 @@ webview receives. `#[derive(ts_rs::TS)]` on those types (gated by the
 - **Feature:** `ts-bindings` is off for shipped builds and for the frontend toolchain. It enables ts-rs derives on the serde-JSON types the DTO layer is composed of (protocol/editor/shell projection types); the rkyv Rust-to-Rust wire is untouched either way.
 - **Excluded on purpose:** `BridgeEnvelope`'s `event`/`routed` variants are `ts(skip)`-ed. Generating the full `ClientConnectionEvent` union would pull the internal event graph (server messages, agent frames, viewport patches, completion sets) into the contract; `frontend/src/bridge/types.ts` narrows those to `ShellEvent` + the families the shell consumes, with an opaque catch-all for the rest, and composes the envelope as `generated ∪ {event,routed}`.
 - **64-bit ids:** generated 64-bit integers are `number` (`Config::with_large_int`), matching the wire; ids that can exceed the safe-integer range cross as strings (menu session ids).
+
+### One projection per family (Plan 132 U1)
+
+Plan 132 removed the last hand-copied DTO structs. A family is now written
+**once**, in whichever of two shapes fits it:
+
+| Family shape | Mechanism | Examples |
+| --- | --- |
+| Identical to the source type | the DTO *is* the source type; one newtype at most | `TypographySnapshotDto` = `ActiveTypography` (a single-field tuple struct, so serde and ts-rs both treat it as the source type and the generated TS keeps the contract name), `DesignSystemProvenance`, `PackageUiProvenance`, `FontProfile`, `UiTypographyHierarchy` |
+| Narrowing or renamed | one `From`/`TryFrom` impl whose destructure names **every** source field (no `..`), so adding, renaming or removing a source field breaks the build at the mapping | `ComponentRecipeDto`, `ShadowLayerDto` (drops `inset`, unwraps `colorRole` to a plain string), `InnerHighlightDto`, `IconGeometryDto`/`IconPathDto` (`f32`→`f64`, SVG `d` via `IconPath::to_d`), `InitialDocumentDto` (`document_version`→`version`), the package-UI surface DTOs |
+
+Consequences worth knowing before touching a family:
+
+- Adding a `#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]` +
+  `ts(export_to = "bridge.ts")` to a core type is the established way to stop
+  copying it (Plan 119 added 71 such derives; Plan 132 added two more —
+  `ActiveTypography` and `DesignSystemProvenance`).
+- Colour-denial validation stays a separate pass *before* projection, because a
+  `From<&ShadowLayer>` impl cannot fail; the error strings
+  (`color denial: invalid <field> …`) are unchanged.
+- The design-system variables table is generated from the **projected** recipe
+  DTO, not from the source recipe, so the wire contract has exactly one author.
+- **Three drift guards:** exhaustive destructuring (compile time), a wire-key-set
+  comparison against the source type in `dto_roundtrips.rs` (catches a serde
+  rename, which destructuring cannot see), and `scripts/check-bindings.sh`
+  (regenerate + git-diff the generated TS).
+- **The projection boundary did not move.** Every rewrite replaced a struct
+  literal with a projection of the same source type: no field was added to the
+  wire, the deliberate narrowings stay (`ShadowLayer.inset` and
+  `EmptyTabContent.package_name` are still dropped, raw theme overrides still
+  never cross, package UI is still parsed Rust-side, identity is still stamped
+  Rust-side), and the two new `ts_rs::TS` derives are behind the `ts-bindings`
+  feature, so shipped builds pay nothing at runtime.
 
 ## Session and request flow
 
@@ -104,8 +137,9 @@ server ClientConnectionEvent
 The runtime snapshot carries `activeDesignSystem: DesignSystemSnapshotDto` —
 specifier, `schemaVersion`, `generation`, `provenance`, and the resolved
 recipe table projected to bounded camelCase variables.
-`DesignSystemProvenanceDto` is the exact trust-domain record:
-`packageName`, `packageVersion`, `apiPrefix`, `trustDomain`.
+`DesignSystemProvenance` is the exact trust-domain record:
+`packageName`, `packageVersion`, `apiPrefix`, `trustDomain` — the source shell
+type itself since Plan 132 U1, so it cannot drift from the Rust value.
 
 - **Deny fields:** package source paths, entry points, manifest JSON,
   approval state, and any recipe text beyond the validated bounded values are
@@ -151,9 +185,12 @@ identity; bridge stamping is correlation protection, not a grant.
   disconnect, reconnect generation, and identity lifecycle.
 - `src-tauri/tests/dto_roundtrips.rs` — typed JSON round trips and exhaustive
   event/message shape coverage, including design-system snapshot/provenance
-  round trips, authority/size pins, and the 128 KiB serialized-snapshot
-  ceiling (`runtime_snapshot_dto_with_active_design_system_round_trip`,
-  `design_system_snapshot_dto_round_trip_and_variables`).
+  round trips, authority/size pins, the 128 KiB serialized-snapshot ceiling
+  (`runtime_snapshot_dto_with_active_design_system_round_trip`,
+  `design_system_snapshot_dto_round_trip_and_variables`), the projected
+  recipe/shadow/inner-highlight **wire-key-set** drift check inside that test,
+  and `typography_dto_is_a_transparent_projection_of_the_protocol_type`
+  (serializing the DTO equals serializing `ActiveTypography`).
 - `src-tauri/src/bridge/forwarder.rs::coalescing_keeps_latest_whole_patch_and_live_order` —
   latest whole-patch replacement, FIFO ordering, and disconnect bypass.
 - `src-tauri/src/bridge/forwarder.rs::sibling_members_stay_one_complete_patch` —
@@ -174,6 +211,7 @@ cd frontend && npm test -- --run src/test/bridge.test.ts
 ## Related
 
 - [React Client Bridge](react-client-bridge.md)
+- [Server State Fanout Lanes](server-state-fanout.md) — the live server lanes whose values reach the webview through this bridge.
 - [Editor Viewport Render Patch](../flows/editor-viewport-render-patch.md)
 - [React CodeMirror Editor](react-codemirror-editor.md)
 - [Protocol Codec](protocol-codec.md)

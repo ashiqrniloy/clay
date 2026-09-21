@@ -1,0 +1,194 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1255 security advisories (from /home/arn/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (605 crate dependencies)
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+
+warning: 9 allowed warnings found
+== [fmt] cargo fmt --check
+== [check] cargo check --all-targets
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+== [clippy] cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+== [test] cargo test --all-targets --quiet
+
+running 1416 tests
+....................................................................................... 87/1416
+....................................................................................... 174/1416
+....................................................................................... 261/1416
+....................................................................................... 348/1416
+....................................................................................... 435/1416
+....................................................................................... 522/1416
+...................................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1789983188023212515/.git/
+..[main (root-commit) abc5d1f] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.. 609/1416
+Initialized empty Git repository in /tmp/clay-git-discovery-parent-1789983188053747579/.git/
+..Initialized empty Git repository in /tmp/clay-git-discovery-detached-1789983188058995052/.git/
+..[main (root-commit) abc5d1f] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at abc5d1f initial
+..Initialized empty Git repository in /tmp/clay-git-discovery-repo-1789983188090254538/.git/
+..[main (root-commit) abc5d1f] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1789983188109130491/.git/
+............................................................................Initialized empty Git repository in /tmp/clay-git-facade-1789983188543360738/repo/.git/
+.[main (root-commit) abc5d1f] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+. 696/1416
+..................................Initialized empty Git repository in /tmp/clay-git-package-load-1789983189212001362/repo/.git/
+[main (root-commit) bfd7e41] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+..................................................... 783/1416
+..........................i............................................................ 870/1416
+....................................................................................... 957/1416
+....................................................................................... 1044/1416
+....................................................................................... 1131/1416
+....................................................................................... 1218/1416
+....................................................................................... 1305/1416
+....................................................................................... 1392/1416
+........................
+test result: ok. 1415 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.30s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+.....................................................
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.04s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.62s
+
+
+running 152 tests
+............................. 29/152
+language_server_authority::generic_fake_lsp_server_initialize_and_shutdown_through_process_service --- FAILED
+....................................................................................... 117/152
+........................... 144/152
+language_server_authority::generic_fake_lsp_exit_early_surfaces_typed_sanitized_exit --- FAILED
+.......
+failures:
+
+---- language_server_authority::generic_fake_lsp_server_initialize_and_shutdown_through_process_service stdout ----
+
+thread 'language_server_authority::generic_fake_lsp_server_initialize_and_shutdown_through_process_service' (271306) panicked at tests/suites/../language_server_authority.rs:665:5:
+expected framed initialize response, got Content-Length: 91
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- language_server_authority::generic_fake_lsp_exit_early_surfaces_typed_sanitized_exit stdout ----
+
+thread 'language_server_authority::generic_fake_lsp_exit_early_surfaces_typed_sanitized_exit' (271305) panicked at tests/suites/../language_server_authority.rs:777:18:
+expected ChildExitedWith after exit-early profile, got Ok([13, 10, 123, 34, 106, 115, 111, 110, 114, 112, 99, 34, 58, 34, 50, 46, 48, 34, 44, 34, 105, 100, 34, 58, 49, 44, 34, 114, 101, 115, 117, 108, 116, 34, 58, 123, 34, 99, 97, 112, 97, 98, 105, 108, 105, 116, 105, 101, 115, 34, 58, 123, 125, 44, 34, 115, 101, 114, 118, 101, 114, 73, 110, 102, 111, 34, 58, 123, 34, 110, 97, 109, 101, 34, 58, 34, 99, 108, 97, 121, 45, 102, 97, 107, 101, 45, 108, 115, 112, 34, 125, 125, 125])
+
+
+failures:
+    language_server_authority::generic_fake_lsp_exit_early_surfaces_typed_sanitized_exit
+    language_server_authority::generic_fake_lsp_server_initialize_and_shutdown_through_process_service
+
+test result: FAILED. 150 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+
+error: test failed, to rerun pass `--test security`
+FAILED at stage: test
+EXIT=101 ELAPSED=100s

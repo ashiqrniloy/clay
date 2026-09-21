@@ -8,7 +8,7 @@
 
 export type {
   ComponentRecipeDto,
-  DesignSystemProvenanceDto,
+  DesignSystemProvenance,
   DesignSystemVariableValueDto as DesignSystemVariableValue,
   DesignSystemSnapshotDto as DesignSystemSnapshot,
   EditorStyleDto as EditorStyle,

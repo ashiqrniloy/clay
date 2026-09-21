@@ -2636,6 +2636,8 @@ fn is_generic_font_family(family: &str) -> bool {
     PartialEq,
 )]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct ActiveTypography {
     pub revision: u64,
     pub monospace: FontProfile,

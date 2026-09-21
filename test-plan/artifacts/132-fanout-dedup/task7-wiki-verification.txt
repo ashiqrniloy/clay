@@ -1,0 +1,14 @@
+=== doc guards after the wiki edits (21 tests: index links, resolvable links, current-page paths)
+running 21 tests
+.....................
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 206 filtered out; finished in 0.13s
+
+
+=== wiki page inventory
+  199 docs/wiki/modules/server-state-fanout.md
+  221 docs/wiki/modules/desktop-typed-bridge.md
+  420 total
+
+=== new page linked from the index
+2
+=== intra-wiki links added:

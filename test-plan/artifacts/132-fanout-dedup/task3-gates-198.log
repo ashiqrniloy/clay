@@ -1,0 +1,18 @@
+== cargo test --all-targets --quiet (1.98.1)
+test result: ok. 1415 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 30.37s
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.10s
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.19s
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.68s
+TEST_EXIT=0
+== cargo bench --no-run (1.98.1)
+BENCH_EXIT=0
+== scripts/check-bindings.sh (1.98.1)
+BINDINGS_EXIT=0
+== cargo clippy --all-targets (1.98.1)
+      1 warning: `clay` (lib) generated 1 warning
+      1 warning: `clay` (lib test) generated 1 warning (1 duplicate)
+      1 warning: the `Err`-variant returned from this function is very large

@@ -122,7 +122,7 @@ async fn bridge_session_bootstraps_notifies_disconnect_and_reconnects_cleanly() 
         Some(clay::shell::theme::ThemeTokenValueDto::Color(hex)) if hex.starts_with('#')
     ));
     assert!((first.active_theme.density_scale - 1.0).abs() < f64::EPSILON);
-    assert!(first.active_typography.hierarchy.body > 0.0);
+    assert!(first.active_typography.0.hierarchy.body > 0.0);
     assert!(bridge.is_connected());
     assert_eq!(bridge.stats().generation, 1);
     assert!(
@@ -147,9 +147,14 @@ async fn bridge_session_bootstraps_notifies_disconnect_and_reconnects_cleanly() 
     // handshake-owned: the connection binds its single tab during connect, so
     // an explicit New is rejected — by design.)
     let document_id = first.initial_document.document_id;
+    // Versions come from the bootstrap, not from literals: the server owns
+    // them, so a document/behavior version bump cannot rot this fixture into a
+    // silent `EditRejected` again.
+    let document_version = first.initial_document.version;
+    let behavior_version = first.behavior_manifest.behavior_version;
     bridge
         .request(&format!(
-            r#"{{"family":"edit","payload":{{"clientId":0,"leaseId":null,"documentId":{document_id},"baseVersion":1,"behaviorVersion":2,"transactionId":77,"operation":{{"insert":{{"byteOffset":0,"text":"x"}}}}}}}}"#
+            r#"{{"family":"edit","payload":{{"clientId":0,"leaseId":null,"documentId":{document_id},"baseVersion":{document_version},"behaviorVersion":{behavior_version},"transactionId":77,"operation":{{"insert":{{"byteOffset":0,"text":"x"}}}}}}}}"#
         ))
         .expect("request accepted");
     assert!(
