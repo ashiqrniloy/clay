@@ -302,7 +302,6 @@ pub(super) async fn persist_settings_change(
             .clear_preferences()
             .map(|_| true)
             .map_err(|error| format!("settings.reset failed: {error}"))?,
-        "settings.open" | "settings.close" => false,
         _ => false,
     };
     if should_reload {

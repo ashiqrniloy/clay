@@ -1,0 +1,39 @@
+clippy::match_same_arms baseline — plan 133 task 1 (U4)
+Command: cargo clippy --all-targets --message-format=json -- -W clippy::pedantic
+Toolchain: clippy 0.1.98 (rustc 1.98.1); HEAD 6ee3b4c; raw JSON 2957 lines / 6.1 MB (not committed)
+A "site" is one `match` expression; the line shown is its primary span. Sites are emitted
+~2x when the lib is compiled twice (rlib + test harness); de-duplicated by (file, line).
+test/prod split: test = file under tests/, a `*tests.rs` module, or the site inside a
+#[cfg(test)] item; prod = everything else.
+
+file                                         sites  prod  test  match lines
+src/behavior/manifest.rs                         1     1     0  [98]
+src/client/mod.rs                                1     1     0  [1642]
+src/client/tests.rs                              4     0     4  [1842, 1884, 2670, 2885]
+src/packages/record/documentation.rs             1     1     0  [155]
+src/packages/service.rs                          1     1     0  [198]
+src/packages/verbs.rs                            1     1     0  [123]
+src/protocol/agent.rs                            1     1     0  [407]
+src/protocol/mod.rs                              1     1     0  [1423]
+src/server/agent.rs                              2     2     0  [1215, 1457]
+src/server/connection/delivery.rs                1     1     0  [146]
+src/server/connection/runtime.rs                 1     1     0  [306]
+src/server/document.rs                           1     1     0  [799]
+src/server/language_server.rs                    1     1     0  [735]
+src/server/menu_sessions.rs                      1     1     0  [509]
+src/server/mod.rs                                1     0     1  [5890]
+src/server/ops/modes.rs                          2     2     0  [300, 321]
+src/server/ops/packages.rs                       1     1     0  [793]
+src/shell/components.rs                          1     1     0  [240]
+src/shell/package_ui.rs                          2     2     0  [604, 806]
+src/shell/theme.rs                              12    12     0  [389, 397, 483, 487, 571, 583, 587, 694, 698, 710, 714, 1297]
+tests/suites/../editor_performance.rs            1     0     1  [576]
+
+TOTAL                                           38    32     6
+
+Five test-side sites are the whole of src/client/tests.rs and tests/editor_performance.rs;
+the sixth is src/server/mod.rs:5890 inside a #[cfg(test)] item. Plan quotes "39
+production+test sites" and "theme.rs 6"; measured is 38 and theme.rs 12. The cited review
+file code-reviews/2026-09-18-comprehensive-implementation-review.md is absent from the
+repo (see baseline.md), so the plan list cannot be reconciled against its source; this
+measured list is the authoritative work order for task 6 (U4).

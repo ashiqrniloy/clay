@@ -559,8 +559,8 @@ where
         match timeout(gap, codec.read_server_message(stream)).await {
             Err(_) => break,
             Ok(Err(error)) => return Err(format!("{label}: read failed: {error}")),
-            Ok(Ok(message)) => match message {
-                ServerMessage::ViewportRenderPatch(patch) => {
+            Ok(Ok(message)) => {
+                if let ServerMessage::ViewportRenderPatch(patch) = message {
                     assert_eq!(
                         patch.request_id, request_id,
                         "{label}: patch matches request id"
@@ -568,13 +568,7 @@ where
                     seen += 1;
                     assert_eq!(seen, 1, "{label}: exactly one patch per request id");
                 }
-                ServerMessage::DecorationBatch(_)
-                | ServerMessage::DecorationSet(_)
-                | ServerMessage::DiagnosticSet(_)
-                | ServerMessage::FoldingRangeSet(_)
-                | ServerMessage::RuntimeDiagnostic(_) => {}
-                _ => {}
-            },
+            }
         }
     }
     if seen == 1 {

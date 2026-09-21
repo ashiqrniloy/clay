@@ -152,15 +152,12 @@ pub(super) fn validate_api_dependency_permissions(
 ) -> Result<(), PackageRecordError> {
     for dependency in dependencies {
         let required = match dependency.api_id.as_str() {
-            "packages.serverLoadPackage" => None,
-            "behavior.buildCodeEditingManifest" => None,
             "modes.serverRegisterModePattern" => Some(PackagePermission::ModeRegistration),
             "modes.serverActivateMajorMode" => Some(PackagePermission::ModeActivation),
             "commands.serverRegisterCommand" => Some(PackagePermission::CommandRegistration),
             "completion.serverRegisterCompletionProvider" => {
                 Some(PackagePermission::CompletionProvider)
             }
-            "completion.completionTriggerCharactersFromEditorRules" => None,
             "parse.serverRegisterParseHandler" | "language.serverRegisterDocumentAnalyzer" => {
                 Some(PackagePermission::ParseDocument)
             }
@@ -169,7 +166,13 @@ pub(super) fn validate_api_dependency_permissions(
                 Some(PackagePermission::RenderDecorations)
             }
             "syntax.serverRegisterSyntaxGrammar" => Some(PackagePermission::ParseDocument),
-            "ui.serverRegisterPanelContribution"
+            "ui.serverSetLayoutOverride" | "configuration.setPackageOption" => {
+                Some(PackagePermission::PackageConfiguration)
+            }
+            // Read-only Git discovery and inert SDUI publication are
+            // server-owned: they require no package permission because Git
+            // authority never reaches package code.
+            "packages.serverLoadPackage" | "behavior.buildCodeEditingManifest" | "completion.completionTriggerCharactersFromEditorRules" | "ui.serverRegisterPanelContribution"
             | "ui.serverRegisterComponentContribution"
             | "ui.serverRegisterTransientOverlayContribution"
             | "ui.serverRegisterThemeToken"
@@ -181,14 +184,7 @@ pub(super) fn validate_api_dependency_permissions(
             // fail-closed, and registration grants no tool execution
             // authority (session tools stay gated by the acceptance policy).
             | "agent.profileRegister"
-            | "agent.skillRegister" => None,
-            "ui.serverSetLayoutOverride" | "configuration.setPackageOption" => {
-                Some(PackagePermission::PackageConfiguration)
-            }
-            // Read-only Git discovery and inert SDUI publication are
-            // server-owned: they require no package permission because Git
-            // authority never reaches package code.
-            "git.serverListGitStatuses" | "git.serverRefreshGitStatus" | "sdui.publishTree" => None,
+            | "agent.skillRegister" | "git.serverListGitStatuses" | "git.serverRefreshGitStatus" | "sdui.publishTree" => None,
             _ => {
                 return Err(ctx.error(
                     PackageRecordRule::InvalidApiDependency,

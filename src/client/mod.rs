@@ -1639,7 +1639,6 @@ async fn run_connection<S>(
                             .send(ClientConnectionEvent::CaretStyleOverride(style))
                             .await;
                     }
-                    Ok(ServerMessage::CaretStyleOverride(_)) => {}
                     Ok(ServerMessage::EditorLayoutOverride(wrap)) => {
                         let _ = events
                             .send(ClientConnectionEvent::EditorLayoutOverride(wrap))
@@ -1694,7 +1693,6 @@ async fn run_connection<S>(
                     Ok(ServerMessage::ActiveTypography(typography)) if typography.validate().is_ok() => {
                         let _ = events.send(ClientConnectionEvent::ActiveTypography(typography)).await;
                     }
-                    Ok(ServerMessage::ActiveTypography(_)) => {}
                     Ok(ServerMessage::RuntimeStateSnapshot(snapshot)) => {
                         // Protocol-level gate only. Full candidate validation and
                         // atomic install happen in the editor; acknowledgement is
@@ -1732,7 +1730,7 @@ async fn run_connection<S>(
                     Ok(ServerMessage::Error { code, message }) => {
                         let _ = events.send(ClientConnectionEvent::ServerError { code, message }).await;
                     }
-                    Ok(_) => {}
+                    Ok(ServerMessage::CaretStyleOverride(_)) | Ok(ServerMessage::ActiveTypography(_)) | Ok(_) => {}
                     Err(CodecError::Io(error)) if matches!(
                         error.kind(),
                         std::io::ErrorKind::UnexpectedEof

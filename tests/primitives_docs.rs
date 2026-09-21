@@ -564,17 +564,26 @@ fn phase20_1_token_catalog_is_complete_and_matches_core_registry() {
     let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // Extract every implemented core token name from `core_theme_value`.
+    // Aliased tokens share one arm (`"accent.primary" | "border.focus" =>`),
+    // so every quoted name on an arm line counts.
     let mut core_tokens = BTreeSet::new();
     for line in theme_source.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix('"')
-            && let Some((name, after)) = rest.split_once('"')
-            && after.trim_start().starts_with("=> CoreThemeValue")
-            && name
+        if !trimmed.contains("=> CoreThemeValue") {
+            continue;
+        }
+        let mut rest = trimmed;
+        while let Some(start) = rest.find('"') {
+            let after = &rest[start + 1..];
+            let Some(end) = after.find('"') else { break };
+            let name = &after[..end];
+            if name
                 .chars()
                 .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.')
-        {
-            core_tokens.insert(name.to_string());
+            {
+                core_tokens.insert(name.to_string());
+            }
+            rest = &after[end + 1..];
         }
     }
     assert!(
@@ -1191,7 +1200,9 @@ fn no_component_kind_or_token_renamed() {
         "modal",
         "textInput",
     ] {
-        let marker = format!("\"{kind}\" => Some(Self::");
+        // The kind table is a `string_enum_impl!` invocation now: the string is
+        // the RHS of `Variant => "kind"` (plan 133 task 6).
+        let marker = format!("=> \"{kind}\",");
         assert!(
             components_src.contains(&marker),
             "ComponentKind {kind} must still parse in components.rs (not renamed/removed)"
@@ -1227,7 +1238,9 @@ fn no_component_kind_or_token_renamed() {
         "border.focus",
         "opacity.disabled",
     ] {
-        let core_marker = format!("\"{token}\" => CoreThemeValue");
+        // Aliased tokens share an arm, so presence of the quoted name is the
+        // rename/removal signal (the doc check below pins the catalog).
+        let core_marker = format!("\"{token}\"");
         assert!(
             tokens_src.contains(&core_marker),
             "core token {token} must still exist in theme.rs (not renamed/removed)"

@@ -5,6 +5,8 @@
 //! Clay resolves every package token through a same-typed core fallback token
 //! before Masonry paint/layout reads cached native values.
 
+use crate::str_enum::string_enum_impl;
+
 use std::collections::BTreeMap;
 
 use crate::color::Color;
@@ -30,53 +32,20 @@ pub(crate) enum ThemeTokenType {
     Density,
 }
 
-impl ThemeTokenType {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "color-role" => Some(Self::ColorRole),
-            "spacing" => Some(Self::Spacing),
-            "radius" => Some(Self::Radius),
-            "typography" => Some(Self::Typography),
-            "opacity" => Some(Self::Opacity),
-            "dimension" => Some(Self::Dimension),
-            "elevation" => Some(Self::Elevation),
-            "motion-duration" => Some(Self::MotionDuration),
-            "z-level" => Some(Self::ZLevel),
-            "density" => Some(Self::Density),
-            _ => None,
-        }
+string_enum_impl! {
+    pub(crate) ThemeTokenType {
+        ColorRole => "color-role",
+        Spacing => "spacing",
+        Radius => "radius",
+        Typography => "typography",
+        Opacity => "opacity",
+        Dimension => "dimension",
+        Elevation => "elevation",
+        MotionDuration => "motion-duration",
+        ZLevel => "z-level",
+        Density => "density",
     }
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::ColorRole => "color-role",
-            Self::Spacing => "spacing",
-            Self::Radius => "radius",
-            Self::Typography => "typography",
-            Self::Opacity => "opacity",
-            Self::Dimension => "dimension",
-            Self::Elevation => "elevation",
-            Self::MotionDuration => "motion-duration",
-            Self::ZLevel => "z-level",
-            Self::Density => "density",
-        }
-    }
-
-    /// Human-readable list of every supported token type, for diagnostics.
-    pub(crate) const fn all_as_str() -> &'static [&'static str] {
-        &[
-            "color-role",
-            "spacing",
-            "radius",
-            "typography",
-            "opacity",
-            "dimension",
-            "elevation",
-            "motion-duration",
-            "z-level",
-            "density",
-        ]
-    }
+    all_as_str
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,23 +74,12 @@ pub(crate) enum ElevationLevel {
     Overlay,
 }
 
-#[allow(dead_code)]
-impl ElevationLevel {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "none" => Some(Self::None),
-            "raised" => Some(Self::Raised),
-            "overlay" => Some(Self::Overlay),
-            _ => None,
-        }
-    }
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Raised => "raised",
-            Self::Overlay => "overlay",
-        }
+string_enum_impl! {
+    #[allow(dead_code)]
+    pub(crate) ElevationLevel {
+        None => "none",
+        Raised => "raised",
+        Overlay => "overlay",
     }
 }
 
@@ -135,27 +93,14 @@ pub(crate) enum ZLevel {
     Tooltip,
 }
 
-#[allow(dead_code)]
-impl ZLevel {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "base" => Some(Self::Base),
-            "panel" => Some(Self::Panel),
-            "overlay" => Some(Self::Overlay),
-            "modal" => Some(Self::Modal),
-            "tooltip" => Some(Self::Tooltip),
-            _ => None,
-        }
-    }
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Base => "base",
-            Self::Panel => "panel",
-            Self::Overlay => "overlay",
-            Self::Modal => "modal",
-            Self::Tooltip => "tooltip",
-        }
+string_enum_impl! {
+    #[allow(dead_code)]
+    pub(crate) ZLevel {
+        Base => "base",
+        Panel => "panel",
+        Overlay => "overlay",
+        Modal => "modal",
+        Tooltip => "tooltip",
     }
 }
 
@@ -168,25 +113,17 @@ pub(crate) enum DensityLevel {
     Spacious,
 }
 
+string_enum_impl! {
+    #[allow(dead_code)]
+    pub(crate) DensityLevel {
+        Compact => "compact",
+        Default => "default",
+        Spacious => "spacious",
+    }
+}
+
 #[allow(dead_code)]
 impl DensityLevel {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "compact" => Some(Self::Compact),
-            "default" => Some(Self::Default),
-            "spacious" => Some(Self::Spacious),
-            _ => None,
-        }
-    }
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Compact => "compact",
-            Self::Default => "default",
-            Self::Spacious => "spacious",
-        }
-    }
-
     /// Spacing-rhythm multiplier for the density level. The shell applies it to
     /// token-owned UI spacing (Phase 20.4 component uplift); panel dimensions
     /// and document typography are never scaled by density.
@@ -386,7 +323,7 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x3d, 0x38, 0x5c)),
         },
-        "text.primary" => CoreThemeValue {
+        "text.primary" | "border.strong" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xee, 0xea, 0xff)),
         },
@@ -394,7 +331,7 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xb9, 0xb2, 0xcf)),
         },
-        "accent.primary" => CoreThemeValue {
+        "accent.primary" | "border.focus" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x7c, 0x6f, 0xff)),
         },
@@ -442,14 +379,6 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x72, 0x6b, 0x98)),
         },
-        "border.strong" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0xee, 0xea, 0xff)),
-        },
-        "border.focus" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x7c, 0x6f, 0xff)),
-        },
         "diagnostic.warning" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xff, 0xc6, 0x6b)),
@@ -480,11 +409,11 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             value: F64(26.0),
         },
         // Phase 20.1: explicit 4pt spacing scale (4/8/12/16/24/32/48).
-        "spacing.xxs" => CoreThemeValue {
+        "spacing.xxs" | "spacing.badge" => CoreThemeValue {
             token_type: Spacing,
             value: F64(4.0),
         },
-        "spacing.xs" => CoreThemeValue {
+        "spacing.xs" | "spacing.tooltip" => CoreThemeValue {
             token_type: Spacing,
             value: F64(8.0),
         },
@@ -568,11 +497,7 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             value: F32(1.0),
         },
         // --- Phase 20.1: typed dimensions for panel/border defaults ---
-        "dimension.border.hairline" => CoreThemeValue {
-            token_type: Dimension,
-            value: DimensionValue(1.0),
-        },
-        "dimension.border.thin" => CoreThemeValue {
+        "dimension.border.hairline" | "dimension.border.thin" => CoreThemeValue {
             token_type: Dimension,
             value: DimensionValue(1.0),
         },
@@ -580,11 +505,11 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: Dimension,
             value: DimensionValue(2.0),
         },
-        "dimension.panel.side.default" => CoreThemeValue {
+        "dimension.panel.side.default" | "dimension.sidebar.default" => CoreThemeValue {
             token_type: Dimension,
             value: DimensionValue(244.0),
         },
-        "dimension.panel.side.min" => CoreThemeValue {
+        "dimension.panel.side.min" | "dimension.panel.vertical.min" => CoreThemeValue {
             token_type: Dimension,
             value: DimensionValue(48.0),
         },
@@ -596,17 +521,9 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: Dimension,
             value: DimensionValue(120.0),
         },
-        "dimension.panel.vertical.min" => CoreThemeValue {
-            token_type: Dimension,
-            value: DimensionValue(48.0),
-        },
         "dimension.panel.vertical.max" => CoreThemeValue {
             token_type: Dimension,
             value: DimensionValue(240.0),
-        },
-        "dimension.sidebar.default" => CoreThemeValue {
-            token_type: Dimension,
-            value: DimensionValue(244.0),
         },
         // Mid-width windows keep a narrower sidebar so the reading measure
         // survives (DESIGN.md §5; plan 118 task E1).
@@ -691,47 +608,19 @@ fn core_theme_value(token: &str) -> Option<CoreThemeValue> {
             token_type: Dimension,
             value: DimensionValue(20.0),
         },
-        "surface.badge" => CoreThemeValue {
+        "surface.badge" | "surface.kbd" | "surface.tooltip" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x3c, 0x38, 0x36)),
         },
-        "text.badge" => CoreThemeValue {
+        "text.badge" | "text.tooltip" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xeb, 0xdb, 0xb2)),
         },
-        "spacing.badge" => CoreThemeValue {
-            token_type: Spacing,
-            value: F64(4.0),
-        },
-        "surface.kbd" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x3c, 0x38, 0x36)),
-        },
-        "text.kbd" => CoreThemeValue {
+        "text.kbd" | "text.icon" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0xa8, 0x99, 0x84)),
         },
-        "border.kbd" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x50, 0x49, 0x45)),
-        },
-        "surface.tooltip" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0x3c, 0x38, 0x36)),
-        },
-        "text.tooltip" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0xeb, 0xdb, 0xb2)),
-        },
-        "spacing.tooltip" => CoreThemeValue {
-            token_type: Spacing,
-            value: F64(8.0),
-        },
-        "text.icon" => CoreThemeValue {
-            token_type: ColorRole,
-            value: ColorValue(Color::from_rgb8(0xa8, 0x99, 0x84)),
-        },
-        "surface.scrollbar" => CoreThemeValue {
+        "border.kbd" | "surface.scrollbar" => CoreThemeValue {
             token_type: ColorRole,
             value: ColorValue(Color::from_rgb8(0x50, 0x49, 0x45)),
         },
@@ -1294,11 +1183,10 @@ impl ResolvedUiTheme {
             "surface.disabled" => base.panel_bg,
             "surface.scrollbar" => base.scrollbar,
             "surface.scrollbar.track" => base.scrollbar_track,
-            "text.primary" => base.text,
+            "text.primary" | "text.tooltip" => base.text,
             "text.muted" => muted_text,
             "text.disabled" | "accent.muted" | "text.icon" | "border.kbd" => base.placeholder,
             "text.badge" | "text.kbd" => base.status_text,
-            "text.tooltip" => base.text,
             // The accent and the border ladder come from their own keys when a
             // theme declares them, and keep the pre-vocabulary projection
             // (caret / scrollbar) when it does not — so nothing shipped changes

@@ -601,12 +601,13 @@ impl TransientPackageOverlay {
         let anchor = match session.origin() {
             TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
-            TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
+            TransientMenuOrigin::CommandPalette | TransientMenuOrigin::Centered => {
+                PackageOverlayAnchor::Bottom
+            }
             TransientMenuOrigin::Completion => PackageOverlayAnchor::Completion,
             // Plan 125: the retired window sheet's origin. No producer sends
             // it and no anchor centers it any more; an older peer's snapshot
             // still projects (bottom-anchored, uncounted) instead of panicking.
-            TransientMenuOrigin::Centered => PackageOverlayAnchor::Bottom,
         };
         let prompt_id = format!("menu.{}.prompt", session.session_id().0);
         let query_id = format!("menu.{}.query", session.session_id().0);
@@ -803,10 +804,9 @@ impl PackageOverlayAnchor {
 
     pub(crate) fn rect(self, working_area: Rect, main_rect: Rect) -> Rect {
         match self {
-            Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
             Self::Bottom => bottom_rect(main_rect),
-            Self::Completion => main_rect,
+            Self::Main | Self::Completion => main_rect,
             Self::WorkingArea | Self::ActivePane => working_area,
         }
     }

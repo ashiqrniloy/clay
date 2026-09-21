@@ -1,0 +1,16 @@
+Plan 133 baseline gates — 2026-09-21, HEAD 6ee3b4c ("WIP"), clean tree (git status --porcelain empty)
+Environment: rustc/cargo/clippy 1.98.1 (cargo-clippy 0.1.98), cargo-audit 0.22.2, node v26.8.2, npm 11.19.1
+
+  scripts/check.sh full                 -> 0   (149 s, "full check PASSED", log: baseline-check-full.log)
+
+Stage exit codes (all 0): scripts/check.sh runs `set -eu` with a `FAILED at stage: <name>`
+trap; any non-zero stage aborts and can never print the final "full check PASSED"
+sentinel. All nine stage banners are present in the log and the sentinel is the last line:
+  audit (9 allowed RUSTSEC advisory warnings) | fmt | check --all-targets
+  clippy --all-targets -- -D warnings (zero warnings, 1.98.1)
+  test --all-targets --quiet (1940 passed, 1 ignored, 0 failed)
+  bench-compile (--no-run) | desktop-clippy | desktop-test (55 passed)
+  bindings (1 passed, 32 filtered; "webview bindings up to date")
+
+Frontend prerequisite was already satisfied (frontend/dist present), as required by the
+desktop stages and scripts/check-bindings.sh.

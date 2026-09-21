@@ -1212,7 +1212,7 @@ async fn daemon_actor(
             }
             read = reader.read_until(b'\n', &mut buf) => {
                 match read {
-                    Ok(0) => {
+                    Ok(0) | Err(_) => {
                         fail_pending(&mut pending, AgentError::ChildExited);
                         break;
                     }
@@ -1312,11 +1312,7 @@ async fn daemon_actor(
                             DaemonLine::Ignore => {}
                         }
                     }
-                    Err(_) => {
-                        fail_pending(&mut pending, AgentError::ChildExited);
-                        break;
                     }
-                }
             }
         }
     }
@@ -1454,10 +1450,9 @@ fn error_clone_kind(error: &AgentError) -> AgentError {
         AgentError::MissingPipe => AgentError::MissingPipe,
         AgentError::FrameTooLarge { len } => AgentError::FrameTooLarge { len: *len },
         AgentError::Timeout => AgentError::Timeout,
-        AgentError::ChildExited => AgentError::ChildExited,
+        AgentError::ChildExited | AgentError::Spawn(_) => AgentError::ChildExited,
         AgentError::ServiceStopped => AgentError::ServiceStopped,
         AgentError::Rpc(message) => AgentError::Rpc(message.clone()),
-        AgentError::Spawn(_) => AgentError::ChildExited,
     }
 }
 

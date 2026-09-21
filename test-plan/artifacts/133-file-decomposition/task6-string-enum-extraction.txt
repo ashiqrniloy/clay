@@ -1,0 +1,334 @@
+src/packages/extension_points.rs:RelationOperation vis='pub' parse_vis='' all_as_str=False impl_prefix=''
+    Append => "append"
+    Replace => "replace"
+    invocation:
+    | string_enum_impl! {
+    |     pub RelationOperation, parse_private {
+    |         Append => "append",
+    |         Replace => "replace",
+    |     }
+    | }
+src/packages/extension_points.rs:ExtensionContributionKind vis='pub' parse_vis='' all_as_str=False impl_prefix=''
+    ModePattern => "modePattern"
+    Grammar => "grammar"
+    Command => "command"
+    KeyRoute => "keyRoute"
+    TextTransform => "textTransform"
+    CompletionProvider => "completionProvider"
+    DecorationLayer => "decorationLayer"
+    DiagnosticSource => "diagnosticSource"
+    Analyzer => "analyzer"
+    IntelligenceProvider => "intelligenceProvider"
+    PanelContribution => "panelContribution"
+    ComponentContribution => "componentContribution"
+    OverlayContribution => "overlayContribution"
+    ThemeTokens => "themeTokens"
+    UiDesignSystem => "uiDesignSystem"
+    IconPack => "iconPack"
+    SduiRegion => "sduiRegion"
+    StatusItem => "statusItem"
+    invocation:
+    | string_enum_impl! {
+    |     pub ExtensionContributionKind, parse_private {
+    |         ModePattern => "modePattern",
+    |         Grammar => "grammar",
+    |         Command => "command",
+    |         KeyRoute => "keyRoute",
+    |         TextTransform => "textTransform",
+    |         CompletionProvider => "completionProvider",
+    |         DecorationLayer => "decorationLayer",
+    |         DiagnosticSource => "diagnosticSource",
+    |         Analyzer => "analyzer",
+    |         IntelligenceProvider => "intelligenceProvider",
+    |         PanelContribution => "panelContribution",
+    |         ComponentContribution => "componentContribution",
+    |         OverlayContribution => "overlayContribution",
+    |         ThemeTokens => "themeTokens",
+    |         UiDesignSystem => "uiDesignSystem",
+    |         IconPack => "iconPack",
+    |         SduiRegion => "sduiRegion",
+    |         StatusItem => "statusItem",
+    |     }
+    | }
+src/packages/self_update.rs:ChannelKind vis='pub' parse_vis='' all_as_str=False impl_prefix=''
+    Npm => "npm"
+    Curl => "curl"
+    invocation:
+    | string_enum_impl! {
+    |     pub ChannelKind, parse_private {
+    |         Npm => "npm",
+    |         Curl => "curl",
+    |     }
+    | }
+src/perf/fixtures.rs:FixtureKind vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    LongLines => "long-lines"
+    ManyShortLines => "many-short-lines"
+    MixedUnicode => "mixed-unicode"
+    NewlineHeavy => "newline-heavy"
+    invocation:
+    | string_enum_impl! {
+    |     pub FixtureKind {
+    |         LongLines => "long-lines",
+    |         ManyShortLines => "many-short-lines",
+    |         MixedUnicode => "mixed-unicode",
+    |         NewlineHeavy => "newline-heavy",
+    |     }
+    | }
+src/protocol/theme.rs:Appearance vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    Light => "light"
+    Dark => "dark"
+    System => "system"
+    invocation:
+    | /// Parse a bounded appearance value from its JSON string form. Unknown
+    | /// values are rejected so a future field never silently round-trips.
+    | /// Lowercase JSON string form used on the wire and in config.
+    | string_enum_impl! {
+    |     pub Appearance {
+    |         Light => "light",
+    |         Dark => "dark",
+    |         System => "system",
+    |     }
+    | }
+    residual impl kept:
+    | impl Appearance {
+    | 
+    |     /// Resolve `System` to a concrete light/dark choice given the observed OS
+    |     /// color-scheme signal. `os_dark = true` means the OS reports a dark
+    |     /// preference; `false` means light or unobservable. `System` with no signal
+    |     /// falls back to dark per the Phase 20.6 pinned semantics.
+    |     pub fn resolve(self, os_dark: bool) -> ResolvedAppearance {
+    |         match self {
+    |             Self::Light => ResolvedAppearance::Light,
+    |             Self::Dark => ResolvedAppearance::Dark,
+    |             Self::System => {
+    |                 if os_dark {
+    |                     ResolvedAppearance::Dark
+    |                 } else {
+    |                     ResolvedAppearance::Light
+    |                 }
+    |             }
+    |         }
+    |     }
+src/shell/components.rs:ComponentKind vis='pub(crate)' parse_vis='pub(crate)' all_as_str=False impl_prefix=''
+    EditorView => "editorView"
+    Panel => "panel"
+    Label => "label"
+    Button => "button"
+    List => "list"
+    Flex => "flex"
+    Stack => "stack"
+    Overlay => "overlay"
+    Scroll => "scroll"
+    Portal => "portal"
+    StatusItem => "statusItem"
+    Dropdown => "dropdown"
+    Collapse => "collapse"
+    Modal => "modal"
+    TextInput => "textInput"
+    TabList => "tabList"
+    invocation:
+    | /// Inverse of `parse`: the catalog string this variant round-trips to.
+    | /// Used by the package UI conformance matrix (Plan 068 task 5) so a single
+    | /// `ComponentKind` value drives both `applicable_states` and the
+    | /// `component_state_palette` paint path, tying the state table to paint.
+    | #[allow(dead_code)] // conformance primitive; consumed by the package UI conformance suite
+    | string_enum_impl! {
+    |     pub(crate) ComponentKind {
+    |         EditorView => "editorView",
+    |         Panel => "panel",
+    |         Label => "label",
+    |         Button => "button",
+    |         List => "list",
+    |         Flex => "flex",
+    |         Stack => "stack",
+    |         Overlay => "overlay",
+    |         Scroll => "scroll",
+    |         Portal => "portal",
+    |         StatusItem => "statusItem",
+    |         Dropdown => "dropdown",
+    |         Collapse => "collapse",
+    |         Modal => "modal",
+    |         TextInput => "textInput",
+    |         // Plan 108 task 8: tab strip hosting per-tab children (React Aria
+    |         // Tabs substrate; selection is widget-local like dropdown).
+    |         TabList => "tabList",
+    |     }
+    | }
+    residual impl kept:
+    | impl ComponentKind {
+    | 
+    |     pub(crate) const fn supports_text_font_role(self) -> bool {
+    |         matches!(
+    |             self,
+    |             Self::Panel
+    |                 | Self::Label
+    |                 | Self::Button
+    |                 | Self::List
+    |                 | Self::StatusItem
+    |                 | Self::Dropdown
+    |                 | Self::Collapse
+    |                 | Self::Modal
+    |                 | Self::TextInput
+    |                 | Self::TabList
+    |         )
+    |     }
+src/shell/theme.rs:ThemeTokenType vis='pub(crate)' parse_vis='pub(crate)' all_as_str=True impl_prefix=''
+    ColorRole => "color-role"
+    Spacing => "spacing"
+    Radius => "radius"
+    Typography => "typography"
+    Opacity => "opacity"
+    Dimension => "dimension"
+    Elevation => "elevation"
+    MotionDuration => "motion-duration"
+    ZLevel => "z-level"
+    Density => "density"
+    invocation:
+    | string_enum_impl! {
+    |     pub(crate) ThemeTokenType {
+    |         ColorRole => "color-role",
+    |         Spacing => "spacing",
+    |         Radius => "radius",
+    |         Typography => "typography",
+    |         Opacity => "opacity",
+    |         Dimension => "dimension",
+    |         Elevation => "elevation",
+    |         MotionDuration => "motion-duration",
+    |         ZLevel => "z-level",
+    |         Density => "density",
+    |     }
+    |     all_as_str
+    | }
+src/shell/theme.rs:ElevationLevel vis='pub(crate)' parse_vis='pub(crate)' all_as_str=False impl_prefix='#[allow(dead_code)]\n'
+    None => "none"
+    Raised => "raised"
+    Overlay => "overlay"
+    invocation:
+    | #[allow(dead_code)]
+    | string_enum_impl! {
+    |     pub(crate) ElevationLevel {
+    |         None => "none",
+    |         Raised => "raised",
+    |         Overlay => "overlay",
+    |     }
+    | }
+src/shell/theme.rs:ZLevel vis='pub(crate)' parse_vis='pub(crate)' all_as_str=False impl_prefix='#[allow(dead_code)]\n'
+    Base => "base"
+    Panel => "panel"
+    Overlay => "overlay"
+    Modal => "modal"
+    Tooltip => "tooltip"
+    invocation:
+    | #[allow(dead_code)]
+    | string_enum_impl! {
+    |     pub(crate) ZLevel {
+    |         Base => "base",
+    |         Panel => "panel",
+    |         Overlay => "overlay",
+    |         Modal => "modal",
+    |         Tooltip => "tooltip",
+    |     }
+    | }
+src/shell/theme.rs:DensityLevel vis='pub(crate)' parse_vis='pub(crate)' all_as_str=False impl_prefix='#[allow(dead_code)]\n'
+    Compact => "compact"
+    Default => "default"
+    Spacious => "spacious"
+    invocation:
+    | #[allow(dead_code)]
+    | string_enum_impl! {
+    |     pub(crate) DensityLevel {
+    |         Compact => "compact",
+    |         Default => "default",
+    |         Spacious => "spacious",
+    |     }
+    | }
+    residual impl kept:
+    | #[allow(dead_code)]
+    | impl DensityLevel {
+    | 
+    |     /// Spacing-rhythm multiplier for the density level. The shell applies it to
+    |     /// token-owned UI spacing (Phase 20.4 component uplift); panel dimensions
+    |     /// and document typography are never scaled by density.
+    |     pub(crate) const fn spacing_scale(self) -> f32 {
+    |         match self {
+    |             Self::Compact => 0.875,
+    |             Self::Default => 1.0,
+    |             Self::Spacious => 1.125,
+    |         }
+    |     }
+src/shell/design_system.rs:BorderStyle vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    None => "none"
+    Solid => "solid"
+    Dashed => "dashed"
+    Dotted => "dotted"
+    invocation:
+    | string_enum_impl! {
+    |     pub BorderStyle {
+    |         None => "none",
+    |         Solid => "solid",
+    |         Dashed => "dashed",
+    |         Dotted => "dotted",
+    |     }
+    | }
+src/shell/design_system.rs:OutlineStyle vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    None => "none"
+    Solid => "solid"
+    invocation:
+    | string_enum_impl! {
+    |     pub OutlineStyle {
+    |         None => "none",
+    |         Solid => "solid",
+    |     }
+    | }
+src/shell/design_system.rs:TransitionTiming vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    Linear => "linear"
+    EaseOut => "ease-out"
+    SpringSnappy => "spring-snappy"
+    SpringSmooth => "spring-smooth"
+    invocation:
+    | string_enum_impl! {
+    |     pub TransitionTiming {
+    |         Linear => "linear",
+    |         EaseOut => "ease-out",
+    |         SpringSnappy => "spring-snappy",
+    |         SpringSmooth => "spring-smooth",
+    |     }
+    | }
+src/shell/design_system.rs:TransformPreset vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    None => "none"
+    PressSubtle => "press-subtle"
+    PressShiftDown => "press-shift-down"
+    HoverLift => "hover-lift"
+    invocation:
+    | string_enum_impl! {
+    |     pub TransformPreset {
+    |         None => "none",
+    |         PressSubtle => "press-subtle",
+    |         PressShiftDown => "press-shift-down",
+    |         HoverLift => "hover-lift",
+    |     }
+    | }
+src/shell/design_system.rs:RecipeState vis='pub' parse_vis='pub' all_as_str=False impl_prefix=''
+    Rest => "rest"
+    Hover => "hover"
+    Active => "active"
+    Focus => "focus"
+    Disabled => "disabled"
+    Selected => "selected"
+    Expanded => "expanded"
+    Open => "open"
+    Invalid => "invalid"
+    invocation:
+    | string_enum_impl! {
+    |     pub RecipeState {
+    |         Rest => "rest",
+    |         Hover => "hover",
+    |         Active => "active",
+    |         Focus => "focus",
+    |         Disabled => "disabled",
+    |         Selected => "selected",
+    |         Expanded => "expanded",
+    |         Open => "open",
+    |         Invalid => "invalid",
+    |     }
+    | }

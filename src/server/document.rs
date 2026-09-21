@@ -796,18 +796,11 @@ impl DocumentState {
                     offset: *byte_offset,
                 })
             }
-            EditOperation::Delete { start, end } => {
-                self.validate_range(*start, *end)?;
-                Ok(AffectedRange::Span {
-                    start: *start,
-                    end: *end,
-                })
-            }
             EditOperation::Replace { start, end, .. } if start == end => {
                 self.validate_boundary(*start)?;
                 Ok(AffectedRange::Insert { offset: *start })
             }
-            EditOperation::Replace { start, end, .. } => {
+            EditOperation::Delete { start, end } | EditOperation::Replace { start, end, .. } => {
                 self.validate_range(*start, *end)?;
                 Ok(AffectedRange::Span {
                     start: *start,

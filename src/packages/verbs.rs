@@ -120,11 +120,10 @@ fn format_list_line(service: &PackageService, pkg: &PackageInspection) -> String
     };
     let adoption = match service.adoption_state(&pkg.name) {
         Some(AdoptionState::Approved) => "adopted",
-        Some(AdoptionState::Pending) => "pending",
         Some(AdoptionState::Stale) => "stale",
         Some(AdoptionState::Revoked) => "revoked",
         None if record.is_none() => "unmanaged",
-        None => "pending",
+        Some(AdoptionState::Pending) | None => "pending",
     };
     format!(
         "  {}  {}  {spec}  {pin}  {source}  [{enabled}] [{adoption}]",

@@ -143,9 +143,8 @@ where
                 )
                 .await?
         }
-        Outcome::Drop => {}
+        Outcome::Drop | Outcome::Replay => {}
         // Impossible for an `Advice` lane; see `state_lane`.
-        Outcome::Replay => {}
         Outcome::Closed => return Ok(Flow::Close),
     }
     Ok(Flow::Continue)

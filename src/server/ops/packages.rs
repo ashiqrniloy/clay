@@ -790,8 +790,8 @@ pub(super) fn apply_package_record_contributions(
 
     if !record.contributions.syntax_grammars.is_empty() {
         match clay.register_syntax_grammar_package(record) {
-            Ok(_) => {}
-            Err(crate::server::syntax::SyntaxGrammarRegistryError::DuplicateContributionId {
+            Ok(_)
+            | Err(crate::server::syntax::SyntaxGrammarRegistryError::DuplicateContributionId {
                 ..
             })
             | Err(crate::server::syntax::SyntaxGrammarRegistryError::OwnedByNativeDescriptor {

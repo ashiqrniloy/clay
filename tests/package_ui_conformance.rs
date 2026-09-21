@@ -243,36 +243,47 @@ fn catalog_doc_kinds() -> Vec<String> {
     kinds
 }
 
-/// Extract the kind names from the `ComponentKind::parse` match arms in
-/// `src/shell/components.rs`. This is the code enum (set C). Only the
-/// `impl ComponentKind` block is scanned so `DeferredComponentKind::parse`
+/// Extract the kind names from the `ComponentKind` string table in
+/// `src/shell/components.rs`. This is the code enum (set C). The table is the
+/// `string_enum_impl!` invocation for `ComponentKind` (it was the hand-written
+/// `parse` match arms before plan 133 task 6), so `DeferredComponentKind`
 /// (e.g. `table`) does not leak in.
 fn catalog_enum_kinds() -> Vec<String> {
     let path = format!("{}/src/shell/components.rs", manifest_dir());
     let src = fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("read components.rs ({path}): {err}"));
-    let impl_block = src
-        .split("impl ComponentKind {")
-        .nth(1)
-        .expect("components.rs must have an `impl ComponentKind` block");
-    let impl_body = impl_block.split("\n}\n").next().unwrap_or(impl_block);
+    let block = src
+        .split("string_enum_impl! {")
+        .find(|block| block.contains("ComponentKind {") && block.contains("=> \""))
+        .expect("components.rs must have a `string_enum_impl!` invocation for ComponentKind");
+    let body = block.split("\n}\n").next().unwrap_or(block);
     let mut kinds = Vec::new();
-    for line in impl_body.lines() {
+    for line in body.lines() {
         let trimmed = line.trim();
-        // Match arms: `"editorView" => Some(Self::EditorView),` — the only lines
-        // in `impl ComponentKind` containing `=> Some(Self::` are `parse` arms.
-        if !trimmed.contains("=> Some(Self::") {
+        // Arm lines: `EditorView => "editorView",` — every double-quoted token
+        // on such a line is a kind string.
+        if !trimmed.contains("=> ") {
             continue;
         }
-        // Extract the first double-quoted token (the kind string).
-        if let (Some(start), Some(end)) = (trimmed.find('"'), trimmed.rfind('"'))
-            && start < end
-        {
-            kinds.push(trimmed[start + 1..end].to_string());
+        for quoted in double_quoted(trimmed) {
+            kinds.push(quoted);
         }
     }
     kinds.sort();
     kinds
+}
+
+/// Every double-quoted token on `line` (an arm may join several with `|`).
+fn double_quoted(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find('"') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('"') else { break };
+        out.push(after[..end].to_string());
+        rest = &after[end + 1..];
+    }
+    out
 }
 
 /// Component catalog stays aligned across docs, Rust validation, and React projection.
@@ -432,11 +443,8 @@ fn core_token_catalog_matches_tokens_md() {
         if !trimmed.contains("=> CoreThemeValue") {
             continue;
         }
-        if let (Some(start), Some(end)) = (trimmed.find('"'), trimmed.rfind('"'))
-            && start < end
-        {
-            code_tokens.push(trimmed[start + 1..end].to_string());
-        }
+        // A line may carry several aliases (`"text.primary" | "border.strong"`).
+        code_tokens.extend(double_quoted(trimmed));
     }
     code_tokens.sort();
     code_tokens.dedup();
@@ -2053,7 +2061,7 @@ fn plan118_chat_landing_and_its_commands_are_absent() {
     const RETIREMENT_GUARDS: &[&str] = &[
         "src/server/command_execution.rs",
         "src/server/connection/runtime.rs",
-        "src/server/js_runtime/tests.rs",
+        "src/server/js_runtime/tests/coding_agent_and_launcher.rs",
         "frontend/src/test/chat-surface-absence.test.ts",
     ];
     let manifest_dir = manifest_dir();

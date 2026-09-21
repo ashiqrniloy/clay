@@ -404,7 +404,9 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
         }
         // Meter numerator only; no transcript row (the usage box rides
         // `Finished`).
-        AgentWireEvent::ContextTokens { .. } => {}
+        AgentWireEvent::ContextTokens { .. }
+        | AgentWireEvent::Started { .. }
+        | AgentWireEvent::Permission { .. } => {}
         AgentWireEvent::Overflow => {
             push_entry(entries, AgentTranscriptKind::Error, "event overflow");
         }
@@ -427,7 +429,6 @@ pub fn apply_transcript_event(entries: &mut Vec<AgentTranscriptEntry>, event: &A
             skill_name.clone(),
             file.clone(),
         ),
-        AgentWireEvent::Started { .. } | AgentWireEvent::Permission { .. } => {}
     }
 }
 
@@ -1099,6 +1100,30 @@ pub enum AgentServerMessage {
         code: String,
         message: String,
     },
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSettingsFileInfo {
+    /// Canonical layout name: `SYSTEM.md` or `skills/<dir>/SKILL.md`.
+    pub name: String,
+    /// Absolute display path (server-resolved; the client never supplies one).
+    pub display_path: String,
+    pub size_bytes: u64,
+    pub modified_ms: Option<u64>,
+    /// False when the file still matches the daemon's seed stamp
+    /// (`.seed-manifest.json`), true on any mismatch or missing stamp.
+    pub edited: bool,
 }
 
 #[cfg(test)]

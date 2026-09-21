@@ -11,6 +11,8 @@
 //! are locked in `docs/reference/primitives/package-security.md`
 //! (`clay-extension-point-v1`, `clay-package-relation-v1`).
 
+use crate::str_enum::string_enum_impl;
+
 use serde_json::Value;
 
 use crate::packages::manifest::{DiagnosticContext, PackageValidationRule};
@@ -35,20 +37,10 @@ pub enum RelationOperation {
     Replace,
 }
 
-impl RelationOperation {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Append => "append",
-            Self::Replace => "replace",
-        }
-    }
-
-    fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "append" => Some(Self::Append),
-            "replace" => Some(Self::Replace),
-            _ => None,
-        }
+string_enum_impl! {
+    pub RelationOperation, parse_private {
+        Append => "append",
+        Replace => "replace",
     }
 }
 
@@ -75,52 +67,26 @@ pub enum ExtensionContributionKind {
     StatusItem,
 }
 
-impl ExtensionContributionKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ModePattern => "modePattern",
-            Self::Grammar => "grammar",
-            Self::Command => "command",
-            Self::KeyRoute => "keyRoute",
-            Self::TextTransform => "textTransform",
-            Self::CompletionProvider => "completionProvider",
-            Self::DecorationLayer => "decorationLayer",
-            Self::DiagnosticSource => "diagnosticSource",
-            Self::Analyzer => "analyzer",
-            Self::IntelligenceProvider => "intelligenceProvider",
-            Self::PanelContribution => "panelContribution",
-            Self::ComponentContribution => "componentContribution",
-            Self::OverlayContribution => "overlayContribution",
-            Self::ThemeTokens => "themeTokens",
-            Self::UiDesignSystem => "uiDesignSystem",
-            Self::IconPack => "iconPack",
-            Self::SduiRegion => "sduiRegion",
-            Self::StatusItem => "statusItem",
-        }
-    }
-
-    fn parse(raw: &str) -> Option<Self> {
-        Some(match raw {
-            "modePattern" => Self::ModePattern,
-            "grammar" => Self::Grammar,
-            "command" => Self::Command,
-            "keyRoute" => Self::KeyRoute,
-            "textTransform" => Self::TextTransform,
-            "completionProvider" => Self::CompletionProvider,
-            "decorationLayer" => Self::DecorationLayer,
-            "diagnosticSource" => Self::DiagnosticSource,
-            "analyzer" => Self::Analyzer,
-            "intelligenceProvider" => Self::IntelligenceProvider,
-            "panelContribution" => Self::PanelContribution,
-            "componentContribution" => Self::ComponentContribution,
-            "overlayContribution" => Self::OverlayContribution,
-            "themeTokens" => Self::ThemeTokens,
-            "uiDesignSystem" => Self::UiDesignSystem,
-            "iconPack" => Self::IconPack,
-            "sduiRegion" => Self::SduiRegion,
-            "statusItem" => Self::StatusItem,
-            _ => return None,
-        })
+string_enum_impl! {
+    pub ExtensionContributionKind, parse_private {
+        ModePattern => "modePattern",
+        Grammar => "grammar",
+        Command => "command",
+        KeyRoute => "keyRoute",
+        TextTransform => "textTransform",
+        CompletionProvider => "completionProvider",
+        DecorationLayer => "decorationLayer",
+        DiagnosticSource => "diagnosticSource",
+        Analyzer => "analyzer",
+        IntelligenceProvider => "intelligenceProvider",
+        PanelContribution => "panelContribution",
+        ComponentContribution => "componentContribution",
+        OverlayContribution => "overlayContribution",
+        ThemeTokens => "themeTokens",
+        UiDesignSystem => "uiDesignSystem",
+        IconPack => "iconPack",
+        SduiRegion => "sduiRegion",
+        StatusItem => "statusItem",
     }
 }
 

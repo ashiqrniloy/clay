@@ -35,7 +35,7 @@ behavior changes.
 
 ## Tasks
 
-- [ ] Baseline gates and file-metric inventory
+- [x] Baseline gates and file-metric inventory
   - Acceptance Criteria:
     - Functional: `scripts/check.sh` full set passes untouched; record exit codes.
     - Performance: none (structural).
@@ -54,8 +54,52 @@ behavior changes.
       - Review §4, §5.
   - Test Cases to Write:
     - None (evidence-recording task).
+  - Evidence (2026-09-21):
+    - Tree/env: HEAD `6ee3b4c` ("WIP"), clean (`git status --porcelain` empty);
+      rustc/cargo/clippy 1.98.1, cargo-audit 0.22.2, node v26.8.2; no
+      `rust-toolchain.toml`. `frontend/dist` present (desktop/bindings stages).
+    - Gates: `scripts/check.sh full` **exit 0** in 149 s, `full check PASSED` —
+      `set -eu` + `FAILED at stage:` trap means the sentinel proves all nine
+      stages exited 0 (audit with 9 allowed RUSTSEC warnings, fmt, check,
+      clippy `-D warnings` **zero warnings**, test 1940 passed/1 ignored,
+      bench-compile, desktop-clippy, desktop-test 55 passed, bindings
+      `webview bindings up to date`). Total 1996 passed / 0 failed / 1 ignored.
+      Log `test-plan/artifacts/133-file-decomposition/baseline-check-full.log`,
+      exit codes `…/baseline-exit-codes.txt`, inventory `…/baseline.md`.
+    - Note: plan 132's baseline failed clippy on 1.98.1 (`result_large_err`,
+      `src/server/connection/documents.rs`); the allow is present at this HEAD
+      (`:264`), so that lane landed between `36eabd2` and `6ee3b4c`.
+    - Line counts (measured): `server/mod.rs` 6,203; `protocol/mod.rs` 3,832;
+      `server/ui.rs` 3,320; `shell/theme.rs` 3,050; `js_runtime/tests.rs`
+      12,663; `connection/tests.rs` 8,944; `client/tests.rs` 3,541;
+      `workspace/tests.rs` 2,605. Plan-quoted values are stale for the four test
+      files (js_runtime +1,618, connection +386, client −152, workspace +41);
+      `ui.rs`/`theme.rs` targets are unaffected.
+    - Types: `protocol/mod.rs` has **71 top-level struct/enum** declarations
+      (33 struct + 38 enum) + 11 type aliases = plan's "71 types"; family-module
+      table recorded in `baseline.md`.
+    - Clippy `match_same_arms` (pedantic, command in evidence file): **38 unique
+      sites** — 32 production + 6 test-side (whole of `src/client/tests.rs` 4 and
+      `tests/editor_performance.rs` 1, plus `src/server/mod.rs:5890` inside a
+      `#[cfg(test)]` item), dominated by `shell/theme.rs` 12. Per-file list with
+      line numbers: `…/baseline-clippy-match-same-arms.txt` (raw 6.1 MB JSON not
+      committed). Plan quotes 39 sites / "theme.rs 6" — unreconcilable because
+      the cited review file is **absent from the repo** (see next); measured list
+      is the task-6 work order.
+    - Findings changing later tasks: (1) all plans 126–134 cite
+      `code-reviews/2026-09-18-comprehensive-implementation-review.md`, which
+      does not exist in the repo or git history; (2) the four giant test modules
+      are already `mod tests;` sibling files and `server/mod.rs`'s test body is
+      `src/server/tests.rs` (836 lines) — task 4 (and task 3's test step) are
+      sibling-file relocations needing a `#[cfg(test)] mod tests;` shim for
+      private access, and the plan's
+      "tests from ~L3100" is stale (`mod tests;` at L6132); (3) `tests/suites/protocol.rs`
+      asserts every new `tests/*.rs` root file is `#[path]`-registered exactly
+      once, so task 4 files must be wired in the same change; (4) `StateFanout`
+      exists at `src/server/fanout.rs:68` (plan 132 landed), so task 3's store
+      extraction is unblocked.
 
-- [ ] Split `src/protocol/mod.rs` into family modules
+- [x] Split `src/protocol/mod.rs` into family modules
   - Acceptance Criteria:
     - Functional: every type moves to an existing or new family file (`protocol/mod.rs` becomes declarations + shared helpers); all `use` sites updated; protocol suites (`tests/suites/protocol.rs`, `benches/protocol_server_baselines.rs`) green.
     - Performance: compile-time neutral or better; no runtime change (type moves only).
@@ -74,8 +118,51 @@ behavior changes.
       - Review C3.
   - Test Cases to Write:
     - Existing round-trip suites are the net (no new tests for moved types).
+  - Evidence (2026-09-21):
+    - Result: `src/protocol/mod.rs` **3,832 → 163 lines**. The hub keeps the
+      `pub mod`/`pub use` list, `PROTOCOL_VERSION` (with its full history doc),
+      the 11 shared id aliases, and `menu_session_id_serde`; no other type is
+      defined there. New families: `behavior.rs` (1,202), `editor_rules.rs`
+      (656), `messages.rs` (598), `typography.rs` (460), `caret.rs` (197),
+      `theme.rs` (164), `document.rs` (149), `shell.rs` (143), `launcher.rs`
+      (71). Existing families gained: `agent.rs` +`AgentSettingsFileInfo`,
+      `diagnostics.rs` +`DiagnosticSeverity`/`RuntimeDiagnostic`. Module map with
+      per-file line/type counts: `test-plan/artifacts/133-file-decomposition/task2-protocol-split.md`.
+    - Move method: line-range extraction script (kept for provenance as
+      `…/task2-split-protocol.py`) sliced each top-level item with its
+      attributes/doc comments; new files open with a module doc and
+      `use super::*;` (precedent: `src/packages/record/*.rs`), the hub globs
+      every family, so **zero `crate::protocol::X` caller edits** were needed.
+      The 13 protocol tests moved into `behavior.rs` with their unit (verbatim),
+      so no visibility widening was required; `src/protocol/codec.rs` is
+      untouched, including its round-trip tests.
+    - Verbatim check: original `mod.rs` non-blank lines vs the new tree —
+      **0 lines missing** (only added family headers/`use super::*;`).
+    - Forced guard/doc updates (not wire changes):
+      `tests/documentation_coverage.rs:242–243` now reads
+      `src/protocol/messages.rs` for `ClientMessage`/`ServerMessage` variants;
+      the hub's version-history line for `FoldingRangeSet` now names
+      `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES` to keep
+      `tests/performance_budgets.rs::folding_and_inlay_payloads_deny_above_cap`
+      (its original satisfaction came from the moved variant doc).
+    - Gates: `scripts/check.sh full` **exit 0**, 325 s, `PASSED` — clippy
+      `-D warnings` zero warnings, `cargo test --all-targets` **1996 passed / 0
+      failed / 1 ignored** (identical to the task-1 baseline), protocol suite
+      `cargo test --test protocol` 227 passed, `cargo bench --no-run` compiles
+      (`benches/protocol_server_baselines.rs`). Log `…/task2-check-full.log`,
+      exit codes `…/task2-exit-codes.txt`.
+    - Compile time: incremental `cargo check --lib` after touching the protocol
+      module — 4.7 s split vs 4.6 s pre-split (A/B via stash, 3 samples each;
+      first pre-split sample 15.7 s included the stashed file-set change).
+      Neutral.
+    - Security: no wire-format change — every item moved verbatim (multiset
+      check), enum/derive bodies untouched, codec round-trip suites green.
+    - Operational note for later gate runs: interrupting the suite during
+      `manual_smoke_docs::plan118_…` leaves `capture-ui-review.sh` / `clay` /
+      `clay-desktop` / `portal_capture.py` orphans that make the next run hang;
+      clear them with `pkill -f "capture[-]ui-review"` etc. Clean run: ~50 s.
 
-- [ ] Split `src/server/mod.rs`: runtime assembly vs. accept loops vs. tests
+- [x] Split `src/server/mod.rs`: runtime assembly vs. accept loops vs. tests
   - Acceptance Criteria:
     - Functional: server construction/`ServerConfig`/generation stores move to focused submodules (e.g. `server/runtime_state.rs` for the fanout/generation stores — coordinate with plan 132's `StateFanout`); accept loops and `spawn_connection` stay; the inline `#[cfg(test)]` suites move to `tests/suites/server_runtime.rs` (or are absorbed by existing suites) without losing any test.
     - Performance: none.
@@ -95,8 +182,74 @@ behavior changes.
       - Review C3; plan 132 (ordering dependency on `StateFanout` location).
   - Test Cases to Write:
     - Test-count equality assertion in evidence (not a new test).
+  - Evidence (2026-09-21):
+    - Result: `src/server/mod.rs` **6,203 → 1,028 lines**. New focused modules:
+      `src/server/runtime_state.rs` (525) — `ServerConfig`, `RuntimeGeneration`
+      (+impl), `RuntimeGenerationStore` (+impl), `ActiveRuntimeStateFanout`,
+      `ActiveTypographyState`, `shell_command_catalogue`,
+      `RuntimeOutputApplication` + `apply_runtime_outputs`*
+      (`crate::server::runtime_state`); and `src/server/runtime_reload.rs`
+      (1,165) — `effective_agent_root`, `RuntimeGenerationCandidate`,
+      `ReloadedDocumentRefresh`, `RuntimeReloadOutcome`, the runtime-contribution
+      helpers, and `impl IpcServer` { `new`/`try_new`, configuration load,
+      diagnostic recording, the hot-reload pipeline (`prepare_*`, `commit_*`,
+      `reload_*`, `refresh_open_documents_after_reload`), `enumerate_ui_choices` }.
+      Kept in `mod.rs`: module decls + prelude, `IpcServer` struct, tab-state
+      plumbing, `run`/`accept_unix_loop`, `spawn_connection`,
+      `sweep_expired_tabs`, `LiveClientGuard`, Unix socket + named-pipe
+      binding/validation, `ServerError`. Module map, method-vs-store inventory,
+      and the full plumbing diff list:
+      `test-plan/artifacts/133-file-decomposition/task3-server-split.md`.
+    - Tests: the four inline `#[cfg(test)]` mods moved to sibling unit-test files
+      (`src/server/runtime_outputs_tests.rs` 225, `runtime_generation_tests.rs`
+      3,070, `tab_server_state_tests.rs` 127, `windows_tests.rs` 67), declared
+      from `mod.rs` with the same cfg gates. **Deviation from the task text**: the
+      task named `tests/suites/server_runtime.rs`, but these suites exercise
+      crate-internal items (`apply_runtime_outputs` is `#[cfg(test)]`,
+      `create_named_pipe_server`/socket helpers are private, private
+      `RuntimeGeneration*` fields are assembled directly), which an integration
+      root (separate crate) cannot reach; sibling test files are the repository
+      precedent (`src/server/tests.rs`, `src/server/connection/tests.rs`). No new
+      `tests/*.rs` root was added, so the suite-inventory guard is unaffected.
+    - Method: extraction script kept for provenance as `task3-split-server.py`
+      (parses top-level items with attrs/doc prefixes plus the method groups
+      inside the two `impl IpcServer` blocks, then cuts those ranges).
+      Verbatim checks: 44/44 moved production blocks reappear as order-preserving
+      subsequences of the new files; the four test bodies were byte-identical
+      pre-rustfmt (then reflowed by `cargo fmt` with equal tokens); the token
+      diff of all removed ranges vs. the new files contains only the expected
+      deltas (4 `mod … {` wrappers + cfg attrs, 19 `pub(super)` keywords,
+      `use`-statement rewrites, module docs).
+    - Plumbing-only edits: `mod runtime_reload;`/`mod runtime_state;` + re-exports
+      (`pub use runtime_reload::{ReloadedDocumentRefresh, RuntimeReloadOutcome}`,
+      `pub use runtime_state::ServerConfig`,
+      `pub(crate) use runtime_state::{RuntimeGeneration, RuntimeGenerationStore,
+      apply_runtime_outputs_without_sdui}`); `pub(super)` on
+      `RuntimeGeneration`/`RuntimeGenerationStore`/`ActiveTypographyState` fields,
+      the stores' `initial`/`push_diagnostic`/`swap`,
+      `RuntimeGenerationCandidate`, and `IpcServer::{load_default_configuration,
+      load_configuration_for_service, prepare_runtime_generation_candidate,
+      commit_runtime_generation}` (previously module-private in the same `server`
+      subtree — same effective visibility); `src/server/connection/tests.rs`
+      moved five `super::super::…` paths to
+      `crate::server::runtime_state::…`; `tests/performance_budgets.rs`'s
+      `is_sibling_test_file` now also accepts `<module>_tests.rs` siblings (it
+      scanned the extracted test files as production code and false-positived on
+      their folding-range fixtures).
+    - Gates: `scripts/check.sh full` **exit 0**, 281 s, `PASSED`; clippy
+      `-D warnings` and `cargo fmt --check` clean; test totals **identical to the
+      task-1 baseline: 1996 passed / 0 failed / 1 ignored** (47 moved test
+      attributes: 4 + 41 + 1 + 1; module and test fn names unchanged,
+      e.g. `runtime_generation_tests::…`). Logs `…/task3-check-full.log`,
+      exit codes `…/task3-exit-codes.txt`.
+    - Compile time: incremental `cargo check --lib` after touching `mod.rs` —
+      4.85 s / 4.94 s split vs 5.43 s / 4.83 s pre-change (A/B via stash; first
+      sample ≈17 s both sides from the fingerprint change). Neutral.
+    - Security: socket binding and parent-directory/socket permission validation
+      plus `ServerError` stayed in `mod.rs` untouched; the moved code is verbatim
+      (checks above), so no gate or permission logic was altered.
 
-- [ ] Extract the giant inline test files (`js_runtime/tests.rs`, `connection/tests.rs`, `client/tests.rs`, `workspace/tests.rs`)
+- [x] Extract the giant inline test files (`js_runtime/tests.rs`, `connection/tests.rs`, `client/tests.rs`, `workspace/tests.rs`)
   - Acceptance Criteria:
     - Functional: the four inline test modules move to `tests/suites/` (or shrink to a thin `mod tests;` include) with zero lost tests; suites green from the new locations.
     - Performance: compile-time neutral or better.
@@ -116,8 +269,61 @@ behavior changes.
       - Review C3 item 6 (ranked refactoring list).
   - Test Cases to Write:
     - None lost; no new tests (move-only).
+  - Evidence (2026-09-21):
+    - Result: each `src/**/tests.rs` is now a thin `src/**/tests/mod.rs` (module
+      doc + all imports + shared helpers + the suite map) plus one file per
+      contiguous thematic run of tests — 55 suites total (24 js_runtime,
+      14 connection, 8 client, 9 workspace). Test counts identical to baseline:
+      **241 + 87 + 48 + 80 = 456**; root files hold 0 tests; largest suite is
+      911 lines (`js_runtime/tests/lanes_and_queues.rs`); the owners'
+      `#[cfg(test)] mod tests;` declarations are untouched
+      (`tests.rs` → `tests/mod.rs`). Per-file before/after table, suite map and
+      full method in
+      `test-plan/artifacts/133-file-decomposition/task4-test-split.md` (+`task4-suite-map.txt`).
+    - **Deviation from the task text**: the suites stayed in-crate under
+      `src/**/tests/` instead of `tests/suites/*.rs`, because these modules
+      exercise `pub(crate)`/private items (`apply_runtime_outputs` is
+      `#[cfg(test)]`, socket helpers and `IpcServer` internals are private,
+      workspace save/reload hooks are test-only), which an integration root
+      (separate crate) cannot reach; the task text explicitly allowed the thin-
+      include form instead. No new `tests/*.rs` root was created, so the suite
+      inventory guard is unaffected.
+    - Method: `task4-split-test-files.py` slices items between per-suite ladder
+      entries named by the first test of each run (kept for provenance). Imports
+      and helpers stay in `tests/mod.rs`; suites start with `use super::*;` so
+      reachability is unchanged. Only two textual edits inside moved items:
+      `super::` chains gain one level (6 + 52 + 12 + 0 lines) and
+      `include_str!`/`include_bytes!` paths gain one level (11 + 1) — plus
+      `#[cfg(windows)] mod windows_named_pipe;` in the client root so the
+      Windows-only suite does not leave an unused glob on non-Windows builds.
+    - Verification: `task4-verify.py` **exit 0** — for each module, every original
+      top-level item (imports, helpers, tests) reappears exactly once across the
+      root + suites as the same code (whitespace-insensitive; rustfmt's
+      trailing-comma moves tolerated) after the documented bump, root files have
+      0 `#[test]` items, all 456 bodies placed, and all 66 root helper items are
+      referenced from at least one suite (no stranded `#[cfg(test)]`-only helpers).
+    - Guard/doc updates: `tests/performance_budgets.rs::is_sibling_test_file`
+      now also treats files under a `tests/` directory as test-only (it scanned
+      the new suites as production and false-positived on folding fixtures);
+      `tests/package_ui_conformance.rs` `RETIREMENT_GUARDS` now names
+      `src/server/js_runtime/tests/coding_agent_and_launcher.rs`; the
+      guard-enforced page `docs/wiki/flows/document-chunked-loading.md` now
+      points at `js_runtime/tests/document_and_git_facades.rs` and
+      `connection/tests/language_intelligence.rs`.
+    - Deferred to the wiki task below: ~20 other wiki pages still name the old
+      `src/**/tests.rs` paths (~80 references) and test-name `cargo test` filters
+      (`client::tests::real_server_tab`); the suite map artifact is the work order.
+    - Gates: `scripts/check.sh full` **exit 0**, 244 s, `PASSED`, clippy
+      `-D warnings` + `fmt --check` clean, totals **1996 passed / 0 failed /
+      1 ignored = baseline** (`task4-check-full.log`, `task4-exit-codes.txt`).
+      Compile time neutral (`cargo check --all-targets` after touching the tests
+      root: 6.5 s/6.8 s vs 6.7 s pre-change). Four earlier attempts were red on
+      unrelated timing-sensitive tests (worker-timeout `RecvError` under load,
+      two `agent_protocol` `ETXTBSY` spawns, one fake-LSP early exit) and one
+      desktop-harness hang after aborted runs; all passed standalone and in the
+      green run — recorded in the artifacts, not caused by the move.
 
-- [ ] Table-driven validation in `src/server/ui.rs` (C4)
+- [x] Table-driven validation in `src/server/ui.rs` (C4)
   - Acceptance Criteria:
     - Functional: string-set validation (`VALID_SLOTS`, `VALID_VISIBILITY`, `VALID_OVERLAY_ANCHORS`, `VALID_FOCUS_POLICIES`, `VALID_DISMISSAL_POLICIES`, `VALID_INPUT_SCOPES`, pointer policies, …) becomes a declarative table consulted by one validator; typed error kinds unchanged (same error variants surface for the same inputs — proven by existing tests).
     - Performance: validation cost not regressed (table lookup vs match — same order; hot-path SDUI validation is budgeted and tested).
@@ -138,7 +344,56 @@ behavior changes.
   - Test Cases to Write:
     - `allowed_sets_unchanged`: before/after set equality per field (golden test authored pre-refactor against the old tables).
 
-- [ ] String-enum macro (U5) and match-arm dedup (U4)
+  - Evidence (2026-09-21):
+    - Result: the 21 hand-written closed-set checks (147 lines of
+      `if !VALID_*.contains(..) { return Err(context.error(rule, Some(id), "…")) }`)
+      are now one-line `validate_choice("<key>", value, id, &context)?` calls backed
+      by the `CHOICE_FIELDS` table (21 rows of `(key, allowed, rule, label)`,
+      `#[rustfmt::skip]` data table) plus one validator, the `choice_field`
+      lookup, and the `choice_message` builder. Adding an allowed value is one edit
+      in the `VALID_*` slice; the diagnostic text is built from that slice
+      (`label` + `a, b, or c`, keeping the two "must be one of …" phrasings and
+      the Oxford comma), so message and values cannot drift. Reads and defaults
+      stay at the call sites (`required_str` / `optional_str(..).unwrap_or(..)`),
+      so missing-field, blank-string, and wrong-type behaviour is untouched —
+      only the membership check moved into the table. Diagnostic
+      (rule, id, message) triples are unchanged, including the layout-override
+      rows, which keep id = offending value.
+    - Security acceptance: the golden `allowed_sets_unchanged` test is
+      `choice_fields_pin_every_allowed_set` — exactly 21 rows, no duplicate keys,
+      every `VALID_*` slice still has >=1 row, and per-field `assert_eq!` against
+      the literal sets that shipped before the refactor. The companion
+      `choice_messages_match_the_shipped_diagnostics` pins the 21 exact message
+      literals (it caught a missing Oxford comma on the first run, i.e. the guard
+      works). Both were generated from the pre-change file, so they cannot drift
+      into agreeing with a regression. `cargo test --lib server::ui::` -> 24 passed.
+    - Performance: <=21-entry linear scan per closed-choice field at contribution
+      registration / override-validation time, no allocation on the accepted path,
+      nothing on the SDUI snapshot/update hot path; payload-budget and
+      conformance tests green.
+    - **Compromise on the line-count target**: `ui.rs` is 2,164 lines (from
+      3,320) — the 21 checks were 147 lines and the table + validator + docs cost
+      111, so the refactor itself saves ~36 lines; `< ~2,000` is not reached
+      because the rest of the file is the registry and the per-contribution
+      validators that C4 does not cover. Follow-up if the target matters: split
+      `ui.rs` into `src/server/ui/{panels,overlays,inputs,state}.rs` family
+      modules (same pattern as the protocol/server splits above).
+    - Deviation: the 1,112-line inline test module moved to
+      `src/server/ui/tests.rs` (`#[cfg(test)] mod tests;`, the module-declaration
+      form tasks 3-4 use), which also carries the two new tests — so
+      `src/server/ui.rs` is no longer the only file touched (same documented
+      deviation pattern as task 3).
+    - Gates: `scripts/check.sh full` **exit 0**, `full check PASSED`, totals
+      **1998 passed / 0 failed / 1 ignored** (= task-1 baseline 1996 + the 2 new
+      tests), clippy `-D warnings` + `fmt --check` clean, desktop/bindings stages
+      green (`task5-check-full.log`, `task5-exit-codes.txt`). One earlier attempt
+      hung in the known desktop-capture flake
+      (`manual_smoke_docs::plan118_ui_review_harness_…`; 1488 tests had passed with
+      0 failures, the test passes standalone in 50 s and passed in the rerun) —
+      unrelated to `ui.rs`. Method/codemod: `task5-table-validation.py`; write-up:
+      `task5-table-validation.md`.
+
+- [x] String-enum macro (U5) and match-arm dedup (U4)
   - Acceptance Criteria:
     - Functional: a `string_enum!` macro generates `parse`/`as_str`/`all_as_str` for the 10 enums; production `same_match_arms` sites resolved (merge arms or extract shared body); no behavior change (parse tables byte-identical).
     - Performance: `as_str` stays `const fn`-equivalent (match on discriminant); no lookup-table allocation.
@@ -158,6 +413,87 @@ behavior changes.
       - Review U4, U5.
   - Test Cases to Write:
     - `string_roundtrip_per_enum`: every variant `parse(as_str(v)) == Some(v)` and unknown strings `None` — one generic test applied per macro invocation.
+
+  - Evidence (2026-09-21):
+    - U5 result: `src/str_enum.rs` (126 lines incl. docs) defines
+      `string_enum_impl!`, generating `const fn as_str(self)`,
+      `fn parse(value: &str) -> Option<Self>`, an optional `const fn
+      all_as_str()` (trailing `all_as_str` token) and a `#[cfg(test)] const
+      ALL: &'static [Self]` used by the golden test; attributes/docs and the
+      visibility in front of the type name are copied onto the generated
+      `impl`. 15 hand-written pairs (89 variant/string pairs) in 7 files now
+      come from one declaration each; 2 new tests.
+    - U5 shape (deviation, deliberate): the macro takes the *impl*, not the
+      type — the plan sketched `string_enum! { enum Name { … } }`, but the
+      converted enums carry `rkyv`/`serde` derives, `#[serde(rename_all)]`,
+      `#[rkyv(…)]` and variant attributes (`#[default]`), so leaving every enum
+      declaration untouched guarantees the archive/wire attributes cannot be
+      disturbed. Not converted (documented in `task6-string-enum.md`): the three
+      `Result`-returning parsers (`protocol/behavior.rs:686`,
+      `design_system.rs:169`) and the parse-only enums
+      (`DeferredComponentKind`, `TextobjectDirection`, `SmartSelectAction`) are
+      outside the `Option<Self>` + `as_str` contract, and
+      `protocol::textobjects::TextobjectKind` already derives `parse` from its
+      own `pub const ALL` vocabulary list (no duplicated table; the macro's
+      test-only `ALL` would clash). Three package enums keep a module-private
+      `parse` via the `parse_private` form — no visibility widening.
+    - U5 count vs the plan: the plan says "the 10 enums"; the cited review is
+      absent from the repo (task-1 finding), so the measured inventory is the
+      source of truth: 16 enums have the triple, 15 converted + 1 skipped above.
+      `parse` cannot be `const fn` (rustc 1.98: "cannot match on `str` in
+      constant functions"), verified before writing the macro; `as_str` stays
+      `const fn`.
+    - U5 correctness evidence: the codemod
+      (`task6-string-enum.py` → `task6-string-enum-extraction.txt`,
+      `task6-string-enum-map.txt`) refuses any rewrite unless the `as_str` and
+      `parse` tables are the same bijection, the arm order equals the enum
+      declaration order, the `parse` body is only a table (no
+      trim/normalisation), and every declared variant is covered — so the
+      `parse` tables are byte-identical by construction. The golden test
+      (`src/str_enum/tests.rs`, `string_roundtrip_per_enum`) uses pairs
+      extracted from the pre-change tables and asserts `Enum::ALL` is
+      exhaustive, `as_str(variant)` equals the pinned string (the
+      protocol-visible surface), string uniqueness, `parse(as_str(v)) ==
+      Some(v)` and unknown-string rejection.
+    - U4 result: `clippy::match_same_arms` 38 (task-1 baseline: 32 production +
+      6 test-side) → **0** in the final pedantic run over the whole tree; the
+      standard gate is green too. Each site was fixed with clippy's own
+      multi-span merge suggestion (merge pattern + delete the duplicate arm)
+      applied by byte offset (`task6-u4-sites.md`). Semantic checks:
+      `src/shell/theme.rs`'s core token map keeps 147 keys / 112 unique aliases
+      before and after (zero added/removed), and the security-relevant
+      command→permission map in `packages/record/documentation.rs` keeps the
+      exact same command set in the merged `=> None` arm with every permission
+      arm untouched. Four merges collapsed a match to one real arm and tripped
+      the default `clippy::single_match` gate → rewritten as `if let` with the
+      same body.
+    - U4 method note (kept in the record): the first application used the
+      clippy JSON's byte offsets as Python string indices, so 16 files
+      containing non-ASCII (box-drawing/`§`) were spliced a few bytes early and
+      failed to parse. The 16 files whose only change was this task were
+      restored from `HEAD` and re-applied byte-safely; the 6 files that also
+      carry tasks 2-5 work or are new/untracked were repaired by hand against
+      the pre-edit spans in the JSON; a re-measured pedantic run then reported
+      exactly the 30 restored sites and none of the 8 hand-handled ones. All 61
+      remaining edits applied in one byte-safe pass.
+    - Guards updated (source-scanning doc guards, forced by both halves):
+      `tests/package_ui_conformance.rs::core_token_catalog_matches_tokens_md`
+      and `tests/primitives_docs.rs::phase20_1_token_catalog_is_complete_…`
+      now collect every quoted name on an arm line (aliased tokens share one
+      arm after U4); `no_component_kind_or_token_renamed`'s implemented-kind
+      marker is `=> "kind",` and its token marker is the quoted name; and
+      `catalog_is_drift_free_across_doc_enum_and_react_registry` reads the
+      `ComponentKind` string table from the macro invocation
+      (`double_quoted()` factored out and shared).
+    - Gates: `scripts/check.sh full` **exit 0**, `full check PASSED`, totals
+      **2000 passed / 0 failed / 1 ignored** (= task-1 baseline 1996 + 2 from
+      task 5 + the 2 new tests), clippy `-D warnings` + `fmt --check` clean,
+      desktop/bindings stages green (`task6-check-full.log`,
+      `task6-exit-codes.txt`). One red intermediate gate run (two
+      `package_ui_conformance` guards, then the `primitives_docs` guards and
+      four `single_match` sites) is recorded in the artifacts. Write-ups:
+      `task6-u4-match-arms.md`, `task6-string-enum.md`; codemod
+      `task6-string-enum.py`.
 
 - [ ] Split `src/shell/theme.rs` into resolution and validation modules
   - Acceptance Criteria:

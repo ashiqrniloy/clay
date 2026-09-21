@@ -98,15 +98,15 @@ fn validate_command(command: &CommandDeclaration) -> Result<(), ManifestValidati
         (
             RoutingPolicy::ClientFirstPredictable | RoutingPolicy::ClientFirstRequiresAck,
             CommandAuthority::BuiltInClientEdit,
-        ) => Ok(()),
-        (
+        )
+        | (
             RoutingPolicy::ServerFirst
             | RoutingPolicy::ServerFirstWithLock { .. }
             | RoutingPolicy::UiReactivePriority
             | RoutingPolicy::Background,
             CommandAuthority::ServerIntent,
-        ) => Ok(()),
-        (RoutingPolicy::ClientUiCommand, CommandAuthority::ClientUi) => Ok(()),
+        )
+        | (RoutingPolicy::ClientUiCommand, CommandAuthority::ClientUi) => Ok(()),
         _ => Err(ManifestValidationError::ExecutableOrSideEffectAuthority {
             command_id: command.command_id.clone(),
         }),

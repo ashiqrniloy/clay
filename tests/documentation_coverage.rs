@@ -239,8 +239,10 @@ fn parity_ledger_covers_every_manual_step_public_api_and_protocol_family() {
     );
 
     // Protocol families: every Client/Server/Agent variant covered at least once.
-    let client = enum_variants(&read("src/protocol/mod.rs"), "ClientMessage");
-    let server = enum_variants(&read("src/protocol/mod.rs"), "ServerMessage");
+    // Wire envelopes moved to their family module (plan 133 task 2); the
+    // protocol hub no longer defines them.
+    let client = enum_variants(&read("src/protocol/messages.rs"), "ClientMessage");
+    let server = enum_variants(&read("src/protocol/messages.rs"), "ServerMessage");
     let agent = enum_variants(&read("src/protocol/agent.rs"), "AgentServerMessage");
     let mut covered_client = Vec::new();
     let mut covered_server = Vec::new();

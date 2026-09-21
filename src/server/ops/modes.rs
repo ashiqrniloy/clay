@@ -286,7 +286,6 @@ pub(crate) fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, S
         .unwrap_or(4);
 
     let autocomplete_triggers: Vec<AutocompleteTrigger> = match value.get("autocompleteTriggers") {
-        None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(arr)) => arr
             .iter()
             .filter_map(|t| {
@@ -305,7 +304,6 @@ pub(crate) fn parse_editor_rules(value: &Value) -> Result<EditorBehaviorRules, S
     // accepted; unknown effects are dropped so packages can never introduce a
     // client-executed transform kind the engine does not recognise.
     let electric_characters: Vec<ElectricCharacterRule> = match value.get("electricCharacters") {
-        None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(arr)) => arr
             .iter()
             .filter_map(|entry| {

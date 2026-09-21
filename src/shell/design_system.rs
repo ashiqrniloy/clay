@@ -4,6 +4,8 @@
 //! Separates UI geometry, materials, state mappings, and motion from content-theme
 //! color authority (Decision Log 2026-08-28-2234).
 
+use crate::str_enum::string_enum_impl;
+
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -303,24 +305,12 @@ pub enum BorderStyle {
     Dotted,
 }
 
-impl BorderStyle {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "none" => Some(Self::None),
-            "solid" => Some(Self::Solid),
-            "dashed" => Some(Self::Dashed),
-            "dotted" => Some(Self::Dotted),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Solid => "solid",
-            Self::Dashed => "dashed",
-            Self::Dotted => "dotted",
-        }
+string_enum_impl! {
+    pub BorderStyle {
+        None => "none",
+        Solid => "solid",
+        Dashed => "dashed",
+        Dotted => "dotted",
     }
 }
 
@@ -346,20 +336,10 @@ pub enum OutlineStyle {
     Solid,
 }
 
-impl OutlineStyle {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "none" => Some(Self::None),
-            "solid" => Some(Self::Solid),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Solid => "solid",
-        }
+string_enum_impl! {
+    pub OutlineStyle {
+        None => "none",
+        Solid => "solid",
     }
 }
 
@@ -387,24 +367,12 @@ pub enum TransitionTiming {
     SpringSmooth,
 }
 
-impl TransitionTiming {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "linear" => Some(Self::Linear),
-            "ease-out" => Some(Self::EaseOut),
-            "spring-snappy" => Some(Self::SpringSnappy),
-            "spring-smooth" => Some(Self::SpringSmooth),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-            Self::EaseOut => "ease-out",
-            Self::SpringSnappy => "spring-snappy",
-            Self::SpringSmooth => "spring-smooth",
-        }
+string_enum_impl! {
+    pub TransitionTiming {
+        Linear => "linear",
+        EaseOut => "ease-out",
+        SpringSnappy => "spring-snappy",
+        SpringSmooth => "spring-smooth",
     }
 }
 
@@ -432,24 +400,12 @@ pub enum TransformPreset {
     HoverLift,
 }
 
-impl TransformPreset {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "none" => Some(Self::None),
-            "press-subtle" => Some(Self::PressSubtle),
-            "press-shift-down" => Some(Self::PressShiftDown),
-            "hover-lift" => Some(Self::HoverLift),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::PressSubtle => "press-subtle",
-            Self::PressShiftDown => "press-shift-down",
-            Self::HoverLift => "hover-lift",
-        }
+string_enum_impl! {
+    pub TransformPreset {
+        None => "none",
+        PressSubtle => "press-subtle",
+        PressShiftDown => "press-shift-down",
+        HoverLift => "hover-lift",
     }
 }
 
@@ -483,34 +439,17 @@ pub enum RecipeState {
     Invalid,
 }
 
-impl RecipeState {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "rest" => Some(Self::Rest),
-            "hover" => Some(Self::Hover),
-            "active" => Some(Self::Active),
-            "focus" => Some(Self::Focus),
-            "disabled" => Some(Self::Disabled),
-            "selected" => Some(Self::Selected),
-            "expanded" => Some(Self::Expanded),
-            "open" => Some(Self::Open),
-            "invalid" => Some(Self::Invalid),
-            _ => None,
-        }
-    }
-
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Rest => "rest",
-            Self::Hover => "hover",
-            Self::Active => "active",
-            Self::Focus => "focus",
-            Self::Disabled => "disabled",
-            Self::Selected => "selected",
-            Self::Expanded => "expanded",
-            Self::Open => "open",
-            Self::Invalid => "invalid",
-        }
+string_enum_impl! {
+    pub RecipeState {
+        Rest => "rest",
+        Hover => "hover",
+        Active => "active",
+        Focus => "focus",
+        Disabled => "disabled",
+        Selected => "selected",
+        Expanded => "expanded",
+        Open => "open",
+        Invalid => "invalid",
     }
 }
 

@@ -184,10 +184,10 @@ partially assembled document. A new head/reload/resync is the recovery boundary.
   absence of the old per-chunk `combined` allocation, plus the package-op and
   provider-window budget pins (`chunked_document_security_budgets_are_pinned`,
   `plan126_provider_document_window_budgets_are_pinned_and_documented`).
-- `src/server/js_runtime/tests.rs` — `documents_open_over_budget_returns_typed_error`
+- `src/server/js_runtime/tests/document_and_git_facades.rs` — `documents_open_over_budget_returns_typed_error`
   (open and reload legs, no document text to JS) and
   `documents_open_under_budget_unchanged` (golden contract below the cap).
-- `src/server/connection/tests.rs` — `static_completion_on_large_document_matches_small_document_results`
+- `src/server/connection/tests/language_intelligence.rs` — `static_completion_on_large_document_matches_small_document_results`
   (windowed consumer parity on a 4 MiB document).
 
 Run focused coverage with:

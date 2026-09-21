@@ -8,6 +8,8 @@
 //! `accept_update` in `src-tauri/src/release.rs` remains the only payload-apply
 //! gate; v1 self-update only execs the recorded argv.
 
+use crate::str_enum::string_enum_impl;
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,20 +28,10 @@ pub enum ChannelKind {
     Curl,
 }
 
-impl ChannelKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Npm => "npm",
-            Self::Curl => "curl",
-        }
-    }
-
-    fn parse(raw: &str) -> Option<Self> {
-        match raw {
-            "npm" => Some(Self::Npm),
-            "curl" => Some(Self::Curl),
-            _ => None,
-        }
+string_enum_impl! {
+    pub ChannelKind, parse_private {
+        Npm => "npm",
+        Curl => "curl",
     }
 }
 

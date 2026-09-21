@@ -11,6 +11,7 @@ pub mod protocol;
 pub(crate) mod sanitize;
 #[doc(hidden)]
 pub mod shell;
+pub(crate) mod str_enum;
 
 #[cfg(any(unix, windows))]
 pub mod server;

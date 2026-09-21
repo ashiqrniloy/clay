@@ -863,10 +863,21 @@ fn production_body(src: &str) -> &str {
 }
 
 /// Sibling `tests.rs` module files are test-only by convention
-/// (`#[cfg(test)] mod tests;` in the owning mod.rs); the guards above
-/// cannot see the declaration from the sibling file itself.
+/// (`#[cfg(test)] mod tests;` in the owning mod.rs), as are `<module>_tests.rs`
+/// siblings and the split suites under a `tests/` directory
+/// (`src/**/tests/mod.rs` + `src/**/tests/<suite>.rs`); the guards above cannot
+/// see the declaration from the test file itself.
 fn is_sibling_test_file(path: &std::path::Path) -> bool {
-    path.file_name().and_then(|name| name.to_str()) == Some("tests.rs")
+    let under_tests_dir = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        == Some("tests");
+    under_tests_dir
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "tests.rs" || name.ends_with("_tests.rs"))
 }
 
 fn mentions_folding_publish(body: &str) -> bool {

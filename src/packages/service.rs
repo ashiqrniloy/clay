@@ -195,8 +195,9 @@ impl std::fmt::Display for PackageServiceError {
                 f,
                 "{code}: package `{package_name}` requires explicit user adoption before execution ({detail}); inspect with `clay package inspect {package_name}` and approve with `clay package adopt {package_name}`"
             ),
-            Self::ApprovalStore { message } => write!(f, "{message}"),
-            Self::InstallLedger { message } => write!(f, "{message}"),
+            Self::ApprovalStore { message } | Self::InstallLedger { message } => {
+                write!(f, "{message}")
+            }
             Self::NoActiveReplacement { target } => {
                 write!(f, "no enabled package currently replaces `{target}`")
             }
