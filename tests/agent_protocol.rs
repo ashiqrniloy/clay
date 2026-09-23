@@ -4,7 +4,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use clay::perf::budgets::{
     AGENT_DAEMON_SPAWN_P95_BUDGET_MS, AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS,
@@ -29,10 +30,12 @@ fn payload_len(frame: &[u8]) -> usize {
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
+    // Wall-clock nanos are not unique across threads: two tests calling this
+    // within one clock tick shared a directory, so one could exec the mock
+    // agent while the other was still writing it (ETXTBSY, "Text file
+    // busy"). A per-process counter is collision-free by construction.
+    static TEMP_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+    let unique = TEMP_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!(
         "clay-agent-host-{name}-{}-{unique}",
         std::process::id()
