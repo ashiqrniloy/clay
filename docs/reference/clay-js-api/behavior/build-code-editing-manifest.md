@@ -136,6 +136,8 @@ const rules = buildCodeEditingManifest({
 - `pairs` (`Array<{ open: string; close: string }>`, optional): delimiter pairs.
 - `electricOutdentCharacters` (`string[]`, optional): unique single-character electric triggers.
 - `autocompleteTriggers` (`string[]`, optional): up to 32 unique single-character autocomplete triggers.
+- `caretStyle` (`object | undefined`, default `editor default bar`): Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime.
+- `movement` (`object | undefined`, default `code-editing defaults`): Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults.
 
 ## Key bindings
 

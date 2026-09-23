@@ -1,0 +1,35 @@
+unique float_cmp sites (cargo clippy --all-targets -- -W clippy::pedantic, clippy 0.1.98): 81
+
+A. RUNTIME-PRODUCTION sites (compiled into the shipped binary, outside any test module): 3 in 1 files
+B. TEST-ONLY sites inside production files (below #[cfg(test)]): 19 in 6 files
+C. TEST-FILE sites (tests/ paths or *_tests.rs): 59 in 14 files
+
+== A. RUNTIME-PRODUCTION ==
+src/shell/icons.rs: 3
+    369:35  
+    375:35  
+    564:28  
+
+== B. TEST MODULES INSIDE PRODUCTION FILES ==
+src/editor/theme.rs: 2 -> 785:28, 790:28
+src/server/ops/modes.rs: 2 -> 744:28, 754:28
+src/server/ops/theme.rs: 2 -> 836:28, 849:28
+src/shell/design_system.rs: 4 -> 2127:28, 2130:28, 2142:28, 2143:28
+src/shell/icons.rs: 2 -> 997:28, 997:28
+src/shell/package_ui.rs: 7 -> 1263:28, 1303:28, 1304:28, 1305:28, 1359:28, 1390:28, 1392:28
+
+== C. TEST FILES ==
+src/server/connection/tests/mod.rs: 2 -> 711:28, 833:28
+src/server/connection/tests/protocol_and_bootstrap.rs: 1 -> 287:28
+src/server/js_runtime/tests/editor_layout_and_design_system.rs: 1 -> 516:28
+src/server/js_runtime/tests/facades_and_modes.rs: 1 -> 567:28
+src/server/js_runtime/tests/load_package_markdown_defaults.rs: 2 -> 492:28, 493:28
+src/server/js_runtime/tests/runtime_themes_and_typography.rs: 2 -> 126:28, 179:28
+src/server/runtime_generation_tests.rs: 4 -> 617:28, 618:28, 619:28, 838:28
+src/shell/layout/tests.rs: 10 -> 580:28, 582:28, 584:28, 598:28, 601:28, 604:28, 613:28, 666:28, 686:28, 1083:28
+src/shell/theme/tests.rs: 15 -> 61:28, 529:28, 1042:28, 1043:28, 1044:28, 1045:28, 1046:28, 1055:28, 1056:28, 1057:28, 1075:28, 1076:28, 1130:28, 1154:28, 1155:28
+src/shell/theme/theme_snapshot_tests.rs: 1 -> 184:28
+tests/suites/../example_config_control_center_chord.rs: 3 -> 289:28, 290:28, 291:28
+tests/suites/../package_ui_conformance.rs: 12 -> 914:28, 918:28, 1546:28, 1547:28, 1548:28, 1549:28, 1550:28, 2602:28, 2674:28, 2730:28, 2754:28, 2758:28
+tests/suites/../performance_budgets.rs: 1 -> 596:28
+tests/suites/../theme_packages.rs: 4 -> 482:28, 786:28, 879:28, 943:28

@@ -75,11 +75,11 @@ ClientMessage::RequestResync {
 
 ## Tests
 
-- `src/client/tests.rs`: `client_ack_advances_confirmed_version` validates acknowledgement-driven confirmed version updates.
-- `src/client/tests.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
-- `src/client/tests.rs`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable stale rejection.
-- `src/client/tests.rs`: `client_applies_resync_snapshot_and_clears_pending_edits` validates snapshot recovery and pending cleanup.
-- `src/client/tests.rs`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale rejection and resync through a real Unix socket server.
+- `src/client/tests/`: `client_ack_advances_confirmed_version` validates acknowledgement-driven confirmed version updates.
+- `src/client/tests/`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
+- `src/client/tests/`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable stale rejection.
+- `src/client/tests/`: `client_applies_resync_snapshot_and_clears_pending_edits` validates snapshot recovery and pending cleanup.
+- `src/client/tests/`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale rejection and resync through a real Unix socket server.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` validates the UI resync boundary.
 - Relevant commands: `cargo test client --quiet`, `cargo test server --quiet`, `cargo test --quiet`.
 

@@ -6,6 +6,7 @@
     probe.py wait-ready [seconds]      # poll until the editor exposes EditableText
     probe.py insert <text> [end|caret] # InsertText on the editor (keeps the document size)
     probe.py focus                     # grab editor focus
+    probe.py click <name> [index]      # invoke an Action node by name substring
     probe.py completion [seconds]      # poll for a completion popup/status and report it
 """
 
@@ -177,6 +178,32 @@ def main(argv):
                 return 0
         print("focus refused")
         return 1
+    if command == "click":
+        wanted = argv[2].lower()
+        index = int(argv[3]) if len(argv) > 3 else 0
+        hits = [
+            node
+            for node in nodes()
+            if wanted in clean(node.get_name()).lower()
+            and "Action" in interfaces(node)
+        ]
+        if len(hits) <= index:
+            print(f"no action node matching {argv[2]!r} (hits={len(hits)})")
+            return 1
+        node = hits[index]
+        try:
+            action = node.get_action_iface()
+            count = action.get_n_actions()
+            names = [action.get_action_name(i) for i in range(count)]
+            action.do_action(0)
+        except Exception as error:  # noqa: BLE001 - reported, not raised
+            print(f"action failed on {clean(node.get_name())!r}: {error}")
+            return 1
+        print(
+            f"clicked {clean(node.get_name())!r}"
+            f" role={clean(node.get_role_name())} actions={names}"
+        )
+        return 0
     if command == "insert":
         text = argv[2]
         where = argv[3] if len(argv) > 3 else "end"

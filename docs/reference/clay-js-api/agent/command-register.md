@@ -15,7 +15,19 @@ phase: Phase 2
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: description
+    type: string
+    default: optional
+    description: short description shown in command discovery.
+  - name: handler
+    type: string
+    default: optional
+    description: a host-built-in handler — `compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`, `openSession`, `openSessionAsFork`, `startRun`, `startWorkflow`, or `steer`. Omitted handlers are data-only commands (dispatch rejects them).
+  - name: name
+    type: string
+    default: required
+    description: the daemon command name. Slash names (`"/compact"`) are invocable from prompt text; other names are dispatch-only. Duplicate names fail closed.
 security: Forwards an inert command declaration (name, optional handler name and description) to the daemon's validated command registry; handlers are host-built-in only and can never inject drivers or execute client code. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.commandRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Commands are data; the daemon's built-in handlers execute them under existing session authority.
 lookup_tags: [agent, command, registration, slash-commands, js-api]

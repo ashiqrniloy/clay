@@ -3,7 +3,7 @@
 ## Source
 
 - `src/server/js_runtime/mod.rs`
-- `src/server/js_runtime/tests.rs`
+- `src/server/js_runtime/tests/`
 - `src/server/facades.rs`
 - `runtime/js/*.js` and `runtime/js/*.d.ts`
 - `src/server/ops/mod.rs`
@@ -30,7 +30,7 @@
 | `src/server/js_runtime/source.rs` | `ClayModuleLoader` + `ModuleLoader` impl, `markdown_it_module_source`, `CONTROLLED_MAIN_SPECIFIER` |
 | `src/server/js_runtime/evaluation.rs` | `evaluate_loaded_module`, `apply_persisted_preferences`, the `evaluate_js_*` bridges, `TerminationTimer` |
 | `src/server/js_runtime/validation.rs` | parse/completion/language-intelligence/document-analysis JSON marshal/unmarshal + result validation |
-| `src/server/js_runtime/tests.rs` | One sibling unit-test module retaining parent-private access; runtime, facade, package-load, trust-domain, loader, and configuration regressions |
+| `src/server/js_runtime/tests/` | One sibling unit-test module retaining parent-private access; runtime, facade, package-load, trust-domain, loader, and configuration regressions |
 
 External callers still reach the previously-`pub(crate)` types (`ClayRuntimeError`, `ClayRuntimeEvaluation`, `RuntimeEntry`, `RuntimeCommand`, `ClayJsRuntimeService`) at `crate::server::js_runtime::*` via `pub(crate)` re-exports in `mod.rs`.
 
@@ -189,13 +189,13 @@ assert_eq!(error.diagnostic().code, "runtime.timeout");
 
 ## Tests
 
-- `src/server/mod.rs`: `reload_runtime_generation_swaps_only_after_successful_configuration_load`, `successful_reload_refreshes_open_documents_without_full_snapshots`, and `failed_reload_keeps_previous_runtime_generation_active` verify generation ID changes, fresh service state after success, open-document refresh through generic mode activation, no full-text snapshot refresh frames, stale service retention after failure, and sanitized diagnostics.
+- `src/server/runtime_generation_tests.rs`: `reload_runtime_generation_swaps_only_after_successful_configuration_load`, `successful_reload_refreshes_open_documents_without_full_snapshots`, and `failed_reload_keeps_previous_runtime_generation_active` verify generation ID changes, fresh service state after success, open-document refresh through generic mode activation, no full-text snapshot refresh frames, stale service retention after failure, and sanitized diagnostics.
 - `tests/persistent_runtime_hot_reload.rs`: `developer_hot_reload_trigger_reports_success_and_sanitized_failure` verifies the non-GUI developer trigger reports success, returns sanitized failure diagnostics, and keeps the previous generation active after failure.
-- `src/server/js_runtime/tests.rs`: 198 passing unit tests plus one ignored manual resource probe cover persistent evaluation, trust-domain separation/replay, exact helper-export loading, package load/activation, manifest/keybinding APIs, parse/completion/language-intelligence bridges, editor-layout configuration, syntax ownership, timeout/heap recovery, and sanitized failures. `cargo test --lib server::js_runtime::tests -- --test-threads=1` is the focused move/regression command.
+- `src/server/js_runtime/tests/`: 198 passing unit tests plus one ignored manual resource probe cover persistent evaluation, trust-domain separation/replay, exact helper-export loading, package load/activation, manifest/keybinding APIs, parse/completion/language-intelligence bridges, editor-layout configuration, syntax ownership, timeout/heap recovery, and sanitized failures. `cargo test --lib server::js_runtime::tests -- --test-threads=1` is the focused move/regression command.
 - `src/server/js_runtime/mod.rs`: owns only runtime implementation and `#[cfg(test)]` service inspection helpers; it includes the sibling module with `#[cfg(test)] mod tests;` and does not contain the test mass.
 - `src/client/mod.rs::tests::selected_file_edit_then_save_persists_and_reports_clean` starts a real Unix IPC server with a `Ctrl+S` configuration overlay, opens and activates a selected Rust file, verifies mode activation preserved the save binding, queues edit then save, and checks both clean `DocumentSaved` metadata and persisted bytes.
-- `src/server/connection/tests.rs`: `client_receives_js_generated_sdui_snapshot` verifies a runtime-generated tree stored in server SDUI state is emitted as the bootstrap `SduiSnapshot`; `server_sends_runtime_diagnostics_after_bootstrap` verifies stored diagnostics are published after bootstrap.
-- `src/server/js_runtime/tests.rs`: typography transaction/rejection tests verify complete replacement and no raw authority fields; `src/server/mod.rs::typography_update_reaches_connected_clients_once` verifies a changed configuration emits one bounded live server update.
+- `src/server/connection/tests/`: `client_receives_js_generated_sdui_snapshot` verifies a runtime-generated tree stored in server SDUI state is emitted as the bootstrap `SduiSnapshot`; `server_sends_runtime_diagnostics_after_bootstrap` verifies stored diagnostics are published after bootstrap.
+- `src/server/js_runtime/tests/`: typography transaction/rejection tests verify complete replacement and no raw authority fields; `src/server/runtime_generation_tests.rs::typography_update_reaches_connected_clients_once` verifies a changed configuration emits one bounded live server update.
 - `src/server/document_analysis.rs`: 6 unit tests covering worker lifecycle, open/change/close/reset/completion/intelligence/shutdown flows, stale output rejection, grant revocation, oversize document rejection, mailbox coalescing, and root/generation cancellation.
 - Command: `cargo test js_runtime --quiet`
 - Command: `cargo test persistent_js_runtime_retains_global_state_between_evaluations --lib`

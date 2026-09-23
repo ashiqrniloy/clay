@@ -1,3 +1,5 @@
+use crate::lock_util::LockOrRecover;
+
 mod agent;
 mod behavior;
 mod commands;
@@ -102,10 +104,10 @@ use self::{
         op_clay_modes_register_pattern,
     },
     packages::{
-        op_clay_packages_end_package_activation, op_clay_packages_list_first_party_specifiers,
-        op_clay_packages_load_in_package_domain, op_clay_packages_load_package,
-        op_clay_packages_load_package_by_specifier, op_clay_packages_validate_manifest,
-        op_clay_packages_validate_permissions,
+        op_clay_packages_authorize, op_clay_packages_end_package_activation,
+        op_clay_packages_list_first_party_specifiers, op_clay_packages_load_in_package_domain,
+        op_clay_packages_load_package, op_clay_packages_load_package_by_specifier,
+        op_clay_packages_validate_manifest, op_clay_packages_validate_permissions,
     },
     parse::{op_clay_parse_register_parse_handler, op_clay_parse_store_update},
     planned::op_clay_runtime_unavailable,
@@ -414,11 +416,12 @@ impl ClayOpState {
     /// worker around registered handler callbacks, and by host evaluations
     /// carrying an explicit package context. Cleared at every evaluation
     /// begin so stale contexts never leak across commands.
+    ///
+    /// Plan 134 D5: the lock recovers from poison. This is attribution only —
+    /// every use resolves the package through the host's enabled set, so a
+    /// recovered stale context can never expand authority.
     pub(crate) fn set_current_package(&self, context: Option<PackageContext>) {
-        *self
-            .current_package
-            .lock()
-            .expect("current package mutex poisoned") = context;
+        *self.current_package.lock_or_recover() = context;
     }
 
     /// Rewire the cross-domain bridge to the current third-party general-lane
@@ -428,10 +431,7 @@ impl ClayOpState {
         &self,
         sender: crate::server::js_runtime::RuntimeCommandSender,
     ) {
-        *self
-            .third_party_commands
-            .lock()
-            .expect("third-party bridge mutex poisoned") = Some(sender);
+        *self.third_party_commands.lock_or_recover() = Some(sender);
         // A fresh third-party worker starts with no snapshot: re-push the
         // current active editor mode so its gate is immediately correct.
         self.replicate_active_editor_mode();
@@ -444,10 +444,7 @@ impl ClayOpState {
         &self,
         sender: crate::server::js_runtime::RuntimeCommandSender,
     ) {
-        *self
-            .third_party_latency_commands
-            .lock()
-            .expect("third-party latency bridge mutex poisoned") = Some(sender);
+        *self.third_party_latency_commands.lock_or_recover() = Some(sender);
         self.replicate_active_editor_mode();
     }
 
@@ -456,10 +453,7 @@ impl ClayOpState {
     pub(crate) fn third_party_commands(
         &self,
     ) -> Option<crate::server::js_runtime::RuntimeCommandSender> {
-        self.third_party_commands
-            .lock()
-            .expect("third-party bridge mutex poisoned")
-            .clone()
+        self.third_party_commands.lock_or_recover().clone()
     }
 
     /// Absorb a cross-domain package-load evaluation's registration payload
@@ -473,32 +467,25 @@ impl ClayOpState {
         evaluation: &crate::server::js_runtime::ClayRuntimeEvaluation,
     ) {
         self.runtime_records
-            .lock()
-            .expect("runtime records mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.op_records.iter().cloned());
         self.parse_handlers
-            .lock()
-            .expect("parse handlers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.parse_handlers.iter().cloned());
         self.js_parse_handlers
-            .lock()
-            .expect("js parse handlers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.js_parse_handlers.iter().cloned());
         self.completion_providers
-            .lock()
-            .expect("completion providers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.completion_providers.iter().cloned());
         self.js_completion_providers
-            .lock()
-            .expect("js completion providers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.js_completion_providers.iter().cloned());
         self.language_intelligence_providers
-            .lock()
-            .expect("language intelligence providers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.language_intelligence_providers.iter().cloned());
         self.js_language_intelligence_providers
-            .lock()
-            .expect("js language intelligence providers mutex poisoned")
+            .lock_or_recover()
             .extend(
                 evaluation
                     .js_language_intelligence_providers
@@ -506,32 +493,19 @@ impl ClayOpState {
                     .cloned(),
             );
         self.document_analyzers
-            .lock()
-            .expect("document analyzers mutex poisoned")
+            .lock_or_recover()
             .extend(evaluation.document_analyzers.iter().cloned());
         if let Some(tree) = &evaluation.published_sdui_tree {
-            *self
-                .published_sdui_tree
-                .lock()
-                .expect("sdui tree mutex poisoned") = Some(tree.clone());
+            *self.published_sdui_tree.lock_or_recover() = Some(tree.clone());
         }
         if let Some(set) = &evaluation.published_decoration_set {
-            *self
-                .published_decoration_set
-                .lock()
-                .expect("decoration set mutex poisoned") = Some(set.clone());
+            *self.published_decoration_set.lock_or_recover() = Some(set.clone());
         }
         if let Some(set) = &evaluation.published_diagnostic_set {
-            *self
-                .published_diagnostic_set
-                .lock()
-                .expect("diagnostic set mutex poisoned") = Some(set.clone());
+            *self.published_diagnostic_set.lock_or_recover() = Some(set.clone());
         }
         if let Some(set) = &evaluation.published_folding_set {
-            *self
-                .published_folding_set
-                .lock()
-                .expect("folding set mutex poisoned") = Some(set.clone());
+            *self.published_folding_set.lock_or_recover() = Some(set.clone());
         }
     }
 
@@ -544,8 +518,7 @@ impl ClayOpState {
     ) -> Result<crate::packages::record::PackageRecord, JsErrorBox> {
         let context = self
             .current_package
-            .lock()
-            .expect("current package mutex poisoned")
+            .lock_or_recover()
             .clone()
             .ok_or_else(|| {
                 JsErrorBox::generic(
@@ -554,7 +527,7 @@ impl ClayOpState {
                 )
             })?;
         let service = self.package_service();
-        let service = service.lock().expect("package service mutex poisoned");
+        let service = service.lock_or_recover();
         service
             .enabled_record(&context.package_name, &context.package_version)
             .cloned()
@@ -575,9 +548,8 @@ impl ClayOpState {
         let record = self.current_package_record()?;
         let service = self.package_service();
         let approved = service
-            .lock()
-            .expect("package service mutex poisoned")
-            .has_approved_capability(&record.manifest.name, permission);
+            .lock_or_recover()
+            .capability_granted(&record, permission);
         if !approved {
             return Err(JsErrorBox::generic(format!(
                 "packages.missing_permission: package `{}` lacks approved `{}`",
@@ -622,17 +594,13 @@ impl ClayOpState {
             return None;
         };
         self.modes
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .active_major_mode(document_id)
             .map(|activation| activation.mode_id.clone())
     }
 
     pub(crate) fn set_replicated_active_editor_mode(&self, mode_id: Option<String>) {
-        *self
-            .replicated_active_editor_mode
-            .lock()
-            .expect("replicated active editor mode mutex poisoned") = mode_id;
+        *self.replicated_active_editor_mode.lock_or_recover() = mode_id;
     }
 
     /// Plan 130 A1: attach the server-owned agent authority to this lane.
@@ -643,7 +611,7 @@ impl ClayOpState {
     pub(crate) fn set_agent_host(&self, host: crate::server::agent::AgentHostHandle) {
         let drained = self.take_pending_agent_registrations();
         {
-            let mut slot = self.agent_host.lock().expect("agent host mutex poisoned");
+            let mut slot = self.agent_host.lock_or_recover();
             *slot = Some(host.clone());
         }
         for registration in drained {
@@ -707,10 +675,7 @@ impl ClayOpState {
         &self,
         fanout: crate::server::fanout::Fanout<crate::protocol::EditorCommandRequest>,
     ) {
-        *self
-            .editor_command_publisher
-            .lock()
-            .expect("editor command publisher mutex poisoned") = Some(fanout);
+        *self.editor_command_publisher.lock_or_recover() = Some(fanout);
     }
 
     /// Publish a gated editor-command execution request to connected clients.
@@ -720,10 +685,7 @@ impl ClayOpState {
         &self,
         request: crate::protocol::EditorCommandRequest,
     ) -> bool {
-        let publishers = self
-            .editor_command_publisher
-            .lock()
-            .expect("editor command publisher mutex poisoned");
+        let publishers = self.editor_command_publisher.lock_or_recover();
         let Some(fanout) = publishers.as_ref() else {
             return false;
         };
@@ -735,10 +697,7 @@ impl ClayOpState {
         &self,
         fanout: crate::server::fanout::StateFanout<Option<crate::protocol::CaretStyle>>,
     ) {
-        *self
-            .caret_style_publisher
-            .lock()
-            .expect("caret style publisher mutex poisoned") = Some(fanout);
+        *self.caret_style_publisher.lock_or_recover() = Some(fanout);
     }
 
     /// Publish the runtime caret appearance override (`None` clears it) to
@@ -748,10 +707,7 @@ impl ClayOpState {
         &self,
         style: Option<crate::protocol::CaretStyle>,
     ) -> bool {
-        let publishers = self
-            .caret_style_publisher
-            .lock()
-            .expect("caret style publisher mutex poisoned");
+        let publishers = self.caret_style_publisher.lock_or_recover();
         let Some(fanout) = publishers.as_ref() else {
             return false;
         };
@@ -765,10 +721,7 @@ impl ClayOpState {
         &self,
         fanout: crate::server::fanout::StateFanout<Option<crate::protocol::WrapPolicy>>,
     ) {
-        *self
-            .editor_layout_publisher
-            .lock()
-            .expect("editor layout publisher mutex poisoned") = Some(fanout);
+        *self.editor_layout_publisher.lock_or_recover() = Some(fanout);
     }
 
     /// Publish the runtime editor wrap-policy override (`None` clears it) to
@@ -778,10 +731,7 @@ impl ClayOpState {
         &self,
         wrap: Option<crate::protocol::WrapPolicy>,
     ) -> bool {
-        let publishers = self
-            .editor_layout_publisher
-            .lock()
-            .expect("editor layout publisher mutex poisoned");
+        let publishers = self.editor_layout_publisher.lock_or_recover();
         let Some(fanout) = publishers.as_ref() else {
             return false;
         };
@@ -795,10 +745,7 @@ impl ClayOpState {
         &self,
         fanout: crate::server::fanout::StateFanout<crate::protocol::ShellPreferences>,
     ) {
-        *self
-            .shell_preferences_publisher
-            .lock()
-            .expect("shell preferences publisher mutex poisoned") = Some(fanout);
+        *self.shell_preferences_publisher.lock_or_recover() = Some(fanout);
     }
 
     /// Phase 22.1: publish shell-level user preferences to connected clients
@@ -807,10 +754,7 @@ impl ClayOpState {
         &self,
         preferences: crate::protocol::ShellPreferences,
     ) -> bool {
-        let publishers = self
-            .shell_preferences_publisher
-            .lock()
-            .expect("shell preferences publisher mutex poisoned");
+        let publishers = self.shell_preferences_publisher.lock_or_recover();
         let Some(fanout) = publishers.as_ref() else {
             return false;
         };
@@ -826,11 +770,7 @@ impl ClayOpState {
             self.domain,
             crate::packages::bundled::RuntimeDomain::ThirdParty
         ) {
-            return self
-                .replicated_active_editor_mode
-                .lock()
-                .expect("replicated active editor mode mutex poisoned")
-                .clone();
+            return self.replicated_active_editor_mode.lock_or_recover().clone();
         }
         self.active_major_mode_id()
     }
@@ -846,22 +786,12 @@ impl ClayOpState {
             return;
         }
         let mode_id = self.active_major_mode_id();
-        if let Some(sender) = self
-            .third_party_commands
-            .lock()
-            .expect("third-party command channel mutex poisoned")
-            .as_ref()
-        {
+        if let Some(sender) = self.third_party_commands.lock_or_recover().as_ref() {
             let _ = sender.send(
                 crate::server::js_runtime::RuntimeCommand::UpdateActiveEditorMode(mode_id.clone()),
             );
         }
-        if let Some(sender) = self
-            .third_party_latency_commands
-            .lock()
-            .expect("third-party latency command channel mutex poisoned")
-            .as_ref()
-        {
+        if let Some(sender) = self.third_party_latency_commands.lock_or_recover().as_ref() {
             let _ = sender
                 .send(crate::server::js_runtime::RuntimeCommand::UpdateActiveEditorMode(mode_id));
         }
@@ -870,20 +800,11 @@ impl ClayOpState {
     pub(crate) fn workspace(
         &self,
     ) -> Arc<tokio::sync::Mutex<crate::server::workspace::WorkspaceState>> {
-        Arc::clone(
-            &self
-                .runtime_context
-                .lock()
-                .expect("Clay runtime op state mutex poisoned")
-                .workspace,
-        )
+        Arc::clone(&self.runtime_context.lock_or_recover().workspace)
     }
 
     pub(super) fn runtime_document_id(&self) -> crate::protocol::DocumentId {
-        self.runtime_context
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .runtime_document_id
+        self.runtime_context.lock_or_recover().runtime_document_id
     }
 
     pub(crate) fn set_runtime_context(
@@ -892,10 +813,7 @@ impl ClayOpState {
         runtime_document_id: crate::protocol::DocumentId,
         configuration_evaluation: bool,
     ) {
-        *self
-            .runtime_context
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = ClayRuntimeContext {
+        *self.runtime_context.lock_or_recover() = ClayRuntimeContext {
             workspace,
             runtime_document_id,
             configuration_evaluation,
@@ -904,8 +822,7 @@ impl ClayOpState {
 
     pub(super) fn language_server_authorization_is_open(&self) -> bool {
         self.runtime_context
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .configuration_evaluation
             && !self
                 .language_server_authority_sealed
@@ -940,43 +857,18 @@ impl ClayOpState {
         // Stale package provenance must never leak across commands; the
         // load op or the worker handler branch re-stamps it when needed.
         self.set_current_package(None);
-        *self
-            .last_published_behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
+        *self.last_published_behavior.lock_or_recover() = None;
         self.package_activation_depth.store(0, Ordering::Release);
-        self.runtime_records
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clear();
-        *self
-            .last_parse_update_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
+        self.runtime_records.lock_or_recover().clear();
+        *self.last_parse_update_json.lock_or_recover() = None;
         *self
             .last_language_intelligence_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
-        *self
-            .last_completion_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
-        *self
-            .published_sdui_tree
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
-        *self
-            .published_decoration_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
-        *self
-            .published_diagnostic_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
-        *self
-            .published_folding_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = None;
+            .lock_or_recover() = None;
+        *self.last_completion_result_json.lock_or_recover() = None;
+        *self.published_sdui_tree.lock_or_recover() = None;
+        *self.published_decoration_set.lock_or_recover() = None;
+        *self.published_diagnostic_set.lock_or_recover() = None;
+        *self.published_folding_set.lock_or_recover() = None;
     }
 
     /// Handle to the shared `PackageService` used by the resolver op for
@@ -1000,75 +892,47 @@ impl ClayOpState {
     }
 
     pub(crate) fn records(&self) -> Vec<String> {
-        self.runtime_records
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.runtime_records.lock_or_recover().clone()
     }
 
     pub(crate) fn published_sdui_tree(&self) -> Option<crate::protocol::SduiTree> {
-        self.published_sdui_tree
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.published_sdui_tree.lock_or_recover().clone()
     }
 
     pub(crate) fn published_decoration_set(&self) -> Option<DecorationSet> {
-        self.published_decoration_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.published_decoration_set.lock_or_recover().clone()
     }
 
     pub(crate) fn published_diagnostic_set(&self) -> Option<DiagnosticSet> {
-        self.published_diagnostic_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.published_diagnostic_set.lock_or_recover().clone()
     }
 
     pub(crate) fn published_folding_set(&self) -> Option<FoldingRangeSet> {
-        self.published_folding_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.published_folding_set.lock_or_recover().clone()
     }
 
     pub(crate) fn parse_handlers(&self) -> Vec<crate::server::parse_coordinator::ParseHandlerMeta> {
-        self.parse_handlers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.parse_handlers.lock_or_recover().clone()
     }
 
     pub(crate) fn js_parse_handlers(
         &self,
     ) -> Vec<crate::server::parse_coordinator::JsParseHandlerRegistration> {
-        self.js_parse_handlers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.js_parse_handlers.lock_or_recover().clone()
     }
 
     pub(crate) fn take_parse_update_json(&self) -> Option<String> {
-        self.last_parse_update_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .take()
+        self.last_parse_update_json.lock_or_recover().take()
     }
 
     pub(crate) fn take_language_intelligence_result_json(&self) -> Option<String> {
         self.last_language_intelligence_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .take()
     }
 
     pub(crate) fn take_completion_result_json(&self) -> Option<String> {
-        self.last_completion_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .take()
+        self.last_completion_result_json.lock_or_recover().take()
     }
 
     pub(crate) fn behavior_manifest(&self) -> BehaviorManifest {
@@ -1076,18 +940,13 @@ impl ClayOpState {
         // read the mode layer the evaluation activated); otherwise resolve the
         // manifest governing the current runtime document (its per-document
         // mode layer when one was published, else the connection-wide global).
-        let last = self
-            .last_published_behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone();
+        let last = self.last_published_behavior.lock_or_recover().clone();
         if let Some(manifest) = last {
             return manifest;
         }
         let document_id = self.runtime_document_id();
         self.behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .manifest_for(document_id)
             .clone()
     }
@@ -1100,13 +959,9 @@ impl ClayOpState {
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
         let published = self
             .behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .publish_replacement(replacement)?;
-        *self
-            .last_published_behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(published.clone());
+        *self.last_published_behavior.lock_or_recover() = Some(published.clone());
         Ok(published)
     }
 
@@ -1114,12 +969,7 @@ impl ClayOpState {
         &self,
         rule: KeyBindingRule,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
-        let mut replacement = self
-            .behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .manifest()
-            .clone();
+        let mut replacement = self.behavior.lock_or_recover().manifest().clone();
         if !replacement
             .commands
             .iter()
@@ -1136,14 +986,10 @@ impl ClayOpState {
         self.replicate_active_editor_mode();
         if self
             .runtime_context
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .configuration_evaluation
         {
-            let mut configured = self
-                .configured_keymaps
-                .lock()
-                .expect("Clay runtime op state mutex poisoned");
+            let mut configured = self.configured_keymaps.lock_or_recover();
             configured.retain(|existing| {
                 existing.context != rule.context || existing.sequence != rule.sequence
             });
@@ -1157,12 +1003,7 @@ impl ClayOpState {
         sequence: &[KeyStroke],
         context: &KeyBindingContext,
     ) -> Result<BehaviorManifest, crate::behavior::manifest::ManifestValidationError> {
-        let mut replacement = self
-            .behavior
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .manifest()
-            .clone();
+        let mut replacement = self.behavior.lock_or_recover().manifest().clone();
         replacement.keymaps.retain(|existing| {
             existing.context != *context || existing.sequence.as_slice() != sequence
         });
@@ -1171,13 +1012,11 @@ impl ClayOpState {
         self.replicate_active_editor_mode();
         if self
             .runtime_context
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .configuration_evaluation
         {
             self.configured_keymaps
-                .lock()
-                .expect("Clay runtime op state mutex poisoned")
+                .lock_or_recover()
                 .retain(|existing| {
                     existing.context != *context || existing.sequence.as_slice() != sequence
                 });
@@ -1189,43 +1028,29 @@ impl ClayOpState {
         if let Some(package_prefix) = set.package_prefix() {
             let _ = self
                 .decoration_cache
-                .lock()
-                .expect("Clay runtime op state mutex poisoned")
+                .lock_or_recover()
                 .insert_validated_set(package_prefix, set.clone());
         }
-        *self
-            .published_decoration_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(set);
+        *self.published_decoration_set.lock_or_recover() = Some(set);
     }
 
     pub(super) fn publish_diagnostic_set(&self, set: DiagnosticSet) {
         let _ = self
             .diagnostic_cache
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .insert_validated_set(set.clone());
-        *self
-            .published_diagnostic_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(set);
+        *self.published_diagnostic_set.lock_or_recover() = Some(set);
     }
 
     pub(super) fn publish_folding_set(&self, set: FoldingRangeSet) {
-        *self
-            .published_folding_set
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(set);
+        *self.published_folding_set.lock_or_recover() = Some(set);
     }
 
     pub(super) fn register_parse_handler_meta(
         &self,
         meta: crate::server::parse_coordinator::ParseHandlerMeta,
     ) {
-        self.parse_handlers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .push(meta);
+        self.parse_handlers.lock_or_recover().push(meta);
     }
 
     pub(super) fn register_js_parse_handler(
@@ -1233,38 +1058,25 @@ impl ClayOpState {
         registration: crate::server::parse_coordinator::JsParseHandlerRegistration,
     ) {
         self.register_parse_handler_meta(registration.meta.clone());
-        self.js_parse_handlers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .push(registration);
+        self.js_parse_handlers.lock_or_recover().push(registration);
     }
 
     pub(super) fn store_parse_update_json(&self, json: String) {
-        *self
-            .last_parse_update_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(json);
+        *self.last_parse_update_json.lock_or_recover() = Some(json);
     }
 
     pub(super) fn store_language_intelligence_result_json(&self, json: String) {
         *self
             .last_language_intelligence_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(json);
+            .lock_or_recover() = Some(json);
     }
 
     pub(super) fn store_completion_result_json(&self, json: String) {
-        *self
-            .last_completion_result_json
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(json);
+        *self.last_completion_result_json.lock_or_recover() = Some(json);
     }
 
     pub(super) fn publish_sdui_tree(&self, tree: crate::protocol::SduiTree) {
-        *self
-            .published_sdui_tree
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(tree);
+        *self.published_sdui_tree.lock_or_recover() = Some(tree);
     }
 
     pub(super) fn register_mode(
@@ -1273,8 +1085,7 @@ impl ClayOpState {
         declaration: crate::packages::modes::ModeDeclaration,
     ) -> Result<(), crate::packages::modes::ModeDiagnostic> {
         self.modes
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_mode(package, declaration)
     }
 
@@ -1283,10 +1094,7 @@ impl ClayOpState {
         input: &crate::packages::modes::DocumentClassificationInput,
     ) -> Result<crate::packages::modes::ModeClassification, crate::packages::modes::ModeDiagnostic>
     {
-        self.modes
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .classify(input)
+        self.modes.lock_or_recover().classify(input)
     }
 
     /// Activate a major mode with host-resolved owner provenance: the
@@ -1298,22 +1106,19 @@ impl ClayOpState {
         input: &crate::packages::modes::DocumentClassificationInput,
     ) -> Result<crate::packages::modes::MajorModeActivation, crate::packages::modes::ModeDiagnostic>
     {
-        let mut modes = self
-            .modes
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut modes = self.modes.lock_or_recover();
         let classification = modes.classify(input)?;
         let owner = {
             let service = self.package_service();
-            let service = service.lock().expect("package service mutex poisoned");
+            let service = service.lock_or_recover();
             service
                 .enabled_record(
                     &classification.package_name,
                     &classification.package_version,
                 )
                 .filter(|record| {
-                    service.has_approved_capability(
-                        &record.manifest.name,
+                    service.capability_granted(
+                        record,
                         crate::packages::permissions::PackagePermission::ModeActivation,
                     )
                 })
@@ -1339,7 +1144,7 @@ impl ClayOpState {
     )> {
         let record = {
             let service = self.package_service();
-            let service = service.lock().expect("package service mutex poisoned");
+            let service = service.lock_or_recover();
             service
                 .enabled_record(&activation.package_name, &activation.package_version)
                 .cloned()
@@ -1407,13 +1212,7 @@ impl ClayOpState {
         manifest.editor_rules = editor_rules;
         manifest.commands.extend(extra_commands);
         manifest.keymaps.extend(extra_keymaps);
-        for rule in self
-            .configured_keymaps
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .iter()
-            .cloned()
-        {
+        for rule in self.configured_keymaps.lock_or_recover().iter().cloned() {
             manifest.keymaps.retain(|existing| {
                 existing.context != rule.context || existing.sequence != rule.sequence
             });
@@ -1440,8 +1239,7 @@ impl ClayOpState {
         crate::packages::commands::CommandDiagnostic,
     > {
         self.commands
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_command(package, declaration)
     }
 
@@ -1451,8 +1249,7 @@ impl ClayOpState {
 
     pub(super) fn list_package_commands(&self) -> Vec<serde_json::Value> {
         self.commands
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .list()
             .map(|command| {
                 serde_json::json!({
@@ -1469,10 +1266,7 @@ impl ClayOpState {
     pub(crate) fn command_registry_snapshot(
         &self,
     ) -> Vec<crate::packages::commands::RegisteredCommand> {
-        self.commands
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .snapshot()
+        self.commands.lock_or_recover().snapshot()
     }
 
     pub(super) async fn execute_command(
@@ -1497,13 +1291,7 @@ impl ClayOpState {
         // installed `ModeRegistry` state (read-only; no filesystem scan, package
         // evaluation, or other authority).
         if crate::server::command_execution::is_mode_discovery_command(&request.command_id) {
-            return executor.execute_discovery(
-                &self
-                    .modes
-                    .lock()
-                    .expect("Clay runtime op state mutex poisoned"),
-                request,
-            );
+            return executor.execute_discovery(&self.modes.lock_or_recover(), request);
         }
         // Phase 18.13 Git commands read server-owned workspace roots and Git
         // cache state. They expose branch/status metadata only: no shell,
@@ -1518,11 +1306,7 @@ impl ClayOpState {
         // Phase 18.12 file-browser commands open/reveal files through
         // server-authoritative workspace APIs and selected-file grants.
         if crate::server::command_execution::is_workspace_command(&request.command_id) {
-            let registry = self
-                .commands
-                .lock()
-                .expect("Clay runtime op state mutex poisoned")
-                .clone();
+            let registry = self.commands.lock_or_recover().clone();
             let workspace = self.workspace();
             let mut workspace = workspace.lock().await;
             return executor
@@ -1531,35 +1315,24 @@ impl ClayOpState {
         }
         // Package commands and other built-in commands go through the standard
         // validation-only execution path.
-        executor.execute(
-            &self
-                .commands
-                .lock()
-                .expect("Clay runtime op state mutex poisoned"),
-            request,
-        )
+        executor.execute(&self.commands.lock_or_recover(), request)
     }
 
     pub(super) fn registered_command_ids(&self) -> Vec<String> {
         self.commands
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .list()
             .map(|command| command.command_id.clone())
             .collect()
     }
 
     pub(crate) fn ui_contributions(&self) -> crate::server::ui::PackageUiRegistrySnapshot {
-        self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .snapshot()
+        self.ui.lock_or_recover().snapshot()
     }
 
     pub(crate) fn syntax_grammars(&self) -> Vec<crate::server::syntax::SyntaxGrammarContribution> {
         self.syntax_grammars
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .list()
             .cloned()
             .collect()
@@ -1568,27 +1341,18 @@ impl ClayOpState {
     pub(crate) fn syntax_engine_preferences(
         &self,
     ) -> std::collections::BTreeMap<String, crate::server::syntax::SyntaxEngineTier> {
-        self.syntax_grammars
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .engine_preferences()
+        self.syntax_grammars.lock_or_recover().engine_preferences()
     }
 
     /// Record the active theme resolved by the `setTheme` Clay JS op.
     pub(super) fn set_active_theme(&self, theme: crate::protocol::ActiveTheme) {
-        *self
-            .active_theme
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(theme);
+        *self.active_theme.lock_or_recover() = Some(theme);
     }
 
     /// Take the active theme snapshot out of this evaluation (cloned; the worker
     /// next evaluation resets it before reuse).
     pub(crate) fn active_theme(&self) -> Option<crate::protocol::ActiveTheme> {
-        self.active_theme
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.active_theme.lock_or_recover().clone()
     }
 
     /// Validate and atomically retain a complete typography candidate for this
@@ -1600,10 +1364,7 @@ impl ClayOpState {
     ) -> Result<crate::protocol::ActiveTypography, crate::protocol::ActiveTypographyValidationError>
     {
         typography.validate()?;
-        let mut active = self
-            .active_typography
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut active = self.active_typography.lock_or_recover();
         typography.revision = active
             .as_ref()
             .map_or(1, |current| current.revision.saturating_add(1));
@@ -1612,25 +1373,16 @@ impl ClayOpState {
     }
 
     pub(crate) fn active_typography(&self) -> Option<crate::protocol::ActiveTypography> {
-        self.active_typography
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.active_typography.lock_or_recover().clone()
     }
 
     /// Phase 20.6: store the bounded appearance preference.
     pub(super) fn set_appearance(&self, appearance: crate::protocol::Appearance) {
-        *self
-            .appearance
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = appearance;
+        *self.appearance.lock_or_recover() = appearance;
     }
 
     pub(crate) fn appearance(&self) -> crate::protocol::Appearance {
-        *self
-            .appearance
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+        *self.appearance.lock_or_recover()
     }
 
     /// Phase 20.6: mark that the user explicitly selected a theme via
@@ -1650,37 +1402,25 @@ impl ClayOpState {
         &self,
         design_system: crate::shell::design_system::ActiveDesignSystem,
     ) {
-        *self
-            .active_design_system
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(design_system);
+        *self.active_design_system.lock_or_recover() = Some(design_system);
     }
 
     /// Take the active UI design-system snapshot out of this evaluation.
     pub(crate) fn active_design_system(
         &self,
     ) -> Option<crate::shell::design_system::ActiveDesignSystem> {
-        self.active_design_system
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.active_design_system.lock_or_recover().clone()
     }
 
     /// Plan 112: record the active icon pack resolved by `setIconPack`.
     pub(super) fn set_active_icon_pack(&self, pack: crate::shell::icons::ActiveIconPack) {
-        *self
-            .active_icon_pack
-            .lock()
-            .expect("Clay runtime op state mutex poisoned") = Some(pack);
+        *self.active_icon_pack.lock_or_recover() = Some(pack);
     }
 
     /// Take the active icon-pack snapshot out of this evaluation. `None`
     /// means no explicit selection ran (bundled Regular subset active).
     pub(crate) fn active_icon_pack(&self) -> Option<crate::shell::icons::ActiveIconPack> {
-        self.active_icon_pack
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.active_icon_pack.lock_or_recover().clone()
     }
 
     /// Plan 112: mark that the user explicitly selected an icon pack via `setIconPack`.
@@ -1710,13 +1450,9 @@ impl ClayOpState {
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
-        let disabled = self
-            .disabled_completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let disabled = self.disabled_completion_providers.lock_or_recover();
         self.completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .iter()
             .filter(|meta| {
                 !crate::server::completion::completion_provider_is_disabled(meta, &disabled)
@@ -1728,24 +1464,15 @@ impl ClayOpState {
     pub(crate) fn js_completion_providers(
         &self,
     ) -> Vec<crate::server::completion::JsCompletionProviderRegistration> {
-        self.js_completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.js_completion_providers.lock_or_recover().clone()
     }
 
     pub(crate) fn completion_providers_for_trigger(
         &self,
         trigger: &str,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
-        let disabled = self
-            .disabled_completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
-        let providers = self
-            .completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let disabled = self.disabled_completion_providers.lock_or_recover();
+        let providers = self.completion_providers.lock_or_recover();
         let mut matched: Vec<_> = providers
             .iter()
             .filter(|meta| {
@@ -1768,21 +1495,12 @@ impl ClayOpState {
     ) -> (bool, crate::protocol::CompletionProviderGeneration) {
         let inserted = self
             .disabled_completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .insert(target);
-        let mut generation = self
-            .completion_provider_generation
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut generation = self.completion_provider_generation.lock_or_recover();
         if inserted {
             *generation = generation.saturating_add(1);
-            for meta in self
-                .completion_providers
-                .lock()
-                .expect("Clay runtime op state mutex poisoned")
-                .iter_mut()
-            {
+            for meta in self.completion_providers.lock_or_recover().iter_mut() {
                 meta.generation = *generation;
             }
         }
@@ -1793,17 +1511,11 @@ impl ClayOpState {
         &self,
         mut metas: Vec<crate::server::completion::CompletionProviderMeta>,
     ) -> Result<Vec<crate::server::completion::CompletionProviderMeta>, String> {
-        let generation = *self
-            .completion_provider_generation
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let generation = *self.completion_provider_generation.lock_or_recover();
         for meta in &mut metas {
             meta.generation = generation;
         }
-        let mut providers = self
-            .completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut providers = self.completion_providers.lock_or_recover();
         for meta in &metas {
             if providers.iter().any(|existing| existing.id == meta.id) {
                 return Err(format!("provider `{}` is already registered", meta.id));
@@ -1818,8 +1530,7 @@ impl ClayOpState {
         registration: crate::server::completion::JsCompletionProviderRegistration,
     ) {
         self.js_completion_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .push(registration);
     }
 
@@ -1827,28 +1538,21 @@ impl ClayOpState {
         &self,
     ) -> Vec<crate::server::language_intelligence::LanguageIntelligenceProviderMeta> {
         self.language_intelligence_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .clone()
     }
 
     pub(crate) fn document_analyzers(
         &self,
     ) -> Vec<crate::server::document_analysis::JsDocumentAnalyzerRegistration> {
-        self.document_analyzers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .clone()
+        self.document_analyzers.lock_or_recover().clone()
     }
 
     pub(super) fn register_document_analyzer(
         &self,
         registration: crate::server::document_analysis::JsDocumentAnalyzerRegistration,
     ) -> Result<(), String> {
-        let mut analyzers = self
-            .document_analyzers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut analyzers = self.document_analyzers.lock_or_recover();
         if analyzers.iter().any(|analyzer| {
             analyzer.package.manifest.name == registration.package.manifest.name
                 && analyzer.id == registration.id
@@ -1866,8 +1570,7 @@ impl ClayOpState {
         &self,
     ) -> Vec<crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration> {
         self.js_language_intelligence_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .clone()
     }
 
@@ -1878,13 +1581,9 @@ impl ClayOpState {
     {
         let generation = *self
             .language_intelligence_provider_generation
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+            .lock_or_recover();
         meta.generation = generation;
-        let mut providers = self
-            .language_intelligence_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned");
+        let mut providers = self.language_intelligence_providers.lock_or_recover();
         if providers.iter().any(|existing| existing.id == meta.id) {
             return Err(format!("provider `{}` is already registered", meta.id));
         }
@@ -1897,8 +1596,7 @@ impl ClayOpState {
         registration: crate::server::language_intelligence::JsLanguageIntelligenceProviderRegistration,
     ) {
         self.js_language_intelligence_providers
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .push(registration);
     }
 
@@ -1907,8 +1605,7 @@ impl ClayOpState {
         package: &crate::packages::record::PackageRecord,
     ) -> Result<usize, crate::server::syntax::SyntaxGrammarRegistryError> {
         self.syntax_grammars
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_package(package)
     }
 
@@ -1918,8 +1615,7 @@ impl ClayOpState {
         tier: crate::server::syntax::SyntaxEngineTier,
     ) -> Result<(), crate::server::syntax::SyntaxGrammarRegistryError> {
         self.syntax_grammars
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .set_engine_preference(target, tier)
     }
 
@@ -1933,8 +1629,7 @@ impl ClayOpState {
     > {
         let command_ids = self.registered_command_ids();
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_pane_content(package, declaration, &command_ids)
     }
 
@@ -1948,8 +1643,7 @@ impl ClayOpState {
     > {
         let command_ids = self.registered_command_ids();
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_panel(package, declaration, &command_ids)
     }
 
@@ -1963,8 +1657,7 @@ impl ClayOpState {
     > {
         let command_ids = self.registered_command_ids();
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_component(package, declaration, &command_ids)
     }
 
@@ -1978,8 +1671,7 @@ impl ClayOpState {
     > {
         let command_ids = self.registered_command_ids();
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_overlay(package, declaration, &command_ids)
     }
 
@@ -1993,8 +1685,7 @@ impl ClayOpState {
     > {
         let command_ids = self.registered_command_ids();
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_input(package, declaration, &command_ids)
     }
 
@@ -2007,8 +1698,7 @@ impl ClayOpState {
         crate::server::ui::UiContributionDiagnostic,
     > {
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_ui_state_scope(package, declaration)
     }
 
@@ -2019,10 +1709,7 @@ impl ClayOpState {
         crate::server::ui::RegisteredPackageLayoutOverride,
         crate::server::ui::UiContributionDiagnostic,
     > {
-        self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .set_layout_override(declaration)
+        self.ui.lock_or_recover().set_layout_override(declaration)
     }
 
     pub(super) fn request_layout_intent(
@@ -2034,8 +1721,7 @@ impl ClayOpState {
         crate::server::ui::UiContributionDiagnostic,
     > {
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .request_layout_intent(package, declaration)
     }
 
@@ -2048,16 +1734,12 @@ impl ClayOpState {
         crate::server::ui::UiContributionDiagnostic,
     > {
         self.ui
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
+            .lock_or_recover()
             .register_theme_token(package, declaration)
     }
 
     pub(crate) fn record(&self, value: String) {
-        self.runtime_records
-            .lock()
-            .expect("Clay runtime op state mutex poisoned")
-            .push(value);
+        self.runtime_records.lock_or_recover().push(value);
     }
 }
 
@@ -2080,7 +1762,7 @@ fn op_clay_runtime_record(state: &mut OpState, #[string] value: String) -> Resul
 }
 
 // Trusted domain: configuration evaluation and bundled first-party packages.
-// This is the full trusted op set (98 ops).
+// This is the full trusted op set (99 ops).
 extension!(
     clay_runtime_trusted_extension,
     ops = [
@@ -2140,6 +1822,7 @@ extension!(
         op_clay_behavior_list_routes,
         op_clay_packages_validate_manifest,
         op_clay_packages_validate_permissions,
+        op_clay_packages_authorize,
         op_clay_packages_load_package,
         op_clay_packages_load_package_by_specifier,
         op_clay_packages_end_package_activation,
@@ -2301,7 +1984,7 @@ mod domain_extension_tests {
     fn package_extension_is_strict_subset_without_admin_ops() {
         let trusted = op_names(&super::clay_runtime_trusted_extension::init());
         let package = op_names(&super::clay_runtime_package_extension::init());
-        assert_eq!(trusted.len(), 98);
+        assert_eq!(trusted.len(), 99);
         // 46 = 38 public contribution ops (including folding publication) +
         // the seven shared `editor-control` gated editor ops + the gated
         // programmatic execution op (follow-up round); visibility grants
@@ -2339,6 +2022,7 @@ mod domain_extension_tests {
             "op_clay_keybindings_list_key_bindings",
             "op_clay_packages_validate_manifest",
             "op_clay_packages_validate_permissions",
+            "op_clay_packages_authorize",
             "op_clay_packages_load_package",
             "op_clay_packages_load_package_by_specifier",
             "op_clay_packages_end_package_activation",

@@ -28,6 +28,10 @@ custom_properties:
     type: enum
     default: current
     description: Selection direction (current, next, prev).
+  - name: documentId
+    type: string
+    default: optional
+    description: Target editor/document surface.
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientSetSelection` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, selection]
@@ -89,6 +93,7 @@ Users may rebind or remove these through documented key binding APIs in `~/.clay
 - `action` (`enum`): Selection action (see Options).
 - `extend` (`boolean`, default `false`): Extend the current selection.
 - `direction` (`enum`, default `current`): Selection direction.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 

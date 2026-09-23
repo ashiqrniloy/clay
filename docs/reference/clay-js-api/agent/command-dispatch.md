@@ -15,7 +15,19 @@ phase: Phase 2
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: name
+    type: string
+    default: required
+    description: the registered daemon command name (for example `"/compact"`).
+  - name: sessionId
+    type: string
+    default: optional
+    description: the session to act on. Session-scoped handlers (`compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`) require it and fail closed without it.
+  - name: args
+    type: object
+    default: optional
+    description: handler arguments, e.g. `{ "entryId": "..." }` for `/branch`, `/fork`, `/clone`, or `{ "sessionId": "..." }` for the open-session commands.
 security: Dispatches a registered daemon command (slash surface) against daemon session state; handlers call daemon session RPCs only and cannot elevate acceptance policy or spawn processes. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.commandDispatch` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Dispatch is live-only: an unavailable daemon is a typed failure, never a deferred execution.
 lookup_tags: [agent, command, dispatch, slash-commands, js-api]

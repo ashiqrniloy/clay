@@ -677,6 +677,318 @@ fn missing_authorization_grant_fails_enable_for_requested_capability() {
     ));
 }
 
+/// Plan 136 task 3 G4: an approval may only cover capabilities the manifest
+/// declares, so a grant for an undeclared capability is rejected instead of
+/// silently ignored.
+#[test]
+fn authorize_package_rejects_capability_the_manifest_never_declares() {
+    let mut service = PackageService::new(
+        "target/test-package-store/undeclared-capability",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package)
+        .expect("installing metadata records package");
+
+    let error = service
+        .authorize_package(
+            &name,
+            vec![PackagePermission::Network],
+            AuthorizationRuntimeProfile::Restricted,
+            "test-user",
+        )
+        .expect_err("undeclared capability must be rejected");
+    assert!(
+        matches!(
+            error,
+            PackageServiceError::UndeclaredCapability {
+                capability: PackagePermission::Network,
+                ..
+            }
+        ),
+        "expected UndeclaredCapability, got {error}"
+    );
+}
+
+/// Plan 136 task 3 G5: revoking the durable approval also withdraws the
+/// recorded capability grant, so re-adopting without re-authorizing fails
+/// closed on the capability gate rather than reusing revoked state.
+#[test]
+fn revoke_withdraws_the_recorded_capability_grant() {
+    let mut service = PackageService::new(
+        "target/test-package-store/revoke-withdraws-grant",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("installing metadata records package");
+    authorize_requested_capabilities(&mut service, &package);
+    service
+        .approve_package(&name, "test")
+        .expect("adoption succeeds");
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+
+    assert!(
+        service
+            .revoke_package_approval(&name)
+            .expect("revoke succeeds"),
+        "revoking an existing approval must report the change"
+    );
+    service.disable(&name).expect("revoked package disables");
+    service
+        .approve_package(&name, "test")
+        .expect("re-adoption succeeds");
+    let error = service
+        .enable(&name)
+        .expect_err("re-adoption without a grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant after revoke, got {error}"
+    );
+}
+
+/// Plan 136 task 3 G3: a grant is bound to the installed provenance, so an
+/// update that re-adopts without re-authorizing fails closed on the capability
+/// gate instead of reusing the previous version's grant.
+#[test]
+fn grant_does_not_survive_installed_provenance_change() {
+    let mut service = PackageService::new(
+        "target/test-package-store/grant-provenance",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("installing metadata records package");
+    authorize_requested_capabilities(&mut service, &package);
+    service
+        .approve_package(&name, "test")
+        .expect("adoption succeeds");
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+    service.disable(&name).expect("package disables");
+
+    // Install a different version and re-adopt, but do not re-authorize.
+    let mut updated = package;
+    updated["version"] = json!("9.9.9");
+    service
+        .install_from_value(updated)
+        .expect("updated metadata installs");
+    service
+        .approve_package(&name, "test")
+        .expect("re-adoption succeeds");
+    let error = service
+        .enable(&name)
+        .expect_err("a grant from another version must not authorize the update");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant for a stale grant, got {error}"
+    );
+}
+
+// ── Plan 136 task 4: durable capability grants ───────────────────────────────
+
+fn durable_root(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "clay-package-grant-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+/// Install, adopt, and grant the fixture's declared capabilities. Adoption
+/// first is the documented order: a grant annotates an approval the user
+/// already made, it never manufactures one.
+fn adopt_then_grant(service: &mut PackageService, package: &Value) {
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("install records package");
+    service
+        .approve_package(&name, "cli")
+        .expect("adoption persists");
+    authorize_requested_capabilities(service, package);
+}
+
+/// Plan 136 task 4: the grant is persisted with the approval record, so a
+/// later process (fresh `PackageService` over the same store root) enables the
+/// package without re-authorizing.
+#[test]
+fn durable_grant_survives_a_new_service_process() {
+    let root = durable_root("survives");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+    service.disable(&name).expect("package disables");
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package.clone())
+        .expect("the fresh process rediscovers the same metadata");
+    let inspection = reopened.inspect(&name).expect("installed package inspects");
+    assert!(
+        !inspection.approved_capabilities.is_empty(),
+        "a fresh process must see the durable grant"
+    );
+    reopened
+        .enable(&name)
+        .expect("the durable grant authorizes without re-authorizing");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: adoption alone stays deny-by-default across processes — a
+/// record with no grant section enables nothing.
+#[test]
+fn store_without_grants_still_fails_closed() {
+    let root = durable_root("no-grant");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    service
+        .install_from_value(package.clone())
+        .expect("install records package");
+    service
+        .approve_package(&name, "cli")
+        .expect("adoption persists");
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package)
+        .expect("re-discovery installs");
+    assert!(
+        reopened
+            .inspect(&name)
+            .expect("installed package inspects")
+            .approved_capabilities
+            .is_empty(),
+        "adoption must not show as a grant"
+    );
+    let error = reopened
+        .enable(&name)
+        .expect_err("an adopted package with no grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: a durable grant never outlives its provenance — a
+/// re-install with a different version drops it with the old approval record.
+#[test]
+fn grant_is_inert_after_provenance_change() {
+    let root = durable_root("provenance");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service.enable(&name).expect("granted + adopted enables");
+    service.disable(&name).expect("package disables");
+
+    let mut updated = package;
+    updated["version"] = json!("9.9.9");
+    service
+        .install_from_value(updated)
+        .expect("updated metadata installs");
+    service
+        .approve_package(&name, "cli")
+        .expect("re-adoption persists");
+    assert!(
+        service
+            .inspect(&name)
+            .expect("inspects")
+            .approved_capabilities
+            .is_empty(),
+        "the previous version's grant must not carry over"
+    );
+    let error = service
+        .enable(&name)
+        .expect_err("a grant from another version must not authorize the update");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant for a stale grant, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: revoke clears the persisted grant with the approval, so a
+/// later process cannot read authority the user just revoked.
+#[test]
+fn revoke_withdraws_the_durable_grant() {
+    let root = durable_root("revoke");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service.enable(&name).expect("granted + adopted enables");
+    service.disable(&name).expect("package disables");
+    assert!(
+        service
+            .revoke_package_approval(&name)
+            .expect("revoke succeeds")
+    );
+    let revoked = service
+        .package_approvals()
+        .find(|record| record.package == name)
+        .expect("revoked record is kept for diagnostics");
+    assert!(revoked.revoked && revoked.grant.is_none());
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package)
+        .expect("re-discovery installs");
+    assert!(
+        reopened
+            .inspect(&name)
+            .expect("inspects")
+            .approved_capabilities
+            .is_empty(),
+        "a fresh process must not see the revoked grant"
+    );
+    reopened
+        .approve_package(&name, "cli")
+        .expect("re-adoption succeeds");
+    let error = reopened
+        .enable(&name)
+        .expect_err("re-adoption without a grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant after revoke, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[test]
 fn granted_powerful_capabilities_parse_and_show_in_inspection() {
     let mut package = full_markdown_fixture();
@@ -2690,7 +3002,11 @@ fn language_server_enable_tolerates_missing_grant_while_sessions_stay_grant_gate
 fn bundled_defaults_never_auto_grant_language_server() {
     use clay::packages::permissions::PackagePermission;
 
-    let fixture = language_server_package_fixture("@clay/lsp-test", "1.0.0", "lsp-test");
+    let mut fixture = language_server_package_fixture("@clay/lsp-test", "1.0.0", "lsp-test");
+    // Plan 136 task 3: a grant may only cover declared capabilities, so the
+    // non-process capabilities granted below are declared by the fixture.
+    fixture["clay"]["capabilities"] =
+        json!(["language-server", "mode-registration", "mode-activation"]);
     let mut service =
         PackageService::new("/tmp/clay-lsp-bundled-test", Box::new(FakeBackend::new()));
     service
@@ -2831,7 +3147,7 @@ fn third_party_replacement_withdraws_trusted_target_atomically() {
             "apiPrefix": "vmdown",
             "entry": "./dist/index.js",
             "loadEntry": "./dist/load.js",
-            "capabilities": [],
+            "capabilities": ["package-control"],
             "permissions": ["mode-registration", "mode-activation"],
             "modes": ["vmdown.markdown"],
             "replaces": ["@clay/markdown"],
@@ -2945,7 +3261,7 @@ fn third_party_replacement_withdraws_the_coding_agent_and_stays_untrusted() {
             "apiPrefix": "vagent",
             "entry": "./dist/index.js",
             "loadEntry": "./dist/load.js",
-            "capabilities": [],
+            "capabilities": ["package-control"],
             "permissions": ["command-registration"],
             "modes": ["vagent"],
             "replaces": ["@clay/coding-agent"],
@@ -3029,6 +3345,8 @@ fn replacement_language_server_requires_own_fresh_grant() {
 
     let mut replacement = language_server_package_fixture("@vendor/lsp-repl", "1.0.0", "ls-repl");
     replacement["clay"]["replaces"] = json!(["@vendor/lsp-target"]);
+    // Plan 136 task 3: the package-control grant below must be declared.
+    replacement["clay"]["capabilities"] = json!(["language-server", "package-control"]);
     service.install_from_value(replacement).unwrap();
     service
         .authorize_package(

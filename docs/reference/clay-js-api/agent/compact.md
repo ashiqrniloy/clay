@@ -20,6 +20,14 @@ custom_properties:
     type: number
     default: 80000
     description: Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction.
+  - name: sessionId
+    type: string
+    default: required
+    description: the live agent session to compact.
+  - name: strategy
+    type: enum
+    default: default
+    description: `default`, `llm`, or `om`. Defaults to `agent.setRunOptions` `compaction` (default `llm`).
 security: Forwards user intent to the clay-agent daemon through a validated op; the daemon applies the secret redactor to the compaction run. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.compact` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Compaction runs mid-session and fails closed while another run is active.
 lookup_tags: [agent, compaction, session, history, js-api]
@@ -73,6 +81,8 @@ No default key binding is assigned. Users may bind a key to `agent.compact` in `
 ## Custom properties
 
 - `compactAfterTokens` (`number`, default `80000`): Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction. Distinct from `agent.setRunOptions` `compactAfterTokens` (coding-session auto-compaction ceiling, default 800000).
+- `sessionId`: the live agent session to compact.
+- `strategy`: `default`, `llm`, or `om`.
 
 ## Return and async behavior
 

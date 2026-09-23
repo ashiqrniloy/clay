@@ -81,6 +81,7 @@ setIconPack("@clay/icons-phosphor-duotone");
 ## Options
 
 Pass either a specifier string or `{ specifier }`. The specifier names one icon-pack contributor: a bundled first-party `@clay/icons-*` package, or an already-enabled package record that declares `clay.contributions.iconPack`.
+- `specifier` (`string`, default `required`): Installed or canonical icon-pack package specifier to activate.
 
 ## Return and async behavior
 

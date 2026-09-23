@@ -1,0 +1,35 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/clay-0586ceeec803fc86)
+
+running 17 tests
+test server::js_runtime::tests::lanes_and_queues::lane_heap_limits_stay_within_the_configured_budget ... ok
+test server::js_runtime::tests::lanes_and_queues::completion_and_language_providers_reject_unowned_module_specifier ... ok
+test server::js_runtime::tests::lanes_and_queues::lane_counters_do_not_require_locking_on_the_dispatch_path ... ok
+PLAN136_LANE_OCCUPANCY domain=trusted lane=general dispatched=0 pending=0 peak_pending=0 capacity=64 superseded=0 evicted=0
+PLAN136_LANE_OCCUPANCY domain=trusted lane=latency dispatched=0 pending=0 peak_pending=0 capacity=64 superseded=0 evicted=0
+PLAN136_LANE_OCCUPANCY domain=third_party lane=general dispatched=4 pending=0 peak_pending=0 capacity=64 superseded=0 evicted=0
+PLAN136_LANE_OCCUPANCY domain=third_party lane=latency dispatched=13 pending=0 peak_pending=1 capacity=64 superseded=0 evicted=0
+PLAN136_LANE_LATENCY busy_ms=500 completions=12 p50_us=1683 p95_us=3473 max_us=3473
+test server::js_runtime::tests::lanes_and_queues::lane_command_counters_track_general_and_latency_separately ... ok
+PLAN127_LANE busy_ms=500 idle_median_us=2278 busy_completion_us=2852 workers_started=4
+test server::js_runtime::tests::lanes_and_queues::latency_lane_unblocked_by_busy_general_lane ... ok
+PLAN127_QUEUE_CAPACITY requests=72 peak_pending=64 capacity=64 superseded=0 evicted=7 served=65
+test server::js_runtime::tests::lanes_and_queues::queue_evicts_oldest_at_capacity ... ok
+test server::js_runtime::tests::lanes_and_queues::third_party_lane_denies_trusted_ops ... ok
+test server::js_runtime::tests::lanes_and_queues::revoked_package_commands_refused_per_lane ... ok
+test server::js_runtime::tests::lanes_and_queues::lane_poison_replaces_only_that_lane ... ok
+PLAN136_GRANTED_LANE busy_ms=500 idle_median_us=1619 busy_completion_us=2937 workers_started=4
+test server::js_runtime::tests::lanes_and_queues::granted_third_party_provider_serves_from_latency_lane_when_general_lane_busy ... ok
+test server::js_runtime::tests::lanes_and_queues::reload_shares_third_party_lanes_untouched ... ok
+PLAN127_QUEUE_DISTINCT documents=8 peak_pending=7 capacity=64 superseded=0 evicted=0
+test server::js_runtime::tests::lanes_and_queues::distinct_documents_never_superseded ... ok
+test server::js_runtime::tests::lanes_and_queues::language_intelligence_module_specifier_serves_from_latency_lane ... ok
+PLAN127_QUEUE_FLOOD requests=40 peak_pending=1 capacity=64 superseded=38 evicted=0 served=2
+test server::js_runtime::tests::lanes_and_queues::queue_bounded_under_flood ... ok
+test server::js_runtime::tests::lanes_and_queues::lane_channel_capacities_are_preserved ... ok
+PLAN127_LANES trusted_ops=195 third_party_ops=142 trusted_only=53
+test server::js_runtime::tests::lanes_and_queues::lanes_share_their_domain_op_set ... ok
+test server::js_runtime::tests::lanes_and_queues::ungranted_third_party_provider_still_fails_closed ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 1420 filtered out; finished in 3.27s
+

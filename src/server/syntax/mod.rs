@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::lock_util::LockOrRecover;
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
@@ -1578,8 +1579,7 @@ impl TreeSitterSyntaxHandler {
     ) -> Result<Tree, TreeSitterSyntaxError> {
         let cached = self
             .trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
+            .lock_or_recover()
             .get(&document_id)
             .filter(|cached| {
                 cached.document_version == document_version
@@ -1594,8 +1594,7 @@ impl TreeSitterSyntaxHandler {
         // parser (Plan 099).
         let mut parser = self
             .trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
+            .lock_or_recover()
             .get_mut(&document_id)
             .map(|state| std::mem::replace(&mut state.parser, self.build_parser()))
             .unwrap_or_else(|| self.build_parser());
@@ -1604,12 +1603,7 @@ impl TreeSitterSyntaxHandler {
         let tree = parser
             .parse(text, None)
             .ok_or(TreeSitterSyntaxError::ParseTimedOut)?;
-        if let Some(state) = self
-            .trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
-            .get_mut(&document_id)
-        {
+        if let Some(state) = self.trees.lock_or_recover().get_mut(&document_id) {
             state.parser = parser;
         }
         Ok(tree)
@@ -1710,8 +1704,7 @@ impl TreeSitterSyntaxHandler {
             let input_edit = input_edit(edit)?;
             let mut tree = self
                 .trees
-                .lock()
-                .expect("syntax tree cache lock poisoned")
+                .lock_or_recover()
                 .get(&notification.document_id)
                 .filter(|cached| {
                     cached.document_version.checked_add(1) == Some(notification.document_version)
@@ -1726,8 +1719,7 @@ impl TreeSitterSyntaxHandler {
 
         let cached_tree = self
             .trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
+            .lock_or_recover()
             .get(&notification.document_id)
             .filter(|cached| {
                 cached.document_version == notification.document_version
@@ -1766,8 +1758,7 @@ impl TreeSitterSyntaxHandler {
             // parser (no grammar-global mutex).
             let mut parser = self
                 .trees
-                .lock()
-                .expect("syntax tree cache lock poisoned")
+                .lock_or_recover()
                 .get_mut(&notification.document_id)
                 .map(|state| std::mem::replace(&mut state.parser, self.build_parser()))
                 .unwrap_or_else(|| self.build_parser());
@@ -1783,8 +1774,7 @@ impl TreeSitterSyntaxHandler {
                 // its reusable state.
                 if let Some(state) = self
                     .trees
-                    .lock()
-                    .expect("syntax tree cache lock poisoned")
+                    .lock_or_recover()
                     .get_mut(&notification.document_id)
                 {
                     state.parser = parser;
@@ -1814,7 +1804,7 @@ impl TreeSitterSyntaxHandler {
         ));
         if let Some((tree, parse_kind, parser)) = reparsed {
             let _ = parse_kind;
-            let mut trees = self.trees.lock().expect("syntax tree cache lock poisoned");
+            let mut trees = self.trees.lock_or_recover();
             trees.insert(
                 notification.document_id,
                 CachedSyntaxState {
@@ -1854,8 +1844,7 @@ impl TreeSitterSyntaxHandler {
 
     pub fn cached_tree_version(&self, document_id: DocumentId) -> Option<u64> {
         self.trees
-            .lock()
-            .expect("syntax tree cache lock poisoned")
+            .lock_or_recover()
             .get(&document_id)
             .map(|cached| cached.document_version)
     }
@@ -1952,10 +1941,7 @@ impl TreeSitterSyntaxHandler {
                 ))
             })
         });
-        let mut cache = self
-            .decoration_cache
-            .lock()
-            .expect("syntax decoration cache lock poisoned");
+        let mut cache = self.decoration_cache.lock_or_recover();
         for set in &mut sets {
             *set = validate_decoration_set(notification.document_version, set.clone(), None)
                 .map_err(map_decoration_error)?;
@@ -2049,6 +2035,9 @@ impl TreeSitterSyntaxHandler {
             };
             ranges.sort_by_key(|range| (range.start_byte, range.end_byte));
             ranges.dedup_by_key(|range| (range.start_byte, range.end_byte));
+            // Plan 134 D5 keep-expect: tree-sitter `Parser` owns mutable FFI
+            // state; a panic mid-parse leaves it unsafe to reuse, so poison must
+            // fail loudly instead of resuming with a torn parser.
             let mut parser = layer.parser.lock().expect("embedded parser lock poisoned");
             #[allow(deprecated)]
             parser.set_timeout_micros(self.contribution.timeout_micros());
@@ -2113,12 +2102,7 @@ impl TreeSitterSyntaxHandler {
         injections: &InjectionState,
         language: &str,
     ) -> Result<Option<Arc<EmbeddedLayer>>, TreeSitterSyntaxError> {
-        if let Some(layer) = injections
-            .layers
-            .lock()
-            .expect("embedded layer cache lock poisoned")
-            .get(language)
-        {
+        if let Some(layer) = injections.layers.lock_or_recover().get(language) {
             return Ok(Some(Arc::clone(layer)));
         }
         let Some(descriptor) = FIRST_PARTY_EMBEDDED_GRAMMARS
@@ -2146,8 +2130,7 @@ impl TreeSitterSyntaxHandler {
         });
         injections
             .layers
-            .lock()
-            .expect("embedded layer cache lock poisoned")
+            .lock_or_recover()
             .insert(language.to_string(), Arc::clone(&layer));
         Ok(Some(layer))
     }

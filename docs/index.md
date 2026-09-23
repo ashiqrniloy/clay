@@ -142,6 +142,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterModePattern](reference/clay-js-api/modes/server-register-mode-pattern.md) — `modes.serverRegisterModePattern`
 - [serverLoadPackage](reference/clay-js-api/packages/server-load-package.md) — `packages.serverLoadPackage`
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `packages.loadPackage`
+- [authorize](reference/clay-js-api/packages/authorize.md) — `packages.authorize`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `parse.serverRegisterParseHandler`
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `syntax.serverRegisterSyntaxGrammar`
 - [setSyntaxEnginePreference](reference/clay-js-api/syntax/set-syntax-engine-preference.md) — `syntax.setSyntaxEnginePreference`

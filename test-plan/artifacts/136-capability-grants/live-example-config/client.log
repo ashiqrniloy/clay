@@ -1,0 +1,25 @@
+
+(process:1832186): Gtk-WARNING **: 19:54:19.230: Locale not supported by C library.
+	Using the fallback 'C' locale.
+
+** (process:1832410): WARNING **: 19:54:19.369: Locale not supported by C library.
+	Using the fallback 'C' locale.
+
+** (clay-desktop:1832186): CRITICAL **: 19:54:24.029: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:54:26.287: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:54:28.186: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:54:31.217: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:54:33.148: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:55:10.520: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:55:12.772: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:55:13.781: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:1832186): CRITICAL **: 19:56:03.444: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+Error: "clay-desktop exited with status signal: 15 (SIGTERM)"

@@ -321,7 +321,7 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 // every shipped default chord (they are already active without init.js;
 // re-declaring them is an idempotent no-op override and doubles as the
 // complete reference). Source of truth: default_keymaps() in
-// src/protocol/mod.rs. Both call forms are shown: batch tables for the
+// src/protocol/behavior.rs. Both call forms are shown: batch tables for the
 // defaults, single-form calls for one-off binds.
 
 import { bindKey, unbindKey } from "clay:keybindings";

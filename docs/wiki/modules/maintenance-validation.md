@@ -23,9 +23,100 @@ Clay now treats all-target Clippy as a runnable repository gate. Linux is the re
   - cold protocol rejection paths keep direct `ServerMessage` errors.
 - No crate-wide `allow(warnings)` or skipped Linux target is used.
 - `Cargo.toml` uses line-table debug information for routine `dev`/`test` builds and keeps full DWARF available through the opt-in `debugging` profile.
-- `autotests = false` prevents Cargo from linking every `tests/*.rs` source separately. Four explicit roots in `tests/suites/{security,runtime,editor,protocol}.rs` include all 33 source modules with plain `#[path] mod`; `integration_suite_inventory_assigns_every_source_once` detects omission or duplicate assignment.
+- `autotests = false` prevents Cargo from linking every `tests/*.rs` source separately. Four explicit roots in `tests/suites/security.rs`, `tests/suites/runtime.rs`, `tests/suites/presentation.rs`, and `tests/suites/protocol.rs` include all 38 source modules with plain `#[path] mod`; `integration_suite_inventory_assigns_every_source_once` detects omission or duplicate assignment.
 - Documentation validation is schema-driven: `api-inventory.toml` plus generated registry metadata covers every public API; `documentation-contracts.json` enumerates every primitive/package reference page and the small security-marker set. Generic validators report IDs/paths/fields, recursively check wiki indexing, and ignore ordinary prose. Tests never run the mutating registry updater.
 - Focused commands select the group and then the original source-module prefix, for example `cargo test --test security package_loading::`. Full source mapping, measurements, and cleanup guidance live in `docs/development/build-and-test.md`.
+
+## Plan 133 decomposition and test layout
+
+Plan 133 (a behavior-preserving structural refactor) split the remaining
+oversized files and moved the giant inline test modules to sibling files:
+
+- `src/protocol/mod.rs` is a re-export hub over family files
+  (`messages.rs`, `behavior.rs`, `editor_rules.rs`, `typography.rs`, `theme.rs`,
+  `caret.rs`, `document.rs`, `shell.rs`, `launcher.rs`), so `crate::protocol::X`
+  paths and wire bytes are unchanged — see
+  [Protocol Codec](protocol-codec.md).
+- `src/server/mod.rs` keeps the `IpcServer` struct, accept loops, socket/pipe
+  binding, and cleanup; `src/server/runtime_state.rs` owns the generation stores
+  and runtime-output application, and `src/server/runtime_reload.rs` owns the
+  configuration/generation commit pipeline — see
+  [Server IPC Skeleton](server-ipc-skeleton.md).
+- `src/server/ui.rs` closed-choice validation is one `CHOICE_FIELDS` table plus
+  `validate_choice` (same allowed sets, rule kinds, and messages) — see
+  [Slot-Aware Package UI](slot-aware-package-ui.md).
+- `src/shell/theme.rs` is a re-export hub over `src/shell/theme/parse.rs`,
+  `src/shell/theme/validate.rs`, and `src/shell/theme/resolve.rs` — see
+  [Editor Theme Registry](editor-theme-registry.md).
+- 15 hand-written `enum + parse + as_str` triples now come from one
+  `string_enum_impl!` declaration in `src/str_enum.rs`, pinned by the golden
+  `string_roundtrip_per_enum` test.
+
+Test layout. The four giant in-crate test modules are now directories whose
+`tests/mod.rs` holds the module doc, imports, shared helpers, and the suite map:
+`src/server/js_runtime/tests/` (24 suites), `src/server/connection/tests/` (14),
+`src/client/tests/` (8), and `src/server/workspace/tests/` (9). The
+`src/server/mod.rs` inline test mods moved to
+`src/server/runtime_outputs_tests.rs`, `src/server/runtime_generation_tests.rs`,
+`src/server/tab_server_state_tests.rs`, and `src/server/windows_tests.rs`;
+`src/server/ui.rs`'s suite moved to `src/server/ui/tests.rs`, the syntax suite to
+`src/server/syntax/tests.rs`, and the theme suites to
+`src/shell/theme/tests.rs` and `src/shell/theme/theme_snapshot_tests.rs`. Owned
+by `#[cfg(test)] mod tests;` declarations, they remain unit tests with
+parent-private access — the integration root (`tests/suites/*`, a separate
+crate) cannot host them. New `tests/*.rs` roots were deliberately not added, so
+the suite inventory guard is unaffected.
+
+`scripts/check.sh full` runs the root stages (audit, fmt, check, clippy
+`-D warnings`, test, bench-compile) plus `desktop-clippy`, `desktop-test`, and
+the generated-webview-binding guard. Plan-133 evidence and logs:
+`test-plan/artifacts/133-file-decomposition/` and the plan-133 record in
+`test-plan/index.md`.
+
+## Plan 134 hygiene policies
+
+Plan 134 (robustness/resource hygiene) established three repository-wide
+conventions. Evidence and the per-site tables live under
+`test-plan/artifacts/134-robustness/`; the implementation pages carry the
+details.
+
+**Lock poison policy (D5).** A `std::sync::Mutex` guard taken in a panicking
+section poisons the lock. Self-healing state — registries, caches, snapshots,
+counters, mailboxes, routing tables that a later write fully replaces or that
+validate per entry — is locked through `src/lock_util.rs::LockOrRecover::lock_or_recover()`
+and keeps serving; irreversible hand-offs keep a loud `expect` naming the
+corruption (currently only the embedded tree-sitter `Parser`), and test-only
+locks keep `expect` so tests fail loudly. Recovery never bypasses authority:
+package allowlists fail closed on a miss, executing-package provenance is
+re-resolved through the host's enabled set, and capability tokens are
+server-issued and re-validated on use. Full class table and tests:
+[Persistent Runtime Hardening](persistent-runtime-hardening.md).
+
+**Async filesystem rule (P3).** Awaited production paths use `tokio::fs` or
+`spawn_blocking`; a `std::fs` call left on a cold path must carry a ceiling
+comment naming why it is not on the reactor (startup registration, JS-worker
+threads, test hooks, the single `resolve_agent_type` stat). Error mapping and
+authority checks are unchanged by the conversion. Sites and the remaining
+ceiling list: [Server File Workspace](server-file-workspace.md).
+
+**Float comparison policy (D4).** No `#[allow(clippy::float_cmp)]` anywhere;
+every comparison is classified:
+
+- *Identity* — round-trips, stored-then-compared values, parsed flags — compares
+the pre-boundary source values or the bit pattern (`x.to_bits() == 0.0f32.to_bits()`),
+not a float `==`. The runtime example is `src/shell/icons.rs::is_arc_flag`,
+which accepts exactly `0.0`/`-0.0`/`1.0` and rejects near-flags.
+- *Tolerance* — golden-value test assertions — uses one epsilon per type
+  domain, `f32::EPSILON`/`f64::EPSILON`, as the house precedent in
+  `src/shell/layout/mod.rs` and `src/editor/theme.rs` already did.
+- *Floors* — contrast and density thresholds — stay exact `>=` comparisons
+  (`TEXT_CONTRAST_MIN`/`UI_CONTRAST_MIN`), never an epsilon window.
+
+Post-plan inventory: 81 unique `clippy::float_cmp` sites (3 runtime production,
+78 test-side) → 0 under `cargo clippy --all-targets -- -W clippy::pedantic`.
+
+Run `cargo test --test protocol primitives_docs` after wiki changes to re-check
+the index/link guards.
 
 ## Plan 086 Release-Integrity Gate
 
@@ -66,7 +157,7 @@ Plan 089 adds three validation layers on top of the existing Linux blocking gate
 
 **`scripts/check.sh` wrapper.** The serial gate is now `scripts/check.sh full` (acquires `target/.clay-full-check.lock`, runs `cargo audit`, `cargo fmt --check`, `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets`, `cargo bench --no-run` in order, reports the failed stage on exit). `scripts/check.sh quick` runs `cargo fmt --check` then `cargo test --lib` (non-release fast path). `scripts/check.sh report` prints advisory `target/` size breakdowns without deleting or masking failures. CI invokes `scripts/check.sh full` as a single gate step. The lock prevents concurrent full runs from corrupting the shared `target/` tree.
 
-**Bounded async-test helpers.** `src/server/mod.rs::runtime_generation_tests::wait_until` polls every 10 ms with a 5 s deadline, panicking with scenario name, generation id, and runtime diagnostics codes on timeout. The four `configuration_watcher_*` poll loops were converted to `wait_until` to fix a production watcher race (the post-reload baseline scan adopted a change landing during the reload, absorbing the recovery write). The helper is test-only; production timeout sites (`connection/mod.rs` provider fallback, `js_runtime/mod.rs` reply waits) remain direct patterns.
+**Bounded async-test helpers.** `src/server/runtime_generation_tests.rs::wait_until` polls every 10 ms with a 5 s deadline, panicking with scenario name, generation id, and runtime diagnostics codes on timeout. The four `configuration_watcher_*` poll loops were converted to `wait_until` to fix a production watcher race (the post-reload baseline scan adopted a change landing during the reload, absorbing the recovery write). The helper is test-only; production timeout sites (`connection/mod.rs` provider fallback, `js_runtime/mod.rs` reply waits) remain direct patterns.
 
 **Build artifact reporting.** `scripts/check.sh report` prints `target/` total size, `debug/deps`, `debug/incremental`, and executable count. Advisory only; no cleanup or masking. The 50 GiB / 20 GiB cleanup thresholds and `cargo clean --profile dev --package clay` workflow are documented in `docs/development/build-and-test.md`.
 

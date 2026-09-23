@@ -284,7 +284,7 @@ async fn live_typography_update_reaches_connection_once() {
     assert!(matches!(
         codec.read_server_message(&mut client).await.unwrap(),
         ServerMessage::ActiveTypography(typography)
-            if typography.revision == 1 && typography.monospace.size == 16.0
+            if typography.revision == 1 && (typography.monospace.size - 16.0).abs() < f32::EPSILON
     ));
     assert!(
         timeout(

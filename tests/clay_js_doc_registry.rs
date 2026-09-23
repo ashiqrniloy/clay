@@ -553,7 +553,9 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     for property in [
         "module",
         "exportName",
-        "modeId",
+        // Plan 136 task 8: the registration op reads `mode`; `modeId` was a
+        // stale documented name that never reached the op.
+        "mode",
         "parseUnit",
         "viewportPriority",
         "timeoutMs",
@@ -586,7 +588,9 @@ fn large_file_parse_public_surfaces_have_clay_js_api_docs() {
     for property in [
         "documentId",
         "documentVersion",
-        "viewportByteRange",
+        // Plan 136 task 8: the op requires `viewport`; `viewportByteRange` was a
+        // stale documented alias the op never read.
+        "viewport",
         "spans",
         "packagePrefix",
     ] {

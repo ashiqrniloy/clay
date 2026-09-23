@@ -10,6 +10,7 @@ use tokio::{
     sync::Mutex,
 };
 
+use crate::lock_util::LockOrRecover;
 use crate::perf::metrics::{MetricMetadata, MetricValue, SERVER_RECEIVE, global_recorder};
 use crate::protocol::ViewportRenderPatch;
 use crate::protocol::{
@@ -82,10 +83,7 @@ impl RuntimeDiagnosticStore {
             return;
         }
         self.push(diagnostic.clone());
-        self.live_router
-            .lock()
-            .expect("runtime diagnostic router lock poisoned")
-            .broadcast(&diagnostic);
+        self.live_router.lock_or_recover().broadcast(&diagnostic);
     }
 
     pub(crate) fn live_router(&self) -> Arc<std::sync::Mutex<OutputRouter<RuntimeDiagnostic>>> {
@@ -117,8 +115,7 @@ impl Drop for ConnectionOutputSubscriptions {
         self.parse_coordinator.unsubscribe_client(self.client_id);
         self.document_analysis.unsubscribe_client(self.client_id);
         self.runtime_diagnostic_router
-            .lock()
-            .expect("runtime diagnostic router lock poisoned")
+            .lock_or_recover()
             .unsubscribe_client(self.client_id);
     }
 }
@@ -458,10 +455,7 @@ where
     // switches to its bound tab after `New`/`Reclaim`. Clean the last state
     // actually routed to this connection even when a later `Reclaim` removed
     // its registry binding before the old connection exited.
-    let tracked_state = cleanup_bound_state
-        .lock()
-        .expect("cleanup bound-state mutex poisoned")
-        .clone();
+    let tracked_state = cleanup_bound_state.lock_or_recover().clone();
     let tracked_state = match tracked_state {
         Some(state) => Some(state),
         None => match cleanup_server.as_ref() {
@@ -579,8 +573,7 @@ where
     let mut analysis_rx = document_analysis.subscribe_client(client_id);
     let runtime_diagnostic_router = runtime_diagnostics.lock().await.live_router();
     let mut runtime_diagnostics_rx = runtime_diagnostic_router
-        .lock()
-        .expect("runtime diagnostic router lock poisoned")
+        .lock_or_recover()
         .subscribe_client(client_id);
     let _subscriptions = ConnectionOutputSubscriptions {
         parse_coordinator: parse_coordinator.clone(),
@@ -851,8 +844,7 @@ where
                 continue;
             };
             bound_tab_id = routed.tab_id;
-            *bound_state.lock().expect("bound tab-state mutex poisoned") =
-                Some(routed.state.clone());
+            *bound_state.lock_or_recover() = Some(routed.state.clone());
             document = routed.state.welcome;
             workspace = routed.state.workspace;
         }

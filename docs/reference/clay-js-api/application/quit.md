@@ -6,7 +6,7 @@ js_export: quit
 js_facade: runtime/js/application.js::quit
 backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_application_quit
-deno_op_path: src/server/ops/application.rs::op_clay_application_quit
+deno_op_path: planned: src/server/ops/application.rs::op_clay_application_quit
 name: quit
 user_facing_name: Quit Clay
 summary: Quit Clay through the planned `clay:application` Clay JavaScript facade.
@@ -15,7 +15,15 @@ phase: Phase 7
 visibility: public
 permissions: []
 key_bindings: [Escape]
-custom_properties: []
+custom_properties:
+  - name: force
+    type: boolean
+    default: planned
+    description: Planned force-quit flag that skips the save/confirm prompts.
+  - name: reason
+    type: string
+    default: planned
+    description: Planned reason string recorded for diagnostics and shutdown prompts.
 security: Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [application, escapequitapplicationactions, js-api]
@@ -57,6 +65,9 @@ quit({ reason: "user-request" });
 
 ## Options
 
+- `force` (`boolean`, optional, planned): Quit without the save/confirm prompts once the op ships.
+- `reason` (`string`, optional, planned): Reason recorded for diagnostics and shutdown prompts once the op ships.
+
 - `reason` (`string`): Optional future reason string for diagnostics or shutdown prompts.
 
 ## Key bindings
@@ -96,7 +107,7 @@ Use `application.quit` when the user asks for quit clay through the Clay JS API.
 ## Backing implementation
 
 - JS facade: `runtime/js/application.js::quit`
-- Future Deno op: `src/server/ops/application.rs::op_clay_application_quit` (`op_clay_application_quit`)
+- Future Deno op (planned, not written): `src/server/ops/application.rs::op_clay_application_quit` (`op_clay_application_quit`). Until then the escape-key path is the client-local `src/client_commands.rs::EditorClientCommand` action.
 - Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand (client-local application lifecycle)`
 - Current implementation audit path: `src/client_commands.rs::EditorClientCommand (client-local application action)`
 

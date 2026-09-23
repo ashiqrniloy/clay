@@ -26,6 +26,37 @@ Governing decisions already made:
 - `decision-logs/2026-09-02-1440-direct-external-coding-agent-adapters.md`:
   Claude Code and Antigravity are direct, capability-declared external
   runtimes with Clay policy bundles, not Prism delegation.
+- `decision-logs/2026-09-23-1821-one-agent-registry-prism-rename-ari.md`:
+  one agent registry, one UI wire (AG-UI projection), one capability
+  model; two runtime depths — the native daemon keeps its rich channel,
+  third parties integrate through the core-owned Agent Runtime Interface
+  (ARI) with declared capabilities; the coding agent is renamed the
+  **Prism agent** (registry id `prism`); the pi coding agent is the first
+  external runtime adapter and can be a tab's primary agent.
+- `decision-logs/2026-09-23-1908-detached-agent-runtime-server.md`: the
+  agent runtime is a detached server — closing Clay does not kill running
+  agents; relaunch attaches and lists all running agents (herdr-style
+  capability, Clay's own shape: one `clay-server` owning workspaces,
+  daemon, and external runtimes; idle self-exit; explicit stop).
+- `decision-logs/2026-09-23-1908-apps-and-splits-shell-default-view.md`:
+  UI becomes an apps-and-splits shell — left navigator with independent
+  Workspaces and Agents sections (cross-workspace, live status),
+  activities as tabs, apps (editor, agent runtime, future canvas) in
+  user-controlled splits, agent info pane tucked behind a gear icon,
+  composer/command palette as a global bottom-lane overlay; the layout is
+  a default view over registry seams third-party packages can compose.
+- `decision-logs/2026-09-23-1946-bun-runtime-nodejs-surfaces.md`: every
+  Node.js runtime surface moves to **Bun** — the clay-agent daemon
+  (spawned on `bun`, TypeScript executed directly, no dist build on the
+  runtime path) and the whole dev workflow (install, scripts, tests);
+  Bun-only in production, no node fallback; the **deno_core package
+  sandbox in the Rust server is untouched** (embedded V8 trust boundary,
+  no Bun equivalent).
+- `decision-logs/2026-09-23-1946-mise-dev-toolchain.md`: **mise** owns dev
+  toolchain pinning — one root `mise.toml` (Bun exact pin; transitional
+  Node pin until the daemon switch, then removed), `mise install` is the
+  fresh-clone setup, CI provisions the same pins via the mise action;
+  Rust stays on rustup/`rust-toolchain.toml`.
 - `decision-logs/2026-08-21-2152-product-surfaces-are-replaceable-packages.md`:
   product surfaces are replaceable first-party packages; third-party packages
   extend/replace through declared extension points with user approval.
@@ -41,11 +72,15 @@ Three layers, strict separation:
    0.7.0 plus explicitly selected family packages/subpaths. Owns native
    providers, models, credentials (vault + keychain), SQLite persistence,
    run ledger, tools, compaction strategies, skills, commands, workflows,
-   supervision, and external-runtime lifecycle/policy projection. It does
-   not proxy vendor authentication or own vendor agent loops. Packages never
+   and supervision. It hosts only the native Prism agent; external-runtime
+   lifecycle and policy are **core-owned (Rust)** per the ARI decision
+   (`2026-09-23-1821`). It does not proxy vendor authentication or own
+   vendor agent loops. Packages never
    spawn or speak to it directly; they use public `agent.*` Clay JS APIs
    served by the Rust server.
-2. **`@clay/coding-agent` (first-party Clay package, "base coding agent").**
+2. **`@clay/coding-agent` (first-party Clay package, "base coding agent";
+   registry id `prism`, the **Prism agent** — renamed 2026-09-23, plan
+   146).**
    Minimal, pi-coding-agent-parity coding agent: coding tools against Clay
    documents, approvals, sessions, branching, compaction, steering, commands,
    plan files. Replaceable like any first-party product package
@@ -928,6 +963,106 @@ mid-Phase-2.2 implementation):
   workflows and commands through declared extension points with user
   approval.
 
+## Direction change: one agent registry, Prism agent rename, and the Agent Runtime Interface (2026-09-23)
+
+Decision `decision-logs/2026-09-23-1821-one-agent-registry-prism-rename-ari.md`
+(option A′, after researching herdr's agent model and pi's RPC surface).
+Amends — does not replace — Phases 9–10:
+
+- **One registry, one wire, one capability model; two runtime depths.**
+  Every agent (native and third party) is an entry in one registry
+  (`~/.clay/agents/<id>/`), surfaces through the same AG-UI projection
+  (`AgentServerMessage`), and declares capabilities that gate the UI.
+  Below that wire, the native Prism daemon keeps its rich Clay-owned RPC
+  channel; third-party runtimes integrate through the core-owned **Agent
+  Runtime Interface** (ARI v1: lifecycle, normalized bounded events,
+  capability set — Phase 9's contract, now named). The native daemon is
+  the declared capability superset and the ceiling the ARI grows toward;
+  it is deliberately *not* forced through the ARI (revisit an ARI facade
+  on the daemon when a second external adapter lands).
+- **The coding agent is renamed the Prism agent** — registry id `prism`,
+  config root `~/.clay/agents/prism/`, picker label "Prism". Identity
+  rename only: the `clay-agent` daemon binary/directory name is
+  unchanged. Plan 149 owns the one-time config migration; earlier
+  `coding-agent` mentions in this roadmap and in shipped docs are
+  historical.
+- **pi coding agent is the first external runtime adapter** (plan 153),
+  ahead of Claude Code: `pi --mode rpc` is the richest documented
+  frontend-less surface among the target vendors (streaming events,
+  steering, session trees, extension-UI approval dialogs, model/thinking
+  switching), so it validates the ARI fastest. Every configured runtime,
+  pi included, may serve as a **tab's primary agent** — not only as a
+  delegation child.
+- Implementation: plans 149 (rename + registry descriptors), 152 (ARI v1
+  types + capability-gated agent app, behind the prototype/approval gate),
+  150 (pi adapter, mock-harness CI + one recorded authenticated manual run).
+  Phase 9's Claude Code work and Phase 10's Antigravity work then build on
+  the ARI instead of introducing a parallel contract.
+
+## Direction change: detached agent runtime and apps-and-splits shell (2026-09-23)
+
+Decisions `decision-logs/2026-09-23-1908-detached-agent-runtime-server.md`
+and `decision-logs/2026-09-23-1908-apps-and-splits-shell-default-view.md`
+(both user-decided after studying herdr):
+
+- **The agent runtime is a detached server.** Closing Clay must not kill
+  a running agent; launching Clay attaches to the running server and
+  shows all running agents. Clay keeps its own shape — one `clay-server`
+  per user session owning per-workspace sessions, the clay-agent daemon,
+  and future external runtimes — with herdr's connect-or-spawn pattern
+  (the `Supervisor` adopt-or-spawn probe already exists; the delta is
+  detached spawn, no kill on GUI exit, an idle self-exit grace period,
+  explicit stop, and a running-agents inventory). Plan 150 implements.
+- **The UI becomes an apps-and-splits shell.** Left navigator with two
+  independent sections — Workspaces (folder-name default, renamable) and
+  Agents (every engaged agent across workspaces with working/blocked/
+  idle status, fed by plan 150's inventory). The main area hosts
+  view-conceptualized **apps** (editor, agent runtime, future
+  canvas/media) in user-controlled **splits**; workspace tabs are
+  **activities**; apps can open other apps in splits (file selected in
+  the agent app's Files tab → editor app opens); the agent runtime app
+  is activity-first with the info pane tucked behind a **gear icon**
+  (inline or open-in-split); the bottom lane (composer, command palette,
+  mentions) becomes a **global overlay** present in every app. The layout
+  is the *default view* over registry-driven seams — packages can later
+  register apps, replace nav sections, and relocate overlays (Phase 4
+  wiring; plan 151 ships the seams and the default view behind the
+  prototype → approval gate).
+- **Execution order becomes 149 → 150 → 151 → 152 → 153**: rename +
+  registry, detached server, shell default view, ARI + capability-gated
+  agent app, pi adapter. Plan 152's prototype guidelines incorporate the
+  shell concept (agent app inside splits, gear-tucked inspector as the
+  capability-gated surface).
+
+## Direction change: Bun runtime, mise toolchain, and plan renumbering (2026-09-23)
+
+Decisions `decision-logs/2026-09-23-1946-bun-runtime-nodejs-surfaces.md`
+and `decision-logs/2026-09-23-1946-mise-dev-toolchain.md`:
+
+- **All Node.js runtime surfaces move to Bun.** The clay-agent daemon
+  runs on `bun` executing `src/main.ts` directly (`CLAY_BUN` override,
+  `RuntimeMissing` fail-closed, tsc demoted to typecheck-only);
+  dependency install, script execution, and tests run on bun
+  (`bun install --frozen-lockfile`, `bun:test` for clay-agent, vitest
+  under bun for the frontend). Production is Bun-only — no node
+  fallback. **deno_core stays exactly as it is**: it is the embedded
+  V8 sandbox for Clay packages (per-domain isolates, capability ops,
+  heap ceilings), a trust boundary inside the Rust server with no Bun
+  equivalent — not a "Node alternative". Compatibility risks are
+  bounded and verified in-plan: `better-sqlite3` (native NAPI, known
+  good under bun), `playwright-core` (pure JS), prism's
+  `worker_threads` image path (one smoke test). Plans 137–139.
+- **mise owns the dev toolchain.** Root `mise.toml` pins Bun exactly
+  (and Node transitionally, removed by plan 139); `mise install` is
+  the one-command fresh-clone setup; CI provisions the same pins via
+  the mise action so local and CI cannot drift. Rust remains on
+  rustup/`rust-toolchain.toml` — plan 148 owns that pin policy.
+- **Plan numbers are now strict execution order.** The bun/mise work
+  takes 137–139; previously numbered plans 137–145 shifted +3 to
+  140–148, and the agent-architecture plans shifted from 146–150 to
+  149–153 (Prism rename/registry 149, detached server 150, shell 151,
+  ARI 152, pi adapter 153). Execute plans in ascending numeric order.
+
 ## Phase 4: Third-Party Workflow/Command Package Platform
 
 ### Scope
@@ -1166,24 +1301,31 @@ mid-Phase-2.2 implementation):
   a workflow/command package (including one that overrides a native command)
   leaves no residue and restores native behavior.
 
-## Phase 9: External Runtime Contract and Claude Code Delegation
+## Phase 9: Agent Runtime Interface, pi Adapter, and Claude Code Delegation
 
 ### Scope
 
 - Introduce a direct, core-owned external-runtime boundary beside the native
-  Prism host. Keep it deliberately small: lifecycle (`start`, `prompt`,
-  `cancel`, `resume`, `respond`), normalized bounded events, and a declared
-  capability set. Clay owns the delegation record, policy-bundle fingerprint,
-  process lifecycle, redaction, and UI; the vendor owns its agent loop and
-  conversation context. Do not model a foreign coding agent as a Prism
-  provider, and do not require ACP.
+  Prism host — the **Agent Runtime Interface** (plans 149–153; decision
+  `2026-09-23-1821`). Keep it deliberately small: lifecycle (`start`,
+  `prompt`, `cancel`, `resume`, `respond`), normalized bounded events, and
+  a declared capability set. Clay owns the delegation record, policy-bundle
+  fingerprint, process lifecycle, redaction, and UI; the vendor owns its
+  agent loop and conversation context. Do not model a foreign coding agent
+  as a Prism provider, and do not require ACP.
+- External runtimes are **primary tab agents, not only delegation
+  children**: the agent-type picker lists every configured runtime from the
+  one registry, and the UI renders only declared capabilities (inspector
+  tabs, composer controls, runtime state) per plan 152's approved
+  capability-states artifact.
 - Compile one task-scoped Clay policy bundle into each runtime's documented
   controls: task instructions, translated skills, declared tool policy,
   Clay MCP server/configuration, workspace, and acceptance policy. Clay MCP
   tools are an independent tool plane, not agent lifecycle control. Preserve
   same-user-child authority disclosure; launch without a shell, with bounded
   I/O, cancellation, and cleanup.
-- Add a Claude Code Agent SDK adapter. Use custom `systemPrompt`,
+- Add a Claude Code Agent SDK adapter **on the ARI** (pi, plan 153, ships
+  first). Use custom `systemPrompt`,
   `settingSources: []`, explicit built-in tool selection/disallow rules,
   explicit skills/agents/hooks, and `strictMcpConfig` with only Clay-declared
   MCP servers. Mediate `canUseTool` in Clay so an approval can allow, deny,
@@ -1200,6 +1342,11 @@ mid-Phase-2.2 implementation):
 
 ### Exit Gate
 
+- A pi fixture (mock JSONL child in CI; recorded authenticated manual run
+  with the real binary — plan 153) proves lifecycle, streaming projection,
+  extension-UI approval round-trip, steering, cancel, vendor-session
+  resume, capability-gated UI, and fail-closed absence when the binary is
+  missing.
 - A Claude Code fixture proves isolated configuration, Clay prompt/skill/tool
   projection, strict MCP selection, approval allow/deny/modified-input flow,
   cancellation, and resumed-session identity. Tests prove denied controls do

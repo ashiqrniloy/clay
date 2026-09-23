@@ -1,0 +1,42 @@
+Plan 134 task 4 — P3 async filesystem: gate exit codes (2026-09-22, HEAD 40022f6 +
+plan 133 uncommitted tree + plan 134 tasks 2–4 edits)
+Log: test-plan/artifacts/134-robustness/task4-check-full.log
+Elapsed: 2026-09-22 22:28:42 → 22:49:00 (+0600), ≈1218 s (bench profile rebuilt).
+
+scripts/check.sh full:
+
+  audit          PASS exit 0 (9 allowed RUSTSEC advisory warnings, pre-existing)
+  fmt            PASS exit 0
+  check          PASS exit 0 (cargo check --all-targets)
+  clippy         PASS exit 0 (cargo clippy --all-targets -- -D warnings, zero warnings)
+  test           PASS exit 0 (2005 passed / 0 failed / 1 ignored:
+                  root 1949 = 1424 lib + 9 + 62 + 227 + 75 + 152 — task-3 gate was
+                  1948, +1 new `open_existing_file_reports_file_unavailable_when_root_disappears`;
+                  desktop 55; bindings 1 / 32 filtered)
+  bench-compile  PASS exit 0
+  desktop-clippy PASS exit 0
+  desktop-test   PASS exit 0
+  bindings       PASS exit 0 ("webview bindings up to date")
+
+Earlier attempts (all four runs preserve their logs):
+
+1. `fmt` FAIL — the launcher visibility-guard update
+   (`tests/rust_visibility_api_mapping.rs`) needed rustfmt line wrapping; fixed.
+2. `test` FAIL — `tests/rust_visibility_api_mapping.rs` guard asserted the
+   literal `pub(crate) fn record_recent_workspace`; the function is now
+   `async`, so the guard declarations were updated to `pub async fn ...`
+   (the guard then matches `pub(crate) async fn ...`). Also
+   `agent_session_isolation::two_workspaces_keep_their_agent_writes_in_their_own_root`
+   raced the daemon log flush (`probe ... err` line logged after the
+   server-side diagnostic); the test now waits (bounded) for the log line.
+   Log: `task4-check-full-flake-security.log`.
+3. `test` FAIL — `language_server_authority::generic_fake_lsp_server_initialize_and_shutdown_through_process_service`
+   read a partial frame (`got Content-Length: 91`); the process service returns
+   whatever one stdout read delivered, so the test now accumulates chunks
+   (bounded) until the framed response is complete. Log:
+   `task4-check-full-flake-lsp.log`.
+4. Re-run: all nine stages PASS, `full check PASSED`.
+
+The two test races are pre-existing gate-hygiene issues surfaced under suite
+load (deeper determinism work belongs to plan 145); both fixes are test-side,
+bounded waits only, no production behavior change.

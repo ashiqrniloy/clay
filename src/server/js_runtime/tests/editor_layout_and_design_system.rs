@@ -513,7 +513,7 @@ async fn set_design_system_adopted_third_party_via_init_js() {
         crate::shell::design_system::RecipeState::Rest,
     );
     let panel_recipe = ds.recipes.get(&panel_key).expect("panel recipe present");
-    assert_eq!(panel_recipe.border_radius, 8.0);
+    assert!((panel_recipe.border_radius - 8.0).abs() < f64::EPSILON);
 }
 
 #[tokio::test]

@@ -84,7 +84,7 @@ async fn save_version_mismatch_after_io_leaves_document_dirty() {
     let document_id = opened.document_id;
 
     let prepared_version = opened.document.lock().await.version();
-    let plan = workspace.prepare_save(document_id).unwrap();
+    let plan = workspace.prepare_save(document_id).await.unwrap();
 
     // Simulate a concurrent edit landing during the unlocked write: bump the
     // in-memory version past the version captured at write time.

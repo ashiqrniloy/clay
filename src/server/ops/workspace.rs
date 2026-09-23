@@ -62,6 +62,7 @@ pub(super) async fn op_clay_workspace_add_root(
         .lock()
         .await
         .add_explicit_user_grant(PathBuf::from(path))
+        .await
         .map_err(|error| JsErrorBox::generic(error.diagnostic().to_string()))?;
     let value = json!({
         "workspaceRootId": root_id.to_string(),
@@ -84,6 +85,7 @@ pub(super) async fn op_clay_workspace_discover_root_for_path(
         .lock()
         .await
         .discover_root_for_path(PathBuf::from(path))
+        .await
         .map_err(|error| JsErrorBox::generic(error.diagnostic().to_string()))?;
     let value = match root_id {
         Some(id) => json!({

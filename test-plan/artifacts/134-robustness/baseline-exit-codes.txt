@@ -1,0 +1,27 @@
+Plan 134 task 1 — baseline gate exit codes (2026-09-22, HEAD 40022f6, dirty tree with
+plan 133 landed-but-uncommitted; see baseline.md)
+Log: test-plan/artifacts/134-robustness/baseline-check-full.log
+Elapsed: 2026-09-22 20:08:07 → 20:12:20 (+0600), ≈253 s.
+
+scripts/check.sh full (no source edits made before this run):
+
+  audit          PASS exit 0 (9 allowed RUSTSEC advisory warnings, pre-existing)
+  fmt            PASS exit 0 (cargo fmt --check clean)
+  check          PASS exit 0 (cargo check --all-targets)
+  clippy         PASS exit 0 (cargo clippy --all-targets -- -D warnings, zero warnings)
+  test           PASS exit 0 (2000 passed / 0 failed / 1 ignored across 15 test-result lines:
+                  root 1944 = 1419 lib + 9 + 62 + 227 + 75 + 152; desktop 55 = 32 + 2 + 1 + 4 + 16;
+                  bindings 1 / 32 filtered)
+  bench-compile  PASS exit 0 (cargo bench --no-run, 1m 22s)
+  desktop-clippy PASS exit 0 (javascriptcoregtk-4.1/webkit2gtk-4.1/gtk+-3.0 present this run —
+                 plan 133 task 7's environment failure is gone on this host)
+  desktop-test   PASS exit 0
+  bindings       PASS exit 0 ("webview bindings up to date")
+
+scripts/check.sh runs under `set -eu` with a `FAILED at stage: <name>` trap, so a
+non-zero stage aborts and cannot print the final sentinel. All nine stage banners are
+present and the log's last line is `full check PASSED` → whole-script exit 0.
+
+Supporting pedantic inventory run (not part of check.sh):
+  cargo clippy --all-targets --message-format=json -- -W clippy::pedantic → exit 0
+  (28.6 s, 84 raw float_cmp diagnostics, 81 unique sites)

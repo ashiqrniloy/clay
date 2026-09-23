@@ -286,9 +286,18 @@ async fn example_config_boot_activates_the_shipped_design_system() {
                 .expect("parse recipe key"),
         )
         .expect("the shipped system must resolve button.default.root.rest");
-    assert_eq!(button.border_radius, 8.0, "control radius ladder");
-    assert_eq!(button.border_width, 1.0, "hairline border width");
-    assert_eq!(button.transition_duration, 150.0, "motion.fast tier");
+    assert!(
+        (button.border_radius - 8.0).abs() < f64::EPSILON,
+        "control radius ladder"
+    );
+    assert!(
+        (button.border_width - 1.0).abs() < f64::EPSILON,
+        "hairline border width"
+    );
+    assert!(
+        (button.transition_duration - 150.0).abs() < f64::EPSILON,
+        "motion.fast tier"
+    );
 
     // 2. The Settings panel enumerates the shipped choice set: @clay/core first,
     //    then the bundled contributor (no third-party system is enabled here).

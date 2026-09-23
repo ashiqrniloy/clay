@@ -2124,10 +2124,10 @@ mod tests {
 
         // Custom override applied
         assert_eq!(button_primary.background_color.as_str(), "accent.muted");
-        assert_eq!(button_primary.border_radius, 8.0);
+        assert!((button_primary.border_radius - 8.0).abs() < f64::EPSILON);
         // Fallback properties filled in from core: the shipped primary button is a
         // fill-only control with no border of its own (DESIGN.md §11).
-        assert_eq!(button_primary.border_width, 0.0);
+        assert!((button_primary.border_width - 0.0).abs() < f64::EPSILON);
         assert_eq!(button_primary.border_style, BorderStyle::None);
         assert_eq!(button_primary.text_color.as_str(), "surface.main");
 
@@ -2139,8 +2139,8 @@ mod tests {
         assert_eq!(modal_dialog.background_color.as_str(), "surface.overlay");
         // The core fallback supplies the dialog's own geometry: one hairline, radius 16,
         // and the approved overlay stack (DESIGN.md §11 panels/overlays).
-        assert_eq!(modal_dialog.border_width, 1.0);
-        assert_eq!(modal_dialog.border_radius, 16.0);
+        assert!((modal_dialog.border_width - 1.0).abs() < f64::EPSILON);
+        assert!((modal_dialog.border_radius - 16.0).abs() < f64::EPSILON);
         assert_eq!(modal_dialog.shadow.len(), 2);
     }
 }

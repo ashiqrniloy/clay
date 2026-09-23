@@ -713,7 +713,7 @@ rejected-close fix:
   `sweep_skips_tabs_of_live_connected_clients` (end-to-end real-server
   liveness wiring, `src/server/mod.rs`);
   `rejected_close_keeps_connection_serving` /
-  `accepted_close_still_ends_connection` (`src/server/connection/tests.rs`);
+  `accepted_close_still_ends_connection` (`src/server/connection/tests/`);
   alias allowlist + `validate_command_id` gate coverage
   (`src/server/ops/keybindings.rs`).
 

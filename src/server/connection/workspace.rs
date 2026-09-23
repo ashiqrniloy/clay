@@ -7,8 +7,8 @@ use tokio::{io::AsyncWrite, sync::Mutex};
 
 use crate::{
     protocol::{
-        ClientId, DocumentId, DocumentMetadata, DocumentVersion, RuntimeDiagnostic, ServerMessage,
-        WorkspaceRootId,
+        ClientId, DocumentId, DocumentMetadata, DocumentVersion, LauncherEntries,
+        RuntimeDiagnostic, ServerMessage, WorkspaceRootId,
         codec::{Codec, CodecError},
     },
     server::{
@@ -386,7 +386,8 @@ where
         launcher::record_recent_workspace(
             server.configuration_root().as_deref(),
             std::path::Path::new(&selected_path),
-        );
+        )
+        .await;
     }
     for message in add_selected_workspace_root_messages(
         ctx.workspace,
@@ -413,10 +414,10 @@ async fn write_launcher_entries<S>(ctx: &mut ConnectionCtx<'_, S>) -> Result<(),
 where
     S: AsyncWrite + Unpin,
 {
-    let entries = ctx
-        .reload_server
-        .map(|server| launcher::launcher_entries(server.configuration_root().as_deref()))
-        .unwrap_or_default();
+    let entries = match ctx.reload_server {
+        Some(server) => launcher::launcher_entries(server.configuration_root().as_deref()).await,
+        None => LauncherEntries::default(),
+    };
     if entries.pruned > 0 {
         ctx.codec
             .write_server_message(
@@ -460,7 +461,7 @@ where
     S: AsyncWrite + Unpin,
 {
     if let Some(server) = ctx.reload_server {
-        launcher::remove_recent_workspace(server.configuration_root().as_deref(), index);
+        launcher::remove_recent_workspace(server.configuration_root().as_deref(), index).await;
     }
     write_launcher_entries(ctx).await
 }

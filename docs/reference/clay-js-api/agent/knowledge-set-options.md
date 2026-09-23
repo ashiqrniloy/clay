@@ -15,7 +15,31 @@ phase: Phase 2
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: graft
+    type: boolean
+    default: optional
+    description: `true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required).
+  - name: graftCliPath
+    type: string
+    default: optional
+    description: explicit path to a `graft` CLI entry (host-owned).
+  - name: graftDeepModel
+    type: object
+    default: optional
+    description: Explicit model for `/graft-build-deep`; requires `graft: true`.
+  - name: graftMode
+    type: enum
+    default: optional
+    description: graft extension mode — `pull` (tools + commands + skill, default), `push` (retrieval pack + first-turn orientation + edit blast radius), or `both`.
+  - name: wiki
+    type: boolean
+    default: optional
+    description: `true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required).
+  - name: workspaceRoot
+    type: string
+    default: required
+    description: absolute workspace root the knowledge base binds to.
 security: Forwards a configuration intent (workspace root, opt-in flags, and an optional graft deep-build model identity) to the daemon, which owns activation; writes stay inside the workspace `.wiki/` tree, the optional qmd binary is never spawned unless explicitly configured, and a graft deep-build key is read from the credential vault unless the trusted caller passes one inline (it joins the redactor and reaches the child process only in its environment, never argv). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript.
 agent_guidance: Use `agent.knowledgeSetOptions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. The call is queued while the daemon is down and applies after the daemon initializes, so load entries never block on daemon startup.
 lookup_tags: [agent, knowledge, wiki, graft, prism-memory, options, js-api]

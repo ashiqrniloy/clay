@@ -614,9 +614,9 @@ async fn example_configuration_loads_cleanly_and_applies_effects_scenario() {
     // Observable proof the configuration actually executed: the example's
     // setTypography call replaced the default monospace profile.
     let typography = server.runtime_generation.active_typography().await;
-    assert_eq!(typography.monospace.size, 16.0);
-    assert_eq!(typography.proportional.size, 17.0);
-    assert_eq!(typography.ui.size, 13.0);
+    assert!((typography.monospace.size - 16.0).abs() < f32::EPSILON);
+    assert!((typography.proportional.size - 17.0).abs() < f32::EPSILON);
+    assert!((typography.ui.size - 13.0).abs() < f32::EPSILON);
     assert_eq!(
         typography.hierarchy,
         crate::protocol::UiTypographyHierarchy::DEFAULT,
@@ -835,7 +835,7 @@ async fn example_configuration_survives_broken_package_module() {
     );
     // Base-config effects still applied.
     let typography = server.runtime_generation.active_typography().await;
-    assert_eq!(typography.monospace.size, 16.0);
+    assert!((typography.monospace.size - 16.0).abs() < f32::EPSILON);
     fs::remove_dir_all(root).unwrap();
 }
 

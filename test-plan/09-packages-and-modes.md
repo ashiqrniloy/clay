@@ -258,11 +258,31 @@ executes no code; `background`/`scale` never change the protocol wire shape
 |---|--------|----------|
 | P55 | From a package script, call `serverOpenDocument` (or `serverReloadDocument`) for a workspace file larger than the 256 KiB package documents budget (`DOCUMENTS_OP_MAX_DOCUMENT_BYTES`) | The call fails with the typed `documents.document_too_large` code instead of handing the file to JavaScript. The surfaced diagnostic is sanitized (`Document/workspace operation failed server validation.` in the status bar; the code in the server diagnostics/log), carries no path and no document text, and the client keeps working: the same file stays open and editable through the client's chunked transfer path, which the package budget never gates. Negative: no oversized text in the diagnostic, no orphan loading state, no client open refusal. |
 
-## Plan 127 capability-grant fail-closed step
+## Plan 136 capability-grant steps
+
+Deep references: `docs/reference/clay-js-api/packages/authorize.md`,
+`docs/reference/clay-js-api/configuration.md` (plan 136 section),
+`docs/reference/packages/creating-packages.md`. Setup: the plan 127 fixture
+package (`@fixture/lane`, declaring `parse-document`, `completion-provider`,
+`mode-registration`) seeded into an isolated scratch `HOME` with the command
+shape Clay's pnpm backend runs (`pnpm add <path>` in `~/.clay/packages`, because
+`clay install` accepts only `npm:` specs), then taken through Clay's own verbs.
+Harness: `test-plan/artifacts/127-lane-scheduling/run-live.sh` (`granted-lane`,
+`ungranted-lane`, `config-granted-lane`) with
+`test-plan/artifacts/136-capability-grants/` fixtures.
 
 | # | Action | Expected |
 |---|--------|----------|
-| P56 | Install a local third-party package that declares `parse-document`/`completion-provider` in `clay.permissions`, adopt it (`clay package adopt`), then reference it from `~/.clay/init.js` with `await loadPackage("@vendor/…")` without a capability grant | The package never executes: `clay package enable` fails closed with `MissingCapabilityGrant { package_name: …, capability: CompletionProvider }`, the app still starts, the fixture document opens, and typing works. No mode contribution, parse handler, completion provider, or lane command appears. The only surfaced diagnostic is the sanitized `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.` in the server log/status — no path, no package name, no code executed. Negative: no mode badge, no provider group in the popup, no crash, no half-applied contribution. |
+| P56 | Install and adopt the fixture, grant its declared capabilities (`clay package authorize`), then reference it from `~/.clay/init.js` with `await loadPackage("@fixture/lane")`; then repeat the run with the grant withdrawn | **Positive:** `clay package enable` succeeds, the app starts, the config loads the package, and the package's declared contributions (mode pattern, parse handler, module-backed completion provider) register on their lanes — no `packages.load_failed`/`configuration failed` diagnostic. **Negative sub-step (no grant):** `clay package enable` fails closed with `MissingCapabilityGrant { package_name: …, capability: CompletionProvider }`, the app still starts and the fixture document opens and edits, and the only surfaced diagnostic is the sanitized `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.` — no mode badge, no provider group, no half-applied contribution. Ceiling: package-owned mode activation for open documents is not wired (plan 136 task 6 further action), so the live editor cannot exercise the registered provider; registration is proven server-side and by the lane counters in module 11 Q44. Trusted-only ops stay unreachable even with the grant: the granted package keeps its own domain op set (automated `third_party_lane_denies_trusted_ops` / `lanes_share_their_domain_op_set`, and no `packages.authorize`/`language_server.authorize`-class op appears in the package extension). |
+| P57 | `clay package inspect @fixture/lane`, then `clay package authorize @fixture/lane --capability completion-provider --capability mode-registration --capability parse-document`, `inspect` again, `enable`, then `clay package revoke` + `inspect` + `enable`; finally authorize only `mode-registration` and `enable` again | Granting is explicit and auditable: `authorize` prints the granted set with the runtime profile and the attribution (`granted by: cli`), `inspect` gains `Grants: … (native-trust)` / `Granted by:` and drops them again after `revoke` (`Adoption: approval revoked`, `Ungranted: … (declared, not granted)`). `enable` succeeds only while the declared set is covered; a second `authorize` **replaces** the whole granted set, so re-granting just `mode-registration` makes `enable` fail closed again with `MissingCapabilityGrant`, and re-granting the full set restores it. Negatives: an undeclared capability is refused (`does not declare capability … in its manifest`); `authorize` on a revoked or unadopted record refuses to manufacture an approval (`run \`clay package adopt …\` first`); `revoke` returns the system to fail-closed with `AdoptionRequired { code: "package_approval.revoked" }` rather than a missing-grant error. |
+| P58 | Put the grant in `~/.clay/init.js` instead of the CLI (`await authorize({ package, capabilities, runtimeProfile, approvedBy: "config" })`) with no CLI grant, launch, then from a **separate** `clay` process run `inspect` and `enable`; relaunch on the same store | The grant is durable and process-independent: the store's approval record carries `grant: { capabilities, runtime_profile: native-trust, granted_by: config, granted_at }`, the fresh CLI process prints `Grants: … (native-trust)` / `Granted by: config`, and its `enable` succeeds. Negatives: `clay:packages` is trusted-domain-only, so package code cannot import `authorize` at all, and a package that calls it while its activation scope is open is refused with `packages.grant_during_activation` (no self-grant); unknown option keys are rejected with `packages.invalid_grant`; a provenance change (reinstall/replace) leaves the grant inert and the package fails closed again. |
+
+## Plan 127 capability-grant fail-closed record (pre-plan-136 shape)
+
+Plan 127 recorded the negative half of P56 while the grant surface did not exist:
+the same fixture, adopted, never granted, `enable` failing closed with
+`MissingCapabilityGrant` and only the sanitized `packages.load_failed`
+diagnostic. That behavior is now P56's negative sub-step above.
 
 ## Plan 127 execution record (2026-09-19, task 7)
 

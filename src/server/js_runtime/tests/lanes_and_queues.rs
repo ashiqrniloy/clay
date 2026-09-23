@@ -909,3 +909,572 @@ async fn lane_channel_capacities_are_preserved() {
         Err(tokio::sync::broadcast::error::TryRecvError::Lagged(1))
     ));
 }
+
+// ── Plan 136 task 6: the granted third-party fixture ─────────────────────────
+
+/// Plan 136 task 6 fixture: the plan-127 fixture shape reached through the
+/// plan-136 grant surface. ONE third-party package declares `parse-document` +
+/// `completion-provider`, registers a deliberately slow parse handler (inline
+/// module object → general lane) and a `moduleSpecifier` completion provider
+/// (→ latency lane).
+struct GrantedLaneFixture {
+    name: String,
+    root: PathBuf,
+    load_specifier: String,
+    package_json: serde_json::Value,
+}
+
+fn granted_lane_fixture(package_name: &str, api_prefix: &str, busy_ms: u64) -> GrantedLaneFixture {
+    let root = config_fixture("plan136-granted-lane").join(api_prefix);
+    write_loadable_package(
+        &root,
+        &format!(
+            r#"
+            import {{ serverRegisterCompletionProvider }} from "clay:completion";
+            import {{ serverRegisterParseHandler }} from "clay:parse";
+            import * as parser from "./parser.js";
+            import * as provider from "./provider.js";
+            export default function load() {{
+              serverRegisterParseHandler({{
+                mode: "{api_prefix}",
+                module: parser,
+                exportName: "parseGrantedDocument",
+                parseUnit: "line-group",
+                viewportPriority: true,
+                timeoutMs: 2_000
+              }});
+              // `module` binds the handler in this isolate and marks the
+              // registration as runtime-bridged; `moduleSpecifier` is what
+              // lets the latency lane materialize the same handler by import.
+              serverRegisterCompletionProvider({{
+                module: provider,
+                moduleSpecifier: import.meta.resolve("./provider.js"),
+                exportName: "provideCompletion"
+              }});
+            }}
+            "#
+        ),
+    );
+    fs::write(
+        root.join("dist/parser.js"),
+        format!(
+            r#"
+            const BUSY_MS = {busy_ms};
+            export async function parseGrantedDocument(notification) {{
+              const deadline = Date.now() + BUSY_MS;
+              while (Date.now() < deadline) {{}}
+              return {{ viewport: notification?.viewport ?? null }};
+            }}
+            "#
+        ),
+    )
+    .expect("write slow package parse handler");
+    fs::write(
+        root.join("dist/provider.js"),
+        r#"
+        export async function provideCompletion(_request, _window) {
+          return {
+            status: "ok",
+            items: [{
+              label: "granted-lane",
+              insertText: "granted-lane",
+              detail: "granted module-backed provider (latency lane)"
+            }]
+          };
+        }
+        "#,
+    )
+    .expect("write module-backed provider module");
+    let package_json = test_package_json(
+        package_name,
+        api_prefix,
+        &["mode-registration", "parse-document", "completion-provider"],
+        serde_json::json!({
+            "modePatterns": [{
+                "mode": api_prefix,
+                "displayName": "Granted Lane",
+                "extensions": ["grantedlane"]
+            }],
+            "completionProviders": [{
+                "id": format!("{api_prefix}.provider"),
+                "priority": 0,
+                "budgets": { "timeoutMs": 2_000, "maxItems": 8 }
+            }]
+        }),
+    );
+    GrantedLaneFixture {
+        name: package_name.to_string(),
+        load_specifier: format!("clay://packages/{package_name}/dist/load.js"),
+        root,
+        package_json,
+    }
+}
+
+/// Install, adopt, grant, and enable the fixture through the real service path
+/// (the same order the host CLI now exposes), then run its load entry with the
+/// package's host-stamped provenance. Returns the parse-handler and
+/// completion-provider registrations the load registered.
+async fn load_granted_lane_fixture(
+    service: &ClayJsRuntimeService,
+    fixture: &GrantedLaneFixture,
+) -> (
+    crate::server::parse_coordinator::JsParseHandlerRegistration,
+    crate::server::completion::JsCompletionProviderRegistration,
+) {
+    use crate::packages::permissions::PackagePermission;
+    let approved = vec![
+        PackagePermission::ModeRegistration,
+        PackagePermission::ParseDocument,
+        PackagePermission::CompletionProvider,
+    ];
+    ensure_synthetic_package_enabled(
+        service,
+        fixture.package_json.clone(),
+        approved.clone(),
+        None,
+    );
+    service
+        .test_op_state()
+        .load_entry_allowlist()
+        .record_for_package(
+            &fixture.load_specifier,
+            fixture.root.join("dist/load.js"),
+            fixture.root.clone(),
+            Some(&fixture.name),
+        );
+    let evaluation = evaluate_as_package(
+        service,
+        fixture.package_json.clone(),
+        approved,
+        &format!(
+            "const m = await import({:?}); await m.default();",
+            fixture.load_specifier
+        ),
+    )
+    .await
+    .expect("granted lane fixture load");
+    let parse_registration = evaluation
+        .js_parse_handlers
+        .iter()
+        .find(|registration| registration.package.manifest.name == fixture.name)
+        .cloned()
+        .expect("granted fixture must register a parse handler");
+    let completion_registration = evaluation
+        .js_completion_providers
+        .iter()
+        .find(|registration| registration.package.manifest.name == fixture.name)
+        .cloned()
+        .expect("granted fixture must register a completion provider");
+    (parse_registration, completion_registration)
+}
+
+fn granted_lane_parse_notification(api_prefix: &str) -> ParseEditNotification {
+    ParseEditNotification {
+        document_id: 7,
+        document_version: 3,
+        behavior_version: 1,
+        package_prefix: api_prefix.to_string(),
+        mode_id: api_prefix.to_string(),
+        viewport: ParseByteRange::new(0, 2),
+        invalidated_ranges: vec![ParseByteRange::new(0, 2)],
+        accepted_edit: None,
+        parse_windows: Vec::new(),
+        memory_budget: None,
+        trace_id: None,
+        request_id: None,
+    }
+}
+
+/// Plan 136 task 6 acceptance: an adopted third-party package with
+/// `parse-document` + `completion-provider` grants answers a completion from
+/// the latency lane while its own 500 ms parse handler holds the general lane,
+/// and the answer carries the package's provenance.
+#[tokio::test]
+async fn granted_third_party_provider_serves_from_latency_lane_when_general_lane_busy() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    use crate::packages::bundled::RuntimeDomain;
+
+    let busy_ms = 500u64;
+    let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(2_000));
+    let fixture = granted_lane_fixture("@vendor/grantedlane", "grantedlane", busy_ms);
+    let (parse_registration, completion_registration) =
+        load_granted_lane_fixture(&service, &fixture).await;
+
+    // Lane identity: the provider registration carries the package-owned
+    // module specifier (latency lane) while the parse handler stays inline
+    // (general lane), and the grant did not move the package out of the
+    // third-party domain.
+    let provider_module = completion_registration
+        .module_specifier
+        .clone()
+        .expect("module-backed provider must carry its resolved module specifier");
+    let allowlist = service.test_op_state().load_entry_allowlist();
+    assert!(
+        allowlist.is_package_module(&provider_module, &fixture.name),
+        "the latency lane must materialize the owning package's module"
+    );
+    assert!(
+        !allowlist.is_package_module(&provider_module, "@vendor/someone-else"),
+        "the latency lane must never materialize another package's module"
+    );
+    assert_eq!(
+        service.registration_domain(&completion_registration.package),
+        RuntimeDomain::ThirdParty,
+        "a capability grant never promotes a package into the trusted domain"
+    );
+    assert_eq!(
+        service.registration_domain(&parse_registration.package),
+        service.registration_domain(&completion_registration.package),
+        "the A/B pair stays in one trust domain, so only the lane differs"
+    );
+
+    let (request, window) = lane_completion_input("grantedlane", 1, "gr");
+    let mut idle_us = Vec::new();
+    for request_id in 0..10u64 {
+        let (request, window) = lane_completion_input("grantedlane", request_id, "gr");
+        let start = Instant::now();
+        let result = service
+            .invoke_completion_provider(completion_registration.clone(), request, window)
+            .await
+            .expect("idle completion");
+        idle_us.push(start.elapsed().as_micros());
+        assert_eq!(result.items[0].label, "granted-lane");
+        assert_eq!(
+            result.provenance.package_name, fixture.name,
+            "a granted provider's answer carries its package provenance"
+        );
+        assert_eq!(result.provenance.package_prefix, "grantedlane");
+    }
+    idle_us.sort_unstable();
+    let idle_median_us = idle_us[idle_us.len() / 2];
+
+    // Hold the general lane for `busy_ms` with the package's own parse handler,
+    // then issue one completion 50 ms in: at least 450 ms of the busy loop
+    // remain if the lanes shared a worker.
+    let parse_task = tokio::spawn({
+        let service = service.clone();
+        let registration = parse_registration.clone();
+        let notification = granted_lane_parse_notification("grantedlane");
+        async move {
+            service
+                .invoke_parse_handler(registration, notification)
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let workers_before_completion = service.workers_started();
+    let start = Instant::now();
+    let completion = service
+        .invoke_completion_provider(completion_registration.clone(), request, window)
+        .await
+        .expect("granted latency-lane completion");
+    let busy_completion_us = start.elapsed().as_micros();
+    assert_eq!(completion.items[0].label, "granted-lane");
+    assert_eq!(completion.provenance.package_name, fixture.name);
+    assert!(
+        !parse_task.is_finished(),
+        "the general lane must still be held when the latency lane answers"
+    );
+    assert_eq!(
+        service.workers_started(),
+        workers_before_completion,
+        "a busy general lane must not replace either lane"
+    );
+    assert!(
+        busy_completion_us < 250_000,
+        "completion must not queue behind the busy general lane: {busy_completion_us} us \
+         (busy {busy_ms} ms, idle median {idle_median_us} us)"
+    );
+    let parse_result = parse_task.await.expect("parse task join");
+    assert!(
+        parse_result.is_ok(),
+        "busy parse must complete under its timeout: {parse_result:?}"
+    );
+    eprintln!(
+        "PLAN136_GRANTED_LANE busy_ms={busy_ms} idle_median_us={idle_median_us} \
+         busy_completion_us={busy_completion_us} workers_started={}",
+        service.workers_started()
+    );
+}
+
+/// Plan 136 task 6 security acceptance: the same fixture without its grants
+/// (and with a partial grant) still fails closed with
+/// `MissingCapabilityGrant`, registers no provider, and starts no lane.
+#[tokio::test]
+async fn ungranted_third_party_provider_still_fails_closed() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    use crate::packages::authorization::RuntimeProfile;
+    use crate::packages::permissions::PackagePermission;
+    use crate::packages::service::PackageServiceError;
+
+    let service = ClayJsRuntimeService::default();
+    let workers_before = service.workers_started();
+    let fixture = granted_lane_fixture("@vendor/ungrantedlane", "ungrantedlane", 500);
+    let op_state = service.test_op_state();
+    let mut package_service = op_state
+        .package_service()
+        .lock()
+        .expect("package service mutex poisoned");
+    package_service
+        .install_from_value_at_root_with_spec(
+            fixture.package_json.clone(),
+            fixture.root.clone(),
+            "local:plan136-grant-fixture",
+        )
+        .expect("fixture installs");
+    package_service
+        .approve_package(&fixture.name, "test")
+        .expect("adoption persists");
+
+    // Adoption alone is never authority.
+    let error = package_service
+        .enable(&fixture.name)
+        .expect_err("an adopted package with no grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant, got {error}"
+    );
+
+    // A partial grant still fails closed: every declared capability needs one.
+    package_service
+        .authorize_package(
+            &fixture.name,
+            vec![PackagePermission::CompletionProvider],
+            RuntimeProfile::Restricted,
+            "test",
+        )
+        .expect("partial grant records");
+    let error = package_service
+        .enable(&fixture.name)
+        .expect_err("a partially granted package must still fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant for the ungranted capabilities, got {error}"
+    );
+    drop(package_service);
+
+    assert!(
+        service
+            .third_party_registrations_snapshot()
+            .js_completion_providers
+            .iter()
+            .all(|registration| registration.package.manifest.name != fixture.name),
+        "an ungranted package must contribute no completion provider"
+    );
+    assert_eq!(
+        service.workers_started(),
+        workers_before,
+        "a host-side refusal must not start a lane"
+    );
+}
+
+/// Plan 136 task 7 acceptance: lane occupancy is observable per (domain, lane),
+/// and the counters keep lanes apart. The granted fixture holds the general lane
+/// with its parse handler while its module-backed provider answers completions
+/// on the latency lane; the two lanes' dispatch counts move independently, the
+/// trusted domain's lanes absorb nothing, and the report-time recording maps
+/// each lane's mailbox state onto that lane's own metric names (the values a
+/// `CLAY_PERF_REPORT_DIR` run writes into its summary).
+#[tokio::test]
+async fn lane_command_counters_track_general_and_latency_separately() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    use crate::packages::bundled::RuntimeDomain;
+
+    let busy_ms = 500u64;
+    let completions = 12u64;
+    let service = ClayJsRuntimeService::with_timeout(Duration::from_millis(2_000));
+    let fixture = granted_lane_fixture("@vendor/lanecounters", "lanecounters", busy_ms);
+    let (parse_registration, completion_registration) =
+        load_granted_lane_fixture(&service, &fixture).await;
+
+    let trusted_general_before = service
+        .lane_queue_stats(RuntimeDomain::Trusted, RuntimeLane::General)
+        .dispatched;
+    let trusted_latency_before = service
+        .lane_queue_stats(RuntimeDomain::Trusted, RuntimeLane::Latency)
+        .dispatched;
+
+    // Mixed workload: the package's own 500 ms parse handler holds the general
+    // lane while its provider answers completions on the latency lane.
+    let parse_task = tokio::spawn({
+        let service = service.clone();
+        let registration = parse_registration.clone();
+        let notification = granted_lane_parse_notification("lanecounters");
+        async move {
+            service
+                .invoke_parse_handler(registration, notification)
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let mut busy_us = Vec::new();
+    for request_id in 0..completions {
+        let (request, window) = lane_completion_input("lanecounters", request_id, "lane");
+        let start = Instant::now();
+        let result = service
+            .invoke_completion_provider(completion_registration.clone(), request, window)
+            .await
+            .expect("latency-lane completion while the general lane is held");
+        busy_us.push(start.elapsed().as_micros());
+        assert_eq!(result.items[0].label, "granted-lane");
+    }
+    assert!(
+        !parse_task.is_finished(),
+        "the general lane must still be held while the latency lane answers"
+    );
+    parse_task
+        .await
+        .expect("parse task join")
+        .expect("busy parse completes under its timeout");
+
+    let general = service.lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::General);
+    let latency = service.lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::Latency);
+    let trusted_general = service.lane_queue_stats(RuntimeDomain::Trusted, RuntimeLane::General);
+    let trusted_latency = service.lane_queue_stats(RuntimeDomain::Trusted, RuntimeLane::Latency);
+
+    // Separation: the fixture load plus its parse handler are general-lane
+    // dispatches, the completions are latency-lane dispatches, and neither
+    // domain's counters pick up the other's work.
+    assert!(
+        general.dispatched >= 1,
+        "the fixture load and parse handler must be counted on the general lane: {general:?}"
+    );
+    assert!(
+        latency.dispatched >= completions,
+        "every completion must be counted on the latency lane: {latency:?}"
+    );
+    assert_eq!(
+        trusted_general.dispatched, trusted_general_before,
+        "third-party work must not be counted on the trusted domain's general lane"
+    );
+    assert_eq!(
+        trusted_latency.dispatched, trusted_latency_before,
+        "third-party work must not be counted on the trusted domain's latency lane"
+    );
+
+    // Report-time recording: one snapshot per (domain, lane) metric, carrying
+    // the mailbox's own count, and no document/provider content.
+    let recorder = crate::perf::metrics::PerfRecorder::for_test(true);
+    service.record_lane_metrics(&recorder);
+    let summary = recorder.summary();
+    let names = crate::perf::metrics::JS_RUNTIME_LANE_METRICS;
+    let third_party = 1;
+    assert_eq!(
+        summary.metrics[names[third_party][0].dispatched].total, general.dispatched,
+        "recorded general-lane dispatch count must match the mailbox"
+    );
+    assert_eq!(
+        summary.metrics[names[third_party][1].dispatched].total, latency.dispatched,
+        "recorded latency-lane dispatch count must match the mailbox"
+    );
+    assert_eq!(
+        summary.metrics[names[third_party][1].peak_pending].total, latency.peak_pending as u64,
+        "recorded latency-lane occupancy must match the mailbox"
+    );
+    assert_eq!(
+        summary.metrics[names[third_party][1].superseded].total, latency.superseded,
+        "recorded latency-lane supersede count must match the mailbox"
+    );
+    assert_eq!(
+        summary.metrics[names[third_party][1].evicted].total, latency.evicted,
+        "recorded latency-lane eviction count must match the mailbox"
+    );
+    assert_eq!(
+        summary.metrics[names[0][0].dispatched].total, trusted_general.dispatched,
+        "an idle lane is reported as zero, not omitted"
+    );
+    assert_eq!(
+        summary.metrics[names[0][1].dispatched].total, trusted_latency.dispatched,
+        "an idle lane is reported as zero, not omitted"
+    );
+
+    busy_us.sort_unstable();
+    let p50_us = busy_us[busy_us.len() / 2];
+    let p95_us = busy_us[(busy_us.len() * 95).div_ceil(100).saturating_sub(1)];
+    let max_us = *busy_us.last().expect("completions were measured");
+    for (domain, lane, stats) in [
+        ("trusted", "general", trusted_general),
+        ("trusted", "latency", trusted_latency),
+        ("third_party", "general", general),
+        ("third_party", "latency", latency),
+    ] {
+        eprintln!(
+            "PLAN136_LANE_OCCUPANCY domain={domain} lane={lane} dispatched={} pending={} \
+             peak_pending={} capacity={} superseded={} evicted={}",
+            stats.dispatched,
+            stats.pending_supersedable,
+            stats.peak_pending,
+            stats.capacity,
+            stats.superseded,
+            stats.evicted
+        );
+    }
+    eprintln!(
+        "PLAN136_LANE_LATENCY busy_ms={busy_ms} completions={completions} p50_us={p50_us} \
+         p95_us={p95_us} max_us={max_us}"
+    );
+    assert!(
+        p95_us < 250_000,
+        "the latency lane must stay responsive under a busy general lane: p95 {p95_us} us"
+    );
+    let _ = fs::remove_dir_all(config_fixture("plan136-granted-lane"));
+}
+
+/// Plan 136 task 7: counting a dispatched command takes no lock beyond the queue
+/// hand-off the mailbox already performs. The counter is a lock-free atomic —
+/// the compile-time check lives next to the field
+/// (`worker.rs`: `const _: fn(&CommandMailbox) -> &AtomicU64`) — and the count
+/// itself is maintained by the dispatch path, so it is exact and lane-local
+/// (the plan-127 lane isolation suite stays green in this same run).
+#[tokio::test]
+async fn lane_counters_do_not_require_locking_on_the_dispatch_path() {
+    let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+    use crate::packages::bundled::RuntimeDomain;
+
+    const INSTANT_PROVIDER: &str = r#"
+    export async function provideCompletion(_request, window) {
+      return { status: "ok", items: [{ label: window.text, insertText: "q" }] };
+    }
+    "#;
+    let completions = 3u64;
+    let service = ClayJsRuntimeService::default();
+    let (_, registration) = module_backed_completion_provider(
+        &service,
+        "@vendor/lanecounters2",
+        "lanecounters2",
+        INSTANT_PROVIDER,
+    )
+    .await;
+    let general_before = service
+        .lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::General)
+        .dispatched;
+    let latency_before = service
+        .lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::Latency)
+        .dispatched;
+
+    for request_id in 0..completions {
+        let (request, window) = lane_completion_input("lanecounters2", request_id, "lane");
+        let result = service
+            .invoke_completion_provider(registration.clone(), request, window)
+            .await
+            .expect("module-backed completion");
+        assert_eq!(result.items[0].label, "lane");
+    }
+
+    let general = service.lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::General);
+    let latency = service.lane_queue_stats(RuntimeDomain::ThirdParty, RuntimeLane::Latency);
+    assert_eq!(
+        latency.dispatched - latency_before,
+        completions,
+        "every dispatched completion is counted exactly once: {latency:?}"
+    );
+    assert_eq!(
+        general.dispatched, general_before,
+        "a latency-lane dispatch must not touch the general lane's counter: {general:?}"
+    );
+    assert_eq!(
+        latency.superseded, 0,
+        "sequential completions must not supersede each other: {latency:?}"
+    );
+    let _ = fs::remove_dir_all(config_fixture("lane-module-provider"));
+}

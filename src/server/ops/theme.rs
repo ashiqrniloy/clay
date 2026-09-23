@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 
 use super::ClayOpState;
 use super::packages::ensure_first_party_record;
+use crate::lock_util::LockOrRecover;
 use crate::packages::record::DesignTokenOverrideDescriptor;
 use crate::protocol::{ActiveTheme, Appearance, ResolvedAppearance};
 use crate::shell::theme::{ContrastFailure, validate_active_theme_contrast};
@@ -276,10 +277,7 @@ pub(crate) fn apply_design_system(
     }
 
     let record = {
-        let mut service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let mut service = clay_state.package_service().lock_or_recover();
         if trimmed.starts_with("@clay/") {
             // Resolve under the already-held service guard. Calling the
             // public `ensure_first_party_record` here re-locked the same
@@ -342,10 +340,7 @@ pub(crate) fn apply_design_system(
         if parent_id == "@clay/core" || parent_id == "clay:core" || parent_id == "core" {
             Some(crate::shell::design_system::ResolvedUiDesignSystem::core_fallback())
         } else {
-            let service = clay_state
-                .package_service()
-                .lock()
-                .expect("package service mutex poisoned");
+            let service = clay_state.package_service().lock_or_recover();
             let parent_record = service.enabled_records().find(|r| {
                 r.manifest.name == *parent_id
                     || r.contributions
@@ -447,19 +442,13 @@ pub(crate) fn apply_icon_pack(
         // without executing anything (inert data). Held-lock resolution only:
         // the public helper would re-lock the same non-reentrant mutex
         // (plan 110 task 18 deadlock precedent).
-        let mut service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let mut service = clay_state.package_service().lock_or_recover();
         super::packages::ensure_first_party_record_locked(&mut service, trimmed)?.0
     } else {
         // Adopted third-party pack: selection requires the record to already
         // be enabled through the ordinary load/adoption path. Selection never
         // installs, adopts, or promotes trust.
-        let service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let service = clay_state.package_service().lock_or_recover();
         service
             .enabled_records()
             .find(|r| r.manifest.name == trimmed)
@@ -833,7 +822,7 @@ mod tests {
             crate::shell::design_system::RecipeState::Rest,
         );
         let btn_recipe = active.recipes.get(&btn_key).expect("button recipe present");
-        assert_eq!(btn_recipe.border_radius, 6.0);
+        assert!((btn_recipe.border_radius - 6.0).abs() < f64::EPSILON);
 
         // Check that untouched recipes inherit from core baseline
         let input_key = crate::shell::design_system::RecipeKey::new(
@@ -846,7 +835,7 @@ mod tests {
             .recipes
             .get(&input_key)
             .expect("input recipe inherited from core");
-        assert_eq!(input_recipe.border_width, 1.0);
+        assert!((input_recipe.border_width - 1.0).abs() < f64::EPSILON);
 
         let _ = std::fs::remove_dir_all(fixture_dir);
     }

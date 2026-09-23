@@ -4,7 +4,10 @@ use std::{
     fmt,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -24,6 +27,7 @@ use super::evaluation::{
     evaluate_js_language_intelligence_provider, evaluate_js_parse_handler, evaluate_loaded_module,
 };
 use super::source::{CONTROLLED_MAIN_SPECIFIER, ClayModuleLoader};
+use crate::lock_util::LockOrRecover;
 
 pub(crate) enum RuntimeEntry {
     ControlledSource(String),
@@ -53,7 +57,8 @@ impl RuntimeCommandSender {
         self.mailbox.enqueue(command).map_err(CommandSendError)
     }
 
-    #[cfg(test)]
+    /// Plan 136 task 7: production accessor for the lane's mailbox counters
+    /// (report-time lane metrics). Plan 127's flood tests read the same state.
     pub(crate) fn queue_stats(&self) -> CommandQueueStats {
         self.mailbox.stats()
     }
@@ -78,12 +83,7 @@ impl Drop for RuntimeWorker {
         // needed. Callers holding a sender clone keep failing until the lane is
         // rewired to the replacement worker.
         self.sender.close();
-        if let Some(join) = self
-            .join
-            .lock()
-            .expect("Clay runtime worker join mutex poisoned")
-            .take()
-        {
+        if let Some(join) = self.join.lock_or_recover().take() {
             let _ = join.join();
         }
     }
@@ -193,11 +193,13 @@ enum CommandKind {
     LanguageIntelligence,
 }
 
-/// Observable state of one lane's command mailbox.
-#[cfg(test)]
+/// Observable state of one lane's command mailbox (Plan 136 task 7: report-time
+/// lane metrics; Plan 127 P2: the flood tests).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CommandQueueStats {
     pub(crate) capacity: usize,
+    /// Commands this lane's worker has taken off the mailbox and run.
+    pub(crate) dispatched: u64,
     pub(crate) pending_supersedable: usize,
     pub(crate) peak_pending: usize,
     pub(crate) superseded: u64,
@@ -280,9 +282,17 @@ impl RuntimeCommand {
 /// `ClayRuntimeError::Superseded` instead of delivering a stale result.
 pub(crate) struct CommandMailbox {
     capacity: usize,
+    /// Dispatch counter: one relaxed increment per command the worker takes off
+    /// the mailbox, read only at report time (plan 136 task 7). Kept out of
+    /// `MailboxState` so the count never needs the queue lock. This assertion
+    /// fails the build if the counter stops being a lock-free atomic.
+    dispatched: AtomicU64,
     state: Mutex<MailboxState>,
     ready: Condvar,
 }
+
+#[cfg(test)]
+const _: fn(&CommandMailbox) -> &AtomicU64 = |mailbox| &mailbox.dispatched;
 
 #[derive(Default)]
 struct MailboxState {
@@ -298,6 +308,7 @@ impl CommandMailbox {
     fn new(capacity: usize) -> Self {
         Self {
             capacity,
+            dispatched: AtomicU64::new(0),
             state: Mutex::new(MailboxState::default()),
             ready: Condvar::new(),
         }
@@ -307,14 +318,10 @@ impl CommandMailbox {
     /// the lane's worker is gone; the command comes back (boxed) for a retry on
     /// the replacement lane.
     fn enqueue(&self, command: RuntimeCommand) -> Result<(), Box<RuntimeCommand>> {
-        let mut state = self
-            .state
-            .lock()
-            .expect("Clay runtime command mailbox poisoned");
+        let mut state = self.state.lock_or_recover();
         if state.closed {
             return Err(Box::new(command));
         }
-        let mut dropped_metric = None;
         // One predicate gates the accounting and the supersede decision, so the
         // pending count stays balanced with `recv()`. The work key is found by
         // scanning the queue: it is bounded by `capacity`, so no side index map
@@ -338,12 +345,12 @@ impl CommandMailbox {
             let same_key = evicted.is_some() && evicted == replacement;
             if let Some(dropped) = evicted.and_then(|index| state.queue.remove(index)) {
                 state.pending_supersedable -= 1;
+                // Counted here, recorded at report time: a drop must not spend a
+                // perf snapshot (plan 136 task 7).
                 if same_key {
                     state.superseded += 1;
-                    dropped_metric = Some(crate::perf::metrics::JS_RUNTIME_COMMAND_SUPERSEDED);
                 } else {
                     state.evicted += 1;
-                    dropped_metric = Some(crate::perf::metrics::JS_RUNTIME_COMMAND_EVICTED);
                 }
                 dropped.fail(ClayRuntimeError::Superseded);
             }
@@ -352,25 +359,22 @@ impl CommandMailbox {
         }
         state.queue.push_back(command);
         drop(state);
-        if let Some(metric) = dropped_metric {
-            global_recorder().record_counter(metric, 1);
-        }
         self.ready.notify_one();
         Ok(())
     }
 
     /// Next command in FIFO order, blocking until one arrives. `None` once the
-    /// mailbox is closed and drained.
+    /// mailbox is closed and drained. Taking a command off the mailbox is the
+    /// dispatch moment: the counter is bumped here, where the lane's worker
+    /// picks work up.
     fn recv(&self) -> Option<RuntimeCommand> {
-        let mut state = self
-            .state
-            .lock()
-            .expect("Clay runtime command mailbox poisoned");
+        let mut state = self.state.lock_or_recover();
         loop {
             if let Some(command) = state.queue.pop_front() {
                 if command.is_supersedable() {
                     state.pending_supersedable -= 1;
                 }
+                self.dispatched.fetch_add(1, Ordering::Relaxed);
                 return Some(command);
             }
             if state.closed {
@@ -379,29 +383,26 @@ impl CommandMailbox {
             state = self
                 .ready
                 .wait(state)
-                .expect("Clay runtime command mailbox poisoned");
+                // A poisoned mailbox lock still yields its guard; the loop
+                // re-checks the queue/closed state below, so recovery cannot
+                // resurrect a torn hand-off (plan 134 D5).
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 
     /// Stop accepting commands and wake the worker so it drains and exits.
     fn close(&self) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("Clay runtime command mailbox poisoned");
+        let mut state = self.state.lock_or_recover();
         state.closed = true;
         drop(state);
         self.ready.notify_all();
     }
 
-    #[cfg(test)]
     fn stats(&self) -> CommandQueueStats {
-        let state = self
-            .state
-            .lock()
-            .expect("Clay runtime command mailbox poisoned");
+        let state = self.state.lock_or_recover();
         CommandQueueStats {
             capacity: self.capacity,
+            dispatched: self.dispatched.load(Ordering::Relaxed),
             pending_supersedable: state.pending_supersedable,
             peak_pending: state.peak_pending,
             superseded: state.superseded,

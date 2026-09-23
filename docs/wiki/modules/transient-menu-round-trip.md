@@ -279,7 +279,7 @@ secondary action, and the v32 `mode` also selects the foot's verb.
   select/activate/cancel/reload, checking one-active-session replacement,
   selection bounds, stale-generation rejection, catalogue/provenance, and
   cleanup.
-- `src/server/connection/tests.rs`: `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`,
+- `src/server/connection/tests/`: `menu_intents_for_unknown_sessions_produce_bounded_diagnostics`,
   `control_center_opens_filters_activates_and_cancels`,
   `tab_switch_cancels_the_active_server_menu_session`,
   `menu_backspace_deletes_one_char_and_secondary_activation_matches_primary`,

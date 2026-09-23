@@ -75,7 +75,9 @@ serverDisableCompletion({ provider: "core.bufferWords" });
 
 ## Options
 
-Pass exactly one non-empty target: either `provider` for an exact completion provider ID (e.g. `rust.snippets`, `typescript.keywords`, `core.bufferWords`) or `packagePrefix` for a package's `apiPrefix` (e.g. `rust`, `typescript`, `javascript`). The target must be at most 128 characters. Both keys must not be set together; extra keys are rejected.
+Pass exactly one non-empty target, at most 128 characters; both keys must not be set together and extra keys are rejected.
+- `provider` (`string`): exact completion provider ID (for example `rust.snippets`, `typescript.keywords`, `core.bufferWords`) whose provider is disabled.
+- `packagePrefix` (`string`): package `apiPrefix` (for example `rust`, `typescript`, `javascript`) whose every registered completion provider is disabled.
 
 ## Key bindings
 

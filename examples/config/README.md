@@ -13,7 +13,7 @@ Layout (mirrors `~/.clay/` on a user machine):
 |-----------------------|------------------------------|---------|
 | `init.js`             | `~/.clay/init.js`     | Base Clay config — every user-facing configuration surface, fully functional standalone. Ends with fault-isolated loads of the two package modules below. |
 | `packages/first-party.js` | `~/.clay/packages/first-party.js` | Language-server grants + one-line `loadPackage` calls for bundled `@clay/*` packages (including the Coding Agent). |
-| `packages/third-party.js` | `~/.clay/packages/third-party.js` | Commented template for third-party packages (none ship). |
+| `packages/third-party.js` | `~/.clay/packages/third-party.js` | Commented template for third-party packages (none ship) — install/remove/update/adopt contract plus the capability-grant surface (`clay package authorize`, `authorize({...})`, inspect, revoke). |
 | `agents/coding-agent/tool-caps.json` | `~/.clay/agents/coding-agent/tool-caps.json` | Coding-agent repository scan caps (`repo_list` / `repo_search` / `glob`). |
 | `agents/coding-agent/skills.json` | `~/.clay/agents/coding-agent/skills.json` | Skill discovery roots (workspace, agent config dir, home) + on/off switches for agent-delivered skills (wiki-searcher, wiki-maintainer, graft). See `agents/coding-agent/` below. |
 

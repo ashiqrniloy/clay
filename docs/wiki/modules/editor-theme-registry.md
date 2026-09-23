@@ -162,7 +162,7 @@ let color = style.color;
 - **Owner:** `src/editor/theme.rs` plus protocol vocabulary in `src/protocol/decorations.rs`.
 - **Public JS API:** `theme.setTheme` in `runtime/js/theme.js`; authoritative docs in `docs/reference/clay-js-api/theme/set-theme.md`.
 - **Deno op:** `op_clay_theme_set_theme` in `src/server/ops/theme.rs`.
-- **Protocol shape:** `TextThemeOverride` and `ActiveTheme` in `src/protocol/mod.rs`; sent as `ServerMessage::ActiveTheme`.
+- **Protocol shape:** `TextThemeOverride` in `src/protocol/typography.rs` and `ActiveTheme` in `src/protocol/theme.rs` (plan 133 task 2 split the protocol family files); sent as `ServerMessage::ActiveTheme`.
 - **Package contribution:** `clay.contributions.textStyles` parsed by `src/packages/record/mod.rs`.
 - **Permissions:** none for theme packages; `setTheme` only resolves bundled first-party `@clay/*` themes.
 - **Validation:** known token/base key, valid hex, duplicate rejection, no-op rejection, executable/raw CSS/native authority rejection, manifest payload budget.
@@ -197,7 +197,7 @@ Roadmap Phase 20's "theme system" item is **satisfied by Phase 18.15**. Phase 20
 
 ## Phase 20.1 UI design tokens and resolved shell theme
 
-Phase 20.1 extends the same `ActiveTheme` snapshot and `setTheme` path with a separate cached UI design-token registry. Editor vocabulary colors stay on `StyleRegistry`; generic UI scalars (spacing, dimensions, density, elevation, motion, z-level, opacity, and semantic color roles for SDUI) resolve through `ResolvedUiTheme` in `src/shell/theme.rs`.
+Phase 20.1 extends the same `ActiveTheme` snapshot and `setTheme` path with a separate cached UI design-token registry. Editor vocabulary colors stay on `StyleRegistry`; generic UI scalars (spacing, dimensions, density, elevation, motion, z-level, opacity, and semantic color roles for SDUI) resolve through `ResolvedUiTheme` in `src/shell/theme/resolve.rs` (hub `src/shell/theme.rs`, plan 133 task 7).
 
 ### Typed catalog and wire shape
 
@@ -225,7 +225,7 @@ Authoritative token catalog: `.agents/skills/clay-execution/references/tokens.md
 
 ### Phase 20.1 tests
 
-- `src/shell/theme.rs`: catalog uniqueness, four-point spacing defaults, design-token validation/rejection, Gruvbox core-fallback compatibility, panel geometry from overrides, density spacing scale without typography revision churn, atomic theme install.
+- `src/shell/theme/parse.rs`, `src/shell/theme/validate.rs`, `src/shell/theme/resolve.rs` and `src/shell/theme/tests.rs`/`theme_snapshot_tests.rs` (plan 133 task 7): catalog uniqueness, four-point spacing defaults, design-token validation/rejection, Gruvbox core-fallback compatibility, panel geometry from overrides, density spacing scale without typography revision churn, atomic theme install.
 - `src/packages/record/mod.rs`: `designTokens` parse/round-trip and rejection of unknown/type-mismatch/invalid/raw/duplicate/typography overrides.
 - `src/protocol/codec.rs`: `active_theme_round_trips_typed_ui_token_overrides`.
 - `tests/editor_performance_invariants.rs`: hot-path source guard above.
@@ -235,7 +235,7 @@ Commands: `cargo test --lib shell::theme`, `cargo test --test editor editor_perf
 
 ## Phase 20.6 canonical Modus defaults and appearance
 
-Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/mod.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime/mod.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](../archive/phase20.6-theme-segregation-settings-ui.md).
+Phase 20.6 segregates the canonical default themes into dedicated first-party packages `@clay/theme-modus-operandi` (canonical light default) and `@clay/theme-modus-vivendi` (canonical dark default), shipped alongside the existing Gruvbox packages using the same inert `textStyles` + no-op ESM structure. A bounded `light` | `dark` | `system` appearance preference (`src/protocol/theme.rs::Appearance`) resolves these canonical defaults without any `loadPackage` call: `src/server/ops/theme.rs::canonical_default_specifier` + `resolve_canonical_default_theme` build the `ActiveTheme` snapshot from the bundled inventory, injected into the evaluation harvest in `src/server/js_runtime/mod.rs` when no explicit theme was set. `System` falls back to dark (Modus Vivendi) when no OS signal is present. An explicit `setTheme` sets `explicit_theme_active = true` and always wins over the appearance-derived default. The new `theme.setAppearance` facade (`op_clay_theme_set_appearance`) exposes the preference; `settings.setTheme`/`settings.setAppearance` from the `@clay/settings` panel persist to `~/.clay/preferences.json` and reload the runtime so changes apply live via the existing `ServerMessage::ActiveTheme` / `RuntimeStateSnapshot` fanout. Full implementation, persistence/precedence, and settings surface details: [Phase 20.6 Theme Package Segregation and Settings UI](../archive/phase20.6-theme-segregation-settings-ui.md).
 
 ## Plan 088 theme/token modernization
 

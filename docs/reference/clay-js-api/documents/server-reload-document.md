@@ -15,7 +15,19 @@ phase: Phase 9
 visibility: public
 permissions: ["workspace-read", "document-read"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: documentId
+    type: string
+    default: required
+    description: Open document to reload.
+  - name: force
+    type: boolean
+    default: false
+    description: Permit replacing a dirty server document when the user has explicitly chosen to discard edits.
+  - name: knownVersion
+    type: number
+    default: optional
+    description: Version the caller expects.
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, reload, dirty-state, js-api]

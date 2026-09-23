@@ -593,7 +593,7 @@ fn performance_budget_constants_are_exported() {
     assert_eq!(LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, 256);
     assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
     assert_eq!(COMPLETION_MAX_VISIBLE_ROWS, 8);
-    assert_eq!(COMPLETION_MAX_WIDTH_PX, 480.0);
+    assert_eq!(COMPLETION_MAX_WIDTH_PX.to_bits(), 480.0_f64.to_bits());
 }
 
 #[test]

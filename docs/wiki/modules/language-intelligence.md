@@ -150,7 +150,7 @@ See the authoritative API page for complete options and errors.
 ## Tests
 
 - `tests/language_intelligence.rs`: protocol round trips, validation, provider ordering, cancellation, timeout, provenance, semantic composition, authority separation, and document-analysis worker intelligence routing.
-- `src/server/connection/tests.rs`: `language_intelligence_window_budget_honored` verifies the window budget on a large multibyte document; `src/server/document.rs`: `window_respects_multibyte_boundaries`, `window_at_document_edges_clamps_to_boundaries`, and `window_cost_is_independent_of_document_size` cover the shared helper.
+- `src/server/connection/tests/`: `language_intelligence_window_budget_honored` verifies the window budget on a large multibyte document; `src/server/document.rs`: `window_respects_multibyte_boundaries`, `window_at_document_edges_clamps_to_boundaries`, and `window_cost_is_independent_of_document_size` cover the shared helper.
 - `tests/editor_intelligence_protocol.rs::completion_recency_and_hover_intelligence_messages_round_trip`: shared-codec coverage for Phase 28.6 completion recency plus hover request/result envelopes.
 - `tests/decoration_intent_authority.rs::hover_intent_does_not_imply_parse_document_or_language_server`: Link hover publication stays on `render-decorations`; built-in language fallbacks retain `ServerIntent` + `UiReactivePriority` metadata.
 - `src/masonry_pane_document.rs::tests::decoration_hover_is_local_and_activation_queues_only_safe_open`: hover changes local chrome without queueing work; safe activation queues only the existing root-bound `OpenDocument` message.

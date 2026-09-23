@@ -15,7 +15,15 @@ phase: Phase 9
 visibility: public
 permissions: ["workspace-write", "document-read"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: documentId
+    type: string
+    default: required
+    description: Open document to save.
+  - name: knownVersion
+    type: number
+    default: optional
+    description: Confirmed server version known by the caller. Values at or below the canonical version are accepted; a value newer than the server is rejected as protocol/state confusion. Omission uses the server-internal baseline.
 security: The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, save, dirty-state, js-api]

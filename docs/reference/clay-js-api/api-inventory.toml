@@ -22,7 +22,7 @@ deno_op = "op_clay_editor_insert_text"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_insert_text"
 documentation_path = "docs/reference/clay-js-api/editor/server-insert-text.md"
 key_bindings = []
-custom_properties = ["normalizeLineEndings:boolean=true"]
+custom_properties = ["normalizeLineEndings:boolean=true", "documentId:string=required", "offset:number=required", "text:string=required"]
 permissions = ["document-edit"]
 security_notes = "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/document.rs::DocumentState::apply_edit"
@@ -45,7 +45,7 @@ deno_op = "op_clay_editor_insert_newline"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_insert_newline"
 documentation_path = "docs/reference/clay-js-api/editor/server-insert-newline.md"
 key_bindings = ["Enter"]
-custom_properties = ["enterRule:manifest=PreserveLeadingWhitespace", "commentContinuation:manifest=//"]
+custom_properties = ["enterRule:manifest=PreserveLeadingWhitespace", "commentContinuation:manifest=//", "documentId:string=required", "offset:number=required"]
 permissions = ["document-edit"]
 security_notes = "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client/behavior.rs::ClientBehaviorState::route_key; src/server/document.rs::DocumentState::apply_edit"
@@ -68,7 +68,7 @@ deno_op = "op_clay_editor_delete_range"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_delete_range"
 documentation_path = "docs/reference/clay-js-api/editor/server-delete-range.md"
 key_bindings = ["Backspace", "Delete"]
-custom_properties = []
+custom_properties = ["documentId:string=required", "end:number=required", "start:number=required"]
 permissions = ["document-edit"]
 security_notes = "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/document.rs::DocumentState::apply_edit"
@@ -91,7 +91,7 @@ deno_op = "op_clay_editor_move_cursor"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_move_cursor"
 documentation_path = "docs/reference/clay-js-api/editor/client-move-cursor.md"
 key_bindings = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Ctrl+Home", "Ctrl+End", "Ctrl+Left", "Ctrl+Right", "Ctrl+Up", "Ctrl+Down"]
-custom_properties = ["direction:enum", "granularity:enum", "extend:boolean=false", "count:number=1"]
+custom_properties = ["direction:enum", "granularity:enum", "extend:boolean=false", "count:number=1", "documentId:string=optional"]
 permissions = []
 security_notes = "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -114,7 +114,7 @@ deno_op = "op_clay_editor_set_selection"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_selection"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-selection.md"
 key_bindings = ["Shift+ArrowLeft", "Shift+ArrowRight", "PrimaryPointerDrag", "Ctrl+L", "Ctrl+D"]
-custom_properties = ["action:enum", "extend:boolean=false", "direction:enum=current"]
+custom_properties = ["action:enum", "extend:boolean=false", "direction:enum=current", "documentId:string=optional"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -137,7 +137,7 @@ deno_op = "op_clay_editor_add_cursor"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_add_cursor"
 documentation_path = "docs/reference/clay-js-api/editor/client-add-cursor.md"
 key_bindings = ["Ctrl+Alt+Down", "Ctrl+Alt+Up"]
-custom_properties = ["direction:enum"]
+custom_properties = ["direction:enum", "documentId:string=optional"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -160,7 +160,7 @@ deno_op = "op_clay_editor_column_select"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_column_select"
 documentation_path = "docs/reference/clay-js-api/editor/client-column-select.md"
 key_bindings = ["Shift+Alt+Down", "Shift+Alt+Up", "Shift+Alt+Left", "Shift+Alt+Right"]
-custom_properties = ["direction:enum"]
+custom_properties = ["direction:enum", "documentId:string=optional"]
 permissions = []
 security_notes = "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -413,7 +413,7 @@ deno_op = "op_clay_editor_scroll_to"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_scroll_to"
 documentation_path = "docs/reference/clay-js-api/editor/client-scroll-to.md"
 key_bindings = ["PointerScroll"]
-custom_properties = ["line:number", "column:number", "revealCursor:boolean=false"]
+custom_properties = ["line:number", "column:number", "revealCursor:boolean=false", "documentId:string=required"]
 permissions = []
 security_notes = "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -436,7 +436,7 @@ deno_op = "op_clay_editor_set_viewport"
 deno_op_path = "src/server/ops/editor.rs::op_clay_editor_set_viewport"
 documentation_path = "docs/reference/clay-js-api/editor/client-set-viewport.md"
 key_bindings = []
-custom_properties = ["visibleLineCount:number", "overscanLines:number=4"]
+custom_properties = ["visibleLineCount:number", "overscanLines:number=4", "documentId:string=required"]
 permissions = []
 security_notes = "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)"
@@ -734,10 +734,10 @@ hot_path_policy = "Escape currently submits a local application action; it does 
 facade_path = "runtime/js/application.js::quit"
 backing_rust = "src/client_commands.rs::EditorClientCommand"
 deno_op = "op_clay_application_quit"
-deno_op_path = "src/server/ops/application.rs::op_clay_application_quit"
+deno_op_path = "planned: src/server/ops/application.rs::op_clay_application_quit"
 documentation_path = "docs/reference/clay-js-api/application/quit.md"
 key_bindings = ["Escape"]
-custom_properties = []
+custom_properties = ["force:boolean=planned", "reason:string=planned"]
 permissions = []
 security_notes = "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/client_commands.rs::EditorClientCommand (client-local application action routed by the React workspace controller, frontend/src/shell/workspace-controller.ts)"
@@ -760,7 +760,7 @@ deno_op = "op_clay_documents_open_document"
 deno_op_path = "src/server/ops/documents.rs::op_clay_documents_open_document"
 documentation_path = "docs/reference/clay-js-api/documents/server-open-document.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["path:string=required", "workspaceRootId:string=required"]
 permissions = ["workspace-read", "document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace/mod.rs"
@@ -783,7 +783,7 @@ deno_op = "op_clay_documents_save_document"
 deno_op_path = "src/server/ops/documents.rs::op_clay_documents_save_document"
 documentation_path = "docs/reference/clay-js-api/documents/server-save-document.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["documentId:string=required", "knownVersion:number=optional"]
 permissions = ["workspace-write", "document-read"]
 security_notes = "The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace/mod.rs"
@@ -806,7 +806,7 @@ deno_op = "op_clay_documents_reload_document"
 deno_op_path = "src/server/ops/documents.rs::op_clay_documents_reload_document"
 documentation_path = "docs/reference/clay-js-api/documents/server-reload-document.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["documentId:string=required", "force:boolean=false", "knownVersion:number=optional"]
 permissions = ["workspace-read", "document-read"]
 security_notes = "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/protocol/mod.rs; src/server/connection/mod.rs; src/server/workspace/mod.rs"
@@ -1249,7 +1249,7 @@ deno_op = "op_clay_modes_register_pattern"
 deno_op_path = "src/server/ops/modes.rs::op_clay_modes_register_pattern"
 documentation_path = "docs/reference/clay-js-api/modes/server-register-mode-pattern.md"
 key_bindings = []
-custom_properties = ["extensions:string[]=required", "mimeTypes:string[]=[]", "fileNames:string[]=[]", "fileNamePatterns:string[]=[]", "modeId:string=required", "apiPrefix:string=required", "editorRules:object|undefined=built-in code-editing defaults"]
+custom_properties = ["extensions:string[]=required", "mimeTypes:string[]=[]", "fileNames:string[]=[]", "fileNamePatterns:string[]=[]", "shebangPatterns:string[]=[]", "contentProbes:string[]=[]", "displayName:string=Mode", "defaultFontRole:enum=proportional", "modeId:string=required", "apiPrefix:string=required", "editorRules:object|undefined=built-in code-editing defaults", "commands:object[]=cached-by-facade-for-activation", "keymaps:object[]=cached-by-facade-for-activation"]
 permissions = ["mode-registration"]
 security_notes = "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority."
 current_rust_owner = "src/packages/modes.rs::ModeRegistry; src/packages/modes.rs::ModeDeclaration"
@@ -1387,7 +1387,7 @@ deno_op = "op_clay_decorations_publish_decorations"
 deno_op_path = "src/server/ops/decorations.rs::op_clay_decorations_publish_decorations"
 documentation_path = "docs/reference/clay-js-api/decorations/server-publish-decorations.md"
 key_bindings = []
-custom_properties = ["documentId:string=required", "documentVersion:number=required", "viewportByteRange:range=required", "spans:DecorationSpan[]=bounded", "packagePrefix:string=required"]
+custom_properties = ["documentId:string=required", "documentVersion:number=required", "currentDocumentVersion:number=documentVersion", "viewport:object=required", "viewport.byteStart:number=required", "viewport.byteEnd:number=required", "spans:DecorationSpan[]=bounded", "packagePrefix:string=required"]
 permissions = ["render-decorations"]
 security_notes = "Requires render-decorations permission plus server validation of document version, byte ranges, payload size, style tokens, package provenance, and viewport bounds; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
 current_rust_owner = "src/server/decorations.rs::validate_decoration_publication; src/protocol/decorations.rs::DecorationSet"
@@ -1410,7 +1410,7 @@ deno_op = "op_clay_diagnostics_publish_diagnostics"
 deno_op_path = "src/server/ops/diagnostics.rs::op_clay_diagnostics_publish_diagnostics"
 documentation_path = "docs/reference/clay-js-api/diagnostics/server-publish-diagnostics.md"
 key_bindings = []
-custom_properties = ["documentId:number=required", "documentVersion:number=required", "viewport:range=required", "source:string=required", "spans:DiagnosticSpan[]=bounded", "packagePrefix:string=required"]
+custom_properties = ["documentId:number=required", "documentVersion:number=required", "viewport:range=required", "source:string=required", "spans:DiagnosticSpan[]=bounded", "packagePrefix:string=required", "currentDocumentVersion:number=optional"]
 permissions = ["render-decorations"]
 security_notes = "Requires render-decorations permission plus server validation of document version, byte ranges, payload size, source/code/message bounds, package provenance, and viewport bounds; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
 current_rust_owner = "src/server/diagnostics.rs::validate_diagnostic_publication; src/protocol/diagnostics.rs::DiagnosticSet"
@@ -1433,7 +1433,7 @@ deno_op = "op_clay_parse_register_parse_handler"
 deno_op_path = "src/server/ops/parse.rs::op_clay_parse_register_parse_handler"
 documentation_path = "docs/reference/clay-js-api/parse/server-register-parse-handler.md"
 key_bindings = []
-custom_properties = ["module:object=required-for-runtime-bridge", "exportName:string=default", "modeId:string=required", "parseUnit:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "maxWindowBytes:number=65536", "guardBytes:number=4096", "memoryBudgetBytes:number=31457280", "resultBudgetBytes:number=4096"]
+custom_properties = ["module:object=required-for-runtime-bridge", "exportName:string=default", "mode:string=required", "parseUnit:enum=line-group", "timeoutMs:number=50", "viewportPriority:boolean=true", "maxWindowBytes:number=65536", "parseWindowBytes:number=alias-of-maxWindowBytes", "guardBytes:number=4096", "memoryBudgetBytes:number=31457280", "resultBudgetBytes:number=4096"]
 permissions = ["parse-document"]
 security_notes = "Requires parse-document permission and server validation of handler provenance, cancellation, timeout, document-version reads, bounded parse-window snapshots, syntax memory budget, and bounded DecorationUpdate output; handler functions stay in the persistent server runtime behind a server-issued token and executable handler/callback/onParse/function payload keys are rejected; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, or access beyond open document content provided by Clay."
 current_rust_owner = "src/server/parse_coordinator.rs::ParseCoordinator; src/server/js_runtime/mod.rs"
@@ -1594,7 +1594,7 @@ deno_op = "op_clay_folding_publish_ranges"
 deno_op_path = "src/server/ops/folding.rs::op_clay_folding_publish_ranges"
 documentation_path = "docs/reference/clay-js-api/folding/server-publish-folding-ranges.md"
 key_bindings = []
-custom_properties = ["documentId:number=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=package-context"]
+custom_properties = ["documentId:number=required", "documentVersion:number=required", "ranges:FoldingRange[]=bounded", "packagePrefix:string=package-context", "currentDocumentVersion:number=optional"]
 permissions = ["render-folding"]
 security_notes = "Requires render-folding permission and server validation of document version, byte ranges, nesting, payload size, and package provenance; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority."
 current_rust_owner = "src/server/folding.rs::validate_folding_publication; src/protocol/folding.rs::FoldingRangeSet"
@@ -1932,7 +1932,7 @@ deno_op = "op_clay_ui_register_component_contribution"
 deno_op_path = "src/server/ops/ui.rs::op_clay_ui_register_component_contribution"
 documentation_path = "docs/reference/clay-js-api/ui/server-register-component-contribution.md"
 key_bindings = []
-custom_properties = ["id:string=package-prefixed", "kind:enum=editorView|panel|label|button|list|flex|stack|overlay|scroll|portal|statusItem|dropdown|collapse|modal|textInput", "deferredKinds:enum=table", "children:ComponentContribution[]=bounded", "styleTokens:string[]=[]", "validationState:enum=none|error|warning|success", "placeholderColor:color-role-token=text.muted", "actionTargets:string[]=[]"]
+custom_properties = ["id:string=package-prefixed", "kind:enum=editorView|panel|label|button|list|flex|stack|overlay|scroll|portal|statusItem|dropdown|collapse|modal|textInput", "deferredKinds:enum=table", "children:ComponentContributionDefinition[]=bounded", "style:object=style-variable-tokens", "action:object=ui-action-intent", "styleTokens:string[]=[]", "validationState:enum=none|error|warning|success", "placeholderColor:color-role-token=text.muted", "actionTargets:string[]=[]"]
 permissions = []
 security_notes = "Runtime-backed Clay JS API validates component kind, duplicate component IDs, package provenance, bounded payloads, action targets, and style-token boundaries and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, or native component mutation authority."
 current_rust_owner = "src/server/ui.rs::PackageUiRegistry; src/server/ops/ui.rs; runtime/js/ui.js"
@@ -2127,24 +2127,24 @@ registry_public = true
 id = "packages.authorize"
 category = "package-loading"
 visibility = "public"
-status = "planned"
+status = "runtime-backed"
 js_module = "clay:packages"
 js_export = "authorize"
 user_facing_name = "Authorize Package Capabilities and Runtime Profile"
 authority = "user-authorized-package-capability-grant"
-runtime_path = "server-side-package-authorization-grant-planned"
+runtime_path = "server-side-package-authorization-grant"
 hot_path_policy = "Capability authorization grants are install/enable/load/reload/explicit-user-command work only; grant lookup at enable/load/registration/request boundaries is a cheap check against already-loaded authorization state and never runs from keypress, paint, layout, scroll, text-event, edit-ack, pointer, or client hot paths."
-facade_path = "planned: runtime/js/packages.js::authorize"
-backing_rust = "src/packages/authorization.rs::PackageAuthorizationRecord; src/packages/authorization.rs::RuntimeProfile; src/packages/service.rs::PackageService::authorize_package"
+facade_path = "runtime/js/packages.js::authorize"
+backing_rust = "src/server/ops/packages.rs::op_clay_packages_authorize; src/packages/service.rs::PackageService::authorize_package; src/packages/authorization.rs::PackageAuthorizationRecord"
 deno_op = "op_clay_packages_authorize"
-deno_op_path = "planned: src/server/ops/packages.rs::op_clay_packages_authorize"
+deno_op_path = "src/server/ops/packages.rs::op_clay_packages_authorize"
 documentation_path = "docs/reference/clay-js-api/packages/authorize.md"
 key_bindings = []
-custom_properties = ["package:string=required", "capabilities:string[]=requested capabilities", "runtimeProfile:enum=native-trust|sandboxed|restricted=native-trust", "source:string=optional provenance match", "approvedBy:string=user|admin|decision"]
+custom_properties = ["package:string=required", "capabilities:string[]=declared capabilities to approve", "runtimeProfile:enum=native-trust|sandboxed|restricted=native-trust", "source:string=optional provenance match", "approvedBy:enum=user|cli|config=required"]
 permissions = []
-security_notes = "Records an explicit user/admin capability grant and runtime profile against a package identity/source/provenance. Bundled @clay/* packages are auto-authorized with native-trust by the loadPackage resolver; user-installed packages requesting powerful capabilities (filesystem, network, shell, wasm, ai-tools, workspace-mutation, native-ui, client-runtime, raw-ops, package-control) require this explicit grant before enable succeeds (MissingCapabilityGrant otherwise). Grants are visible, revocable, provenance-preserving, and fail-closed when absent. This is the documented surface for capability grants; hidden JSON/TOML/ad hoc keys cannot grant capabilities. The grant authorizes a package to use separately-implemented documented APIs; it does not materialize surfaces or bypass client validation."
-current_rust_owner = "planned: src/packages/authorization.rs; src/packages/service.rs::PackageService::authorize_package"
-registry_public = false
+security_notes = "Records an explicit user/CLI/config capability grant and runtime profile for an installed package's exact provenance. The trusted-only packages facade cannot be imported by third-party code, the op refuses while a package load entry is activating, and every granted capability must be declared by the manifest, so no package can grant itself authority. Bundled @clay/* packages are auto-authorized with native-trust by the loadPackage resolver; user-installed packages requesting powerful capabilities (filesystem, network, shell, wasm, ai-tools, workspace-mutation, native-ui, client-runtime, raw-ops, package-control) require this explicit grant before enable succeeds (MissingCapabilityGrant otherwise). Grants are visible, revocable, provenance-preserving, and fail-closed when absent; hidden JSON/TOML/ad hoc keys cannot grant capabilities. The grant authorizes a package to use separately-implemented documented APIs; it does not materialize surfaces or bypass client validation, and grants no filesystem, network, shell, extension loading, AI mutation, workspace, WASM, client-side JavaScript, package-manager, native-widget, raw-op, or implicit package-control authority."
+current_rust_owner = "src/server/ops/packages.rs::op_clay_packages_authorize; src/packages/service.rs::PackageService::authorize_package"
+registry_public = true
 
 [[api]]
 id = "packages.setConflictOverride"
@@ -2347,7 +2347,7 @@ deno_op = "op_clay_workspace_list_directory"
 deno_op_path = "src/server/ops/workspace.rs::op_clay_workspace_list_directory"
 documentation_path = "docs/reference/clay-js-api/workspace/server-list-directory.md"
 key_bindings = []
-custom_properties = ["maxDepth:number=8", "maxEntries:number=1000", "cancelTokenId:string=none"]
+custom_properties = ["rootId:string=required", "relativePath:string=package-relative-path", "maxDepth:number=8", "maxEntries:number=1000", "cancelTokenId:string=none"]
 permissions = ["workspace-read"]
 security_notes = "Uses server validation to list only paths inside a known workspace root after traversal checks and bounded ignore/depth/count rules using the component grammar; malformed, unsupported, or oversized root .gitignore input aborts with a bounded diagnostic instead of broadening traversal. Packages cannot list arbitrary paths or bypass diagnostics; the API does not grant filesystem, workspace, network, shell, extension loading, AI mutation, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority."
 current_rust_owner = "src/server/workspace/mod.rs::WorkspaceState"
@@ -2900,7 +2900,7 @@ deno_op = "op_clay_language_register_intelligence_provider"
 deno_op_path = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider"
 documentation_path = "docs/reference/clay-js-api/language/server-register-language-intelligence-provider.md"
 key_bindings = []
-custom_properties = ["packageName:string=required", "packageVersion:string=required", "packagePrefix:string=required", "permissions:string[]=required", "id:string=required", "modes:string[]=optional", "features:string[]=required", "priority:number=0", "exportName:string=provideLanguageIntelligence", "timeoutMs:number=500", "module:object=optional", "moduleSpecifier:string=optional"]
+custom_properties = ["packageName:string=required", "packageVersion:string=required", "packagePrefix:string=required", "permissions:string[]=required", "id:string=required", "modes:string[]=optional", "features:string[]=required", "priority:number=0", "exportName:string=provideLanguageIntelligence", "timeoutMs:number=500", "provider:object=alternative-flat-declaration-shape", "budgets.timeoutMs:number=500", "module:object=optional", "moduleSpecifier:string=optional"]
 permissions = ["parse-document"]
 security_notes = "Requires parse-document; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields rejected and a moduleSpecifier must resolve to a loaded package-owned module (top-level or inside provider), which routes the handler to the domain latency lane; results are inert validated data; code-action edits are preview-only in Phase 18.20; provider provenance stamped by coordinator."
 current_rust_owner = "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider; src/server/language_intelligence.rs"
@@ -3572,7 +3572,7 @@ deno_op = "op_clay_agent_compact_session"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_compact_session"
 documentation_path = "docs/reference/clay-js-api/agent/compact.md"
 key_bindings = []
-custom_properties = ["compactAfterTokens:number=80000"]
+custom_properties = ["compactAfterTokens:number=80000", "sessionId:string=required", "strategy:enum==, "]
 permissions = ["agent-host"]
 security_notes = "Forwards user intent to the clay-agent daemon through a validated op; the daemon applies the secret redactor to the compaction run. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCompact"
@@ -3595,7 +3595,7 @@ deno_op = "op_clay_agent_search_sessions"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_search_sessions"
 documentation_path = "docs/reference/clay-js-api/agent/search-sessions.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["limit:number=optional", "query:string=optional", "sessionId:string=required"]
 permissions = ["agent-host"]
 security_notes = "Workspace scoping is server-owned (the daemon filters by the session's stamped workspaceRoot); snippets are redacted daemon-side. Results are transcript metadata for explicit user-facing flows and are never auto-injected into agent context. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSearch"
@@ -3618,7 +3618,7 @@ deno_op = "op_clay_agent_set_autonomy"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_set_autonomy"
 documentation_path = "docs/reference/clay-js-api/agent/set-full-autonomy.md"
 key_bindings = []
-custom_properties = ["default:boolean=true"]
+custom_properties = ["default:boolean=true", "enabled:boolean==required", "sessionId:string=required"]
 permissions = ["agent-host"]
 security_notes = "Autonomy is on by default (decision 2026-09-20-2049) and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls (out-of-workspace writes, delete/move, shell metacharacters) run without an approval prompt in that session, and a fresh session inherits the same default; callers who want prompts block autonomy explicitly with fullAutonomy:false at session.new or agent.setFullAutonomy({enabled:false}). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSetAutonomy"
@@ -3641,7 +3641,7 @@ deno_op = "op_clay_agent_resume_run"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_resume_run"
 documentation_path = "docs/reference/clay-js-api/agent/resume-run.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["decision:enum=optional", "decisions:object[]==optional", "expectedVersion:number=required", "runId:string=required", "sessionId:string=required"]
 permissions = ["agent-host"]
 security_notes = "Forwards the user's decision to the daemon, which validates the decision shape and run-state version fail-closed; stale or malformed resumes have no side effects. Surfaces the pending approval to the user when not resuming programmatically. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::runResume"
@@ -3664,7 +3664,7 @@ deno_op = "op_clay_agent_session_tree"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_session_tree"
 documentation_path = "docs/reference/clay-js-api/agent/session-tree.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["entryId:string=required", "method:enum=required", "sessionId:string=required"]
 permissions = ["agent-host"]
 security_notes = "Checkout first restores server-recorded document checkpoints (buffer-only, lease-respecting) before moving the conversation leaf; abandoned branches are kept, never deleted. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCheckout"
@@ -3687,7 +3687,7 @@ deno_op = "op_clay_agent_profile_register"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_profile_register"
 documentation_path = "docs/reference/clay-js-api/agent/profile-register.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["description:string=optional", "instructions:string=optional", "name:string=required", "skills:string[]=optional", "tools:string[]=optional"]
 permissions = ["agent-host"]
 security_notes = "Forwards an inert profile declaration (name, description, instructions, tool names, skill names) to the daemon's validated registry; duplicate profiles and unknown tool or skill ids fail closed at session start, before any provider turn. Tool execution authority stays governed by the acceptance policy, not by registration. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::profileRegister"
@@ -3710,7 +3710,7 @@ deno_op = "op_clay_agent_skill_register"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_skill_register"
 documentation_path = "docs/reference/clay-js-api/agent/skill-register.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["description:string=optional", "instructions:string==optional", "name:string=required", "toolNames:string[]=optional"]
 permissions = ["agent-host"]
 security_notes = "Forwards an inert skill declaration (name, description, instructions, tool names) to the daemon's validated skill registry; duplicate names fail closed. Skills surface only through the daemon's load_skill progressive-disclosure tool and never execute anything by being registered. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::skillRegister"
@@ -3733,7 +3733,7 @@ deno_op = "op_clay_agent_command_register"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_command_register"
 documentation_path = "docs/reference/clay-js-api/agent/command-register.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["description:string=optional", "handler:string==optional", "name:string=required"]
 permissions = ["agent-host"]
 security_notes = "Forwards an inert command declaration (name, optional handler name and description) to the daemon's validated command registry; handlers are host-built-in only and can never inject drivers or execute client code. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::commandRegister"
@@ -3756,7 +3756,7 @@ deno_op = "op_clay_agent_command_dispatch"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_command_dispatch"
 documentation_path = "docs/reference/clay-js-api/agent/command-dispatch.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["name:string=required", "sessionId:string==optional", "args:object=optional"]
 permissions = ["agent-host"]
 security_notes = "Dispatches a registered daemon command (slash surface) against daemon session state; handlers call daemon session RPCs only and cannot elevate acceptance policy or spawn processes. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::commandDispatch"
@@ -3779,7 +3779,7 @@ deno_op = "op_clay_agent_knowledge_set_options"
 deno_op_path = "src/server/ops/agent.rs::op_clay_agent_knowledge_set_options"
 documentation_path = "docs/reference/clay-js-api/agent/knowledge-set-options.md"
 key_bindings = []
-custom_properties = []
+custom_properties = ["graft:boolean==optional", "graftCliPath:string==optional", "graftDeepModel:object==optional", "graftMode:enum==optional", "wiki:boolean==optional", "workspaceRoot:string=required"]
 permissions = ["agent-host"]
 security_notes = "Forwards a workspace-scoped configuration intent (opt-in wiki and graft knowledge bases, decision 2156; optional graft deep-build model identity) to the daemon, which owns activation via kernel.load; wiki writes stay inside the workspace .wiki/ tree, ingested sources are labeled untrusted_external, the optional qmd binary is never spawned unless explicitly configured, and the graft CLI runs as a host-owned bounded child process (fail-closed resolution, never spawned by package JavaScript). A graft deep-build key is read from the credential vault unless the trusted caller passes one inline (it joins the redactor and reaches the child only in its environment, never argv). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority."
 current_rust_owner = "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions"

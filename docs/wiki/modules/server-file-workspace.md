@@ -59,6 +59,44 @@ cannot `New`/`Reclaim` a second tab.
 19. Startup root validation in `IpcServer::try_new` uses the same diagnostics, so a missing or inaccessible configured root reports that the path is not visible to the Clay server process and suggests mounting or choosing a root inside the server environment.
 20. Plan 030 (code-review remediation) lock-release I/O: `open_existing_file`, `open_selected_file`, `save_document`, and `reload_document` are each split into a `prepare_*` phase (workspace mutex held; fast filesystem metadata + authority reauthorization + registry lookup + resident-budget reservation only), a free `*_io` phase (`tokio::fs` read/write with **no** workspace mutex held), and a `commit_*` phase (workspace mutex reacquired to mutate the registry and resident-byte accounting). The IpcServer connection handlers and Clay JS document ops call the `*_unlocked` orchestration free functions (`open_existing_file_unlocked`, `open_selected_file_unlocked`, `save_document_unlocked`, `reload_document_unlocked`) so concurrent operations on unrelated documents are no longer serialized by a slow disk call. The `&mut self` one-shot methods remain as thin wrappers used by tests and direct callers that hold no outer mutex. Because the mutex is released across disk I/O, every `commit_*` re-validates registry state on reacquire instead of assuming it is unchanged: `register_canonical_file`/`register_selected_file` re-check the canonical path and return the existing lease if a concurrent open won (no duplicate document entry, no orphan `SingleFile` root); `commit_reload` re-checks dirtiness and refuses to clobber an unsaved edit unless `force`; `commit_save` tolerates a document closed during the write (the bytes are already on disk) and detects a concurrent edit through `mark_clean_if_version(prepared_version)`, leaving the document dirty rather than falsely clean. Lock ordering: the workspace mutex and the per-document `Arc<Mutex<DocumentState>>` are never held simultaneously across a `tokio::fs` await — the per-document lock is acquired only briefly inside `prepare`/`commit`/`*_io` to read or mutate text/version, then dropped before any cross-mutex await, so no new deadlock paths are introduced.
 
+### Async Filesystem Rule (plan 134 P3)
+
+The awaited open/save/reload path never calls `std::fs`. Canonicalization and
+metadata for the open path — `canonical_file_state`, `reauthorize_open_file`,
+`canonical_selected_file`, `contained_existing_path`,
+`contained_new_file_path`, `matches_current` — are `async fn` on `tokio::fs`,
+and their callers (`prepare_open_existing`, `prepare_open_selected`,
+`register_loaded_file`, `prepare_save`, `prepare_reload`,
+`atomic_write_chunks`, and the agent document ops) await them. The atomic
+write's read-only mode check, original-permission capture, and
+`set_permissions` are `tokio::fs` too; `discover_root_for_path` and
+`add_explicit_user_grant` are async, and `add_root` is a sync startup wrapper
+over async `add_root_async` plus pure `add_root_state`.
+
+Work that has no `tokio::fs` equivalent moves to `spawn_blocking` instead of
+blocking a reactor worker: `persist_settings_change` (whole root resolution +
+preferences read/write, including `effective_configuration_root`),
+`runtime_reload::persisted_appearance` (the package-service guard is dropped
+before the await), and `command_execution`'s `OPEN_DIRECTORY` walk
+(`prepare_directory_listing` under the guard then `traverse_directory` on the
+blocking pool).
+
+Cold paths keep `std::fs` and carry a ceiling comment naming why they are not
+on the reactor: startup root registration, the blocking-pool traversal helpers,
+`FileMetadata::capture` (no production caller), `#[cfg(test)]` hooks, the
+`configuration.rs` JS-worker-thread sites, `ops/packages.rs` (JS worker thread),
+`launcher.rs`'s single `resolve_agent_type` stat, and the startup watcher in
+`server/mod.rs`. A new `std::fs` call on an awaited production path needs the
+same conversion, not a ceiling comment.
+
+Semantics are unchanged: every site keeps its existing `map_err` into
+`WorkspaceError::{RootUnavailable, FileUnavailable}`,
+`UserBrowseError::Unavailable`, and `ConfigurationError::{Root, ReadModule}`.
+Canonical containment (`matches_current`) and `validate_regular_file_metadata`
+still run before any read, and the atomic-write read-only/permission checks are
+preserved (now async); no workspace lock or `std::sync` guard is held across an
+await in the new code.
+
 ## Code Examples
 
 ```rust
@@ -91,39 +129,49 @@ let reloaded = workspace.reload_document(opened.document_id, false).await?;
 - Access release is single-scope: `release_single_document_access` holds one lock while it checks the holder count, removes the last holder, and subtracts the document's resident bytes, so a concurrent grant cannot interleave between the holder check and the removal.
 - Absolute paths from failed unauthorized requests are rendered as `<requested path>` in diagnostics unless they are server-authorized workspace roots. This keeps host path discovery out of client-visible messages while preserving actionable relative workspace paths.
 - Container/toolbox/distrobox diagnostics are passive mappings of known IO failures. They do not run shell probes, scan mounts, access the network, or expand workspace authority.
+- **Resident-memory ceiling (plan 134 R4, recorded, no action):** the server's
+  resident floor is bounded by compiled budgets — the fail-closed
+  `DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES` 256 MiB for file-backed ropes and
+  in-flight reservations, `SYNTAX_CACHE_BUDGET_BYTES` 30 MiB, the 32 MiB JS
+  latency-lane heap, plus the advisory ≤256 MiB envelope in
+  `docs/development/performance.md`. There is no per-document mirror of the
+  whole file beyond the Crop rope, so the floor is capped by those budgets
+  rather than growing with open-tab count. Revisit on profile evidence above
+  that envelope with documents closed, or when a new retained cache lands
+  without a byte budget.
 
 ## Tests
 
-- `src/server/workspace/tests.rs`: `duplicate_open_reuses_document_and_preserves_lease_policy` verifies duplicate canonical registrations share the document ID and lease policy.
-- `src/server/workspace/tests.rs`: `open_existing_file_loads_utf8_text` verifies server-side file loading creates a clean version-1 document snapshot.
-- `src/server/workspace/tests.rs`: `duplicate_open_reuses_loaded_document_and_lease_policy` verifies duplicate opens reuse the existing in-memory document without re-reading changed disk contents.
-- `src/server/workspace/tests.rs`: `open_invalid_utf8_reports_file_io_error_without_document_entry` verifies invalid UTF-8 is reported and leaves registry indexes empty.
-- `src/server/workspace/tests.rs`: `open_existing_file_streams_large_utf8_text_and_bounds_head`, `selected_open_streams_large_text_without_file_size_ceiling`, `reload_streams_new_text_and_replaces_resident_bytes`, and `utf8_scalar_split_across_file_read_buffers_remains_valid` verify large-file streaming, bounded heads, replacement accounting, and cross-read UTF-8 carry handling.
-- `src/server/workspace/tests.rs`: `document_budget_rejects_open_and_close_releases_resident_bytes` and `binary_sniff_rejects_nul_in_leading_bytes_but_not_after_boundary` verify server-owned budget accounting and the documented 8 KiB binary-sniff boundary.
-- `src/server/workspace/tests.rs`: `selected_file_open_grants_only_the_selected_file` verifies an explicit selected-file open creates a single-file grant that rejects sibling paths.
-- `src/server/workspace/tests.rs`: `selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry` and `selected_file_open_rejects_special_file_without_document_entry` verify selected directories, special files, and invalid UTF-8 files do not create document entries or grants.
-- `src/server/workspace/tests.rs`: `workspace_rejects_path_traversal_outside_root` verifies `..` traversal cannot authorize a sibling file outside the root.
-- `src/server/workspace/tests.rs`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
-- `src/server/workspace/tests.rs`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.
-- `src/server/workspace/tests.rs`: `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking` verifies loaded files start clean, accepted edits mark dirty, and clean marking is explicit.
-- `src/server/workspace/tests.rs`: `accepted_edit_marks_file_document_dirty_and_save_marks_clean` verifies accepted edits dirty file-backed documents and successful saves clear dirty state.
-- `src/server/workspace/tests.rs`: `save_writes_canonical_rope_text_to_disk` verifies saves persist the server canonical rope text, including UTF-8 text.
-- `src/server/workspace/tests.rs`: `reload_dirty_document_requires_force_or_rejects` verifies dirty reloads are rejected unless forced and forced reloads replace canonical text.
-- `src/server/workspace/tests.rs`: `reload_clean_document_refreshes_disk_text_and_marks_clean` verifies clean reloads refresh from disk and stay clean.
-- `src/server/workspace/tests.rs`: `save_missing_file_returns_typed_error_and_keeps_dirty` verifies missing files produce typed errors without clearing dirty state.
-- `src/server/workspace/tests.rs`: `save_stale_metadata_returns_typed_error_and_keeps_dirty` verifies external on-disk changes are stale-save conflicts and preserve unsaved edits.
-- `src/server/workspace/tests.rs`: `workspace_diagnostic_for_missing_root_is_actionable` verifies missing root diagnostics include a stable code and container/toolbox/distrobox hint.
-- `src/server/workspace/tests.rs`: `workspace_diagnostic_sanitizes_unauthorized_paths` verifies outside-root diagnostics avoid leaking the unauthorized path.
-- `src/server/workspace/tests.rs`: `workspace_permission_denied_keeps_document_dirty` verifies permission-denied saves report a stable diagnostic and preserve dirty in-memory state.
+- `src/server/workspace/tests/`: `duplicate_open_reuses_document_and_preserves_lease_policy` verifies duplicate canonical registrations share the document ID and lease policy.
+- `src/server/workspace/tests/`: `open_existing_file_loads_utf8_text` verifies server-side file loading creates a clean version-1 document snapshot.
+- `src/server/workspace/tests/`: `duplicate_open_reuses_loaded_document_and_lease_policy` verifies duplicate opens reuse the existing in-memory document without re-reading changed disk contents.
+- `src/server/workspace/tests/`: `open_invalid_utf8_reports_file_io_error_without_document_entry` verifies invalid UTF-8 is reported and leaves registry indexes empty.
+- `src/server/workspace/tests/`: `open_existing_file_streams_large_utf8_text_and_bounds_head`, `selected_open_streams_large_text_without_file_size_ceiling`, `reload_streams_new_text_and_replaces_resident_bytes`, and `utf8_scalar_split_across_file_read_buffers_remains_valid` verify large-file streaming, bounded heads, replacement accounting, and cross-read UTF-8 carry handling.
+- `src/server/workspace/tests/`: `document_budget_rejects_open_and_close_releases_resident_bytes` and `binary_sniff_rejects_nul_in_leading_bytes_but_not_after_boundary` verify server-owned budget accounting and the documented 8 KiB binary-sniff boundary.
+- `src/server/workspace/tests/`: `selected_file_open_grants_only_the_selected_file` verifies an explicit selected-file open creates a single-file grant that rejects sibling paths.
+- `src/server/workspace/tests/`: `selected_file_open_rejects_directory_and_invalid_utf8_without_document_entry` and `selected_file_open_rejects_special_file_without_document_entry` verify selected directories, special files, and invalid UTF-8 files do not create document entries or grants.
+- `src/server/workspace/tests/`: `workspace_rejects_path_traversal_outside_root` verifies `..` traversal cannot authorize a sibling file outside the root.
+- `src/server/workspace/tests/`: `workspace_rejects_directory_and_special_file_open` verifies directories and Unix socket files are rejected as document opens.
+- `src/server/workspace/tests/`: `workspace_canonicalizes_symlink_before_authorization` verifies escaping symlinks are denied and in-root symlinks canonicalize consistently.
+- `src/server/workspace/tests/`: `file_backed_document_dirty_state_tracks_accepted_edits_and_clean_marking` verifies loaded files start clean, accepted edits mark dirty, and clean marking is explicit.
+- `src/server/workspace/tests/`: `accepted_edit_marks_file_document_dirty_and_save_marks_clean` verifies accepted edits dirty file-backed documents and successful saves clear dirty state.
+- `src/server/workspace/tests/`: `save_writes_canonical_rope_text_to_disk` verifies saves persist the server canonical rope text, including UTF-8 text.
+- `src/server/workspace/tests/`: `reload_dirty_document_requires_force_or_rejects` verifies dirty reloads are rejected unless forced and forced reloads replace canonical text.
+- `src/server/workspace/tests/`: `reload_clean_document_refreshes_disk_text_and_marks_clean` verifies clean reloads refresh from disk and stay clean.
+- `src/server/workspace/tests/`: `save_missing_file_returns_typed_error_and_keeps_dirty` verifies missing files produce typed errors without clearing dirty state.
+- `src/server/workspace/tests/`: `save_stale_metadata_returns_typed_error_and_keeps_dirty` verifies external on-disk changes are stale-save conflicts and preserve unsaved edits.
+- `src/server/workspace/tests/`: `workspace_diagnostic_for_missing_root_is_actionable` verifies missing root diagnostics include a stable code and container/toolbox/distrobox hint.
+- `src/server/workspace/tests/`: `workspace_diagnostic_sanitizes_unauthorized_paths` verifies outside-root diagnostics avoid leaking the unauthorized path.
+- `src/server/workspace/tests/`: `workspace_permission_denied_keeps_document_dirty` verifies permission-denied saves report a stable diagnostic and preserve dirty in-memory state.
 - `src/server/tests.rs`: `server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies startup root configuration is validated and invalid roots produce a typed server error.
-- `src/server/connection/tests.rs`: `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack` verifies open dispatch returns the initial file snapshot and manifest while later edit acknowledgements remain metadata-only.
-- `src/server/connection/tests.rs`: `file_io_errors_are_typed_protocol_failures` verifies workspace IO failures map to stable protocol error codes.
+- `src/server/connection/tests/`: `connection_open_document_sends_snapshot_and_manifest_without_full_document_on_edit_ack` verifies open dispatch returns the initial file snapshot and manifest while later edit acknowledgements remain metadata-only.
+- `src/server/connection/tests/`: `file_io_errors_are_typed_protocol_failures` verifies workspace IO failures map to stable protocol error codes.
 - `src/server/js_runtime/mod.rs`: `document_facade_open_status_list_round_trip`, `workspace_roots_facade_reports_authorized_roots`, and `document_facade_rejects_unauthorized_paths` verify the runtime-backed `clay:documents`/`clay:workspace` subset reuses server workspace validation.
-- `src/server/js_runtime/tests.rs`: `documents_open_over_budget_returns_typed_error` drives both ops past the cap and asserts the exact `documents.document_too_large` code with the document payload marker absent from the JS error path; `documents_open_under_budget_unchanged` pins the golden JSON contract below the cap; `tests/performance_budgets.rs::chunked_document_security_budgets_are_pinned` pins the 256 KiB value.
-- `src/server/workspace/tests.rs`: `release_single_document_access_releases_bytes_with_last_holder` verifies resident bytes are released only when the last access holder is removed.
+- `src/server/js_runtime/tests/`: `documents_open_over_budget_returns_typed_error` drives both ops past the cap and asserts the exact `documents.document_too_large` code with the document payload marker absent from the JS error path; `documents_open_under_budget_unchanged` pins the golden JSON contract below the cap; `tests/performance_budgets.rs::chunked_document_security_budgets_are_pinned` pins the 256 KiB value.
+- `src/server/workspace/tests/`: `release_single_document_access_releases_bytes_with_last_holder` verifies resident bytes are released only when the last access holder is removed.
 - Phase 18.12 workspace discovery/listing tests in `src/server/workspace/mod.rs`: root deduplication, cwd fallback, marker ancestry discovery, no-marker fallback, explicit directory/file grants, grant deduplication, unknown marker rejection, bounded listing, max-depth/max-entry truncation, default and root `.gitignore` ignores, traversal rejection, cancellation, child counts, and permission-denied diagnostics. Plan 060 T8 tests in `src/server/ops/workspace.rs` block traversal on a FIFO-backed `.gitignore` while open/save complete, then verify cooperative cancellation and token removal on success, error, and unwind.
-- `src/server/connection/tests.rs`: `connection_add_selected_workspace_root_sends_file_browser_snapshot` and `connection_add_selected_workspace_root_rejects_stale_capability` cover selected-folder root grants and stale-token rejection.
-- `src/server/connection/tests.rs`: `cross_tab_workspace_and_document_authority_is_fail_closed` covers per-tab list/open/resync/status/edit/save/reload/close denial, foreign root IDs, cross-connection capability rejection, unchanged target text/version/dirty state, and rejection of a bound connection's foreign `Reclaim`.
+- `src/server/connection/tests/`: `connection_add_selected_workspace_root_sends_file_browser_snapshot` and `connection_add_selected_workspace_root_rejects_stale_capability` cover selected-folder root grants and stale-token rejection.
+- `src/server/connection/tests/`: `cross_tab_workspace_and_document_authority_is_fail_closed` covers per-tab list/open/resync/status/edit/save/reload/close denial, foreign root IDs, cross-connection capability rejection, unchanged target text/version/dirty state, and rejection of a bound connection's foreign `Reclaim`.
 - Relevant commands: `cargo test workspace:: --lib`, `cargo test server::connection::tests`, `cargo test`.
 
 ## Related

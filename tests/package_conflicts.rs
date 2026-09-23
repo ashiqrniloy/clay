@@ -22,6 +22,7 @@ fn package_fixture(
             "permissions".to_string(),
             json!(["mode-registration", "mode-activation"]),
         ),
+        ("capabilities".to_string(), json!([])),
         ("modes".to_string(), json!([mode])),
         ("docs".to_string(), json!("./docs/index.md")),
     ]);
@@ -74,9 +75,23 @@ fn record(package_json: Value) -> PackageRecord {
 
 fn install_and_authorize(
     service: &mut PackageService,
-    package_json: Value,
+    mut package_json: Value,
     extra_grants: &[PackagePermission],
 ) {
+    // Plan 136 task 3: an approval may only cover declared capabilities, so a
+    // fixture granted extra authority (package-control for replacement flows)
+    // declares it in the manifest, exactly as a real package would.
+    if !extra_grants.is_empty() {
+        let declared = package_json["clay"]["capabilities"]
+            .as_array_mut()
+            .expect("conflict fixture declares clay.capabilities");
+        for grant in extra_grants {
+            let name = grant.as_str();
+            if !declared.iter().any(|value| value.as_str() == Some(name)) {
+                declared.push(json!(name));
+            }
+        }
+    }
     let record = assemble_package_record(&package_json).expect("conflict fixture validates");
     let mut grants = record.manifest.clay.permissions.clone();
     grants.extend(extra_grants.iter().copied());

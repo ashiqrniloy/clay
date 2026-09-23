@@ -383,9 +383,15 @@ fn plan118_new_runtime_machinery_stays_crate_private() {
     let root = repository_root();
     let crate_private_declarations: &[(&str, &str)] = &[
         // Launcher: recents persistence and entry assembly (plan 118 Part D).
-        ("src/server/launcher.rs", "pub fn record_recent_workspace"),
-        ("src/server/launcher.rs", "pub fn remove_recent_workspace"),
-        ("src/server/launcher.rs", "pub fn launcher_entries"),
+        (
+            "src/server/launcher.rs",
+            "pub async fn record_recent_workspace",
+        ),
+        (
+            "src/server/launcher.rs",
+            "pub async fn remove_recent_workspace",
+        ),
+        ("src/server/launcher.rs", "pub async fn launcher_entries"),
         ("src/server/launcher.rs", "pub const MAX_RECENTS"),
         ("src/server/mod.rs", "pub mod launcher"),
         // Design-system selection helpers (plan 118 task 20).
@@ -394,9 +400,25 @@ fn plan118_new_runtime_machinery_stays_crate_private() {
             "pub fn bundled_design_system_display_name",
         ),
         // Contrast floors (plan 118 task 14). `REQUIRED_CONTRAST_PAIRS` is not
-        // listed: it was already `pub(crate)` before the plan.
-        ("src/shell/theme.rs", "pub const HAIRLINE_VISIBILITY_MIN"),
-        ("src/shell/theme.rs", "pub const REQUIRED_FILL_PAIRS"),
+        // listed: it was already `pub(crate)` before the plan. Plan 133 task 7
+        // moved both floors to `src/shell/theme/validate.rs`.
+        (
+            "src/shell/theme/validate.rs",
+            "pub const HAIRLINE_VISIBILITY_MIN",
+        ),
+        (
+            "src/shell/theme/validate.rs",
+            "pub const REQUIRED_FILL_PAIRS",
+        ),
+        // Plan 136 task 9: provider-lane occupancy counters and the
+        // `RuntimeProfile` parser are implementation, not programmatic
+        // surfaces. The plan's JS-facing grant types stay `pub` because the
+        // external CLI/package suites consume them (`CapabilityGrant`,
+        // `PackageInspection::grant_provenance`, `verbs::authorize`,
+        // `format_grant_lines`, `PackageService::authorize_package`).
+        ("src/perf/metrics.rs", "pub struct JsRuntimeLaneMetrics"),
+        ("src/perf/metrics.rs", "pub const JS_RUNTIME_LANE_METRICS"),
+        ("src/packages/authorization.rs", "pub fn parse"),
     ];
     for (path, declaration) in crate_private_declarations {
         let source = read_src(path);

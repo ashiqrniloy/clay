@@ -279,6 +279,7 @@ async fn document_read(
         let workspace = workspace.lock().await;
         let canonical = workspace
             .contained_existing_path(root_id, Path::new(&path))
+            .await
             .map_err(workspace_error_message)?;
         workspace
             .find_open_document_by_canonical_path(&canonical)
@@ -334,6 +335,7 @@ async fn read_contained_bytes(
         let workspace = workspace.lock().await;
         workspace
             .contained_existing_path(root_id, Path::new(path))
+            .await
             .map_err(workspace_error_message)?
     };
     let file = tokio::fs::File::open(&canonical)
@@ -361,7 +363,10 @@ async fn document_write(
     let (workspace, root_id) = session_workspace(workspaces, agent, params).await?;
     let canonical = {
         let workspace = workspace.lock().await;
-        match workspace.contained_existing_path(root_id, Path::new(&path)) {
+        match workspace
+            .contained_existing_path(root_id, Path::new(&path))
+            .await
+        {
             Ok(canonical) => Ok(Some(canonical)),
             Err(WorkspaceError::FileUnavailable { .. }) => Ok(None),
             Err(error) => Err(workspace_error_message(error)),
@@ -419,6 +424,7 @@ async fn document_write(
         let workspace = workspace.lock().await;
         workspace
             .contained_new_file_path(root_id, Path::new(&path))
+            .await
             .map_err(workspace_error_message)?
     };
     if let Some(parent) = canonical.parent() {
@@ -446,6 +452,7 @@ async fn document_mkdir(
         let workspace = workspace.lock().await;
         workspace
             .contained_new_file_path(root_id, Path::new(&path))
+            .await
             .map_err(workspace_error_message)?
     };
     tokio::fs::create_dir_all(&canonical)
@@ -465,6 +472,7 @@ async fn document_stat(
         let workspace = workspace.lock().await;
         workspace
             .contained_existing_path(root_id, Path::new(&path))
+            .await
             .ok()
             .and_then(|canonical| {
                 workspace
@@ -478,10 +486,14 @@ async fn document_stat(
     }
     let canonical = {
         let workspace = workspace.lock().await;
-        match workspace.contained_existing_path(root_id, Path::new(&path)) {
+        match workspace
+            .contained_existing_path(root_id, Path::new(&path))
+            .await
+        {
             Ok(canonical) => canonical,
             Err(_) => workspace
                 .contained_new_file_path(root_id, Path::new(&path))
+                .await
                 .map_err(workspace_error_message)?,
         }
     };

@@ -15,7 +15,27 @@ phase: Phase 1
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: decision
+    type: enum
+    default: optional
+    description: single decision for the pending interruption.
+  - name: decisions
+    type: object[]
+    default: optional
+    description: batch of per-tool-call decisions with outcomes (`allow_once`, `allow_for_run`, `deny_once`, `deny_for_run`). Mutually exclusive with `decision`.
+  - name: expectedVersion
+    type: number
+    default: required
+    description: optimistic run-state version; mismatch fails closed.
+  - name: runId
+    type: string
+    default: required
+    description: the suspended run to resume.
+  - name: sessionId
+    type: string
+    default: required
+    description: the session that owns the suspended run.
 security: Forwards the user's decision to the daemon, which validates the decision shape and run-state version fail-closed; stale or malformed resumes have no side effects. Surfaces the pending approval to the user when not resuming programmatically. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.resumeRun` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Only resume with a decision the user actually made; automated approval without user intent is forbidden.
 lookup_tags: [agent, approval, resume, run, durable, js-api]

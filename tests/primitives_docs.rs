@@ -520,7 +520,9 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 98);
+    // 98 at the Plan 061 baseline, +`op_clay_packages_authorize` (plan 136
+    // task 3: trusted-only capability-grant op).
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 99);
 
     let facades = read("src/server/facades.rs")
         .lines()
@@ -560,7 +562,8 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
 /// unexpired owner-reviewed expiry. CI invokes this test by name.
 #[test]
 fn phase20_1_token_catalog_is_complete_and_matches_core_registry() {
-    let theme_source = read("src/shell/theme.rs");
+    // Plan 133 task 7 moved the catalog to `src/shell/theme/parse.rs`.
+    let theme_source = read("src/shell/theme/parse.rs");
     let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // Extract every implemented core token name from `core_theme_value`.
@@ -1179,7 +1182,8 @@ fn no_component_kind_or_token_renamed() {
     // this test additionally pins specific kind names and the Phase 20.1 tokens.
     let components_src = read("src/shell/components.rs");
     let components_doc = read(".agents/skills/clay-execution/references/components.md");
-    let tokens_src = read("src/shell/theme.rs");
+    // Plan 133 task 7 moved the token catalog to `src/shell/theme/parse.rs`.
+    let tokens_src = read("src/shell/theme/parse.rs");
     let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // 15 implemented ComponentKind entries still parse and are cataloged implemented.

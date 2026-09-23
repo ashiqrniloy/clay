@@ -10,6 +10,7 @@ use std::{
 
 use tokio::sync::oneshot;
 
+use crate::lock_util::LockOrRecover;
 use crate::perf::budgets::{JS_RUNTIME_EVALUATION_TIMEOUT_MS, JS_RUNTIME_HEAP_LIMIT_BYTES};
 use crate::protocol::{IncrementalParseUpdate, ParseEditNotification};
 
@@ -80,6 +81,26 @@ pub(crate) fn lane_heap_limit_bytes(
         RuntimeLane::Latency => configured_heap_limit_bytes
             .min(crate::perf::budgets::JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES),
     }
+}
+
+/// Replace a bounded snapshot only when its contents differ (plan 134 R3).
+///
+/// `completion_providers` is rebuilt by every successful evaluation, but a
+/// theme-only or otherwise unrelated reload usually yields the identical
+/// provider list. Structural `PartialEq` on the metadata (cheap: a bounded
+/// list of scalars and short strings, no allocation) gates the clone, so
+/// repeated no-change evaluations do not churn the stored `Vec`. Returns
+/// `true` when the snapshot was replaced (the clone happened).
+fn replace_snapshot_only_on_change<T: Clone + PartialEq>(
+    slot: &std::sync::Mutex<Vec<T>>,
+    providers: &[T],
+) -> bool {
+    let mut stored = slot.lock_or_recover();
+    if stored.as_slice() == providers {
+        return false;
+    }
+    *stored = providers.to_vec();
+    true
 }
 
 /// One lane's isolate handle plus its own poison flag: a lane timeout/heap
@@ -513,11 +534,7 @@ impl ClayJsRuntimeService {
             }
         }
         self.wire_runtime_publishers(&replacement);
-        *self
-            .lane(domain, lane)
-            .worker
-            .lock()
-            .expect("Clay runtime service worker mutex poisoned") = replacement;
+        *self.lane(domain, lane).worker.lock_or_recover() = replacement;
     }
 
     /// Attach the shared host channels to one lane's op state. Replacement
@@ -527,12 +544,7 @@ impl ClayJsRuntimeService {
         // Plan 130 A1: the agent handle rides the same wiring path as the
         // other host channels, so a replacement lane (poison restart) and a
         // reloaded lane both come up with the server's own host attached.
-        if let Some(host) = self
-            .agent_host
-            .lock()
-            .expect("agent host mutex poisoned")
-            .clone()
-        {
+        if let Some(host) = self.agent_host.lock_or_recover().clone() {
             worker.op_state.set_agent_host(host);
         }
         worker
@@ -584,7 +596,7 @@ impl ClayJsRuntimeService {
     /// service and every lane's op state. Called once by server construction;
     /// `production_reload` carries the remembered handle to the rebuilt lanes.
     pub(crate) fn set_agent_host(&self, host: crate::server::agent::AgentHostHandle) {
-        *self.agent_host.lock().expect("agent host mutex poisoned") = Some(host);
+        *self.agent_host.lock_or_recover() = Some(host);
         self.wire_domain_lanes();
     }
 
@@ -603,8 +615,7 @@ impl ClayJsRuntimeService {
         package_version: &str,
     ) -> crate::packages::bundled::RuntimeDomain {
         self.package_service
-            .lock()
-            .expect("package service mutex poisoned")
+            .lock_or_recover()
             .enabled_records()
             .find(|record| {
                 record.manifest.name == package_name && record.manifest.version == package_version
@@ -790,11 +801,10 @@ impl ClayJsRuntimeService {
         } else if let Ok(evaluation) = &result {
             self.evaluations.fetch_add(1, Ordering::Relaxed);
             domain_runtime.evaluations.fetch_add(1, Ordering::Relaxed);
-            *self
-                .completion_providers
-                .lock()
-                .expect("completion provider snapshot lock poisoned") =
-                evaluation.completion_providers.clone();
+            replace_snapshot_only_on_change(
+                &self.completion_providers,
+                &evaluation.completion_providers,
+            );
         }
         result
     }
@@ -821,10 +831,7 @@ impl ClayJsRuntimeService {
     pub(crate) fn completion_providers(
         &self,
     ) -> Vec<crate::server::completion::CompletionProviderMeta> {
-        self.completion_providers
-            .lock()
-            .expect("completion provider snapshot lock poisoned")
-            .clone()
+        self.completion_providers.lock_or_recover().clone()
     }
 
     pub(crate) async fn load_default_configuration_with_workspace(
@@ -978,10 +985,7 @@ impl ClayJsRuntimeService {
             package_prefix.to_string(),
             contribution.id.clone(),
         );
-        let mut native_syntax_handlers = self
-            .native_syntax_handlers
-            .lock()
-            .expect("native syntax handler set lock poisoned");
+        let mut native_syntax_handlers = self.native_syntax_handlers.lock_or_recover();
         if native_syntax_handlers.contains(&key) {
             return Ok(Some((
                 crate::server::parse_coordinator::ParseHandlerMeta {
@@ -1026,10 +1030,7 @@ impl ClayJsRuntimeService {
         key: crate::server::connection::ModeActivationKey,
         cached: crate::server::connection::CachedModeActivation,
     ) {
-        let mut cache = self
-            .mode_activation_cache
-            .lock()
-            .expect("mode activation cache lock poisoned");
+        let mut cache = self.mode_activation_cache.lock_or_recover();
         cache.insert(key, cached);
     }
 
@@ -1038,10 +1039,7 @@ impl ClayJsRuntimeService {
         &self,
         key: &crate::server::connection::ModeActivationKey,
     ) -> Option<crate::server::connection::CachedModeActivation> {
-        self.mode_activation_cache
-            .lock()
-            .expect("mode activation cache lock poisoned")
-            .get(key)
+        self.mode_activation_cache.lock_or_recover().get(key)
     }
 
     /// Number of generated module evaluations the open path served from V8.
@@ -1066,12 +1064,7 @@ impl ClayJsRuntimeService {
             contribution.package_prefix.clone(),
             contribution.id.clone(),
         );
-        if !self
-            .native_syntax_handlers
-            .lock()
-            .expect("native syntax handler set lock poisoned")
-            .contains(&key)
-        {
+        if !self.native_syntax_handlers.lock_or_recover().contains(&key) {
             return None;
         }
         Some((
@@ -1164,10 +1157,7 @@ impl ClayJsRuntimeService {
             return Ok(());
         }
         let mut packages: Vec<(crate::server::ops::PackageContext, String)> = {
-            let service = self
-                .package_service
-                .lock()
-                .expect("package service mutex poisoned");
+            let service = self.package_service.lock_or_recover();
             let mut enabled: Vec<_> = service
                 .enabled_records()
                 .filter(|record| {
@@ -1254,8 +1244,7 @@ impl ClayJsRuntimeService {
     ) -> Result<(), ClayRuntimeError> {
         let enabled = self
             .package_service
-            .lock()
-            .expect("package service mutex poisoned")
+            .lock_or_recover()
             .enabled_record(package_name, package_version)
             .is_some();
         if enabled {
@@ -1342,10 +1331,7 @@ impl ClayJsRuntimeService {
         else {
             return false;
         };
-        let service = self
-            .package_service
-            .lock()
-            .expect("package service mutex poisoned");
+        let service = self.package_service.lock_or_recover();
         service.enabled_records().any(|record| {
             record.manifest.name == registration.package.manifest.name
                 && record.manifest.version == registration.package.manifest.version
@@ -1368,8 +1354,7 @@ impl ClayJsRuntimeService {
         self.document_analysis_registration_authorized(registration)
             && self
                 .package_service
-                .lock()
-                .expect("package service mutex poisoned")
+                .lock_or_recover()
                 .language_server_grant(
                     &registration.package.manifest.name,
                     &registration.contribution,
@@ -1466,13 +1451,7 @@ impl ClayJsRuntimeService {
         domain: crate::packages::bundled::RuntimeDomain,
         lane: RuntimeLane,
     ) -> Arc<RuntimeWorker> {
-        Arc::clone(
-            &self
-                .lane(domain, lane)
-                .worker
-                .lock()
-                .expect("Clay runtime service worker mutex poisoned"),
-        )
+        Arc::clone(&self.lane(domain, lane).worker.lock_or_recover())
     }
 
     /// Snapshot of the third-party worker's current registration payload
@@ -1560,14 +1539,45 @@ impl ClayJsRuntimeService {
         self.workers_started.load(Ordering::Relaxed)
     }
 
-    /// Per-lane command mailbox state (Plan 127 P2 flood tests).
-    #[cfg(test)]
+    /// Per-lane command mailbox state: Plan 127 P2 flood tests plus the
+    /// report-time lane metrics (plan 136 task 7).
     pub(crate) fn lane_queue_stats(
         &self,
         domain: crate::packages::bundled::RuntimeDomain,
         lane: RuntimeLane,
     ) -> self::worker::CommandQueueStats {
         self.domain_lane_worker(domain, lane).sender.queue_stats()
+    }
+
+    /// Plan 136 task 7: record one snapshot per (domain, lane) lane metric into
+    /// `recorder`. Called ONCE at report time (`src/launch.rs`, right before
+    /// `write_perf_report`) instead of once per command, so lane occupancy
+    /// costs no perf snapshots while a lane is under load and the 4096-snapshot
+    /// budget stays with per-edit metrics.
+    ///
+    /// Every lane is reported, including idle ones: a zero dispatch count is
+    /// part of the measurement. Counts only — no document text, provider
+    /// source, or package names. Counters live on the lane's current mailbox,
+    /// so a lane replacement (timeout/heap poison) restarts them.
+    pub(crate) fn record_lane_metrics(&self, recorder: &crate::perf::metrics::PerfRecorder) {
+        for (domain_index, domain) in [
+            crate::packages::bundled::RuntimeDomain::Trusted,
+            crate::packages::bundled::RuntimeDomain::ThirdParty,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for lane in RuntimeLane::ALL {
+                let stats = self.lane_queue_stats(domain, lane);
+                let names =
+                    &crate::perf::metrics::JS_RUNTIME_LANE_METRICS[domain_index][lane.index()];
+                recorder.record_counter(names.dispatched, stats.dispatched);
+                recorder.record_gauge(names.pending, stats.pending_supersedable as u64);
+                recorder.record_gauge(names.peak_pending, stats.peak_pending as u64);
+                recorder.record_counter(names.superseded, stats.superseded);
+                recorder.record_counter(names.evicted, stats.evicted);
+            }
+        }
     }
 
     /// Per-domain successful evaluation count (trust-domain dispatch tests).

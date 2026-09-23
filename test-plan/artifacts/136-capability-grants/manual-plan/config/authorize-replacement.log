@@ -1,0 +1,6 @@
+Authorized @fixture/lane: mode-registration (native-trust)
+  granted by:  cli
+  Grants:      mode-registration (native-trust)
+  Granted by:  cli at 2026-09-23T14:32:33Z
+  Approved by: cli at 2026-09-23T14:32:32Z
+  Ungranted:   completion-provider, parse-document (declared, not granted)

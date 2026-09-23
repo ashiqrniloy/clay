@@ -15,7 +15,19 @@ phase: Phase 7
 visibility: public
 permissions: [document-edit]
 key_bindings: [Backspace, Delete]
-custom_properties: []
+custom_properties:
+  - name: documentId
+    type: string
+    default: required
+    description: Target document identifier.
+  - name: end
+    type: number
+    default: required
+    description: Exclusive end offset of the range to delete.
+  - name: start
+    type: number
+    default: required
+    description: Start offset of the range to delete.
 security: Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [backspacedelete, editor, js-api]

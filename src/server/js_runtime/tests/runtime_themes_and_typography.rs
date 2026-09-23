@@ -123,7 +123,7 @@ async fn set_typography_replaces_all_profiles_atomically() {
         .expect("complete typography candidate emitted");
     assert_eq!(typography.revision, 1);
     assert_eq!(typography.monospace.families[0], "JetBrains Mono");
-    assert_eq!(typography.proportional.size, 17.0);
+    assert!((typography.proportional.size - 17.0).abs() < f32::EPSILON);
     assert_eq!(typography.ui.families, ["system-ui"]);
     assert!(
         result
@@ -176,7 +176,7 @@ async fn set_typography_failure_preserves_previous_revision() {
         .expect("valid replacement after failure succeeds");
     let typography = second.active_typography.unwrap();
     assert_eq!(typography.revision, 2);
-    assert_eq!(typography.monospace.size, 18.0);
+    assert!((typography.monospace.size - 18.0).abs() < f32::EPSILON);
 }
 
 #[tokio::test]

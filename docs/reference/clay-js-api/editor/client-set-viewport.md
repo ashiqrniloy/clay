@@ -24,6 +24,10 @@ custom_properties:
     type: number
     default: 4
     description: Behavior-changing setting `overscanLines` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target editor/document surface.
 security: Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 agent_guidance: Use `editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, resizeviewport]
@@ -77,6 +81,7 @@ No default key binding is assigned. Users may bind a key to `editor.clientSetVie
 
 - `visibleLineCount` (`number`, default `none`): Behavior-changing setting `visibleLineCount` for this API.
 - `overscanLines` (`number`, default `4`): Behavior-changing setting `overscanLines` for this API.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 

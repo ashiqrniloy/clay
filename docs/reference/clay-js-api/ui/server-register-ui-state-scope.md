@@ -117,6 +117,7 @@ console.log(cursorState.id, cursorState.persistence);
 - `implementationStatus` (`implemented | deferred`, default `deferred`): Whether the declared lifecycle is currently implemented or intentionally deferred.
 - `targetId` (`string`, required for `pane`, `component`, and `transient-overlay`): Package-prefixed target ID.
 - `valueSchema.kind` (`boolean | number | string | enum | object`): Bounded schema kind. Enum schemas require 1 to 32 string `values`.
+- `valueSchema` (`object`, default `optional`): Closes the stored value type through `valueSchema.kind`: `boolean`, `number`, `string`, `enum`, or `object`.
 
 ## Key bindings
 

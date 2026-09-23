@@ -1,7 +1,8 @@
 use super::*;
 
+const EPSILON: f64 = 0.000_001;
+
 fn assert_rect_eq(actual: Rect, expected: Rect) {
-    const EPSILON: f64 = 0.000_001;
     assert!((actual.x0 - expected.x0).abs() < EPSILON, "x0: {actual:?}");
     assert!((actual.y0 - expected.y0).abs() < EPSILON, "y0: {actual:?}");
     assert!((actual.x1 - expected.x1).abs() < EPSILON, "x1: {actual:?}");
@@ -577,11 +578,11 @@ fn slot_handle_hit_test_all_four_slots() {
 fn slot_resize_clamps_to_min_max() {
     let mut slot = FixedSlotState::new(FixedSlotId::Left, 200.0, 100.0, 400.0).unwrap();
     slot.resize_to(50.0);
-    assert_eq!(slot.size, 100.0); // clamped to min
+    assert!((slot.size - 100.0).abs() < EPSILON); // clamped to min
     slot.resize_to(500.0);
-    assert_eq!(slot.size, 400.0); // clamped to max
+    assert!((slot.size - 400.0).abs() < EPSILON); // clamped to max
     slot.resize_to(300.0);
-    assert_eq!(slot.size, 300.0); // within bounds
+    assert!((slot.size - 300.0).abs() < EPSILON); // within bounds
 }
 
 #[test]
@@ -595,13 +596,13 @@ fn slot_resize_sets_resized_by_user() {
 #[test]
 fn slot_collapse_restore_toggles_effective_size() {
     let mut slot = FixedSlotState::new(FixedSlotId::Left, 200.0, 100.0, 400.0).unwrap();
-    assert_eq!(slot.effective_size(800.0), 200.0);
+    assert!((slot.effective_size(800.0) - 200.0).abs() < EPSILON);
     slot.toggle_collapse();
     assert!(slot.collapsed);
-    assert_eq!(slot.effective_size(800.0), 0.0);
+    assert!((slot.effective_size(800.0) - 0.0).abs() < EPSILON);
     slot.toggle_collapse();
     assert!(!slot.collapsed);
-    assert_eq!(slot.effective_size(800.0), 200.0);
+    assert!((slot.effective_size(800.0) - 200.0).abs() < EPSILON);
 }
 
 #[test]
@@ -610,7 +611,7 @@ fn slot_collapse_restore_round_trip() {
     let original_size = slot.size;
     slot.toggle_collapse();
     slot.toggle_collapse();
-    assert_eq!(slot.size, original_size);
+    assert!((slot.size - original_size).abs() < EPSILON);
     assert!(!slot.collapsed);
 }
 
@@ -663,7 +664,7 @@ fn working_area_slot_resize_commit_bumps_version() {
         .unwrap()
         .fixed_slot_mut(FixedSlotId::Left)
         .unwrap();
-    assert_eq!(slot.size, 300.0);
+    assert!((slot.size - 300.0).abs() < EPSILON);
     assert!(slot.resized_by_user);
 }
 
@@ -683,7 +684,7 @@ fn working_area_slot_resize_cancel_restores_size() {
         .unwrap()
         .fixed_slot_mut(FixedSlotId::Left)
         .unwrap();
-    assert_eq!(slot.size, 200.0);
+    assert!((slot.size - 200.0).abs() < EPSILON);
 }
 
 #[test]
@@ -855,7 +856,7 @@ fn transient_anchor_uses_focused_pane_geometry() {
     // Focused pane (1) is the left half.
     let anchor = layout.focused_pane_rect(area).unwrap();
     assert!(anchor.width() < 800.0); // not the full working area
-    assert!(anchor.x0 == 0.0); // left half
+    assert!((anchor.x0 - 0.0).abs() < EPSILON); // left half
 
     // Full working area is wider.
     assert!(area.width() > anchor.width());
@@ -1080,7 +1081,7 @@ fn collapse_restore_effective_size_zero_and_back() {
     let available = 800.0;
     slot.toggle_collapse();
     assert!(slot.collapsed);
-    assert_eq!(slot.effective_size(available), 0.0);
+    assert!((slot.effective_size(available) - 0.0).abs() < EPSILON);
     slot.toggle_collapse();
     assert!(!slot.collapsed);
     assert!((slot.effective_size(available) - original).abs() < f64::EPSILON);

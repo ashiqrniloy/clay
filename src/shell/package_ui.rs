@@ -1260,7 +1260,9 @@ mod tests {
             assert!(overlay.y0 >= main.y0 && overlay.y1 <= main.y1);
             assert!(overlay.height() <= main.height());
         }
-        assert_eq!(bottom_rect(Rect::new(0.0, 0.0, 300.0, 80.0)).height(), 80.0);
+        assert!(
+            (bottom_rect(Rect::new(0.0, 0.0, 300.0, 80.0)).height() - 80.0).abs() < f64::EPSILON
+        );
     }
 
     #[test]
@@ -1300,9 +1302,9 @@ mod tests {
         let overlay_rect =
             runtime.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0), &defaults)[0].rect;
         assert!(overlay_rect.y0 >= geometry.main_rect.y0);
-        assert_eq!(overlay_rect.y1, geometry.main_rect.y1);
-        assert_eq!(overlay_rect.x0, geometry.main_rect.x0);
-        assert_eq!(overlay_rect.x1, geometry.main_rect.x1);
+        assert!((overlay_rect.y1 - geometry.main_rect.y1).abs() < f64::EPSILON);
+        assert!((overlay_rect.x0 - geometry.main_rect.x0).abs() < f64::EPSILON);
+        assert!((overlay_rect.x1 - geometry.main_rect.x1).abs() < f64::EPSILON);
         assert!(overlay_rect.height() <= 240.0);
     }
 
@@ -1356,7 +1358,7 @@ mod tests {
             &theme,
         );
         assert!(below.x0 >= main.x0 && below.x1 <= main.x1);
-        assert_eq!(below.width(), COMPLETION_MAX_WIDTH_PX);
+        assert!((below.width() - COMPLETION_MAX_WIDTH_PX).abs() < f64::EPSILON);
         assert!(below.y0 >= 120.0 && below.y1 <= main.y1);
 
         let above = completion_overlay_rect(
@@ -1387,9 +1389,9 @@ mod tests {
         let many = completion_overlay_rect(main, caret, usize::MAX, &typography, &theme);
 
         assert!(one.height() < eight.height());
-        assert_eq!(many.height(), eight.height());
+        assert!((many.height() - eight.height()).abs() < f64::EPSILON);
         assert!(many.height() <= main.height());
-        assert_eq!(many.width(), COMPLETION_MAX_WIDTH_PX);
+        assert!((many.width() - COMPLETION_MAX_WIDTH_PX).abs() < f64::EPSILON);
     }
 
     #[test]

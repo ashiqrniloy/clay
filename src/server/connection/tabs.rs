@@ -131,7 +131,8 @@ pub(super) async fn open_workspace_for_bound_tab(
         crate::server::launcher::record_recent_workspace(
             server.configuration_root().as_deref(),
             &root,
-        );
+        )
+        .await;
     }
     let snapshot = {
         let mut registry = tab_registry.lock().await;

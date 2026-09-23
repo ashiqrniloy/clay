@@ -134,7 +134,9 @@ describe("core baseline hierarchy (plan 110 task 9)", () => {
   });
 
   it("defaults the ui profile to 13px with 15px titles and 12px labels", () => {
-    const protocol = readRepo("src/protocol/mod.rs");
+    // Plan 133 task 2 moved the typography contract out of `src/protocol/mod.rs`
+    // into `src/protocol/typography.rs` (values unchanged).
+    const protocol = readRepo("src/protocol/typography.rs");
     const defaultBlock = protocol.slice(
       protocol.indexOf("pub const DEFAULT: Self = Self {"),
       protocol.indexOf(

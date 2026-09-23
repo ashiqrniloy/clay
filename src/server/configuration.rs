@@ -1,3 +1,11 @@
+//! Plan 134 P3 async-filesystem ceiling: the sync `std::fs` sites here run on
+//! the embedded-JS runtime worker thread (module loading, preferences
+//! read/write, package-option state), not on the connection reactor. Reactor
+//! paths that need a configuration root or the persisted appearance wrap this
+//! API in `tokio::task::spawn_blocking`
+//! (`connection::runtime::persist_settings_change`,
+//! `runtime_reload::persisted_appearance`).
+
 use std::{
     collections::VecDeque,
     error::Error,
@@ -10,6 +18,7 @@ use deno_core::ModuleSpecifier;
 use deno_error::JsErrorBox;
 use serde_json::Value;
 
+use crate::lock_util::LockOrRecover;
 use crate::packages::manifest::is_valid_api_prefix;
 
 const PACKAGE_OPTION_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
@@ -178,10 +187,7 @@ impl ConfigurationRuntime {
             path: display_relative_to(&self.config_root, &module_path),
             message: truncate_utf8(message, MODULE_ERROR_MESSAGE_BUDGET_BYTES),
         };
-        let mut errors = self
-            .module_errors
-            .lock()
-            .expect("configuration module error mutex poisoned");
+        let mut errors = self.module_errors.lock_or_recover();
         if errors.len() >= MODULE_ERROR_CAPACITY {
             errors.pop_front();
         }
@@ -190,11 +196,7 @@ impl ConfigurationRuntime {
     }
 
     pub(crate) fn take_module_errors(&self) -> Vec<ConfigurationModuleError> {
-        self.module_errors
-            .lock()
-            .expect("configuration module error mutex poisoned")
-            .drain(..)
-            .collect()
+        self.module_errors.lock_or_recover().drain(..).collect()
     }
 
     pub(crate) fn resolve_module(
@@ -261,16 +263,11 @@ impl ConfigurationRuntime {
     pub(crate) fn state_json(&self) -> String {
         let loaded_modules: Vec<String> = self
             .loaded_modules
-            .lock()
-            .expect("configuration module state mutex poisoned")
+            .lock_or_recover()
             .iter()
             .map(|path| display_relative_to(&self.config_root, path))
             .collect();
-        let package_options = self
-            .package_options
-            .lock()
-            .expect("configuration package option state mutex poisoned")
-            .clone();
+        let package_options = self.package_options.lock_or_recover().clone();
         serde_json::json!({
             "entryPoint": display_relative_to(&self.config_root, &self.entry_point),
             "loadedModules": loaded_modules,
@@ -335,17 +332,13 @@ impl ConfigurationRuntime {
             estimated_payload_bytes: size,
         };
         self.package_options
-            .lock()
-            .expect("configuration package option state mutex poisoned")
+            .lock_or_recover()
             .push(registered.clone());
         Ok(registered)
     }
 
     fn record_loaded_module(&self, module_path: PathBuf) {
-        let mut loaded_modules = self
-            .loaded_modules
-            .lock()
-            .expect("configuration module state mutex poisoned");
+        let mut loaded_modules = self.loaded_modules.lock_or_recover();
         if !loaded_modules.iter().any(|loaded| loaded == &module_path) {
             loaded_modules.push(module_path);
         }

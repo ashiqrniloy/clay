@@ -365,6 +365,14 @@ impl RuntimeGenerationStore {
     pub(super) async fn swap(&self, next: RuntimeGeneration) {
         *self.current.lock().await = next;
     }
+
+    /// Plan 136 task 7: record the live generation's per-lane JS runtime
+    /// metrics. The service is cloned (Arc handles) out of the store before
+    /// recording, so the generation lock is not held while the recorder runs.
+    pub(crate) async fn record_lane_metrics(&self, recorder: &crate::perf::metrics::PerfRecorder) {
+        let service = self.current.lock().await.service.clone();
+        service.record_lane_metrics(recorder);
+    }
 }
 
 fn shell_command_catalogue() -> Vec<RegisteredCommand> {

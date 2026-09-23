@@ -16,6 +16,14 @@ visibility: public
 permissions: ["workspace-read"]
 key_bindings: []
 custom_properties:
+  - name: rootId
+    type: WorkspaceRootId
+    default: required
+    description: Workspace root returned by the root-listing API; the listing is confined to it.
+  - name: relativePath
+    type: string
+    default: package-relative-path
+    description: Package-root-relative path inside the workspace root; defaults to the root itself.
   - name: maxDepth
     type: number
     default: 8
@@ -82,6 +90,8 @@ No default key binding is assigned. Users may bind a key to `workspace.serverLis
 - `maxDepth` (`number`, default `8`): maximum listing depth.
 - `maxEntries` (`number`, default `1000`): maximum returned entries.
 - `cancelTokenId` (`string`, optional): cancellation token id.
+- `rootId`: Workspace root returned by the root-listing API; the listing is confined to it.
+- `relativePath`: Package-root-relative path inside the workspace root; defaults to the root itself.
 
 ## Return and async behavior
 

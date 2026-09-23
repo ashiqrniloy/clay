@@ -40,6 +40,10 @@ custom_properties:
     type: string
     default: package context
     description: Package API prefix retained as provenance.
+  - name: currentDocumentVersion
+    type: number
+    default: optional
+    description: Validation override used by tests/server integration; defaults to `documentVersion`.
 security: Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.
 agent_guidance: Use `diagnostics.serverPublishDiagnostics` from server-side package code only. Publish inert DiagnosticSpan records; never invent renderer callbacks, CSS, raw ops, LSP process spawning, or client-side JavaScript hooks. Prefer this over stuffing diagnostic metadata into `serverPublishDecorations`.
 lookup_tags: [js-api, diagnostics, syntax-error, range-diagnostic, lsp-ready, phase18.17]
@@ -134,6 +138,7 @@ No default key binding is assigned.
 - `source`: source-keyed replacement identity.
 - `spans`: bounded inert diagnostics.
 - `packagePrefix`: provenance and conflict identity.
+- `currentDocumentVersion`: Validation override used by tests/server integration; defaults to `documentVersion`.
 
 ## Return and async behavior
 

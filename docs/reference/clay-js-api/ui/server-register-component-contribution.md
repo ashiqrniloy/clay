@@ -32,6 +32,14 @@ custom_properties:
     type: ComponentContributionDefinition[]
     default: []
     description: Bounded child component declarations.
+  - name: style
+    type: object
+    default: optional
+    description: Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed style-variable names.
+  - name: action
+    type: object
+    default: optional
+    description: UI action intent validated against the registered package-prefixed command IDs (`action.commandId`).
   - name: styleTokens
     type: string[]
     default: []
@@ -117,6 +125,8 @@ console.log(toolbar.id, toolbar.rootKind, toolbar.componentCount);
 - `kind` (`enum`, required): Supported kind: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `dropdown`, `collapse`, `modal`, or `textInput`.
 - `deferredKinds` (`enum`, default `table`): As of Phase 20.5 only `table` remains deferred and rejected with diagnostics.
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child component declarations.
+- `style` (`object`, optional): Component style-variable tokens, for example `style.validationState` and `style.placeholderColor`, validated against the closed style-variable names.
+- `action` (`object`, optional): UI action intent validated against registered package-prefixed command IDs.
 - `styleTokens` (`string[]`, default `[]`): Typed style-variable token references through known Clay core tokens or package theme tokens.
 - `actionTargets` (`string[]`, default `[]`): Registered command IDs referenced by action intents in this tree.
 
@@ -132,6 +142,10 @@ No default key binding is assigned. Components may emit inert command intents on
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child declarations.
 - `styleTokens` (`string[]`, default `[]`): Typed style-token references.
 - `actionTargets` (`string[]`, default `[]`): Registered command action IDs.
+- `style`: Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed s...
+- `action`: UI action intent validated against the registered package-prefixed command IDs (`action.commandId`).
+- `validationState`: Phase 20.5: `textInput` validation border state: `none`, `error`, `warning`, or `success`.
+- `placeholderColor`: Phase 20.5: `textInput` placeholder text color-role token.
 
 ## Return and async behavior
 

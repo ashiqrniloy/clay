@@ -1,0 +1,3 @@
+/home/arn/Projects/clay/test-plan/artifacts/127-lane-scheduling/probe.py:197: DeprecationWarning: Atspi.Action.get_action_name is deprecated
+  names = [action.get_action_name(i) for i in range(count)]
+clicked 'Save' role=button actions=['press']

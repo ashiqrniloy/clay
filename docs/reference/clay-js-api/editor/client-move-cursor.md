@@ -32,6 +32,10 @@ custom_properties:
     type: number
     default: 1
     description: Repeat count for the motion (clamped to >= 1).
+  - name: documentId
+    type: string
+    default: optional
+    description: Target editor/document surface.
 security: Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientMoveCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [cursormovement, editor, js-api]
@@ -97,6 +101,7 @@ Users may rebind or remove these through documented key binding APIs in `~/.clay
 - `granularity` (`enum`, optional): Motion granularity.
 - `extend` (`boolean`, default `false`): Extend the current selection.
 - `count` (`number`, default `1`): Repeat count.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 

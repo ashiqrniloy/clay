@@ -102,6 +102,8 @@ The initial recorder captures sanitized, typed snapshots for scoped durations, c
 
 Benchmark and test helpers can construct `PerfRecorder::for_test(true)` directly to assert expected metric names without relying on process environment. The no-op default remains the production path when `CLAY_PERF_PROFILE`/`--profile-perf` is absent. Enabled recorders retain at most `PERF_SNAPSHOT_CAPACITY` (4096) metadata-only snapshots; later events are dropped rather than growing profiling memory without bound.
 
+`PerfSummary` aggregates retained snapshots by metric name: `count` (snapshots kept for that name), `total` (summed `Counter`/`Bytes` amounts, or the last `Gauge` value; 0 for duration-only names), and p50/p95/max nanoseconds when the name carries durations. Metrics recorded once at report time — the per-lane JS runtime occupancy in plan 136 task 7 — therefore report their amount in `total`, not in `count`.
+
 ### Plan 099 correlated editor trace and production baseline
 
 Plan 099 adds trace schema version `1` across the browser, Tauri client, and
@@ -300,16 +302,76 @@ coordinators already abort their host-side tasks for superseded work.
 Evaluation, parse, and analysis commands are host-gated (one pending job per
 document) and are never superseded or evicted.
 
-| Metric                          | Meaning                                                                                                                                        |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `js_runtime.command.superseded` | An undelivered completion/language-intelligence command a newer request for the same client/document/provider replaced before it ran.           |
-| `js_runtime.command.evicted`    | An undelivered supersedable command dropped because the lane's supersedable backlog was at capacity (oldest first).                             |
+| Metric (per domain and lane)                                  | Meaning                                                                                                          |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `js_runtime.lane.<domain>.<lane>.dispatched`                  | Commands that lane's worker took off its mailbox and ran (general = evaluation/parse/analysis, latency = provider invocations). |
+| `js_runtime.lane.<domain>.<lane>.pending`                     | Commands still waiting in the lane's supersedable backlog (gauge).                                               |
+| `js_runtime.lane.<domain>.<lane>.peak_pending`                | High-water mark of that backlog since the lane's mailbox was created (gauge).                                    |
+| `js_runtime.lane.<domain>.<lane>.superseded`                  | An undelivered completion/language-intelligence command a newer request for the same client/document/provider replaced before it ran. |
+| `js_runtime.lane.<domain>.<lane>.evicted`                     | An undelivered supersedable command dropped because the lane's supersedable backlog was at capacity (oldest first). |
 
-Both counters carry no document text, provider source, or paths; the same
-values are exposed per lane for the flood tests
-(`ClayJsRuntimeService::lane_queue_stats`), which assert a one-document typing
-burst collapses onto a single queue slot while distinct documents queue
-without supersede.
+`<domain>` is `trusted` or `third_party`; `<lane>` is `general` or `latency`
+(`JS_RUNTIME_LANE_METRICS`, indexed `[domain][lane]`). Every lane is reported,
+including idle ones, so a zero dispatch count is part of the measurement. The
+names replace plan 127's global `js_runtime.command.superseded`/`.evicted`,
+which could not say which lane absorbed the work.
+
+All five are recorded **once at report time** (`ClayJsRuntimeService::
+record_lane_metrics`, called by the server's SIGTERM hook right before
+`write_perf_report`), not per command: while a lane is under load the mailbox
+only maintains counters it already keeps (plus one relaxed atomic increment for
+the dispatch count), so lane occupancy never spends the recorder's 4096-snapshot
+budget that per-edit metrics need. The counters live on the lane's current
+mailbox, so a lane replacement (timeout/heap poison) restarts them.
+
+None of the five carries document text, provider source, paths, or package
+names.
+
+### Plan 136 lane occupancy measurement and tuning decision (2026-09-23)
+
+Measured on the granted plan-127 fixture (one adopted third-party package
+declaring `parse-document` + `completion-provider`: a 500 ms parse handler on
+the general lane, a `moduleSpecifier` provider on the latency lane) with the
+per-(domain, lane) counters above. Reproduce with
+`cargo test --lib lanes_and_queues -- --nocapture` (the `PLAN136_LANE_*` and
+`PLAN127_QUEUE_*` lines) and a live run via
+`test-plan/artifacts/127-lane-scheduling/run-live.sh start granted-lane` +
+`run-live.sh stop` (`CLAY_PERF_REPORT_DIR` is set by the harness; the summary's
+`js_runtime.lane.*` entries are the same counters).
+
+Mixed workload — 12 completions answered on the latency lane while the general
+lane was held 500 ms:
+
+| Observation | Value |
+| --- | --- |
+| Latency-lane completion latency under load | p50 2264 µs / p95 2892 µs / max 2892 µs (idle median ≈ 2.4 ms; bound 250 ms) |
+| `third_party.general.dispatched` / `peak_pending` | 4 / 0 (fixture load + parse handler) |
+| `third_party.latency.dispatched` / `peak_pending` | 13 / 1 |
+| `trusted.*` lanes | 0 dispatches (third-party work is counted on its own domain's lanes) |
+| One-document typing burst (40 requests) | `peak_pending` 1, `superseded` 38, `evicted` 0 |
+| 72 requests past capacity | `peak_pending` 64, `superseded` 0, `evicted` 7 |
+| Live granted-lane session (server + client, no typing) | `trusted.general` 2, `trusted.latency` 0, `third_party.general` 5, `third_party.latency` 3 — the latency dispatches are package-load registrations, not client requests (a client-free run shows the same 3), so the plan-136 task 6 mode-activation ceiling still holds |
+
+**Decision: keep `JS_RUNTIME_LANES_PER_DOMAIN = 2` and
+`JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES = 32 MiB`.** The measurement shows the
+split doing its job rather than straining: the latency lane answered in ~2.9 ms
+worst case while the general lane was 500 ms busy, its backlog never exceeded one
+pending command under a one-document burst (supersede collapsed 38 of 40 onto
+one slot), and capacity eviction only appeared under the synthetic 72-request
+past-capacity test. Nothing here shows a lane needing its own budget:
+
+- A third lane (per-provider or per-workload) would buy nothing the measurement
+  asks for — the latency lane's p95 is ~2 orders of magnitude inside the
+  responsiveness bound, and the supersedable mailbox already bounds backlog
+  growth by capacity, not by lane count.
+- The 32 MiB latency ceiling is a cap, not a reservation: the lane's work is a
+  single provider invocation per command (result sets already bounded by the
+  host completion/language budgets), no lane hit a heap limit or timeout in the
+  measurement, and there is no per-lane heap probe to justify raising it.
+- Revisit trigger: a lane heap-limit event or timeout poison on the latency
+  lane, or `evicted`/`superseded` churn outside the deliberate burst tests,
+  would mean the ceiling or the lane split is actually binding; a real-session
+  mix (many providers, long sessions) is still the missing input.
 
 ## Plan 056 low-latency syntax Linux verification (2026-07-19)
 

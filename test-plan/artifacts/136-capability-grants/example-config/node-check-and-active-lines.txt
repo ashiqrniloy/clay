@@ -1,0 +1,2 @@
+node --check: init.js + third-party.js OK
+import { loadPackage } from "clay:packages";

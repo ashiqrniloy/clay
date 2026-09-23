@@ -1,0 +1,2 @@
+completion.serverRegisterCompletionProvider: `priority` is declared in runtime/js/completion.d.ts but is documented in neither custom_properties (frontmatter + api-inventory.toml) nor a ## Options listing; delete the key from the typings or document it
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 227 filtered out; finished in 0.02s

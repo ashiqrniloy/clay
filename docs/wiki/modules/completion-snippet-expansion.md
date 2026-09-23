@@ -216,7 +216,7 @@ LSP completion results can exceed `COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES` (16 K
 - `tests/completion_provider.rs`: first-party snippet providers end-to-end, ranked buffer-word ordering, exclusive claim selection, disable filtering and generation bump, stale-drop on disable, LSP priority 100 non-exclusive merge, `serverDisableCompletion` override, and dynamic provider routing through document-analysis coordinator.
 - `src/server/completion.rs` unit tests: scorer prefix/case/length/recency precedence, non-alphabetical buffer ordering, and item/payload caps.
 - `src/server/connection/mod.rs` unit test: equal-priority static providers use the shared score while preserving snippet/plain metadata.
-- `src/server/connection/tests.rs`: `static_completion_on_large_document_matches_small_document_results` verifies a 4 MiB document produces the same static completion result as its small twin, and `src/server/document.rs`: `window_cost_is_independent_of_document_size` verifies the O(window) allocation invariant the request path relies on.
+- `src/server/connection/tests/`: `static_completion_on_large_document_matches_small_document_results` verifies a 4 MiB document produces the same static completion result as its small twin, and `src/server/document.rs`: `window_cost_is_independent_of_document_size` verifies the O(window) allocation invariant the request path relies on.
 - `src/protocol/completion.rs`: recency ring count/character-bound validation; `src/protocol/codec.rs`: non-empty recency round trip.
 - `src/client/mod.rs`: accepted completion recency reaches the next non-blocking request.
 - `tests/editor_performance_invariants.rs`: snippet accept hot-path guard (no Deno.core, op_clay_, enqueue_, std::fs, TcpStream, reqwest, ureq)

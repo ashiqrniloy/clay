@@ -489,8 +489,8 @@ async fn preferences_typography_round_trips_through_reload() {
     let typography = result.active_typography.expect("typography emitted");
     assert!(typography.revision >= 1, "revision assigned on apply");
     assert_eq!(typography.monospace.families[0], "JetBrains Mono");
-    assert_eq!(typography.monospace.size, 18.0);
-    assert_eq!(typography.proportional.size, 17.0);
+    assert!((typography.monospace.size - 18.0).abs() < f32::EPSILON);
+    assert!((typography.proportional.size - 17.0).abs() < f32::EPSILON);
     assert_eq!(typography.ui.families, ["system-ui"]);
 }
 

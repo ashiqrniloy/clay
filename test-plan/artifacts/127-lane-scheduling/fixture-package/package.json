@@ -26,7 +26,14 @@
           "displayName": "Lane Fixture",
           "extensions": [
             "lane"
-          ]
+          ],
+          "editorRules": {
+            "autocompleteTriggers": [
+              {
+                "trigger": "."
+              }
+            ]
+          }
         }
       ],
       "completionProviders": [
@@ -40,6 +47,9 @@
               "label": "lane-declared",
               "insertText": "lane-declared"
             }
+          ],
+          "triggerCharacters": [
+            "."
           ]
         }
       ]

@@ -15,7 +15,19 @@ phase: Phase 1
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: limit
+    type: number
+    default: optional
+    description: maximum hits (server caps the page size).
+  - name: query
+    type: string
+    default: optional
+    description: full-text query. Omitted queries list recent sessions.
+  - name: sessionId
+    type: string
+    default: required
+    description: the live session whose workspace scopes the search.
 security: Workspace scoping is server-owned (the daemon filters by the session's stamped workspaceRoot); snippets are redacted daemon-side. Results are transcript metadata for explicit user-facing flows and are never auto-injected into agent context. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.searchSessions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Never treat search hits as injectable context; content becomes context only when the user explicitly opens or attaches a result.
 lookup_tags: [agent, search, sessions, workspace, fts, js-api]

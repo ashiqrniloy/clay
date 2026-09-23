@@ -15,7 +15,15 @@ phase: Phase 9
 visibility: public
 permissions: ["workspace-read", "document-read"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: path
+    type: string
+    default: required
+    description: Workspace-relative path to an existing UTF-8 text file.
+  - name: workspaceRootId
+    type: string
+    default: required
+    description: Configured server workspace root identifier advertised by Clay.
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, open, js-api]

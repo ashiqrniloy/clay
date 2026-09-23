@@ -24,6 +24,14 @@ custom_properties:
     type: manifest
     default: //
     description: Behavior-changing setting `commentContinuation` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target document identifier.
+  - name: offset
+    type: number
+    default: required
+    description: Insertion offset for the newline.
 security: Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.serverInsertNewline` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, newline]
@@ -68,6 +76,8 @@ await serverInsertNewline({ documentId: "current", offset: 12 });
 - `documentId` (`string`): Target document identifier.
 - `offset` (`number`): Insertion offset for the newline.
 - `behaviorContext` (`object`): Optional future context used by inert manifest rules such as leading-whitespace preservation.
+- `commentContinuation` (`manifest`, default `//`): Behavior-changing setting `commentContinuation` for this API.
+- `enterRule` (`manifest`, default `PreserveLeadingWhitespace`): Behavior-changing setting `enterRule` for this API.
 
 ## Key bindings
 
@@ -81,6 +91,8 @@ Users may rebind or remove these through documented key binding APIs in `~/.clay
 
 - `enterRule` (`manifest`, default `PreserveLeadingWhitespace`): Behavior-changing setting `enterRule` for this API.
 - `commentContinuation` (`manifest`, default `//`): Behavior-changing setting `commentContinuation` for this API.
+- `documentId`: Target document identifier.
+- `offset`: Insertion offset for the newline.
 
 ## Return and async behavior
 

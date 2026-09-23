@@ -89,8 +89,36 @@ Plan 127 split each domain into two lanes and bounded the work each lane accepts
 
 - Each lane has one `CommandMailbox`. The supersedable backlog is bounded by `JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY` (64); commands with a `(kind, client_id, document_id, provider token)` key are replaced in place by a newer request for the same unit of work, and at capacity the **oldest** supersedable command is evicted (stale-first) rather than rejecting the new request.
 - Only idempotent, request-scoped commands are supersedable (`Completion`, `LanguageIntelligence`). Guaranteed commands (`Evaluate`, `UpdateActiveEditorMode`) and delta-carrying commands (`Parse`, `DocumentAnalysis`) are always admitted, because dropping them would lose state or a document version. `Parse` is additionally gate-limited to one pending job per document by the parse coordinator.
-- Superseded work never reaches the isolate: callers receive `ClayRuntimeError::Superseded` and treat it as no result. Drops are counted as `js_runtime.command.superseded` (replaced by newer work) and `js_runtime.command.evicted` (dropped at capacity) in the perf recorder.
-- Worker shutdown closes the lane's mailbox and lets the queue drain; there is no `Shutdown` command variant.
+- Superseded work never reaches the isolate: callers receive `ClayRuntimeError::Superseded` and treat it as no result.
+
+### Lane occupancy counters
+
+Each lane counts its own traffic so lane pressure is measurable in a normal run (plan 136 task 7):
+
+| Counter | Where it is bumped |
+|---|---|
+| `js_runtime.lane.<domain>.<lane>.dispatched` | `CommandMailbox::recv`, the moment the lane worker pops a command |
+| `…pending` / `…peak_pending` | the mailbox's live and high-water supersedable backlog |
+| `…superseded` / `…evicted` | replaced by newer work / dropped at capacity |
+
+`<domain>` is `trusted` or `third_party`, `<lane>` is `general` or `latency`, so a report carries 20 keys (4 lanes × 5 counters, all present and zero when unused). The names are static strings from `JS_RUNTIME_LANE_METRICS` (`src/perf/metrics.rs`), indexed `[domain][lane]`.
+
+The counters are **atomic and lock-free on the dispatch path** — `recv` does one relaxed `fetch_add`, the mailbox counters are plain atomics — and they are **recorded once, at report time**, not per event: `PerfRecorder` names are `&'static str`, its buffer is capped (`PERF_SNAPSHOT_CAPACITY`), and `MetricSummary` now carries the summed `total` for counter/gauge names. `IpcServer::record_lane_metrics` reads the live mailbox counters just before `write_perf_report` runs on the `SIGTERM` path (`src/launch.rs`), so a long session does not pay one snapshot per command, and the report path is the only place the counters are read.
+
+How to read them:
+
+```bash
+CLAY_PERF_PROFILE=1 CLAY_PERF_REPORT_DIR=/tmp/perf clay server &   # any run you want to measure
+kill -TERM %1                                                     # report is written on exit
+python3 -c 'import json;m=json.load(open("/tmp/perf/clay-server-perf-summary.json"))["metrics"];
+print({k: v["total"] for k, v in m.items() if k.startswith("js_runtime.lane.")})'
+```
+
+Measured on the plan 136 granted fixture (`test-plan/artifacts/136-capability-grants/lane-occupancy/`): `trusted.general` 1–2, `third_party.general` 5, `third_party.latency` 3, other lanes 0, 0 dropped events — the third-party numbers are the fixture's load-entry registrations. A client-free run over the same server produced the **same** latency-lane count, which showed that a client completion request never reaches a package-owned JS provider (package-owned mode activation is still unwired) and that the counters measure registration plus package traffic rather than trusting the popup path. Under the plan 127 burst tests the same counters print `peak_pending=1`/`superseded=38` for a 40-request burst and `peak_pending=64`/`evicted=7` for 72 requests at capacity 64.
+
+**Tuning decision (plan 136, kept):** `JS_RUNTIME_LANES_PER_DOMAIN = 2` and the 32 MiB latency-lane heap stay as they are. The measured latency lane answered in ~1.6–2.3 ms idle and ~2.6–3.6 ms while the general lane was held for 500 ms, backlog never exceeded one pending command in a one-document burst, eviction appeared only in the synthetic 72-request test, and no heap-limit or timeout event occurred. Revisit if a latency-lane heap/timeout event appears, if supersede/evict churn shows up outside the burst tests, or once a real-session mix exists — the plan records that fixture numbers are not final evidence.
+
+Worker shutdown closes the lane's mailbox and lets the queue drain; there is no `Shutdown` command variant.
 
 ### Heap-limit restoration
 
@@ -121,6 +149,50 @@ Lanes exist to keep latency-sensitive work off slow work inside one trust domain
 
 Hardening work happens during runtime startup, configuration evaluation, package load/enable, parse scheduling, reload, package graph changes, or sandbox supervision. It must not run in keypress, paint, layout, scroll, edit acknowledgement, or text-event handlers. Clients continue to consume validated behavior manifests, SDUI, decorations, and protocol updates. Lane selection is decided at registration time, so no lane lookup, queue mutation, or isolate handoff happens on an input hot path; latent lanes are only drained by their own worker.
 
+## Lock Poison Policy (plan 134 D5)
+
+A `std::sync::Mutex` becomes poisoned when the thread holding its guard panics,
+and every later `lock()` returns an error. The old `expect("…poisoned")` on all
+357 measured sites meant one panicked critical section killed the whole server
+process and every editor connection with it. Plan 134 triaged every site and
+split them into two classes, implemented by
+`src/lock_util.rs::LockOrRecover::lock_or_recover` (one trait impl for
+`std::sync::Mutex`; the healthy path is exactly `Mutex::lock`, only the poison
+arm differs):
+
+| Class | Policy | Current population |
+|---|---|---|
+| Self-healing state — registries, caches, snapshots, counters, mailboxes, routing tables a later write fully replaces or that validate per entry | `lock_or_recover()`: take the guard and keep serving | 330 production sites (`server/ops/mod.rs` 133, `document_analysis.rs` 31, `parse_coordinator.rs` 26, `language_intelligence.rs` 21, `completion.rs` 21, `js_runtime/mod.rs` 15, `client/mod.rs` 15, `syntax/mod.rs` 12, …) |
+| Irreversible hand-off — reusing the guarded state after a mid-operation panic is unsafe | keep a loud `expect` with a comment naming the corruption | embedded tree-sitter `Parser` (`src/server/syntax/mod.rs`): FFI state interrupted mid-parse must not be reused |
+| Test-only locks (`#[cfg(test)]` hooks, harness gates, test suites) | keep `expect`: tests should fail loudly, and no production path can poison them | 25 sites |
+
+One condvar arm recovers inline: the `js_runtime/worker.rs` mailbox
+`ready.wait(state)` uses `PoisonError::into_inner`, and the loop re-checks
+queue/closed, so no torn hand-off is served. Mailbox byte accounting may
+lose or double-count one in-flight event after a torn write (entry-bounded
+queues, re-clamped on the next enqueue) — a recorded ceiling, not an
+authority bypass.
+
+**Security: recovery never bypasses authority.** Permission state is
+re-validated by the ordinary checks on the next operation, never trusted
+because it was read from a recovered guard:
+
+- `PackageLoadEntryAllowlist` only ever inserts validated paths, and a miss
+denies rather than admits.
+- `ClayOpState::set_current_package` is attribution only — every use resolves
+the package through the host's enabled set, so a recovered stale context can
+never expand authority.
+- `PackageService` enable/authorize checks are unchanged and run before any
+mutation.
+- Client capability slots hold server-issued single-use tokens that are
+re-validated server-side on use.
+
+Tests: `src/lock_util.rs::tests::poisoned_state_mutex_recovers_service` (helper),
+`src/server/fanout.rs` (poison a live state lane, then publish/read and
+broadcast), and `src/server/tests.rs` (real `IpcServer`: poison `live_clients`,
+then the connection-arrival `sweep_expired_tabs` service path still runs). The
+kept-`expect` class has no test because `expect` is the behavior.
+
 ## Repository Gates
 
 Plan 034 hardening is verified by focused security tests plus repository-wide gates:
@@ -140,12 +212,17 @@ Plan 034 hardening is verified by focused security tests plus repository-wide ga
 - Lane scheduling: `latency_lane_unblocked_by_busy_general_lane` (completion round-trips under budget while a parse handler holds the general lane), `lane_poison_replaces_only_that_lane`, `language_intelligence_module_specifier_serves_from_latency_lane`, `lane_heap_limits_stay_within_the_configured_budget`.
 - Lane/domain invariants: `lanes_share_their_domain_op_set`, `third_party_lane_denies_trusted_ops`, `revoked_package_commands_refused_per_lane`, `reload_shares_third_party_lanes_untouched`.
 - Queue bounds: `queue_bounded_under_flood` (same-document supersession), `distinct_documents_never_superseded`, `queue_evicts_oldest_at_capacity`.
-- Heap restoration: `src/server/js_runtime/tests.rs::near_heap_limit_recovers_with_original_cap` (the restored cap tracks the live heap instead of inheriting the near-heap ratchet value).
+- Lane occupancy counters (plan 136 task 7): `lane_command_counters_track_general_and_latency_separately` (per-domain/per-lane counts stay separate, including the mailbox dispatch count) and `lane_counters_do_not_require_locking_on_the_dispatch_path` (the counters are atomics; a compile-time check pins the `&AtomicU64` type on the mailbox).
+- Heap restoration: `src/server/js_runtime/tests/::near_heap_limit_recovers_with_original_cap` (the restored cap tracks the live heap instead of inheriting the near-heap ratchet value).
 
 Manual evidence for the plan-127 scheduling work (isolated live run, measured
 `server.edit_ack` p50/p95, grant-gate negative check) is under
 `test-plan/artifacts/127-lane-scheduling/`, with the diff-based JS-API surface
 verification in `code-reviews/2026-09-18-plan127-baseline/task8-js-api-surface.md`.
+Plan 136's lane-occupancy evidence (live granted-lane summary, client-free
+comparison, automated lane measurement, and the keep-or-raise decision) is under
+`test-plan/artifacts/136-capability-grants/` (`lane-occupancy/`,
+`automated-lane/`, `manual-plan/`).
 
 ## Related
 

@@ -15,7 +15,23 @@ phase: Phase 2
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: description
+    type: string
+    default: optional
+    description: short description shown in the skill catalog.
+  - name: instructions
+    type: string
+    default: optional
+    description: full instructions loaded on demand through `load_skill`.
+  - name: name
+    type: string
+    default: required
+    description: the skill name; profiles reference it by name. Duplicate names fail closed.
+  - name: toolNames
+    type: string[]
+    default: optional
+    description: tools the skill documents; validated against the tool registry.
 security: Forwards an inert skill declaration (name, description, instructions, tool names) to the daemon's validated skill registry; re-registering a name replaces the definition. Skills surface only through the daemon's load_skill progressive-disclosure tool and never execute anything by being registered. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.skillRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register skills before the profile that references them; keep instructions as documentation, never as an execution surface.
 lookup_tags: [agent, skill, registration, progressive-disclosure, js-api]

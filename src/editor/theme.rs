@@ -782,12 +782,12 @@ mod tests {
         let r = StyleRegistry::default();
         for (idx, color) in r.syntax.iter().enumerate() {
             assert!(
-                color.split().1 == 1.0,
+                (color.split().1 - 1.0).abs() < f32::EPSILON,
                 "TokenType index {idx} must be opaque, got {color:?}"
             );
         }
         assert!(
-            r.semantic.split().1 == 1.0,
+            (r.semantic.split().1 - 1.0).abs() < f32::EPSILON,
             "semantic fallback must be opaque"
         );
     }

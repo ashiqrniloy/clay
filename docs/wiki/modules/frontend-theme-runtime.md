@@ -17,7 +17,14 @@ resolution in JavaScript.
 ## How it works
 
 1. The server resolves the active theme into a snapshot and ships it in the
-   bootstrap DTO and `themeSnapshot` envelopes.
+   bootstrap DTO and `themeSnapshot` envelopes. The Rust authority is
+   `src/shell/theme.rs` (hub) over `src/shell/theme/parse.rs` (token catalog and
+   resolver), `src/shell/theme/validate.rs` (override validation and the WCAG
+   contrast floors), and `src/shell/theme/resolve.rs` (`ResolvedUiTheme`,
+   `resolve_theme_token_snapshot`, `density_spacing_scale`); the typography
+   contract (`ActiveTypography`) lives in `src/protocol/typography.rs`. The hub
+   re-exports the three modules, so the projection below reads the same
+   `ThemeSnapshot`/`TypographySnapshot` values as before the Plan 133 split.
 2. `themeCssVariables` maps every token to a custom property using the locked
    naming rule `token.name.sub` → `--clay-token-name-sub`.
    - Spacing scalars are pre-multiplied by `densityScale` (spacing only —

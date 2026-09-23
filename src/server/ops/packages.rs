@@ -1,3 +1,8 @@
+//! Plan 134 P3 async-filesystem ceiling: package resolution and the
+//! first-party/loadEntry scans below run inside the embedded-JS runtime
+//! worker thread (op execution / module loading), not on the connection
+//! reactor; work there is bounded by the mailbox lane and is left on `std::fs`.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,15 +14,19 @@ use deno_error::JsErrorBox;
 use serde_json::{Value, json};
 
 use crate::packages::{
+    authorization::RuntimeProfile,
     commands::PackageCommandDeclaration,
     manifest::{PackageDiagnostic, validate_manifest_value},
     modes::ModeDeclaration,
-    permissions::{PermissionValidationError, is_prohibited_authority, parse_permission},
+    permissions::{
+        PackagePermission, PermissionValidationError, is_prohibited_authority, parse_permission,
+    },
     record::{PackageRecord, PackageRecordError, assemble_package_record},
 };
 use crate::protocol::{KeyBindingContext, KeyBindingRule};
 
 use super::ClayOpState;
+use crate::lock_util::LockOrRecover;
 
 /// One recorded validated package module: its absolute on-disk path plus the
 /// validated package root that confines transitive imports.
@@ -38,6 +47,11 @@ pub(crate) struct PackageLoadEntry {
 // count of modules in loaded packages. Upgrade path: eviction only matters once
 // packages can be unloaded dynamically (Phase 19 hot-reload); not needed before
 // then.
+///
+/// Plan 134 D5: the lock recovers from poison. Entries are inserted only after
+/// path validation and a lookup miss denies, so recovery cannot admit an
+/// unvalidated module: a torn write leaves either no entry (fail closed) or a
+/// fully inserted already-validated entry.
 #[derive(Debug, Default)]
 pub(crate) struct PackageLoadEntryAllowlist {
     entries: Mutex<HashMap<String, PackageLoadEntry>>,
@@ -65,24 +79,20 @@ impl PackageLoadEntryAllowlist {
         package_root: PathBuf,
         package_name: Option<&str>,
     ) {
-        self.entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned")
-            .insert(
-                opaque_specifier.to_string(),
-                PackageLoadEntry {
-                    absolute_path,
-                    package_root,
-                    package_name: package_name.map(str::to_string),
-                },
-            );
+        self.entries.lock_or_recover().insert(
+            opaque_specifier.to_string(),
+            PackageLoadEntry {
+                absolute_path,
+                package_root,
+                package_name: package_name.map(str::to_string),
+            },
+        );
     }
 
     /// The opaque load-entry specifier recorded for a package, if any.
     pub(crate) fn specifier_for_package(&self, package_name: &str) -> Option<String> {
         self.entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned")
+            .lock_or_recover()
             .iter()
             .find(|(_, entry)| entry.package_name.as_deref() == Some(package_name))
             .map(|(specifier, _)| specifier.clone())
@@ -98,10 +108,7 @@ impl PackageLoadEntryAllowlist {
         )
     )]
     pub(crate) fn revoke_package(&self, package_name: &str) -> usize {
-        let mut entries = self
-            .entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned");
+        let mut entries = self.entries.lock_or_recover();
         let before = entries.len();
         entries.retain(|_, entry| entry.package_name.as_deref() != Some(package_name));
         before.saturating_sub(entries.len())
@@ -112,16 +119,14 @@ impl PackageLoadEntryAllowlist {
     /// the module loader checks in `resolve`/`load`.
     pub(crate) fn absolute_path(&self, opaque_specifier: &str) -> Option<PathBuf> {
         self.entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned")
+            .lock_or_recover()
             .get(opaque_specifier)
             .map(|entry| entry.absolute_path.clone())
     }
 
     pub(crate) fn is_package_module(&self, opaque_specifier: &str, package_name: &str) -> bool {
         self.entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned")
+            .lock_or_recover()
             .get(opaque_specifier)
             .is_some_and(|entry| entry.package_name.as_deref() == Some(package_name))
     }
@@ -142,10 +147,7 @@ impl PackageLoadEntryAllowlist {
         // Clone the referrer entry out of the map so the immutable borrow ends
         // before the mutable insert below; all path work happens outside the lock.
         let referrer_entry = {
-            let entries = self
-                .entries
-                .lock()
-                .expect("package loadEntry allowlist mutex poisoned");
+            let entries = self.entries.lock_or_recover();
             entries.get(referrer).cloned()?
         };
         // Join the relative specifier against the referrer's directory and
@@ -169,10 +171,7 @@ impl PackageLoadEntryAllowlist {
             .replace('\\', "/");
         let package_prefix = referrer.strip_suffix(&referrer_relative_to_root)?;
         let new_specifier = format!("{package_prefix}{relative_tail}");
-        let mut entries = self
-            .entries
-            .lock()
-            .expect("package loadEntry allowlist mutex poisoned");
+        let mut entries = self.entries.lock_or_recover();
         entries.insert(
             new_specifier.clone(),
             PackageLoadEntry {
@@ -320,6 +319,179 @@ pub(super) fn op_clay_packages_validate_permissions(
         .map_err(serialize_error("packages.validation_failed"))
 }
 
+/// Record an explicit user/CLI/config capability grant for an installed
+/// package (Plan 136 task 3). Trusted-only and refused while a bundled
+/// `loadEntry` is activating, so package code can never grant capabilities to
+/// itself or to another package. Capabilities are validated against the
+/// assembled manifest inside `PackageService::authorize_package`; the single
+/// enable-time enforcement point stays `ensure_capability_grants`.
+#[op2]
+#[string]
+pub(super) fn op_clay_packages_authorize(
+    state: &mut OpState,
+    #[string] request_json: String,
+) -> Result<String, JsErrorBox> {
+    let request = parse_json(&request_json, "packages.invalid_grant")?;
+    let object = request
+        .as_object()
+        .ok_or_else(|| JsErrorBox::generic("packages.invalid_grant: options must be an object"))?;
+    for key in object.keys() {
+        if !matches!(
+            key.as_str(),
+            "package" | "capabilities" | "runtimeProfile" | "source" | "approvedBy"
+        ) {
+            return Err(JsErrorBox::generic(format!(
+                "packages.invalid_grant: unknown option `{key}`"
+            )));
+        }
+    }
+    let package_ref = grant_string(object.get("package"), "package", 256)?;
+    let approved_by = grant_string(object.get("approvedBy"), "approvedBy", 16)?;
+    if !matches!(approved_by, "user" | "cli" | "config") {
+        return Err(JsErrorBox::generic(
+            "packages.invalid_grant: approvedBy must be user, cli, or config",
+        ));
+    }
+    let capabilities = grant_capabilities(object.get("capabilities"))?;
+    let runtime_profile = match object.get("runtimeProfile") {
+        None | Some(Value::Null) => RuntimeProfile::NativeTrust,
+        Some(Value::String(value)) => RuntimeProfile::parse(value).ok_or_else(|| {
+            JsErrorBox::generic(
+                "packages.invalid_grant: runtimeProfile must be native-trust, sandboxed, or restricted",
+            )
+        })?,
+        Some(_) => {
+            return Err(JsErrorBox::generic(
+                "packages.invalid_grant: runtimeProfile must be native-trust, sandboxed, or restricted",
+            ));
+        }
+    };
+    let source = match object.get("source") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) if !value.trim().is_empty() && value.len() <= 256 => {
+            Some(value.as_str())
+        }
+        Some(_) => {
+            return Err(JsErrorBox::generic(
+                "packages.invalid_grant: source must be a non-empty string of at most 256 bytes",
+            ));
+        }
+    };
+
+    let clay_state = state.borrow::<Arc<ClayOpState>>();
+    ensure_grant_authority_open(clay_state)?;
+
+    let summary = {
+        let mut service = clay_state.package_service().lock_or_recover();
+        let (resolved_name, installed) = service
+            .installed_package_for_specifier(package_ref)
+            .ok_or_else(|| {
+                JsErrorBox::generic(format!(
+                    "packages.not_installed: package `{package_ref}` is not installed"
+                ))
+            })?;
+        if let Some(source) = source
+            && installed.provenance.requested_spec != source
+            && resolved_name != source
+        {
+            return Err(JsErrorBox::generic(format!(
+                "packages.provenance_mismatch: `{source}` does not match the installed provenance of `{resolved_name}`"
+            )));
+        }
+        service
+            .authorize_package(
+                &resolved_name,
+                capabilities.clone(),
+                runtime_profile,
+                approved_by,
+            )
+            .map_err(|error| match error {
+                crate::packages::service::PackageServiceError::NotInstalled { .. } => {
+                    JsErrorBox::generic(format!("packages.not_installed: {error}"))
+                }
+                crate::packages::service::PackageServiceError::InvalidClayMetadata(_) => {
+                    JsErrorBox::generic(format!("packages.invalid_manifest: {error}"))
+                }
+                crate::packages::service::PackageServiceError::UndeclaredCapability { .. } => {
+                    JsErrorBox::generic(format!("packages.undeclared_capability: {error}"))
+                }
+                error => JsErrorBox::generic(format!("packages.authorization_failed: {error}")),
+            })?;
+        json!({
+            "packageName": resolved_name,
+            "version": installed.provenance.resolved_version,
+            "sourceKind": installed.provenance.source_kind.as_str(),
+            "capabilities": capabilities.iter().map(|capability| capability.as_str()).collect::<Vec<_>>(),
+            "runtimeProfile": runtime_profile.as_str(),
+            "approvedBy": approved_by,
+            "granted": true,
+        })
+    };
+
+    serde_json::to_string(&summary).map_err(serialize_error("packages.authorization_failed"))
+}
+
+/// Capability grants are explicit user/CLI/config decisions: a bundled
+/// package's `loadEntry` runs inside the trusted runtime with package
+/// provenance stamped, so the op must refuse there (Plan 136 task 3).
+fn ensure_grant_authority_open(state: &ClayOpState) -> Result<(), JsErrorBox> {
+    if state.in_package_activation() {
+        return Err(JsErrorBox::generic(
+            "packages.grant_during_activation: capability grants require user configuration, CLI, or an explicit user command, never package activation",
+        ));
+    }
+    Ok(())
+}
+
+fn grant_string<'a>(
+    value: Option<&'a Value>,
+    field: &str,
+    max_bytes: usize,
+) -> Result<&'a str, JsErrorBox> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty() && value.len() <= max_bytes)
+        .ok_or_else(|| {
+            JsErrorBox::generic(format!(
+                "packages.invalid_grant: {field} must be a non-empty string of at most {max_bytes} bytes"
+            ))
+        })
+}
+
+fn grant_capabilities(value: Option<&Value>) -> Result<Vec<PackagePermission>, JsErrorBox> {
+    let values = value.and_then(Value::as_array).ok_or_else(|| {
+        JsErrorBox::generic(
+            "packages.invalid_grant: capabilities must be an array of capability strings",
+        )
+    })?;
+    if values.is_empty() || values.len() > 21 {
+        return Err(JsErrorBox::generic(
+            "packages.invalid_grant: capabilities must contain 1..=21 entries",
+        ));
+    }
+    let mut capabilities: Vec<PackagePermission> = Vec::with_capacity(values.len());
+    for value in values {
+        let name = grant_string(Some(value), "capabilities entry", 64)?;
+        let capability = match parse_permission(name) {
+            Ok(capability) => capability,
+            Err(PermissionValidationError::UnknownPermission { .. }) => {
+                return Err(JsErrorBox::generic(format!(
+                    "packages.unknown_permission: unknown Clay package capability `{name}`"
+                )));
+            }
+            Err(PermissionValidationError::ProhibitedAuthority { .. }) => {
+                return Err(JsErrorBox::generic(format!(
+                    "packages.prohibited_authority: prohibited authority `{name}` cannot be granted"
+                )));
+            }
+        };
+        if !capabilities.contains(&capability) {
+            capabilities.push(capability);
+        }
+    }
+    Ok(capabilities)
+}
+
 fn parse_json(json_text: &str, code: &str) -> Result<Value, JsErrorBox> {
     serde_json::from_str(json_text)
         .map_err(|error| JsErrorBox::generic(format!("{code}: input must be valid JSON ({error})")))
@@ -360,10 +532,7 @@ pub(super) fn ensure_first_party_record(
     clay_state: &Arc<ClayOpState>,
     specifier: &str,
 ) -> Result<(crate::packages::record::PackageRecord, PathBuf, String), JsErrorBox> {
-    let mut service = clay_state
-        .package_service()
-        .lock()
-        .expect("package service mutex poisoned");
+    let mut service = clay_state.package_service().lock_or_recover();
     ensure_first_party_record_locked(&mut service, specifier)
 }
 
@@ -479,10 +648,7 @@ pub(super) async fn op_clay_packages_load_in_package_domain(
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
 
     let (context, allowlisted) = {
-        let service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let service = clay_state.package_service().lock_or_recover();
         let record = service.enabled_record(&name, &version).ok_or_else(|| {
             JsErrorBox::generic(format!(
                 "packages.package_not_enabled: package `{name}` is not enabled"
@@ -564,10 +730,7 @@ pub(super) fn op_clay_packages_load_package_by_specifier(
     clay_state.seal_language_server_authority();
 
     let (record, package_root, resolved_name) = {
-        let mut service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let mut service = clay_state.package_service().lock_or_recover();
         ensure_first_party_record_locked(&mut service, specifier)?
     };
     if record.runtime_domain == crate::packages::bundled::RuntimeDomain::Trusted {
@@ -903,5 +1066,29 @@ mod tests {
         );
         let _ = fs::remove_file(outside);
         let _ = fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod grant_authority_tests {
+    use super::*;
+
+    /// Plan 136 task 3: a bundled package's `loadEntry` runs in the trusted
+    /// runtime with the activation scope stamped, so it must not be able to
+    /// grant capabilities to itself or another package while that scope is
+    /// active.
+    #[tokio::test]
+    async fn grant_authority_closes_during_package_activation() {
+        let _runtime_guard = crate::server::JS_RUNTIME_TEST_LOCK.lock().await;
+        let service = crate::server::js_runtime::ClayJsRuntimeService::default();
+        let op_state = service.test_op_state();
+        assert!(ensure_grant_authority_open(&op_state).is_ok());
+        op_state.enter_package_activation();
+        assert!(
+            ensure_grant_authority_open(&op_state).is_err(),
+            "capability grants must be refused inside package activation"
+        );
+        op_state.exit_package_activation();
+        assert!(ensure_grant_authority_open(&op_state).is_ok());
     }
 }

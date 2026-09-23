@@ -786,7 +786,9 @@
             "P53",
             "P54",
             "P55",
-            "P56"
+            "P56",
+            "P57",
+            "P58"
           ]
         }
       ],
@@ -798,6 +800,7 @@
         "modes.serverClassifyDocument",
         "modes.serverActivateMajorMode",
         "packages.loadPackage",
+        "packages.authorize",
         "theme.setTheme",
         "theme.setAppearance",
         "theme.setTypography",
@@ -1120,7 +1123,8 @@
             "Q40",
             "Q41",
             "Q42",
-            "Q43"
+            "Q43",
+            "Q44"
           ]
         }
       ],

@@ -15,6 +15,7 @@ use std::{
     },
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::{
@@ -189,7 +190,7 @@ impl AnalysisMailbox {
         reply: Option<AnalysisReply>,
     ) -> Result<(), EnqueueError> {
         let bytes = event.estimated_bytes();
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         if state.closed {
             return Err(EnqueueError::Closed);
         }
@@ -214,7 +215,7 @@ impl AnalysisMailbox {
             return self.push(event, None);
         };
         let bytes = event.estimated_bytes();
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         if state.closed {
             return Err(EnqueueError::Closed);
         }
@@ -248,7 +249,7 @@ impl AnalysisMailbox {
         loop {
             let notified = self.ready.notified();
             {
-                let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+                let mut state = self.state.lock_or_recover();
                 if let Some(event) = state.queue.pop_front() {
                     state.bytes = state.bytes.saturating_sub(event.bytes);
                     return Some(event);
@@ -262,7 +263,7 @@ impl AnalysisMailbox {
     }
 
     fn close(&self) {
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         state.closed = true;
         state.queue.clear();
         state.bytes = 0;
@@ -377,7 +378,7 @@ impl AnalysisOutputSink {
     /// (the worker treats that as a queue-limit failure, unchanged semantics).
     fn try_send(&self, output: DocumentAnalysisOutput) -> bool {
         {
-            let router = self.router.lock().expect("analysis output router poisoned");
+            let router = self.router.lock_or_recover();
             match &output {
                 DocumentAnalysisOutput::Decorations(set) => {
                     router.route_document(set.document_id, &output);
@@ -396,10 +397,7 @@ impl AnalysisOutputSink {
 
 impl fmt::Debug for DocumentAnalysisCoordinator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         formatter
             .debug_struct("DocumentAnalysisCoordinator")
             .field("registrations", &inner.registrations.len())
@@ -439,16 +437,14 @@ impl DocumentAnalysisCoordinator {
         client_id: ClientId,
     ) -> mpsc::Receiver<DocumentAnalysisOutput> {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .subscribe_client(client_id)
     }
 
     /// Authorize `client_id` to receive analysis output for `document_id`.
     pub(crate) fn subscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .subscribe_document(document_id, client_id);
     }
 
@@ -456,16 +452,14 @@ impl DocumentAnalysisCoordinator {
     /// close; the document may remain open for other connections).
     pub(crate) fn unsubscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .unsubscribe_document(document_id, client_id);
     }
 
     /// Remove every subscription held by one connection (disconnect).
     pub(crate) fn unsubscribe_client(&self, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .unsubscribe_client(client_id);
     }
 }
@@ -486,10 +480,7 @@ impl DocumentAnalysisCoordinator {
             &registration,
             language_intelligence,
         )?;
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if inner.registrations.iter().any(|registered| {
             registered.generation == generation
                 && registered.registration.package.manifest.name
@@ -525,10 +516,7 @@ impl DocumentAnalysisCoordinator {
             )];
         }
         let mut diagnostics = Vec::new();
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         let matching = inner
             .registrations
             .iter()
@@ -600,10 +588,7 @@ impl DocumentAnalysisCoordinator {
                 .get(&key)
                 .expect("analysis worker inserted above")
                 .clone();
-            let mut documents = worker
-                .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned");
+            let mut documents = worker.active_documents.lock_or_recover();
             if documents.len() >= DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER {
                 diagnostics.push(analysis_status(
                     "analysis.document_limit",
@@ -667,10 +652,7 @@ impl DocumentAnalysisCoordinator {
         byte_end: u64,
         inserted_text: String,
     ) -> bool {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return false;
         };
@@ -694,8 +676,7 @@ impl DocumentAnalysisCoordinator {
                 Ok(()) => {
                     if let Some(document) = worker
                         .active_documents
-                        .lock()
-                        .expect("analysis document state lock poisoned")
+                        .lock_or_recover()
                         .get_mut(&document_id)
                     {
                         document.version = document_version;
@@ -722,10 +703,7 @@ impl DocumentAnalysisCoordinator {
             self.close_document(document_id, document_version);
             return;
         }
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return;
         };
@@ -741,8 +719,7 @@ impl DocumentAnalysisCoordinator {
             if worker.mailbox.coalesce_reset(event).is_ok() {
                 if let Some(document) = worker
                     .active_documents
-                    .lock()
-                    .expect("analysis document state lock poisoned")
+                    .lock_or_recover()
                     .get_mut(&document_id)
                 {
                     document.version = document_version;
@@ -760,10 +737,7 @@ impl DocumentAnalysisCoordinator {
         document_id: DocumentId,
         document_version: DocumentVersion,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.remove(&document_id) else {
             return;
         };
@@ -774,8 +748,7 @@ impl DocumentAnalysisCoordinator {
             };
             worker
                 .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned")
+                .lock_or_recover()
                 .remove(&document_id);
             let _ = worker.mailbox.push(
                 DocumentAnalysisEvent::Close {
@@ -784,12 +757,7 @@ impl DocumentAnalysisCoordinator {
                 },
                 None,
             );
-            if worker
-                .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned")
-                .is_empty()
-            {
+            if worker.active_documents.lock_or_recover().is_empty() {
                 let _ = worker.mailbox.push(DocumentAnalysisEvent::Shutdown, None);
                 empty_workers.push(route.key);
             }
@@ -801,10 +769,7 @@ impl DocumentAnalysisCoordinator {
 
     pub(crate) fn cancel_package(&self, package_name: &str) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -824,10 +789,7 @@ impl DocumentAnalysisCoordinator {
     )]
     pub(crate) fn cancel_root(&self, root_id: WorkspaceRootId) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -854,10 +816,7 @@ impl DocumentAnalysisCoordinator {
     /// outputs so late old-generation decorations/diagnostics cannot publish.
     pub(crate) fn cancel_older_generations(&self, active_generation: u64) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -867,8 +826,7 @@ impl DocumentAnalysisCoordinator {
         };
         self.cancel_workers(keys);
         self.inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .registrations
             .retain(|registration| registration.generation >= active_generation);
         self.drain_pending_outputs();
@@ -892,8 +850,7 @@ impl DocumentAnalysisCoordinator {
     pub(crate) fn registered_generations(&self) -> Vec<u64> {
         let mut generations = self
             .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .registrations
             .iter()
             .map(|registration| registration.generation)
@@ -914,8 +871,7 @@ impl DocumentAnalysisCoordinator {
     pub(crate) fn worker_generations(&self) -> Vec<u64> {
         let mut generations = self
             .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .workers
             .keys()
             .map(|key| key.generation)
@@ -926,10 +882,7 @@ impl DocumentAnalysisCoordinator {
     }
 
     fn cancel_workers(&self, keys: Vec<WorkerKey>) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         for key in &keys {
             if let Some(worker) = inner.workers.remove(key) {
                 worker.active.store(false, Ordering::Release);
@@ -949,10 +902,7 @@ impl DocumentAnalysisCoordinator {
     }
 
     pub(crate) fn active_completion_provider_ids(&self, document_id: DocumentId) -> Vec<String> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return Vec::new();
         };
@@ -1055,10 +1005,7 @@ impl DocumentAnalysisCoordinator {
         package_name: &str,
         document_id: DocumentId,
     ) -> Result<(AnalysisWorker, JsDocumentAnalyzerRegistration), CompletionProviderError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let route = inner
             .routes
             .get(&document_id)
@@ -1189,8 +1136,7 @@ fn publish_invocation_outputs(
     let mut output_failed = false;
     if let Some(set) = invocation.decorations {
         let current = active_documents
-            .lock()
-            .expect("analysis document state lock poisoned")
+            .lock_or_recover()
             .get(&set.document_id)
             .copied();
         if current.is_some_and(|document| document.version == set.document_version)
@@ -1201,8 +1147,7 @@ fn publish_invocation_outputs(
     }
     if let Some(set) = invocation.diagnostics {
         let current = active_documents
-            .lock()
-            .expect("analysis document state lock poisoned")
+            .lock_or_recover()
             .get(&set.document_id)
             .copied();
         if current.is_some_and(|document| document.version == set.document_version)

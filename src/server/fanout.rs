@@ -5,6 +5,7 @@
 //! (lagged receivers drop), and [`StateFanout`] for state that also carries a
 //! current value (lagged receivers and late subscribers replay it).
 
+use crate::lock_util::LockOrRecover;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::broadcast;
 
@@ -95,7 +96,7 @@ impl<T: Clone> StateFanout<T> {
     }
 
     fn lock(&self) -> MutexGuard<'_, T> {
-        self.current.lock().expect("state fanout mutex poisoned")
+        self.current.lock_or_recover()
     }
 }
 
@@ -164,6 +165,26 @@ mod tests {
         }
         assert!(matches!(receiver.try_recv(), Err(TryRecvError::Lagged(1))));
         assert_eq!(receiver.try_recv().expect("backlog survives"), 1);
+    }
+
+    /// A poisoned recovered-class lock keeps serving (plan 134 D5): the lane's
+    /// state store recovers, so a panicked critical section cannot kill the
+    /// connection task that publishes or replays through it.
+    #[tokio::test]
+    async fn poisoned_state_mutex_recovers_service() {
+        let fanout = StateFanout::new(4, 1u32);
+        let poisoner = fanout.clone();
+        std::thread::spawn(move || {
+            let _guard = poisoner.lock();
+            panic!("poison the state store");
+        })
+        .join()
+        .ok();
+
+        let mut receiver = fanout.subscribe();
+        fanout.publish(7);
+        assert_eq!(fanout.current(), 7);
+        assert_eq!(receiver.recv().await.expect("lane stays open"), 7);
     }
 
     /// Clones share one channel and one store, which is what lets a reloaded

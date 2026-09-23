@@ -20,6 +20,18 @@ custom_properties:
     type: boolean
     default: true
     description: Behavior-changing setting `normalizeLineEndings` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target document identifier such as `"current"` once runtime document IDs exist.
+  - name: offset
+    type: number
+    default: required
+    description: Protocol-defined insertion offset.
+  - name: text
+    type: string
+    default: required
+    description: Inert text to insert.
 security: Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.serverInsertText` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, textinsertion]
@@ -73,6 +85,9 @@ No default key binding is assigned. Users may bind a key to `editor.serverInsert
 ## Custom properties
 
 - `normalizeLineEndings` (`boolean`, default `true`): Behavior-changing setting `normalizeLineEndings` for this API.
+- `documentId`: Target document identifier such as `"current"` once runtime document IDs exist.
+- `offset`: Protocol-defined insertion offset.
+- `text`: Inert text to insert.
 
 ## Return and async behavior
 

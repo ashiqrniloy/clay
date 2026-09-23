@@ -283,17 +283,30 @@ impl CommandExecutor {
             OPEN_DIRECTORY_COMMAND_ID => {
                 let (root_id, relative_path) =
                     navigate_directory_arguments(&request.arguments, &request.command_id)?;
-                workspace
-                    .list_directory(
-                        crate::server::workspace::FileListRequest {
-                            root_id,
-                            relative_path: relative_path.clone(),
-                            max_depth: 1,
-                            max_entries: 1,
-                        },
-                        None,
-                    )
+                // Plan under the caller's workspace guard, then walk on Tokio's
+                // bounded blocking pool: the sync `list_directory` compatibility
+                // path would run a recursive std::fs walk on the reactor
+                // (plan 134 P3).
+                let plan = workspace
+                    .prepare_directory_listing(crate::server::workspace::FileListRequest {
+                        root_id,
+                        relative_path: relative_path.clone(),
+                        max_depth: 1,
+                        max_entries: 1,
+                    })
                     .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
+                tokio::task::spawn_blocking(move || {
+                    crate::server::workspace::traverse_directory(plan, None)
+                })
+                .await
+                .map_err(|_| {
+                    diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "directory listing task failed",
+                    )
+                })?
+                .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
                     root_id,
                     relative_path,

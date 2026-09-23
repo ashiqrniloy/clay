@@ -24,10 +24,10 @@ custom_properties:
     type: string
     default: default
     description: Export name resolved from module; the export must be a function and is never serialized to Rust.
-  - name: modeId
+  - name: mode
     type: string
     default: required
-    description: Active mode ID this handler serves.
+    description: Active mode ID this handler serves; the registration op reads `mode` (not `modeId`).
   - name: parseUnit
     type: enum
     default: line-group
@@ -44,6 +44,10 @@ custom_properties:
     type: number
     default: 65536
     description: Maximum bytes included in one bounded parse-window snapshot.
+  - name: parseWindowBytes
+    type: number
+    default: 65536
+    description: Alias of `maxWindowBytes`, read with `maxWindowBytes` when both are absent.
   - name: guardBytes
     type: number
     default: 4096
@@ -128,7 +132,7 @@ serverRegisterParseHandler({
 - `packageManifest` or package context fields: package identity and declared `parse-document` permission.
 - `module` (`Record<string, unknown>`, required for live handlers): Package module object already loaded inside the persistent server runtime.
 - `exportName` (`string`, default `"default"`): Function export to store behind the server-issued token.
-- `modeId` / `mode` (`string`, required): Mode ID served by the handler.
+- `mode` (`string`, required): Mode ID served by the handler; `modeId` appears in older examples but is not read by the registration op.
 - `parseUnit` (`"file" | "region" | "line-group"`, default `"line-group"`): Incremental unit hint.
 - `viewportPriority` (`boolean`, default `true`): Prioritize visible parse output.
 - `timeoutMs` (`number`, default `50`): Bounded timeout policy; values must be between 1 and 5000.
@@ -147,7 +151,7 @@ No default key binding is assigned.
 
 ## Custom properties
 
-- `modeId`: parser/mode binding.
+- `mode`: parser/mode binding.
 - `module`: persistent-runtime parser module, stored behind a token.
 - `exportName`: function export selected from `module`.
 - `parseUnit`: incremental scheduling contract.
@@ -157,6 +161,8 @@ No default key binding is assigned.
 - `guardBytes`: bounded parse-window guard context policy.
 - `memoryBudgetBytes`: retained syntax/window memory policy.
 - `resultBudgetBytes`: parse-result payload budget metadata.
+- `mode`: Active mode ID this handler serves; the registration op reads `mode` (not `modeId`).
+- `parseWindowBytes`: Alias of `maxWindowBytes`, read with `maxWindowBytes` when both are absent.
 
 ## Return and async behavior
 

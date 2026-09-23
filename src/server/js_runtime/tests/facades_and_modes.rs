@@ -564,8 +564,47 @@ async fn package_manifest_can_customize_movement_and_caret_style() {
     ));
     assert!(!caret.stop_blink_on_typing);
     // Absent caret fields keep the defaults.
-    assert_eq!(
-        caret.width_px,
-        crate::protocol::CaretStyle::default().width_px
+    assert!(
+        (caret.width_px - crate::protocol::CaretStyle::default().width_px).abs() < f32::EPSILON
     );
+}
+
+/// Plan 134 R3: an evaluation that yields the same provider list must not
+/// replace (clone) the stored snapshot; a changed list must replace it. The
+/// helper's return value is the swap signal, so this needs no allocation
+/// counter or global hook.
+#[test]
+fn provider_snapshot_not_replaced_when_unchanged() {
+    use crate::lock_util::LockOrRecover;
+    use crate::server::completion::CompletionProviderMeta;
+
+    let meta = |id: &str| {
+        CompletionProviderMeta::builtin_core(
+            id,
+            0,
+            Default::default(),
+            Default::default(),
+            50,
+            16,
+            1,
+        )
+    };
+    let slot = std::sync::Mutex::new(Vec::new());
+    let providers = vec![meta("a"), meta("b")];
+
+    assert!(super::super::replace_snapshot_only_on_change(
+        &slot, &providers
+    ));
+    assert!(
+        !super::super::replace_snapshot_only_on_change(&slot, &providers),
+        "an identical provider list must not clone/replace the snapshot"
+    );
+    assert_eq!(slot.lock_or_recover().as_slice(), providers.as_slice());
+
+    let changed = vec![meta("a"), meta("c")];
+    assert!(
+        super::super::replace_snapshot_only_on_change(&slot, &changed),
+        "a changed provider list must be stored"
+    );
+    assert_eq!(slot.lock_or_recover().as_slice(), changed.as_slice());
 }

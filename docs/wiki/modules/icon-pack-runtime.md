@@ -1,7 +1,7 @@
 # Icon Pack Runtime
 
 **Files:** `src/shell/icons.rs`, `src/packages/record/icons.rs`, `src/packages/extension_points.rs`, `src/server/ops/theme.rs`, `src/server/mod.rs`, `src/server/configuration.rs`, `src/protocol/runtime.rs`, `src/shell/file_browser.rs`, `src-tauri/src/bridge/dto.rs`, `runtime/js/theme.js` (+ `.d.ts`), `frontend/src/icons/`, `frontend/src/state/icon-store.ts`, `frontend/src/components/icon.tsx`, `frontend/src/components/button.tsx`, `frontend/src/components/tooltip.tsx`, `frontend/src/components/icon.module.css`, `scripts/generate-icon-packs.mjs`, `packages/icons-phosphor-regular/`, `packages/icons-phosphor-duotone/`, `packages/icon-sources/`  
-**Tests:** `tests/icon_packages.rs`, `tests/runtime_update_protocol.rs`, `src-tauri/tests/dto_roundtrips.rs`, `src/shell/icons.rs` (unit), `src/shell/file_browser.rs` (unit), `src/server/ops/theme.rs` (unit), `src/server/js_runtime/tests.rs` (`plan112_*`), `frontend/src/test/icons.test.tsx`, `frontend/src/test/design-system-consumption.test.ts`  
+**Tests:** `tests/icon_packages.rs`, `tests/runtime_update_protocol.rs`, `src-tauri/tests/dto_roundtrips.rs`, `src/shell/icons.rs` (unit), `src/shell/file_browser.rs` (unit), `src/server/ops/theme.rs` (unit), `src/server/js_runtime/tests/` (`plan112_*`), `frontend/src/test/icons.test.tsx`, `frontend/src/test/design-system-consumption.test.ts`  
 **Reference Docs:** `docs/reference/clay-js-api/theme/set-icon-pack.md`, `docs/reference/icon-packs.md`, `docs/reference/ui-components.md` (Plan 112 section), `docs/reference/packages/creating-packages.md`, `docs/development/icon-pack-primitive-review.md`
 
 ---
@@ -176,7 +176,7 @@ Mirrors the design-system lifecycle (`src/server/ops/theme.rs`,
 - `tests/runtime_update_protocol.rs`: snapshot round-trip identity + invalid
   pack rejection; `src-tauri/tests/dto_roundtrips.rs`: DTO projection +
   malformed-geometry fail-closed.
-- `src/server/js_runtime/tests.rs` `plan112_*`: load-then-select, either-order
+- `src/server/js_runtime/tests/` `plan112_*`: load-then-select, either-order
   selection, modular reload no-resend, preference persistence, zero-config
   fallback, unloaded third-party fail-closed.
 - `frontend/src/test/icons.test.tsx`: geometry rendering, a11y contract,

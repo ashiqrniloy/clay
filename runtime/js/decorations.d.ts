@@ -36,7 +36,6 @@ export type ServerPublishDecorationsOptions = {
     documentId: number;
     documentVersion: number;
     currentDocumentVersion?: number;
-    behaviorVersion?: number;
     viewport: {
         byteStart: number;
         byteEnd: number;

@@ -1066,13 +1066,14 @@ Plan 060 reviewed every user-visible behavior changed by the comprehensive remed
 |---|---|
 | Load an installed package from `init.js` | [`packages.loadPackage`](packages/load-package.md) |
 | Adopt, inspect, revoke, or roll back a third-party package/replacement | `clay package adopt\|inspect\|revoke\|rollback` host CLI, never package JavaScript |
+| Grant an adopted third-party package the capabilities its manifest declares | [`packages.authorize`](packages/authorize.md) from `init.js` (attributed `approvedBy: "config"`) or `clay package authorize` (attributed `cli`), before `loadPackage`; withdrawn by `clay package revoke` |
 | Approve a fixed language-server contribution for known roots | [`language-server.authorizeLanguageServer`](language-server/authorize-language-server.md), before `loadPackage` seals authority |
 | Bind built-in/package commands | [`keybindings.bindKey`](keybindings/bind-key.md) |
 | Select theme, typography, design system, or validated syntax tier | [`setTheme`](theme/set-theme.md), [`setTypography`](theme/set-typography.md), [`setDesignSystem`](theme/set-design-system.md) ([`settings.setDesignSystem`](settings/set-design-system.md) for persisted UI changes), [`setSyntaxEnginePreference`](syntax/set-syntax-engine-preference.md) |
 | Set approved package UI defaults | [`setPackageOption`](configuration/set-package-option.md) and [`serverSetLayoutOverride`](ui/server-set-layout-override.md) |
 | Compose local configuration | [`loadConfigurationModule`](configuration/load-configuration-module.md), confined beneath `~/.clay/` |
 
-Third-party adoption and replacement approval remain host-owned durable decisions. JavaScript cannot approve itself, mint `PackageContext`, choose/promote `RuntimeDomain`, expand relation/replacement scope, disable consent checks, or move third-party code into the trusted runtime. `loadPackage` consumes an already-valid approval and routes execution by host provenance; it is not an authorization setting.
+Third-party adoption and replacement approval remain host-owned durable decisions. JavaScript cannot approve itself, mint `PackageContext`, choose/promote `RuntimeDomain`, expand relation/replacement scope, disable consent checks, or move third-party code into the trusted runtime. `loadPackage` consumes an already-valid approval and routes execution by host provenance; it is not an authorization setting. The same holds for capability grants (plan 136): [`packages.authorize`](packages/authorize.md) is user-configuration/CLI/explicit-user-command work that refuses while a package activation is open (`packages.grant_during_activation`), `clay:packages` is absent from the shared third-party runtime, and no hidden JSON/TOML/ad hoc key can grant a capability.
 
 ### Fixed controls, not settings
 
@@ -1533,3 +1534,77 @@ existing bounded configuration-root watcher and the single
 layout, scroll, pointer, text-event, edit-acknowledgement, and
 decoration-rendering paths execute no configuration JavaScript and recompute no
 selection.
+
+## Plan 136 third-party capability grant configuration review
+
+Plan 136 made the capability grant a documented configuration surface. Before it,
+a third-party package that declared `parse-document` or `completion-provider` could
+be adopted and enabled but never granted: `PackageService::authorize_package` had no
+user-facing entry point, so enable failed closed with `MissingCapabilityGrant` and
+no configuration could fix it. The grant is now expressible from `~/.clay/init.js`
+through [`packages.authorize`](packages/authorize.md) and from the host CLI (`clay
+package authorize <name> --capability <cap>...`), and `clay package inspect` shows
+the current grants.
+
+User-visible Plan 136 configuration surfaces:
+
+| Surface | Status | API / mechanism | Notes |
+|---|---|---|---|
+| Capability grant from configuration | runtime-backed | [`packages.authorize`](packages/authorize.md) | Records the grant with `approvedBy: "config"`; every granted capability must be declared by the manifest, and unknown option keys are rejected instead of ignored |
+| Capability grant from the CLI | runtime-backed | `clay package authorize <name> --capability <cap>... [--runtime-profile <p>] [--approved-by <who>]` | The same grant attributed to `cli`; requires a current adoption so the grant is durable rather than process-local |
+| Adoption and revocation | host CLI, never package JavaScript | `clay package adopt`, `clay package revoke` | Revoking withdraws the persisted grant together with the approval; a package cannot adopt, approve, or grant for itself |
+| Package enablement after the grant | runtime-backed | [`packages.loadPackage`](packages/load-package.md) | `loadPackage` consumes the recorded grant; it never creates one |
+| Grant enforcement | compiled security boundary | `PackageService::capability_granted` (`ensure_capability_grants`, package-op dispatch) | Fails closed with `MissingCapabilityGrant`; not tunable from `init.js` |
+| Durable grant storage | internal | `clay-package-approvals.json` (`src/packages/approvals.rs`, owner-only atomic write) | A grant annotates an adoption the user already made; it never manufactures one |
+
+The documented order is grant before load: a capability grant records authority, and
+`loadPackage` is what consumes it. Authorizing before adopting still fails closed at
+enable with the adoption diagnostic, so the reviewer path is install → adopt →
+`authorize` → `loadPackage`.
+
+```js
+// ~/.clay/init.js
+import { authorize, loadPackage } from "clay:packages";
+
+// Reviewer example: `@vendor/words` was installed and adopted
+// (`clay package adopt @vendor/words`). Grant only the capabilities the
+// manifest declares and the user intends; the grant is durable because it is
+// recorded on that approval record, and `clay package revoke` withdraws it.
+authorize({
+  package: "@vendor/words",
+  capabilities: ["completion-provider"],
+  runtimeProfile: "native-trust",
+  approvedBy: "config",
+});
+
+await loadPackage("@vendor/words");
+```
+
+The package-author side of the same grant is the manifest, not configuration: the
+capability must be declared in `clay.permissions` (or the legacy `clay.capabilities`
+alias) and the contribution metadata registered by the load entry, exactly as
+[`packages.authorize`](packages/authorize.md) documents. Configuration can only
+approve a declared capability; it cannot widen a manifest or invent one.
+
+No hidden JSON/TOML/ad hoc key can grant a capability. Capabilities are granted only
+by the documented surfaces above; representative rejected keys are
+`capabilityGrant`, `packageGrants`, `grantedCapabilities`, `allowedCapabilities`,
+`packages.authorizedCapabilities`, `packages.grants`, `permissions.grant`,
+`trust.granted`, `clay.packageGrant`, and their JSON/TOML equivalents. A grant
+missing, stale, or revoked blocks enable with `MissingCapabilityGrant` — there is no
+configuration key that turns that check off.
+
+`clay:packages` stays trusted-only: it is absent from the shared third-party
+runtime, so package code cannot call `authorize`, and the op additionally refuses
+while a package activation is open (`packages.grant_during_activation`), so a load
+entry cannot grant itself or another package a capability. Grants made from
+`init.js` are attributed (`approvedBy: "config"`) and remain revocable.
+
+Configuration evaluation remains startup, package-load, reload, or explicit
+setting-change work only: grant work happens at install/enable/load/reload or an
+explicit user command, and the enforcement read is a cheap check against
+already-loaded authorization state at the enable, load, registration, and request
+boundaries. This review adds no filesystem, network, shell, extension loading, AI
+mutation, workspace mutation, WASM, raw-op, client-side JavaScript, or
+package-manager authority, and adds no keypress, paint, layout, scroll,
+text-event, edit-acknowledgement, pointer, or client hot-path work.

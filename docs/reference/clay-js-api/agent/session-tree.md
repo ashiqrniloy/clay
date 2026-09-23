@@ -15,7 +15,19 @@ phase: Phase 1
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: entryId
+    type: string
+    default: required
+    description: the target tree entry.
+  - name: method
+    type: enum
+    default: required
+    description: the tree operation.
+  - name: sessionId
+    type: string
+    default: required
+    description: the live agent session.
 security: Checkout first restores server-recorded document checkpoints (buffer-only, lease-respecting) before moving the conversation leaf; abandoned branches are kept, never deleted. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.sessionTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Checkout rewrites the live branch; confirm with the user before discarding their current position.
 lookup_tags: [agent, tree, checkout, fork, clone, checkpoint, js-api]

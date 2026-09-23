@@ -61,10 +61,17 @@ export function inspect(_options) {
 export function list() {
     return plannedPackageApi("packages.list");
 }
-/** Authorize capabilities and a runtime profile for a package.
- * Planned: not callable until the op wiring ships. */
-export function authorize(_options) {
-    return plannedPackageApi("packages.authorize");
+/** Authorize capabilities and a runtime profile for an installed package.
+ *
+ * Records an explicit user/CLI/config capability grant against the installed
+ * package's provenance. Trusted-only and refused during package activation,
+ * so package code can never grant capabilities to itself or another package.
+ * Every granted capability must be declared by the package manifest, and the
+ * grant is what lets `loadPackage` enable a package that requests powerful
+ * capabilities. Grants are visible in `clay package inspect` and withdrawn by
+ * `clay package revoke`. */
+export function authorize(options) {
+    return parse(requireOps().op_clay_packages_authorize(JSON.stringify(options ?? null)));
 }
 /** Set an explicit user-selected winner for a package contribution conflict.
  * Planned: not callable until the op wiring ships. */

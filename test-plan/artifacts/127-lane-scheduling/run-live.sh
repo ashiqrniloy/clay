@@ -2,6 +2,10 @@
 # Plan 127 lane-scheduling manual steps: isolated live launches.
 #
 #   run-live.sh start fixture            # plan 127 fixture package (grant-gate check)
+#   run-live.sh start granted-lane       # plan 136: granted fixture, latency-lane provider
+#   run-live.sh start ungranted-lane     # plan 136 negative check (adopt, no grant)
+#   run-live.sh start config-granted-lane # plan 136: the grant comes from init.js
+#   run-live.sh start example-config     # plan 136: the canonical examples/config tree
 #   run-live.sh start completion         # bundled @clay/rust: typing + completion
 #   run-live.sh start markdown [bytes]   # bundled @clay/markdown: big document, parse handler
 #   run-live.sh stop
@@ -64,23 +68,25 @@ case "${1:-}" in
         exit 0
         ;;
     status)
-        isolated bash -c "cd '$store' && corepack pnpm list --json" 2>/dev/null \
+        isolated bash -c "cd '$store' && pnpm list --json" 2>/dev/null \
             | python3 "$here/store-list.py" || true
         for name in "@fixture/lane" "@fixture/laneblocked"; do
             isolated "$repo/target/debug/clay" package inspect "$name" 2>&1 \
-                | grep -E "^(Package|Status|Adoption)" || true
+                | grep -E "^(Package|Status|Adoption|Grants|Granted by|Approved by|Ungranted)" || true
         done
         exit 0
         ;;
     start) ;;
     *)
-        echo "usage: run-live.sh start fixture|completion|markdown [bytes] | stop | status" >&2
+        echo "usage: run-live.sh start fixture|granted-lane|ungranted-lane|config-granted-lane|example-config|completion|markdown [bytes] | stop | status" >&2
         exit 2
         ;;
 esac
 
-# The store survives a restart so the fixture install/adopt evidence is kept.
-if [[ "$mode" == "fixture" ]]; then
+# The store survives a restart so the fixture install/adopt evidence is kept
+# (`fixture` mode), and so a durable grant written by configuration can be
+# checked across launches (`config-granted-lane` with CLAY_LIVE_KEEP_ROOT=1).
+if [[ "$mode" == "fixture" || "$mode" == "config-granted-lane" ]]; then
     : "${CLAY_LIVE_KEEP_ROOT:=}"
 else
     stop_all
@@ -92,10 +98,19 @@ chmod 700 "$root" "$root/bin" "$root/config" "$root/config/clay" "$root/data" \
     "$root/home" "$root/home/.config" "$root/home/.clay" "$root/workspace" \
     "$root/tmp" "$store"
 
-# `corepack pnpm` is the offline pnpm on this host; Clay's backend spawns `pnpm`.
+# Clay's backend spawns `pnpm`; expose the host's pnpm to the isolated HOME.
+# Prefer corepack (plan 127's original shape), fall back to the host's absolute
+# pnpm when corepack is not installed, and never re-enter this shim.
 cat > "$root/bin/pnpm" <<'SH'
 #!/bin/sh
-exec corepack pnpm "$@"
+if command -v corepack >/dev/null 2>&1; then
+    exec corepack pnpm "$@"
+fi
+if [ -x /usr/bin/pnpm ]; then
+    exec /usr/bin/pnpm "$@"
+fi
+echo "no host pnpm available (corepack missing, /usr/bin/pnpm absent)" >&2
+exit 127
 SH
 chmod 700 "$root/bin/pnpm"
 
@@ -103,11 +118,12 @@ document=demo.lane
 case "$mode" in
     fixture)
         fixture="$here/fixture-package"
-        isolated bash -c "cd '$store' && corepack pnpm add '$fixture' --ignore-scripts" >/dev/null
+        isolated bash -c "cd '$store' && pnpm add '$fixture' --ignore-scripts" >/dev/null
         isolated "$repo/target/debug/clay" package adopt "@fixture/lane" >/dev/null 2>&1 || true
-        # `enable` is expected to fail closed here: no user-facing capability
-        # grant surface exists for parse-document/completion-provider on a
-        # non-bundled package (recorded in the artifact README).
+        # This mode keeps the plan 127 negative check: it never grants, so
+        # `enable` fails closed and the package code never runs. Plan 136 task 5
+        # added the `clay package authorize` surface; `granted-lane` below is the
+        # mode that uses it (see the plan 136 artifact README).
         isolated "$repo/target/debug/clay" package enable "@fixture/lane" \
             > "$root/enable.log" 2>&1 || true
         cp "$here/init-fixture.js" "$root/home/.clay/init.js"
@@ -115,6 +131,74 @@ case "$mode" in
 lane fixture document
 hello
 EOF
+        ;;
+    granted-lane|ungranted-lane)
+        # Plan 136 task 6: the plan 127 fixture package, taken through the
+        # grant surface the plan adds. `ungranted-lane` keeps the plan 127
+        # negative check (adopt, never grant, enable must fail closed).
+        fixture="$here/fixture-package"
+        isolated bash -c "cd '$store' && pnpm add '$fixture' --ignore-scripts" >/dev/null
+        isolated "$repo/target/debug/clay" package adopt "@fixture/lane" >/dev/null
+        if [[ "$mode" == "granted-lane" ]]; then
+            isolated "$repo/target/debug/clay" package authorize "@fixture/lane" \
+                --capability completion-provider \
+                --capability mode-registration \
+                --capability parse-document > "$root/authorize.log" 2>&1
+        fi
+        isolated "$repo/target/debug/clay" package enable "@fixture/lane" \
+            > "$root/enable.log" 2>&1 || true
+        isolated "$repo/target/debug/clay" package inspect "@fixture/lane" \
+            > "$root/inspect.log" 2>&1 || true
+        if [[ "$mode" == "granted-lane" ]] && ! grep -q "Enabled @fixture/lane" "$root/enable.log"; then
+            echo "granted-lane: enable did not succeed" >&2
+            cat "$root/enable.log" >&2
+            exit 1
+        fi
+        cp "$here/../136-capability-grants/init-granted-lane.js" "$root/home/.clay/init.js"
+        cat > "$root/workspace/$document" <<'EOF'
+lane granted document
+hello
+EOF
+        ;;
+    config-granted-lane)
+        # Plan 136 task 13: the grant is written by configuration, not by the CLI.
+        # The harness only installs and adopts; nothing is enabled, so the first
+        # launch records the durable grant (and the expected fail-closed load),
+        # and a second launch with CLAY_LIVE_KEEP_ROOT=1 loads the package after a
+        # fresh CLI `clay package enable` proved the grant is readable off-process.
+        fixture="$here/fixture-package"
+        isolated bash -c "cd '$store' && pnpm add '$fixture' --ignore-scripts" >/dev/null
+        isolated "$repo/target/debug/clay" package adopt "@fixture/lane" >/dev/null
+        cp "$here/../136-capability-grants/init-config-granted-lane.js" \
+            "$root/home/.clay/init.js"
+        cat > "$root/workspace/$document" <<'EOF'
+lane config-granted document
+hello
+EOF
+        ;;
+    example-config)
+        # Plan 136 task 12: the canonical example tree, copied verbatim into a
+        # scratch config root (the guide's `cp -r examples/config/. ~/.clay/`).
+        # Nothing is granted: the third-party module is a commented template, so
+        # this run proves the shipped example itself is runnable.
+        cp -r "$repo/examples/config/." "$root/home/.clay/"
+        python3 - "$root/workspace/notes.md" 4096 <<'PY'
+import sys
+
+path, target = sys.argv[1], int(sys.argv[2])
+with open(path, "w", encoding="utf-8") as handle:
+    written, index = 0, 0
+    while written < target:
+        chunk = "".join(
+            "# heading {index}\n\n- item {index}\n\n".format(index=index + offset)
+            for offset in range(100)
+        )
+        handle.write(chunk)
+        written += len(chunk)
+        index += 100
+    handle.write("\nplain tail line\n")
+PY
+        document=notes.md
         ;;
     completion)
         cp "$repo/tests/fixtures/configuration/ui-review-completion/init.js" \

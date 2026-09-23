@@ -13,10 +13,10 @@
   notifications) and `ActiveTypographyState` (typography snapshots).
 - `src/server/connection/mod.rs` — per-connection subscriptions and the
   initial-sync reads; `src/server/connection/delivery.rs` — per-lane policy.
-- Tests: `src/server/fanout.rs`, `src/server/js_runtime/tests.rs`
+- Tests: `src/server/fanout.rs`, `src/server/js_runtime/tests/`
   (`lane_channel_capacities_are_preserved`, the caret/layout/shell lane tests),
   `src/server/connection/delivery.rs` (`lagged_state_lane_writes_the_current_value`,
-  `lagged_advice_lane_writes_nothing`), `src/server/connection/tests.rs`.
+  `lagged_advice_lane_writes_nothing`), `src/server/connection/tests/`.
 
 ## Overview
 
@@ -159,23 +159,33 @@ editor_commands.publish(request); // live subscribers only
   `T: Debug` just to be debug-printed as part of `RuntimeGenerationStore`.
 - **Unwired means silent:** publishing with no publisher wired stores nothing
   and sends nothing; the `bool` return is the only signal.
+- **Snapshot clones are the recorded R2 ceiling (plan 134, no action):**
+  `StateFanout::publish`/`current` clone the state value
+  (`src/server/fanout.rs`), and `latest_for` clones the runtime snapshot before
+  per-client narrowing (`src/server/runtime_state.rs`); the publish lane itself
+  carries only the generation id. Desktop scale is capped at 64 connections,
+  64 documents per client, and 64 snapshot documents (`src/perf/budgets.rs`),
+  and no profile has named the clone paths, so `Arc`-sharing is deferred
+  (YAGNI). Revisit when those 64 caps rise, when the existing diff-review
+  triggers fire (snapshot payload p95 > 768 KiB or install p95 > 16 ms;
+  `src/perf/budgets.rs`), or when a profile names the clone paths.
 
 ## Tests
 
 - `src/server/fanout.rs` — `late_subscriber_replays_current`,
   `lagged_receiver_replays_current`, `publish_honors_configured_capacity`,
   `clones_share_channel_and_state`. Run: `cargo test --lib server::fanout`.
-- `src/server/js_runtime/tests.rs::lane_channel_capacities_are_preserved` —
+- `src/server/js_runtime/tests/::lane_channel_capacities_are_preserved` —
   publishes past each lane's capacity and asserts the exact `Lagged` counts, so
   a changed literal fails.
-- `src/server/js_runtime/tests.rs` caret/layout/shell lane tests
+- `src/server/js_runtime/tests/` caret/layout/shell lane tests
   (`set_cursor_style_publishes_runtime_caret_override`,
   `set_editor_layout_publishes_runtime_wrap_override`,
   `set_pane_focus_policy_publishes_shell_preferences`,
   `shell_preferences_default_to_click_when_unset`).
 - `src/server/connection/delivery.rs` — `lagged_state_lane_writes_the_current_value`
   and `lagged_advice_lane_writes_nothing` pin the two policies.
-- `src/server/connection/tests.rs` — end-to-end lane delivery through a real
+- `src/server/connection/tests/` — end-to-end lane delivery through a real
   connection, including initial sync and typography replacement.
 
 ```bash

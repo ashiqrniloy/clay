@@ -14,6 +14,7 @@ fn graph_fixture(name: &str, prefix: &str, extra_clay: serde_json::Map<String, V
             "permissions".to_string(),
             json!(["mode-registration", "mode-activation"]),
         ),
+        ("capabilities".to_string(), json!([])),
         ("modes".to_string(), json!([prefix])),
         ("docs".to_string(), json!("./docs/index.md")),
     ]);
@@ -28,9 +29,24 @@ fn graph_fixture(name: &str, prefix: &str, extra_clay: serde_json::Map<String, V
 
 fn install_and_authorize(
     service: &mut PackageService,
-    package_json: Value,
+    mut package_json: Value,
     extra_grants: &[PackagePermission],
 ) {
+    // Plan 136 task 3: an approval may only cover declared capabilities, so a
+    // fixture that is granted extra authority (package-control for
+    // replacement/disable flows) declares it in the manifest, exactly as a
+    // real package would.
+    if !extra_grants.is_empty() {
+        let declared = package_json["clay"]["capabilities"]
+            .as_array_mut()
+            .expect("graph fixture declares clay.capabilities");
+        for grant in extra_grants {
+            let name = grant.as_str();
+            if !declared.iter().any(|value| value.as_str() == Some(name)) {
+                declared.push(json!(name));
+            }
+        }
+    }
     let record = assemble_package_record(&package_json).expect("graph fixture manifest validates");
     let mut grants = record.manifest.clay.permissions.clone();
     grants.extend(extra_grants.iter().copied());
@@ -228,6 +244,10 @@ fn approval_for(
         capabilities: vec![
             "mode-registration".to_string(),
             "mode-activation".to_string(),
+            // Replacement/disable fixtures declare package-control (Plan 136
+            // task 3), so their approvals must cover it too; extra approved
+            // capabilities are inert for packages that do not declare them.
+            "package-control".to_string(),
         ],
         processes: Vec::new(),
         relations: vec![clay::packages::approvals::ApprovedRelation {
@@ -238,6 +258,9 @@ fn approval_for(
             scopes: scopes.into_iter().map(str::to_string).collect(),
         }],
         replacements: Vec::new(),
+        // Adoption alone grants nothing; capability grants are issued by
+        // `authorize_package` (Plan 136 task 4).
+        grant: None,
         approved_by: "user".to_string(),
         approved_at: "2026-07-21T00:00:00Z".to_string(),
         revoked: false,

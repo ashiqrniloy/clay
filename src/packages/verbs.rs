@@ -6,10 +6,12 @@
 use std::io::Write;
 use std::path::Path;
 
+use crate::packages::authorization::RuntimeProfile;
 use crate::packages::init_lines::{
     AppendOutcome, InitLineError, RemoveOutcome, append_load_line, init_js_path, remove_load_line,
 };
 use crate::packages::manager::{PackageInstallOptions, PackageSpec};
+use crate::packages::permissions::parse_permission;
 use crate::packages::service::{AdoptionState, PackageInspection, PackageService};
 
 pub fn install(
@@ -129,6 +131,114 @@ fn format_list_line(service: &PackageService, pkg: &PackageInspection) -> String
         "  {}  {}  {spec}  {pin}  {source}  [{enabled}] [{adoption}]",
         pkg.name, pkg.version
     )
+}
+
+/// Grant capabilities to an adopted package through the shared service path
+/// (Plan 136 task 5). The grant is durable: it lands on the package's current
+/// approval record, so `clay package inspect`/`enable` in a later process read
+/// the same authority. Adoption comes first — a CLI grant on an unadopted
+/// package would be an in-memory record in a process that is about to exit,
+/// so the verb refuses instead of pretending it persisted.
+pub fn authorize(
+    service: &mut PackageService,
+    package_name: &str,
+    capabilities: &[String],
+    runtime_profile: Option<&str>,
+    approved_by: &str,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    if capabilities.is_empty() {
+        return Err("clay package authorize requires at least one --capability".to_string());
+    }
+    let mut granted = Vec::with_capacity(capabilities.len());
+    for capability in capabilities {
+        let permission = parse_permission(capability).map_err(|error| match error {
+            crate::packages::permissions::PermissionValidationError::UnknownPermission {
+                permission,
+            } => format!("unknown capability `{permission}`"),
+            crate::packages::permissions::PermissionValidationError::ProhibitedAuthority {
+                permission,
+            } => format!("capability `{permission}` is reserved for Clay-owned authority"),
+        })?;
+        if !granted.contains(&permission) {
+            granted.push(permission);
+        }
+    }
+    let profile = match runtime_profile {
+        Some(name) => RuntimeProfile::parse(name).ok_or_else(|| {
+            format!(
+                "unknown runtime profile `{name}`; expected: native-trust | sandboxed | restricted"
+            )
+        })?,
+        None => RuntimeProfile::NativeTrust,
+    };
+    if service.inspect(package_name).is_none() {
+        return Err(format!("package `{package_name}` is not installed"));
+    }
+    if service.adoption_state(package_name) != Some(AdoptionState::Approved) {
+        return Err(format!(
+            "package `{package_name}` is not adopted; run `clay package adopt {package_name}` first so the grant is durable"
+        ));
+    }
+    service
+        .authorize_package(package_name, granted, profile, approved_by)
+        .map_err(|error| error.to_string())?;
+    let inspection = service.inspect(package_name).expect("inspection exists");
+    writeln!(
+        out,
+        "Authorized {}: {} ({})",
+        inspection.name,
+        inspection.approved_capabilities.join(", "),
+        inspection.runtime_profile.as_deref().unwrap_or("unknown")
+    )
+    .map_err(io_err)?;
+    writeln!(out, "  granted by:  {approved_by}").map_err(io_err)?;
+    for line in format_grant_lines(&inspection) {
+        writeln!(out, "  {line}").map_err(io_err)?;
+    }
+    Ok(())
+}
+
+/// Grant lines for `clay package inspect`: the granted capabilities and
+/// runtime profile, who granted/approved them and when, and the capabilities
+/// the manifest declares but the user has not granted yet.
+pub fn format_grant_lines(inspection: &PackageInspection) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !inspection.approved_capabilities.is_empty() {
+        lines.push(format!(
+            "Grants:      {} ({})",
+            inspection.approved_capabilities.join(", "),
+            inspection.runtime_profile.as_deref().unwrap_or("unknown")
+        ));
+    }
+    if let Some(provenance) = &inspection.grant_provenance {
+        lines.push(format!(
+            "Granted by:  {} at {}",
+            provenance.granted_by, provenance.granted_at
+        ));
+        lines.push(format!(
+            "Approved by: {} at {}",
+            provenance.approved_by, provenance.approved_at
+        ));
+    }
+    let ungranted: Vec<&str> = inspection
+        .requested_capabilities
+        .iter()
+        .filter(|capability| {
+            !inspection
+                .approved_capabilities
+                .iter()
+                .any(|granted| granted == *capability)
+        })
+        .map(String::as_str)
+        .collect();
+    if !ungranted.is_empty() {
+        lines.push(format!(
+            "Ungranted:   {} (declared, not granted)",
+            ungranted.join(", ")
+        ));
+    }
+    lines
 }
 
 fn report_append(config_root: &Path, name: &str, out: &mut dyn Write) -> Result<(), String> {

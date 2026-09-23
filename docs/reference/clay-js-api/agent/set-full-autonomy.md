@@ -20,6 +20,14 @@ custom_properties:
     type: boolean
     default: true
     description: The autonomy default itself — sessions are fully autonomous unless a caller explicitly blocks it (decision 2026-09-20-2049, superseding the "off by default" part of decision 2157). Documented as a property, not a settable option; there is no "default autonomy" key in init.js.
+  - name: enabled
+    type: boolean
+    default: required
+    description: true skips approval prompts for gated calls; false restores them. New sessions start with true unless their creator passed `fullAutonomy: false`.
+  - name: sessionId
+    type: string
+    default: required
+    description: the live agent session.
 security: Autonomy is on by default and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls — out-of-workspace writes, delete/move, and shell-metacharacter commands — run without an approval prompt in that session, and a fresh session inherits the same default. Callers who want prompts must block autonomy explicitly (`fullAutonomy: false` at creation, or this API with `enabled: false`). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.setFullAutonomy` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Autonomy defaults to on: do not change it on a user's behalf in either direction, and never re-enable it after a user block without an explicit user action.
 lookup_tags: [agent, autonomy, approval, permissions, js-api]
@@ -72,6 +80,8 @@ No default key binding is assigned. Users may bind a key to `agent.setFullAutono
 ## Custom properties
 
 - `default` (`boolean`, default `true`): The autonomy default itself — a session is fully autonomous unless its creator blocks it (decision 2026-09-20-2049). This documents the default; it is not a settable init.js key. There is no "default autonomy" configuration option: autonomy state lives with the session, `session.new`'s `fullAutonomy` parameter seeds it, and only this API (host-side) changes it afterwards.
+- `enabled`: true skips approval prompts for gated calls; false restores them.
+- `sessionId`: the live agent session.
 
 ## Return and async behavior
 

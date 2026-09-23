@@ -219,6 +219,13 @@ async fn language_server_facade_round_trips_exact_uint8array_bytes() {
     let contribution = "lspbytes.server";
     let mut package_json = loadable_package_fixture(package_name, "lspbytes");
     package_json["clay"]["capabilities"] = serde_json::json!(["language-server"]);
+    // Plan 136 task 3: the base grant below may only cover declared
+    // capabilities, so the fixture declares them alongside the language server.
+    package_json["clay"]["permissions"] = serde_json::json!([
+        "parse-document",
+        "render-decorations",
+        "completion-provider"
+    ]);
     package_json["clay"]["contributions"]["languageServers"] = serde_json::json!([{
         "id": contribution,
         "executable": executable,

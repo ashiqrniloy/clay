@@ -1,0 +1,130 @@
+Plan 134 task 1 — blocking std::fs inventory, re-measured 2026-09-22 on HEAD 40022f6
+(dirty tree: plan 133 landed-but-uncommitted; see baseline.md).
+Method: python line scan for `std::fs::` or bare `fs::` (excludes `tokio::fs::`/`tokio_fs`),
+enclosing-fn attribution, plus manual call-site tracing for async reachability.
+Full machine output: baseline-fs-counts.txt (counts), script embedded in baseline.md notes.
+
+## Whole-tree magnitude (supersedes the review's unreconcilable "324")
+
+| Measure | Count |
+| --- | --- |
+| `std::fs::` **call lines**, all of `src/` (incl. test modules) | 188 |
+| bare `fs::` + `std::fs::` call lines, all of `src/` | 1278 across 84 files |
+| same, excluding test-path files (`*/tests/*`, `*tests.rs`) | 506 across 35 files |
+
+The review's 324 and the plan's "all 324 sites" cannot be reproduced against this tree
+(its source file is absent — see baseline.md finding 1) and its methodology is unknown;
+the measured numbers above are the baseline. Top production files: `src/server/agent.rs`
+78, `agent_settings.rs` 48, `workspace/mod.rs` 35, `shell/file_browser.rs` 31,
+`configuration.rs` 29, `agent_mcp_config.rs` 26, `git.rs` 24, `config_watch.rs` 21,
+`launcher.rs` 21.
+
+## Priority files named by plan 134 P3
+
+Format: `line` — enclosing fn — reachability.
+"ASYNC-REACHABLE" = the sync fn is called directly (no spawn_blocking) from an async
+server op / connection handler, so the call blocks the runtime's worker thread.
+
+### `src/server/workspace/mod.rs` (hot open-document path)
+- 523, 528 — `add_root` — sync fn; production caller is process startup only
+  (`IpcServer::try_new`, `launch.rs:285`), not an async handler. NOT hot.
+- 621, 626 — `discover_root_for_path` — sync; async caller
+  `op_clay_workspace_discover_root_for_path` (`ops/workspace.rs:86`). ASYNC-REACHABLE.
+- 664, 669 — `add_explicit_user_grant` — sync; async caller
+  `op_clay_workspace_add_root` (`ops/workspace.rs:64`, async op2, holds the
+  `tokio::sync::Mutex` guard across the call). ASYNC-REACHABLE.
+- 763, 771 — `traverse_directory` — listed under the spawn_blocking path below, but
+  also callable synchronously: `WorkspaceState::list_directory` (`:743`, sync) is
+  called directly by async `execute_workspace` (`command_execution.rs:287`) — that
+  leg is ASYNC-REACHABLE (recursive `fs::read_dir` walk). The `run_directory_listing`
+  leg (`ops/workspace.rs:143`) offloads via `spawn_blocking` — safe.
+- 846–894 — `traverse_user_browse_directory` — only invoked through
+  `execute_user_browse_listing` (`:926`) which uses `spawn_blocking`. Safe.
+- 968 — `list_directory_recursive` — same two legs as 763/771.
+- 1349 — `contained_new_file_path` — sync containment probe; async callers
+  `agent_documents.rs` `document_write`/`document_mkdir`/`document_stat`
+  (`:421,448,484`). ASYNC-REACHABLE.
+- **1957, 1966, 1994, 2003 — `canonical_file_state` — sync; called directly by
+  `prepare_open_existing` (async, `:1187`) and `register_loaded_file` (async,
+  `:1257`). OPEN-DOCUMENT HOT PATH. ASYNC-REACHABLE.**
+- **2035, 2058 — `reauthorize_open_file` — sync; called directly by
+  `authorize_document_access` (async, `:1717`) and `authorize_save` (async, `:1774`).
+  OPEN-DOCUMENT HOT PATH. ASYNC-REACHABLE.**
+- **2115, 2120 — `canonical_selected_file` — sync; called directly by
+  `prepare_open_selected` (async, `:1206`), `contained_existing_path` (`:1313`).
+  SELECTED-FILE HOT PATH. ASYNC-REACHABLE.**
+- 2329 — `FileMetadata::capture` — sync, zero production callers (only its
+  definition + `matches_current` sibling); note for the dead-code sweep, not a
+  hot-path site.
+- 2344 — `matches_current` — sync, called by async `atomic_write_chunks`
+  (`:2600`). ASYNC-REACHABLE.
+- 2530, 2542, 2575 — `atomic_write_chunks` (async fn) — permission/metadata reads
+  inline in an async fn. The chunk write itself is `tokio::fs` (`:2608`), so these
+  are the remaining sync stragglers on that path.
+- 3279, 3306 — `read_auxiliary_file_bounded` / `count_visible_children` — only
+  reached from `traverse_directory`/listing (spawn_blocking leg).
+- 1957–2120 region already contains a documented prepare/commit split
+  (`:362–371`): the plan's P3 premise holds — the *prepare* phase still does
+  canonicalize+metadata on the runtime thread.
+
+### `src/server/configuration.rs`
+- 107 — `from_config_root` — sync; async caller `persist_settings_change`
+  (`connection/runtime.rs:255`, async). ASYNC-REACHABLE.
+- 254 — `load_module_source` — sync; async path `js_runtime/source.rs:237`
+  (`SourceLoader::load` ← runtime evaluation, async). ASYNC-REACHABLE.
+- 367 — `load_preferences` — sync; async path `apply_persisted_preferences`
+  (`js_runtime/evaluation.rs:76,123`) and `runtime_reload` (`:1156`). ASYNC-REACHABLE.
+- 517, 518 — `write_preferences` — sync; caller `persist_preference` (`:455`) ←
+  `apply_appearance` (`ops/theme.rs:160`, sync) ← async paths:
+  `op_clay_theme_set_appearance`/`set_theme` and `js_runtime/evaluation.rs:135`
+  inside async `evaluate_loaded_module`. ASYNC-REACHABLE.
+- 784, 828 — `canonical_local_file` / `validate_local_module_path_allow_missing` —
+  sync config-module validation; reached from module load/approval paths. ASYNC-REACHABLE.
+- 77, 79, 92 — `migrate_legacy_config_root` — one-shot startup migration.
+- test-only: 964–1521.
+
+### `src/server/agent_documents.rs`
+- **No production `std::fs` site** — production code already uses `tokio::fs`
+  (`:87, 339, 425, 451, 488`; plan 119 P2-2 atomic-write precedent). The only
+  `std::fs` mention is a comment inside a tokio test (`:661`). Plan 134's P3 list
+  entry is stale for this file; nothing to move here.
+
+### `src/server/launcher.rs`
+- 59 — `read_store` — sync; async callers `record_recent_workspace`
+  (`connection/tabs.rs:131` ASYNC `open_workspace_for_bound_tab`,
+  `connection/workspace.rs:386` ASYNC `handle_add_selected_workspace_root`,
+  `server/mod.rs:341` ASYNC `create_tab_state`), `launcher_entries`
+  (`connection/workspace.rs:418` ASYNC `write_launcher_entries`). ASYNC-REACHABLE.
+- 86, 90, 91, 93 — `write_store` — same async callers as above, plus
+  `remove_recent_workspace` (`connection/workspace.rs:463` ASYNC
+  `handle_remove_launcher_recent`). ASYNC-REACHABLE.
+- 164 — `list_agents` (`fs::read_dir`) — via `launcher_entries` (ASYNC). ASYNC-REACHABLE.
+- 221 — `count_skills` (`fs::read_dir`) — via `list_agents`. ASYNC-REACHABLE.
+- test-only: 285–437.
+
+### `src/server/ops/theme.rs`
+- **No production `std::fs` site** — production uses `tokio::fs`
+  (`:165` async `set_appearance` path and aqua/doc load). All 12 `std::fs` lines
+  (792–1029) are fixture setup inside `#[cfg(test)]`. Plan 134's P3 list entry is
+  stale for this file (the `configuration.rs:517` write it triggers is the real
+  site — listed above).
+
+### `src/server/ops/packages.rs`
+- 155 — `resolve_relative` — sync; async path `js_runtime/source.rs:128`
+  (`SourceLoader::resolve` ← runtime evaluation, async). ASYNC-REACHABLE.
+- 255, 262 — `op_clay_packages_list_first_party_specifiers` (async fn body itself,
+  no offload). ASYNC.
+- 430 — `ensure_package_installed_locked` — sync; async callers
+  `language_server.rs:46,228` and `packages.rs:375` runtime ops. ASYNC-REACHABLE.
+- 676, 682 — `canonical_load_entry_paths` — sync; async caller `packages.rs:593`
+  (package load evaluation). ASYNC-REACHABLE.
+- test-only: 846–905.
+
+## Adjacent findings (out of plan 134's named list; for the P3 task to consider)
+- `src/server/command_execution.rs:287` (ASYNC `execute_workspace`) calls
+  `WorkspaceState::list_directory` (sync) which runs `traverse_directory` inline —
+  a recursive blocking walk on the async runtime, unlike the `spawn_blocking` leg
+  in `ops/workspace.rs:143`.
+- `src/server/agent.rs`, `agent_settings.rs`, `git.rs`, `config_watch.rs`,
+  `packages/*` carry the bulk of the 506 production-path sites; the plan's "cold-path
+  ceiling comment" applies to these.

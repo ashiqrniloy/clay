@@ -1,3 +1,5 @@
+use crate::lock_util::LockOrRecover;
+
 use std::{
     collections::BTreeMap,
     env,
@@ -51,12 +53,70 @@ pub const SYNTAX_QUERY_BYTES: &str = "syntax.query.bytes";
 pub const SYNTAX_DECORATION_CHUNKS: &str = "syntax.decoration.chunks";
 pub const SYNTAX_CANCELLED_SUPERSEDED: &str = "syntax.parse.cancelled_superseded";
 pub const SYNTAX_EDIT_TO_PUBLISH: &str = "syntax.edit_to_publish";
-/// Plan 127 P2: undelivered completion/language-intelligence commands a newer
-/// request for the same work key replaced before they ran.
-pub const JS_RUNTIME_COMMAND_SUPERSEDED: &str = "js_runtime.command.superseded";
-/// Plan 127 P2: undelivered completion/language-intelligence commands dropped
-/// because the lane's supersedable backlog was at capacity (oldest first).
-pub const JS_RUNTIME_COMMAND_EVICTED: &str = "js_runtime.command.evicted";
+/// Plan 136 task 7: per-(domain, lane) JS runtime lane metric names.
+///
+/// Indexed `[domain][lane]`: domain 0 is the trusted runtime, domain 1 the
+/// third-party runtime; lane 0 is `general`, lane 1 `latency` (matching
+/// `RuntimeLane as usize` and `JS_RUNTIME_LANES_PER_DOMAIN`). The names are
+/// static strings because `PerfSummary` aggregates by name only, so a
+/// formatted name could not be recorded at all.
+///
+/// All five are recorded once at report time (`ClayJsRuntimeService::
+/// record_lane_metrics`), not per command, so lane occupancy costs the
+/// recorder's 4096-snapshot budget nothing while a lane is under load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct JsRuntimeLaneMetrics {
+    /// Commands this lane's worker took off its mailbox and ran.
+    pub dispatched: &'static str,
+    /// Commands still waiting in the lane's supersedable backlog.
+    pub pending: &'static str,
+    /// High-water mark of that backlog since the lane's mailbox was created.
+    pub peak_pending: &'static str,
+    /// Undelivered commands a newer request for the same work key replaced.
+    pub superseded: &'static str,
+    /// Undelivered commands dropped because the backlog was at capacity.
+    pub evicted: &'static str,
+}
+
+/// See [`JsRuntimeLaneMetrics`]. `js_runtime.command.superseded`/`.evicted`
+/// (plan 127) are the same counts without the lane key; these names replace
+/// them, so a measurement can say which lane absorbed the work.
+pub(crate) const JS_RUNTIME_LANE_METRICS: [[JsRuntimeLaneMetrics;
+    crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN];
+    2] = [
+    [
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.trusted.general.dispatched",
+            pending: "js_runtime.lane.trusted.general.pending",
+            peak_pending: "js_runtime.lane.trusted.general.peak_pending",
+            superseded: "js_runtime.lane.trusted.general.superseded",
+            evicted: "js_runtime.lane.trusted.general.evicted",
+        },
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.trusted.latency.dispatched",
+            pending: "js_runtime.lane.trusted.latency.pending",
+            peak_pending: "js_runtime.lane.trusted.latency.peak_pending",
+            superseded: "js_runtime.lane.trusted.latency.superseded",
+            evicted: "js_runtime.lane.trusted.latency.evicted",
+        },
+    ],
+    [
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.third_party.general.dispatched",
+            pending: "js_runtime.lane.third_party.general.pending",
+            peak_pending: "js_runtime.lane.third_party.general.peak_pending",
+            superseded: "js_runtime.lane.third_party.general.superseded",
+            evicted: "js_runtime.lane.third_party.general.evicted",
+        },
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.third_party.latency.dispatched",
+            pending: "js_runtime.lane.third_party.latency.pending",
+            peak_pending: "js_runtime.lane.third_party.latency.peak_pending",
+            superseded: "js_runtime.lane.third_party.latency.superseded",
+            evicted: "js_runtime.lane.third_party.latency.evicted",
+        },
+    ],
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerfConfig {
@@ -163,6 +223,11 @@ pub struct MetricSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct MetricSummary {
     pub count: u64,
+    /// Summed `Counter`/`Bytes` amounts, or the last `Gauge` value (0 for
+    /// duration-only names). Report-time metrics (plan 136 task 7 lane
+    /// occupancy) are recorded once per name, so their amount — not the
+    /// snapshot count — is the measurement.
+    pub total: u64,
     pub duration_samples: u64,
     pub p50_nanos: u128,
     pub p95_nanos: u128,
@@ -293,20 +358,14 @@ impl PerfRecorder {
     pub fn snapshots(&self) -> Vec<MetricSnapshot> {
         self.inner
             .as_ref()
-            .map(|inner| {
-                inner
-                    .lock()
-                    .expect("perf recorder poisoned")
-                    .snapshots
-                    .clone()
-            })
+            .map(|inner| inner.lock_or_recover().snapshots.clone())
             .unwrap_or_default()
     }
 
     pub fn dropped_snapshots(&self) -> u64 {
         self.inner
             .as_ref()
-            .map(|inner| inner.lock().expect("perf recorder poisoned").dropped)
+            .map(|inner| inner.lock_or_recover().dropped)
             .unwrap_or_default()
     }
 
@@ -316,8 +375,15 @@ impl PerfRecorder {
         for snapshot in &snapshots {
             let summary = metrics.entry(snapshot.name.to_string()).or_default();
             summary.count += 1;
-            if let MetricValue::Duration { nanos } = &snapshot.value {
-                summary.durations.push(*nanos);
+            match &snapshot.value {
+                MetricValue::Duration { nanos } => summary.durations.push(*nanos),
+                MetricValue::Counter { amount } => {
+                    summary.total = summary.total.saturating_add(*amount);
+                }
+                MetricValue::Gauge { value } => summary.total = *value,
+                MetricValue::Bytes { bytes } => {
+                    summary.total = summary.total.saturating_add(*bytes);
+                }
             }
         }
         for summary in metrics.values_mut() {
@@ -335,7 +401,7 @@ impl PerfRecorder {
     fn record(&self, name: &'static str, value: MetricValue, metadata: MetricMetadata) {
         if let Some(inner) = &self.inner {
             push_snapshot(
-                &mut inner.lock().expect("perf recorder poisoned"),
+                &mut inner.lock_or_recover(),
                 MetricSnapshot {
                     name,
                     value,
@@ -382,7 +448,7 @@ impl PerfScope {
         let elapsed = self.start.take().map(|start| start.elapsed());
         if let (Some(duration), Some(inner)) = (elapsed, &self.inner) {
             push_snapshot(
-                &mut inner.lock().expect("perf recorder poisoned"),
+                &mut inner.lock_or_recover(),
                 MetricSnapshot {
                     name: self.name,
                     value: MetricValue::Duration {
@@ -405,7 +471,7 @@ impl Drop for PerfScope {
             return;
         };
         push_snapshot(
-            &mut inner.lock().expect("perf recorder poisoned"),
+            &mut inner.lock_or_recover(),
             MetricSnapshot {
                 name: self.name,
                 value: MetricValue::Duration {

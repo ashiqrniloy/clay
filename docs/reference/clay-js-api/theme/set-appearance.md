@@ -70,6 +70,7 @@ const summary = setAppearance("dark");
 ## Options
 
 Pass either an appearance string or `{ appearance }`.
+- `appearance` (`enum`, default `required`): Either an appearance string or `{ appearance }`, closed to `light` | `dark` | `system`.
 
 ## Return and async behavior
 

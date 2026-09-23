@@ -13,6 +13,40 @@
 - `tests/agent_protocol.rs`
 - `tests/typography_protocol.rs`
 
+## Module map (Plan 133 task 2)
+
+`src/protocol/mod.rs` is the hub: it declares the family modules, re-exports
+them with `pub use <family>::*`, and keeps only the cross-family items
+(`PROTOCOL_VERSION` with its version history, the shared id aliases, and
+`menu_session_id_serde`). The wire types live in the family files:
+
+| Family | Contents |
+| --- | --- |
+| `messages.rs` | `ClientMessage`/`ServerMessage` and their payload enums |
+| `behavior.rs` | behavior manifests, default keymaps, editor rules |
+| `editor_rules.rs` | declarative editor rule shapes |
+| `typography.rs` | `ActiveTypography`, font profiles, `TextThemeOverride` |
+| `theme.rs` | `ActiveTheme`, `Appearance`, `UiDesignTokenOverride`, `WireDesignTokenValue` |
+| `caret.rs` | caret/selection wire shapes |
+| `document.rs` | document/workspace transfer shapes |
+| `shell.rs` | shell preferences and shell/tab wire shapes |
+| `launcher.rs` | launcher entry shapes |
+
+Each family opens with `use super::*;` (the `src/packages/record/*` pattern), so
+a family file reads like the original single module. The split is move-only: the
+`rkyv`/`serde` derives, discriminants, and codec bytes are unchanged (the codec
+round-trip suites pass untouched), and callers keep using `crate::protocol::X`
+through the hub re-exports, so no wire-format or generated-binding change was
+needed.
+
+Plan 133 task 6 also replaced 15 hand-written `enum + parse + as_str` triples
+(89 variant/string pairs across 7 files, including the protocol-visible
+`ThemeTokenType`, `ComponentKind`, routing, and effect enums) with one
+`string_enum_impl!` declaration each in `src/str_enum.rs`. The golden test
+`string_roundtrip_per_enum` pins every exact shipped string, string uniqueness,
+and unknown-string rejection, so the package- and JS-visible vocabulary stays
+byte-identical.
+
 ## Overview
 
 The protocol module defines the shared client/server IPC message contract. It uses owned Rust message types for business logic and keeps `rkyv` serialization, validation, and socket framing behind `Codec`. Wire protocol version 2 introduced `DecorationViewportRequest`; version 3 accompanies grouped native decoration chunks and analyzer-only diagnostic semantics; version 4 introduces the Phase 19 complete `RuntimeStateSnapshot` / `RuntimeGenerationInstalled` reload contract; version 5 (Plan 059) adds `ServerMessage::DecorationBatch` for single-frame multi-chunk parse updates and pairs with the `ReadPumpGuard` cancellation-safe framing pattern; protocol v15 moves `InitialDocument` and initial workspace SDUI after tab binding. Phase 28 adds protocol versions 20-23 for `FoldingRangeSet`, Link targets, InlayHint payloads, and completion recency metadata; Phase 25 bumps the pin to 24 for boxed agent messages; package UI reaches version 26. Plan 098 bumps the current wire pin to 27 for bounded document heads and pull-based chunks. Plan 099 bumps it to 28 for optional content-free performance trace IDs on viewport, parse, and decoration messages, and to 29 for the atomic viewport render protocol: `ViewportRenderRequest` (monotonic request id + visible byte bounds) is answered by exactly one `ServerMessage::ViewportRenderPatch` carrying ordered decoration/diagnostic/fold members, authoritative covered ranges, and a complete/empty/rejected terminal status. Version 30 adds the selected provider/model pair to `AgentInventory` so a fresh agent surface can configure its composer from inventory; version 31 adds the `/` palette's row fields (`TransientMenuItemData.scope` and `.bindings`) and the scope chip on `MenuQueryUpdate`, so the palette's chips are server data and its scope filters the session's own item set; version 32 adds `TransientMenuSnapshotData.mode`, the bounded presentation vocabulary (`catalogue` | `path` | `picker` | `secret` | `url` | `oauth`) that lets the one composer palette render every stage — pickers included — and marks the shielded secret stage, with absence decoding as the catalogue. Older servers are rejected before incompatible message discriminants or payload semantics are used.
@@ -37,7 +71,7 @@ The protocol module defines the shared client/server IPC message contract. It us
 
 ## How It Works
 
-`src/protocol/mod.rs` contains owned message enums and IDs. Ordinary text edits are represented as deltas (`Insert`, `Delete`, `Replace`) with byte ranges and inserted text rather than full-document payloads. Phase 5 edit messages include `document_id`, `client_id`, optional `lease_id`, `base_version`, `behavior_version`, and `transaction_id` so the server can validate authority and ordering before mutation. `ServerMessage::EditAck` returns a server-confirmed version, while `EditRejected` carries recoverable sync reasons such as stale/future versions, lease failure, read-only access, invalid ranges, or region-lock conflicts. Initial, open, reload, and resync snapshots carry `DocumentTextHead { total_bytes, first_chunk }`; ordinary edit acknowledgements remain metadata-only. `DocumentChunkRequest` identifies the authorized document, exact version, UTF-8 byte offset, and untrusted requested size. The server clamps that size to `MAX_CHUNK_BYTES` (256 KiB), slices the canonical rope at character boundaries, and returns `DocumentChunk` or typed `DocumentChunkRejected`. Completion is `offset + text.len() == total_bytes`; no redundant final flag exists.
+The protocol family files contain the owned message enums and IDs (`src/protocol/mod.rs` is the re-export hub — see the module map above). Ordinary text edits are represented as deltas (`Insert`, `Delete`, `Replace`) with byte ranges and inserted text rather than full-document payloads. Phase 5 edit messages include `document_id`, `client_id`, optional `lease_id`, `base_version`, `behavior_version`, and `transaction_id` so the server can validate authority and ordering before mutation. `ServerMessage::EditAck` returns a server-confirmed version, while `EditRejected` carries recoverable sync reasons such as stale/future versions, lease failure, read-only access, invalid ranges, or region-lock conflicts. Initial, open, reload, and resync snapshots carry `DocumentTextHead { total_bytes, first_chunk }`; ordinary edit acknowledgements remain metadata-only. `DocumentChunkRequest` identifies the authorized document, exact version, UTF-8 byte offset, and untrusted requested size. The server clamps that size to `MAX_CHUNK_BYTES` (256 KiB), slices the canonical rope at character boundaries, and returns `DocumentChunk` or typed `DocumentChunkRejected`. Completion is `offset + text.len() == total_bytes`; no redundant final flag exists.
 
 `DocumentAccess::Editable { lease_id }` records the editable lease in the access state, while read-only observers use `DocumentAccess::ReadOnly`. Region-lock conflicts are described by `RegionLockConflict` and `LockOwner` metadata so later UI/AI phases can explain why an overlapping edit was rejected without granting AI, extension, file, shell, or network authority.
 

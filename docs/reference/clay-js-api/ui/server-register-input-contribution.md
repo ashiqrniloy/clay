@@ -131,6 +131,9 @@ console.log(previewInput.id, previewInput.focusPolicy);
 - `selectionPolicy` (`preserve-editor | component-local | disabled`, default `preserve-editor`): Selection behavior.
 - `context.modes` (`string[]`, default `[]`): Optional mode conditions; every mode must be declared by the package manifest.
 - `actionTargets` (`string[]`, default `[]`): Registered command IDs allowed by this input contribution.
+- `context` (`object`, default `optional`): Interaction context: `context.modes` restricts the contribution to manifest-declared language modes.
+- `focus` (`object`, default `optional`): Focus policy: `focus.policy` is `none`, `restore-editor`, `focus-component`, or `trap`.
+- `pointer` (`object`, default `optional`): Pointer policy: `pointer.click` (`none` | `focus` | `action` | `select`), `pointer.action` (registered command), and `pointer.drag` (`none` | `select` | `pan`).
 
 ## Key bindings
 

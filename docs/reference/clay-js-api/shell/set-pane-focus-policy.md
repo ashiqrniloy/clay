@@ -75,6 +75,7 @@ setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 ## Options
 
 Pass `{ paneFocusPolicy }` where `paneFocusPolicy` is a string.
+- `paneFocusPolicy` (`enum`, default `click`): One of `click` (default) or `cursor`. `click` activates a pane on pointer-down inside it. `cursor` activates a pane when the pointer moves over it (focus follows cursor); focus changes are skipped while dragging a divider or panel resize handle.
 
 ## Return and async behavior
 

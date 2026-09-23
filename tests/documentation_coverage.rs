@@ -1115,6 +1115,121 @@ fn plan127_wiki_pages_describe_lane_scheduling_and_the_trust_domain_constraint()
     }
 }
 
+/// Plan 136 wiki contract: the package-authority page must document the
+/// capability-grant surface (trusted-only `authorize`, CLI verb, provenance
+/// binding, revocation, fail-closed default), the hardening page must document
+/// the per-(domain, lane) occupancy counters with their read path and tuning
+/// decision, and the index must describe both. It also fails if the
+/// pre-plan-136 claim that no grant surface exists reappears on an evergreen
+/// wiki page.
+#[test]
+fn plan136_wiki_pages_describe_capability_grants_and_lane_counters() {
+    let markers: [(&str, &str); 17] = [
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "## Capability Grants",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "capability_granted",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "packages.grant_during_activation",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "Facade::trusted",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "clay package authorize",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "authorize.md",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "grant: null",
+        ),
+        (
+            "docs/wiki/modules/third-party-runtime-authority.md",
+            "plan 136",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "js_runtime.lane.",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "JS_RUNTIME_LANE_METRICS",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "CLAY_PERF_REPORT_DIR",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "tuning decision",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "lane_command_counters_track_general_and_latency_separately",
+        ),
+        (
+            "docs/wiki/modules/persistent-runtime-hardening.md",
+            "plan 136",
+        ),
+        ("docs/wiki/index.md", "third-party-runtime-authority.md"),
+        ("docs/wiki/index.md", "capability-grant surface"),
+        ("docs/wiki/index.md", "occupancy counters"),
+    ];
+    for (page, marker) in markers {
+        assert!(
+            read(page).to_lowercase().contains(&marker.to_lowercase()),
+            "{page} is missing the Plan 136 marker {marker:?}"
+        );
+    }
+
+    // The pre-plan-136 state: package capability grants had no user-facing
+    // entry point, so a third-party package could not enable at all. Plan 136
+    // shipped the CLI verb, the `authorize` API, and the durable grant, so
+    // those claims must not come back on an evergreen wiki page.
+    let stale = [
+        "capability grants have no user-facing surface",
+        "no user-facing entry point for grants",
+        "authorize_package has no user-facing",
+        "no capability grant surface",
+        "package grants have no user-facing surface",
+    ];
+    let mut dirs = vec![
+        PathBuf::from("docs/wiki/modules"),
+        PathBuf::from("docs/wiki/flows"),
+    ];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(root().join(&dir)).expect("wiki dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                dirs.push(path.strip_prefix(root()).expect("relative").to_path_buf());
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root())
+                .expect("relative")
+                .to_string_lossy()
+                .into_owned();
+            let doc = read(&relative);
+            for claim in stale {
+                assert!(
+                    !doc.contains(claim),
+                    "{relative} still claims {claim:?}; plan 136 shipped the capability-grant surface"
+                );
+            }
+        }
+    }
+}
+
 /// Plan 129 wiki contract: the connection page must map every arm family to
 /// its handler entry point, describe the dispatch context and the
 /// handler-entry authorization boundary, and record the future-size work that

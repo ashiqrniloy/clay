@@ -32,6 +32,10 @@ custom_properties:
     type: string
     default: package context
     description: Package API prefix retained as provenance.
+  - name: currentDocumentVersion
+    type: number
+    default: optional
+    description: Validation override; defaults to `documentVersion`. A mismatch drops the publication.
 security: Requires render-folding permission plus server validation of package provenance, current document version, byte ranges, nesting, and FOLDING_RANGE_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority.
 agent_guidance: Use `folding.serverPublishFoldingRanges` from server-side package code only. Publish inert ranges; never invent renderer callbacks or client-side JavaScript hooks. Collapse state is client-local.
 lookup_tags: [js-api, folding, foldingrange]
@@ -98,6 +102,7 @@ No default key binding is assigned. `editor.clientToggleFold` toggles the range 
 - `documentVersion`: stale-version guard.
 - `ranges`: bounded inert folds.
 - `packagePrefix`: provenance and merge identity.
+- `currentDocumentVersion`: Validation override; defaults to `documentVersion`.
 
 ## Return and async behavior
 

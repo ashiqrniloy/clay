@@ -1,3 +1,5 @@
+use crate::lock_util::LockOrRecover;
+
 pub(crate) mod behavior;
 
 pub use behavior::ClientUiCommandRoute;
@@ -369,7 +371,7 @@ impl ClientEditQueue {
         );
         let operation = event.operation;
         let (base_version, lease_id) = {
-            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            let mut state = self.sync_state.lock_or_recover();
             let base_version =
                 state.reserve_pending(event.document_id, transaction_id, operation.clone());
             recorder.record_gauge(
@@ -392,13 +394,13 @@ impl ClientEditQueue {
         };
 
         if lease_id.is_none() {
-            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            let mut state = self.sync_state.lock_or_recover();
             state.rollback_pending_reservation(event.document_id, transaction_id);
             return Err(mpsc::error::TrySendError::Closed(message));
         }
 
         if let Err(error) = self.sender.try_send(message) {
-            let mut state = self.sync_state.lock().expect("client sync state poisoned");
+            let mut state = self.sync_state.lock_or_recover();
             state.rollback_pending_reservation(event.document_id, transaction_id);
             recorder.record_counter("client.edit_queue.enqueue_failed", 1);
             recorder.record_gauge(
@@ -535,26 +537,19 @@ impl ClientEditQueue {
         // is available yet, send an empty capability; the server rejects it
         // with a typed diagnostic and re-issues a token for retry.
         self.file_open_capability
-            .lock()
-            .expect("client selected-path capability state poisoned")
+            .lock_or_recover()
             .take()
             .unwrap_or_default()
     }
 
     #[doc(hidden)]
     pub fn with_file_open_capability(self, capability: impl Into<String>) -> Self {
-        *self
-            .file_open_capability
-            .lock()
-            .expect("client file-open capability state poisoned") = Some(capability.into());
+        *self.file_open_capability.lock_or_recover() = Some(capability.into());
         self
     }
 
     pub fn sync_snapshot(&self) -> ClientSyncSnapshot {
-        self.sync_state
-            .lock()
-            .expect("client sync state poisoned")
-            .snapshot()
+        self.sync_state.lock_or_recover().snapshot()
     }
 
     #[doc(hidden)]
@@ -578,7 +573,7 @@ impl ClientEditQueue {
         confirmed_version: DocumentVersion,
     ) {
         self.lease_id = access.lease_id();
-        let mut state = self.sync_state.lock().expect("client sync state poisoned");
+        let mut state = self.sync_state.lock_or_recover();
         // Phase 22.2: replace only this document's state; other panes' live
         // documents keep their own confirmed/optimistic tracking.
         state.install_document_state(
@@ -597,7 +592,7 @@ impl ClientEditQueue {
         pending: Vec<PendingEdit>,
     ) {
         self.lease_id = access.lease_id();
-        let mut state = self.sync_state.lock().expect("client sync state poisoned");
+        let mut state = self.sync_state.lock_or_recover();
         state.install_document_state(document_id, confirmed_version, pending, access.lease_id());
     }
 }
@@ -1312,8 +1307,7 @@ fn pending_handshake_event(
         ServerMessage::BehaviorManifest(manifest) => {
             let behavior_version = manifest.behavior_version;
             match behavior_state
-                .lock()
-                .expect("client behavior state poisoned")
+                .lock_or_recover()
                 .install_replacement(manifest.as_ref().clone())
             {
                 Ok(()) => Some(ClientConnectionEvent::BehaviorManifestInstalled {
@@ -1487,8 +1481,7 @@ async fn run_connection<S>(
                         );
                         let pending_depth = {
                             let mut state = sync_state
-                                .lock()
-                                .expect("client sync state poisoned");
+                                .lock_or_recover();
                             state.acknowledge(document_id, confirmed_version, transaction_id);
                             state.pending_len()
                         };
@@ -1498,8 +1491,7 @@ async fn run_connection<S>(
                     Ok(ServerMessage::EditRejected { document_id, transaction_id, reason }) => {
                         let known_version = {
                             let mut state = sync_state
-                                .lock()
-                                .expect("client sync state poisoned");
+                                .lock_or_recover();
                             state.reject(document_id, transaction_id);
                             state.confirmed_version_for(document_id)
                         };
@@ -1520,8 +1512,7 @@ async fn run_connection<S>(
                     Ok(ServerMessage::ResyncSnapshot { document_id, version, head, access, lease_id }) => {
                         let snapshot = ClientResyncSnapshot { document_id, version, head, access, lease_id };
                         sync_state
-                            .lock()
-                            .expect("client sync state poisoned")
+                            .lock_or_recover()
                             .apply_resync_snapshot(snapshot.clone());
                         let _ = events.send(ClientConnectionEvent::ResyncSnapshot(snapshot)).await;
                     }
@@ -1566,8 +1557,7 @@ async fn run_connection<S>(
                         // regardless of which pane is active.
                         {
                             let mut state = sync_state
-                                .lock()
-                                .expect("client sync state poisoned");
+                                .lock_or_recover();
                             state.apply_resync_snapshot(ClientResyncSnapshot {
                                 document_id: metadata.document_id,
                                 version: metadata.version,
@@ -1591,8 +1581,7 @@ async fn run_connection<S>(
                         // pending token so only the most recently issued one is
                         // valid.
                         *file_open_capability
-                            .lock()
-                            .expect("client file-open capability state poisoned") = Some(token);
+                            .lock_or_recover() = Some(token);
                     }
                     Ok(ServerMessage::SduiUpdate { update }) => {
                         let _ = events.send(ClientConnectionEvent::SduiUpdate(update)).await;
@@ -1712,8 +1701,7 @@ async fn run_connection<S>(
                     Ok(ServerMessage::BehaviorManifest(manifest)) => {
                         let behavior_version = manifest.behavior_version;
                         let install_result = behavior_state
-                            .lock()
-                            .expect("client behavior state poisoned")
+                            .lock_or_recover()
                             .install_replacement(manifest.as_ref().clone());
                         match install_result {
                             Ok(()) => {

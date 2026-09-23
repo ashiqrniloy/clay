@@ -628,6 +628,38 @@ fn server_accepts_configured_workspace_roots_and_reports_invalid_roots() {
     let _ = fs::remove_dir(socket_path.parent().unwrap());
 }
 
+/// Plan 134 D5: a poisoned recovered-class state mutex must not kill the
+/// server. Poison the real live-client set and verify the connection-arrival
+/// service path (`sweep_expired_tabs`) still runs to completion.
+#[tokio::test]
+async fn poisoned_state_mutex_recovers_service() {
+    let socket_path = unique_socket_path("poison-recovery");
+    let server = IpcServer::try_new(ServerConfig::new(&socket_path)).unwrap();
+
+    let live = Arc::clone(&server.live_clients);
+    std::thread::spawn(move || {
+        let _guard = live.lock().expect("unpoisoned before the panic");
+        panic!("poison the live-client set");
+    })
+    .join()
+    .ok();
+    assert!(
+        server.live_clients.lock().is_err(),
+        "the live-client set must be poisoned for this test to mean anything"
+    );
+
+    super::sweep_expired_tabs(
+        &server.tab_registry,
+        &server.tab_states,
+        &server.tab_registry_tx,
+        &server.live_clients,
+    )
+    .await;
+
+    let _ = fs::remove_file(&socket_path);
+    let _ = fs::remove_dir(socket_path.parent().unwrap());
+}
+
 #[test]
 fn production_server_binaries_use_fallible_constructor() {
     for path in ["src/launch.rs", "src/bin/clay-server.rs"] {

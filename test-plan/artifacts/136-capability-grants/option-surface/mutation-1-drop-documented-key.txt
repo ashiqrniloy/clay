@@ -1,0 +1,2 @@
+completion.serverRegisterCompletionProvider: `moduleSpecifier` is declared in runtime/js/completion.d.ts and listed under ## Options but is missing from custom_properties (add it to the page frontmatter and api-inventory.toml)
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 227 filtered out; finished in 0.02s

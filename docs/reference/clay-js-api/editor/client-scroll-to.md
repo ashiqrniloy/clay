@@ -28,6 +28,10 @@ custom_properties:
     type: boolean
     default: false
     description: Behavior-changing setting `revealCursor` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target editor/document surface.
 security: Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientScrollTo` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, scrolling]
@@ -87,6 +91,7 @@ Users may rebind or remove these through documented key binding APIs in `~/.clay
 - `line` (`number`, default `none`): Behavior-changing setting `line` for this API.
 - `column` (`number`, default `none`): Behavior-changing setting `column` for this API.
 - `revealCursor` (`boolean`, default `false`): Behavior-changing setting `revealCursor` for this API.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 

@@ -19,6 +19,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
@@ -765,8 +766,7 @@ impl LanguageIntelligenceCoordinator {
         provider: impl LanguageIntelligenceProvider,
     ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_builtin(meta, provider)
     }
@@ -778,8 +778,7 @@ impl LanguageIntelligenceCoordinator {
         provider: impl LanguageIntelligenceProvider,
     ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package(package, meta, provider)
     }
@@ -791,8 +790,7 @@ impl LanguageIntelligenceCoordinator {
         provider: impl LanguageIntelligenceProvider,
     ) -> Result<(), LanguageIntelligenceProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package_replacing_older(package, meta, provider)
     }
@@ -802,10 +800,7 @@ impl LanguageIntelligenceCoordinator {
         document_id: DocumentId,
         generation: LanguageIntelligenceProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_generations.insert(document_id, generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -817,10 +812,7 @@ impl LanguageIntelligenceCoordinator {
     }
 
     pub fn document_changed(&self, document_id: DocumentId, version: DocumentVersion) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.insert(document_id, version);
         let task_keys = inner
             .active_tasks
@@ -835,10 +827,7 @@ impl LanguageIntelligenceCoordinator {
     /// document: version/generation tracking and active intelligence work for
     /// the document (Plan 060 T6, P1-4).
     pub(crate) fn remove_document(&self, document_id: DocumentId) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.remove(&document_id);
         inner.current_generations.remove(&document_id);
         let task_keys: Vec<_> = inner
@@ -855,10 +844,7 @@ impl LanguageIntelligenceCoordinator {
         target: impl Into<String>,
         generation: LanguageIntelligenceProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.registry.disable(target.into()) {
             return;
         }
@@ -875,10 +861,7 @@ impl LanguageIntelligenceCoordinator {
     }
 
     pub fn cancel_package(&self, package_prefix: &str) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_package(package_prefix);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -904,10 +887,7 @@ impl LanguageIntelligenceCoordinator {
         &self,
         active_generation: LanguageIntelligenceProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_older_generations(active_generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -942,8 +922,7 @@ impl LanguageIntelligenceCoordinator {
 
     pub fn providers(&self) -> Vec<LanguageIntelligenceProviderMeta> {
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .list_ordered()
             .into_iter()
@@ -957,8 +936,7 @@ impl LanguageIntelligenceCoordinator {
         active_mode: &str,
     ) -> Vec<LanguageIntelligenceProviderMeta> {
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .providers_for_feature(feature, active_mode)
             .into_iter()
@@ -980,10 +958,7 @@ impl LanguageIntelligenceCoordinator {
         validate_window(&request, &window)?;
 
         let (provider, meta, task_key) = {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("language intelligence coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
 
             if inner.active_tasks.len() >= LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS {
                 return Err(
@@ -1067,8 +1042,7 @@ impl LanguageIntelligenceCoordinator {
         });
 
         self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
+            .lock_or_recover()
             .active_tasks
             .insert(task_key, task);
         Ok(reply_rx)
@@ -1085,10 +1059,7 @@ impl LanguageIntelligenceCoordinator {
         let result = match result {
             Ok(result) => result,
             Err(LanguageIntelligenceProviderError::Timeout) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("language intelligence coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.timed_out_tasks += 1;
                 inner.stats.failed_tasks += 1;
@@ -1101,10 +1072,7 @@ impl LanguageIntelligenceCoordinator {
                 return;
             }
             Err(LanguageIntelligenceProviderError::ProviderFailed(_)) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("language intelligence coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
                 drop(inner);
@@ -1118,10 +1086,7 @@ impl LanguageIntelligenceCoordinator {
         };
 
         if self.validate_task_freshness(&task_key).is_err() {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("language intelligence coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner.active_tasks.remove(&task_key);
             inner.stats.stale_results_rejected += 1;
             // Drop reply_tx without sending: caller learns no result will arrive.
@@ -1130,10 +1095,7 @@ impl LanguageIntelligenceCoordinator {
 
         match self.validate_published_result(&result) {
             Ok(()) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("language intelligence coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_results += 1;
                 drop(inner);
@@ -1143,10 +1105,7 @@ impl LanguageIntelligenceCoordinator {
                 let _ = reply_tx.send(published);
             }
             Err(_) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("language intelligence coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.stale_results_rejected += 1;
                 // Drop reply_tx without sending: caller learns no result will arrive.
@@ -1158,10 +1117,7 @@ impl LanguageIntelligenceCoordinator {
         &self,
         task_key: &TaskKey,
     ) -> Result<(), LanguageIntelligenceCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&task_key.document_id)
@@ -1181,10 +1137,7 @@ impl LanguageIntelligenceCoordinator {
         &self,
         result: &LanguageIntelligenceResult,
     ) -> Result<(), LanguageIntelligenceCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&result.document_id)
@@ -1227,11 +1180,7 @@ impl LanguageIntelligenceCoordinator {
     }
 
     pub fn stats(&self) -> LanguageIntelligenceCoordinatorStats {
-        self.inner
-            .lock()
-            .expect("language intelligence coordinator lock poisoned")
-            .stats
-            .clone()
+        self.inner.lock_or_recover().stats.clone()
     }
 }
 

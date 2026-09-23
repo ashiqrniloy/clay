@@ -329,7 +329,20 @@ Configuration and `init.js` grant **no package-install authority**: config
 can only call `loadPackage` for already-installed packages, and
 `loadPackage` of an un-adopted third-party package fails closed with an
 adoption diagnostic — package JavaScript does not run until the user
-adopts it (`clay package adopt`). See
+adopts it (`clay package adopt`). Adoption and capability grants are
+separate decisions: `clay package adopt` records the durable approval
+(identity, processes, relations, the declared capability ceiling), and the
+capabilities themselves are granted afterwards — from the CLI with
+`clay package authorize <name> --capability <cap> [--capability <cap>]...
+[--runtime-profile <p>] [--approved-by <who>]` (defaults: profile
+`native-trust`, approved-by `cli`), or from config with `authorize` from
+`clay:packages`. A grant is a complete set: re-authorizing replaces the
+previous grant instead of adding to it. It is persisted on the approval
+record, so `clay package inspect` and `clay package enable` in a later
+process see it, and `clay package revoke` clears it with the approval.
+`clay package inspect` prints the granted capabilities and runtime profile,
+who granted and approved them and when, and the declared-but-ungranted
+remainder. See
 `docs/development/distribution.md` for the distribution surfaces.
 
 ## Loading Packages from init.js

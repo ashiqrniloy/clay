@@ -1,0 +1,6 @@
+retained 282 dropped 0
+server.document.apply_edit {'count': 3, 'total': 0, 'durationSamples': 3, 'p50Nanos': 65326, 'p95Nanos': 82079, 'maxNanos': 82079}
+server.edit_ack {'count': 3, 'total': 0, 'durationSamples': 3, 'p50Nanos': 194706, 'p95Nanos': 342491, 'maxNanos': 342491}
+runtime.load_configuration_with_workspace {'count': 1, 'total': 0, 'durationSamples': 1, 'p50Nanos': 67855923, 'p95Nanos': 67855923, 'maxNanos': 67855923}
+runtime.evaluate_controlled_module {'count': 1, 'total': 0, 'durationSamples': 1, 'p50Nanos': 1920955, 'p95Nanos': 1920955, 'maxNanos': 1920955}
+server.receive {'count': 3, 'total': 3, 'durationSamples': 0, 'p50Nanos': 0, 'p95Nanos': 0, 'maxNanos': 0}

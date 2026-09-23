@@ -708,14 +708,16 @@ async fn control_center_opens_filters_activates_and_cancels_scenario() {
     );
     // The hermetic root (not ambient ~/.clay) was the reload
     // source: the sentinel typography from its init.js is now live.
-    assert_eq!(
-        server
+    assert!(
+        (server
             .runtime_generation
             .active_typography()
             .await
             .monospace
-            .size,
-        21.0,
+            .size
+            - 21.0)
+            .abs()
+            < f32::EPSILON,
         "reloaded generation must come from the hermetic config root"
     );
 
@@ -830,14 +832,16 @@ async fn runtime_generation_replacement_cancels_open_control_center_scenario() {
     );
     // The hermetic root (not ambient ~/.clay) was the reload
     // source: the sentinel typography from its init.js is now live.
-    assert_eq!(
-        server
+    assert!(
+        (server
             .runtime_generation
             .active_typography()
             .await
             .monospace
-            .size,
-        21.0,
+            .size
+            - 21.0)
+            .abs()
+            < f32::EPSILON,
         "replaced generation must come from the hermetic config root"
     );
 

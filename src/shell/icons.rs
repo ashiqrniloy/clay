@@ -280,6 +280,15 @@ fn check_coordinate(value: f32, field: &str) -> Result<(), IconValidationError> 
     }
 }
 
+/// Exact test for an SVG arc flag (large-arc / sweep), which must be the
+/// literal `0` or `1`. The parser accepts only the exactly representable `f32`
+/// values `0.0`/`1.0`, so identity — not an epsilon — is correct; `abs()` keeps
+/// `-0.0` accepted and NaN rejected (clippy `float_cmp` bans the `==` form).
+fn is_arc_flag(value: f32) -> bool {
+    let bits = value.abs().to_bits();
+    bits == 0.0_f32.to_bits() || bits == 1.0_f32.to_bits()
+}
+
 /// Validate a fully constructed geometry (used after deserialization and
 /// before transport; parse paths apply the same bounds inline).
 pub fn validate_icon_geometry(geometry: &IconGeometry) -> Result<(), IconValidationError> {
@@ -366,13 +375,13 @@ pub fn validate_icon_geometry(geometry: &IconGeometry) -> Result<(), IconValidat
                         "arc radii must be non-negative",
                     ));
                 }
-                if p[3] != 0.0 && p[3] != 1.0 {
+                if !is_arc_flag(p[3]) {
                     return Err(IconValidationError::new(
                         "paths.commands",
                         "arc large-arc flag must be 0 or 1",
                     ));
                 }
-                if p[4] != 0.0 && p[4] != 1.0 {
+                if !is_arc_flag(p[4]) {
                     return Err(IconValidationError::new(
                         "paths.commands",
                         "arc sweep flag must be 0 or 1",
@@ -561,7 +570,7 @@ impl<'a> PathScanner<'a> {
 
     fn flag(&mut self) -> Result<f32, IconValidationError> {
         let value = self.number()?;
-        if value == 0.0 || value == 1.0 {
+        if is_arc_flag(value) {
             Ok(value)
         } else {
             Err(IconValidationError::new(
@@ -994,12 +1003,25 @@ mod tests {
         // All arcs normalized to absolute ArcTo with 0/1 flags.
         assert!(commands
             .iter()
-            .all(|command| matches!(command, IconPathCommand::ArcTo(p) if (p[3] == 0.0 || p[3] == 1.0) && (p[4] == 0.0 || p[4] == 1.0))
+            .all(|command| matches!(command, IconPathCommand::ArcTo(p) if is_arc_flag(p[3]) && is_arc_flag(p[4]))
                 || !matches!(command, IconPathCommand::ArcTo(_))));
         assert_eq!(
             *commands.last().expect("non-empty"),
             IconPathCommand::ClosePath
         );
+    }
+
+    /// The arc-flag check is exact identity, not a tolerance: only the
+    /// representable flag values (`-0.0`, `0.0`, `1.0`) pass, so a near-flag
+    /// number cannot be smuggled in as a flag (D4 regression net).
+    #[test]
+    fn arc_flag_identity_accepts_only_exact_zero_and_one() {
+        for accepted in [0.0_f32, -0.0, 1.0] {
+            assert!(is_arc_flag(accepted), "must accept {accepted}");
+        }
+        for rejected in [0.5, 0.999_999_9, 1.0 + f32::EPSILON, 2.0, f32::NAN] {
+            assert!(!is_arc_flag(rejected), "must reject {rejected}");
+        }
     }
 
     #[test]

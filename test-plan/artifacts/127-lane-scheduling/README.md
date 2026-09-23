@@ -8,7 +8,7 @@ typing latency with packages active, measured).
 
 ## Conventions and sources
 
-- AT-SPI probe `probe.py` (`dump`, `editor`, `focus`, `completion`, `wait-ready`)
+- AT-SPI probe `probe.py` (`dump`, `editor`, `focus`, `click`, `insert`, `completion`, `wait-ready`)
   and `portal-shot.py` (portal screenshot cropped to the `clay-desktop` window)
   are copied from the plan 126 artifact set: `test-plan/artifacts/126-access-paths/`.
   Crop bounds come from the computer-use-linux GNOME Shell extension; activate
@@ -18,7 +18,10 @@ typing latency with packages active, measured).
   through `computer-use-linux` (`activate_window`, `type_text`, `press_key`).
   `Ctrl+Space` is consumed by GNOME input-source switching on this host, so the
   fixtures also bind `Ctrl+J` to `completion.trigger`; the `.` autocomplete
-  trigger of `@clay/rust` works unmodified.
+  trigger of `@clay/rust` works unmodified. Plan 136 update: a *package-owned*
+  mode does not route the built-in `completion.trigger` command (the client
+  rejects it as an unknown command there), so `@fixture/lane` declares its own
+  `.` trigger in its manifest instead of relying on a bound chord.
 - `run-live.sh` isolation mirrors `scripts/capture-ui-review.sh`: private
   mode-700 root for `HOME`/`XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`TMPDIR`, private
   server socket, fixture workspace, tree-kill teardown. `CLAY_PERF_PROFILE=1`
@@ -45,6 +48,18 @@ the shape plan 127 routes to the **latency** lane.
 parse handler, but the provider is registered as a module object, so it lives in
 the general lane and must wait for the handler to release it.
 
+Plan 136 update (2026-09-23): plan 136 task 5 added the `clay package authorize`
+surface and task 6 drove both fixtures through it. `fixture-package/load.js` now
+registers its own `lane` mode pattern (`serverRegisterModePattern`, the
+`mode-registration` grant) because the host applies package manifest
+contributions only for trusted/bundled records, passes `module` **and**
+`moduleSpecifier` to the completion registration (a specifier-only call
+registers nothing), and `package.json` declares the `.` trigger
+(`modePatterns[].editorRules.autocompleteTriggers` +
+`completionProviders[].triggerCharacters`). The granted/ungranted live modes,
+the driver script, and all of that evidence are in
+`test-plan/artifacts/136-capability-grants/`.
+
 These fixtures are ready to use the moment a capability-grant surface exists;
 they cannot be *enabled* today (see the ceiling below), which is why the live
 lane A/B is not part of the execution record.
@@ -59,6 +74,17 @@ host's `corepack`-cached pnpm is exposed to the isolated `HOME` through a small
 shim (`$root/bin/pnpm`) with `COREPACK_HOME` pointed at the host cache.
 
 ## Reachability ceiling recorded by this task
+
+Plan 136 update (2026-09-23): the grant half of this ceiling is closed —
+`clay package authorize` (plan 136 task 5) records `parse-document`,
+`completion-provider`, and `mode-registration` for `@fixture/lane`, and the
+package then enables and loads in its own third-party domain. What remains
+unreachable live is mode *activation*: third-party manifest contributions are
+applied only for trusted/bundled records, and nothing in the host activates a
+registered mode for an open document (the only caller of
+`modes.activate_major_mode` is the `clay:modes` JS op, which needs an already-open
+`documentId`, and there is no document-open hook). The plan-136 artifact README
+records that ceiling and its evidence.
 
 Capability grants for non-bundled packages are recorded by
 `PackageService::authorize_package`, which has no CLI, desktop, or JS surface in

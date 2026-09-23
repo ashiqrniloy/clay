@@ -6,6 +6,23 @@
     )
 )]
 
+//! Plan 134 P3 async-filesystem policy: the open/save/reload and
+//! root-discovery paths use `tokio::fs` so they never block the connection
+//! reactor; the blocking filesystem work for a plan (directory traversal,
+//! streamed file IO) runs on Tokio's blocking pool. Remaining `std::fs` sites
+//! are cold-path only by design:
+//! - `add_root` / `add_root_from_cwd`: process startup (`IpcServer::try_new`);
+//! - `traverse_directory` and its helpers (`read_auxiliary_file_bounded`,
+//!   `count_visible_children`): only entered from the blocking pool
+//!   (`execute_user_browse_listing`, `ops::workspace::run_directory_listing`,
+//!   and `command_execution`'s navigated-listing walk);
+//! - `FileMetadata::capture`: no production caller;
+//! - `#[cfg(test)]` hooks (`ATOMIC_WRITE_PAUSES`, `TEST_TEMP_NAMES`, ...);
+//! - upgrade path: move startup root registration to `spawn_blocking` only if
+//!   startup ever runs on the reactor or a profile shows it matters.
+
+use crate::lock_util::LockOrRecover;
+
 use std::{
     collections::{HashMap, HashSet},
     error::Error,
@@ -529,6 +546,35 @@ impl WorkspaceState {
                 path: canonical_path.clone(),
                 source,
             })?;
+        self.add_root_state(canonical_path, &metadata)
+    }
+
+    /// Async root registration for the reactor path (open folder / selected
+    /// file): the canonicalize + metadata probe runs on `tokio::fs`, then the
+    /// in-memory registration is shared with [`Self::add_root`].
+    async fn add_root_async(&mut self, root: &Path) -> Result<WorkspaceRootId, WorkspaceError> {
+        let canonical_path = tokio_fs::canonicalize(root).await.map_err(|source| {
+            WorkspaceError::RootUnavailable {
+                path: root.to_path_buf(),
+                source,
+            }
+        })?;
+        let metadata = tokio_fs::metadata(&canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::RootUnavailable {
+                path: canonical_path.clone(),
+                source,
+            })?;
+        self.add_root_state(canonical_path, &metadata)
+    }
+
+    /// In-memory half of root registration: validation against the probed
+    /// metadata, dedup, and insertion. No filesystem access.
+    fn add_root_state(
+        &mut self,
+        canonical_path: PathBuf,
+        metadata: &fs::Metadata,
+    ) -> Result<WorkspaceRootId, WorkspaceError> {
         if !metadata.is_dir() {
             return Err(WorkspaceError::RootNotDirectory {
                 path: canonical_path,
@@ -613,17 +659,19 @@ impl WorkspaceState {
     /// is found, add that directory as a root. If no marker is found within the
     /// bounded depth, return `None`; the caller should fall back to a
     /// single-file selected-file grant.
-    pub(crate) fn discover_root_for_path(
+    pub(crate) async fn discover_root_for_path(
         &mut self,
         path: impl AsRef<Path>,
     ) -> Result<Option<WorkspaceRootId>, WorkspaceError> {
-        let canonical_path =
-            fs::canonicalize(path.as_ref()).map_err(|source| WorkspaceError::FileUnavailable {
+        let canonical_path = tokio_fs::canonicalize(path.as_ref())
+            .await
+            .map_err(|source| WorkspaceError::FileUnavailable {
                 path: path.as_ref().to_path_buf(),
                 source,
             })?;
-        let metadata =
-            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
+        let metadata = tokio_fs::metadata(&canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::FileUnavailable {
                 path: path.as_ref().to_path_buf(),
                 source,
             })?;
@@ -642,8 +690,8 @@ impl WorkspaceState {
                 break;
             }
             for marker in KNOWN_PROJECT_MARKERS {
-                if dir.join(marker).exists() {
-                    return self.add_root(dir).map(Some);
+                if tokio_fs::metadata(dir.join(marker)).await.is_ok() {
+                    return self.add_root_async(dir).await.map(Some);
                 }
             }
             current = dir.parent();
@@ -656,23 +704,25 @@ impl WorkspaceState {
     /// Add an explicit user grant as a workspace root. Directories become
     /// directory roots; files become single-file grants. Deduplicated by
     /// canonical path.
-    pub(crate) fn add_explicit_user_grant(
+    pub(crate) async fn add_explicit_user_grant(
         &mut self,
         path: impl AsRef<Path>,
     ) -> Result<WorkspaceRootId, WorkspaceError> {
-        let canonical_path =
-            fs::canonicalize(path.as_ref()).map_err(|source| WorkspaceError::RootUnavailable {
+        let canonical_path = tokio_fs::canonicalize(path.as_ref())
+            .await
+            .map_err(|source| WorkspaceError::RootUnavailable {
                 path: path.as_ref().to_path_buf(),
                 source,
             })?;
-        let metadata =
-            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::RootUnavailable {
+        let metadata = tokio_fs::metadata(&canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::RootUnavailable {
                 path: path.as_ref().to_path_buf(),
                 source,
             })?;
 
         if metadata.is_dir() {
-            return self.add_root(canonical_path);
+            return self.add_root_state(canonical_path, &metadata);
         }
 
         if metadata.is_file() {
@@ -1185,7 +1235,7 @@ impl WorkspaceState {
         file_path: &Path,
         client_id: ClientId,
     ) -> Result<OpenPrepare, WorkspaceError> {
-        let file_state = self.canonical_file_state(root_id, file_path)?;
+        let file_state = self.canonical_file_state(root_id, file_path).await?;
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
             return existing.map(OpenPrepare::Existing);
         }
@@ -1203,7 +1253,8 @@ impl WorkspaceState {
         selected_path: &Path,
         client_id: ClientId,
     ) -> Result<SelectedOpenPrepare, WorkspaceError> {
-        let (canonical_path, metadata, display_path) = canonical_selected_file(selected_path)?;
+        let (canonical_path, metadata, display_path) =
+            canonical_selected_file(selected_path).await?;
         if let Some(existing) = self
             .existing_document_lease_by_canonical_path(&canonical_path, client_id)
             .await
@@ -1254,7 +1305,9 @@ impl WorkspaceState {
         text: String,
         client_id: ClientId,
     ) -> Result<OpenDocumentLease, WorkspaceError> {
-        let file_state = self.canonical_file_state(root_id, file_path.as_ref())?;
+        let file_state = self
+            .canonical_file_state(root_id, file_path.as_ref())
+            .await?;
         if let Some(existing) = self.existing_document_lease(&file_state, client_id).await {
             return existing;
         }
@@ -1305,12 +1358,13 @@ impl WorkspaceState {
 
     /// Canonicalized, containment-checked path for an existing file
     /// (agent reverse-RPC reads and stats).
-    pub(crate) fn contained_existing_path(
+    pub(crate) async fn contained_existing_path(
         &self,
         root_id: WorkspaceRootId,
         file_path: &Path,
     ) -> Result<PathBuf, WorkspaceError> {
         self.canonical_file_state(root_id, file_path)
+            .await
             .map(|state| state.canonical_path)
     }
 
@@ -1318,7 +1372,7 @@ impl WorkspaceState {
     /// exist yet (agent write of a new file). Containment is enforced against
     /// the parent directory so a missing leaf cannot smuggle `..` past the
     /// root check.
-    pub(crate) fn contained_new_file_path(
+    pub(crate) async fn contained_new_file_path(
         &self,
         root_id: WorkspaceRootId,
         file_path: &Path,
@@ -1346,7 +1400,7 @@ impl WorkspaceState {
         let mut file_name_parts: Vec<std::ffi::OsString> = Vec::new();
         let mut probe = joined.clone();
         let canonical_ancestor = loop {
-            match fs::canonicalize(&probe) {
+            match tokio_fs::canonicalize(&probe).await {
                 Ok(canonical) => {
                     break canonical;
                 }
@@ -1622,7 +1676,7 @@ impl WorkspaceState {
     ) -> Result<SaveDocumentOutcome, WorkspaceError> {
         self.authorize_save(document_id, client_id, known_version)
             .await?;
-        let plan = self.prepare_save(document_id)?;
+        let plan = self.prepare_save(document_id).await?;
         let io = save_io(&plan).await?;
         self.commit_save(plan, io).await
     }
@@ -1704,7 +1758,7 @@ impl WorkspaceState {
     /// reauthorization against the current on-disk metadata. Runs under the
     /// workspace mutex; the heavy chunked `tokio::fs` write happens in [`save_io`]
     /// after the mutex is released.
-    fn prepare_save(&self, document_id: DocumentId) -> Result<SavePlan, WorkspaceError> {
+    async fn prepare_save(&self, document_id: DocumentId) -> Result<SavePlan, WorkspaceError> {
         let open_document = self
             .documents
             .get(&document_id)
@@ -1714,7 +1768,7 @@ impl WorkspaceState {
         let expected_metadata = open_document.file_state.last_known_metadata.clone();
         let document = Arc::clone(&open_document.document);
 
-        let current_identity = self.reauthorize_open_file(document_id)?;
+        let current_identity = self.reauthorize_open_file(document_id).await?;
         if current_identity.metadata() != expected_metadata {
             return Err(WorkspaceError::StaleFileMetadata {
                 path: relative_path,
@@ -1771,7 +1825,7 @@ impl WorkspaceState {
         if document.lock().await.is_dirty() && !force {
             return Err(WorkspaceError::DirtyDocument { document_id });
         }
-        let pre_read_identity = self.reauthorize_open_file(document_id)?;
+        let pre_read_identity = self.reauthorize_open_file(document_id).await?;
         let reservation =
             self.reserve_document_bytes(pre_read_identity.metadata().len(), &relative_path)?;
         Ok(ReloadPlan {
@@ -1936,7 +1990,7 @@ impl WorkspaceState {
         })
     }
 
-    fn canonical_file_state(
+    async fn canonical_file_state(
         &self,
         root_id: WorkspaceRootId,
         file_path: &Path,
@@ -1954,7 +2008,7 @@ impl WorkspaceState {
                 } else {
                     root_path.join(file_path)
                 };
-                let canonical_path = fs::canonicalize(&joined).map_err(|source| {
+                let canonical_path = tokio_fs::canonicalize(&joined).await.map_err(|source| {
                     WorkspaceError::FileUnavailable {
                         path: file_path.to_path_buf(),
                         source,
@@ -1963,12 +2017,12 @@ impl WorkspaceState {
                 if !canonical_path.starts_with(root_path) {
                     return Err(WorkspaceError::OutsideRoot);
                 }
-                let metadata = fs::metadata(&canonical_path).map_err(|source| {
-                    WorkspaceError::FileUnavailable {
+                let metadata = tokio_fs::metadata(&canonical_path)
+                    .await
+                    .map_err(|source| WorkspaceError::FileUnavailable {
                         path: file_path.to_path_buf(),
                         source,
-                    }
-                })?;
+                    })?;
                 validate_regular_file_metadata(&metadata)?;
                 let relative_path = canonical_path
                     .strip_prefix(root_path)
@@ -1991,21 +2045,22 @@ impl WorkspaceState {
                         .parent()
                         .map_or_else(|| file_path.to_path_buf(), |parent| parent.join(file_path))
                 };
-                let canonical_path = fs::canonicalize(&requested).map_err(|source| {
-                    WorkspaceError::FileUnavailable {
-                        path: file_path.to_path_buf(),
-                        source,
-                    }
-                })?;
+                let canonical_path =
+                    tokio_fs::canonicalize(&requested).await.map_err(|source| {
+                        WorkspaceError::FileUnavailable {
+                            path: file_path.to_path_buf(),
+                            source,
+                        }
+                    })?;
                 if canonical_path != *granted_path {
                     return Err(WorkspaceError::OutsideRoot);
                 }
-                let metadata = fs::metadata(&canonical_path).map_err(|source| {
-                    WorkspaceError::FileUnavailable {
+                let metadata = tokio_fs::metadata(&canonical_path)
+                    .await
+                    .map_err(|source| WorkspaceError::FileUnavailable {
                         path: file_path.to_path_buf(),
                         source,
-                    }
-                })?;
+                    })?;
                 validate_regular_file_metadata(&metadata)?;
                 Ok(FileDocumentState {
                     workspace_root_id: root_id,
@@ -2017,7 +2072,7 @@ impl WorkspaceState {
         }
     }
 
-    fn reauthorize_open_file(
+    async fn reauthorize_open_file(
         &self,
         document_id: DocumentId,
     ) -> Result<TargetIdentity, WorkspaceError> {
@@ -2031,12 +2086,11 @@ impl WorkspaceState {
             .ok_or(WorkspaceError::UnknownRoot {
                 root_id: open_document.file_state.workspace_root_id,
             })?;
-        let canonical_path =
-            fs::canonicalize(&open_document.file_state.canonical_path).map_err(|source| {
-                WorkspaceError::FileUnavailable {
-                    path: open_document.file_state.workspace_relative_path.clone(),
-                    source,
-                }
+        let canonical_path = tokio_fs::canonicalize(&open_document.file_state.canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::FileUnavailable {
+                path: open_document.file_state.workspace_relative_path.clone(),
+                source,
             })?;
         match &root.authority {
             WorkspaceAuthority::Directory {
@@ -2054,8 +2108,9 @@ impl WorkspaceState {
                 }
             }
         }
-        let metadata =
-            fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
+        let metadata = tokio_fs::metadata(&canonical_path)
+            .await
+            .map_err(|source| WorkspaceError::FileUnavailable {
                 path: open_document.file_state.workspace_relative_path.clone(),
                 source,
             })?;
@@ -2108,16 +2163,18 @@ impl FileMetadata {
     }
 }
 
-fn canonical_selected_file(
+async fn canonical_selected_file(
     selected_path: &Path,
 ) -> Result<(PathBuf, FileMetadata, PathBuf), WorkspaceError> {
-    let canonical_path =
-        fs::canonicalize(selected_path).map_err(|source| WorkspaceError::FileUnavailable {
+    let canonical_path = tokio_fs::canonicalize(selected_path)
+        .await
+        .map_err(|source| WorkspaceError::FileUnavailable {
             path: selected_path.to_path_buf(),
             source,
         })?;
-    let metadata =
-        fs::metadata(&canonical_path).map_err(|source| WorkspaceError::FileUnavailable {
+    let metadata = tokio_fs::metadata(&canonical_path)
+        .await
+        .map_err(|source| WorkspaceError::FileUnavailable {
             path: selected_path.to_path_buf(),
             source,
         })?;
@@ -2340,8 +2397,8 @@ impl TargetIdentity {
     /// content metadata as when this identity was captured. A missing target
     /// is an error (fail closed), a replaced file or any content change —
     /// including a same-length edit that bumps `modified` — is a mismatch.
-    fn matches_current(&self, path: &Path) -> io::Result<bool> {
-        let metadata = fs::metadata(path)?;
+    async fn matches_current(&self, path: &Path) -> io::Result<bool> {
+        let metadata = tokio_fs::metadata(path).await?;
         let current = Self::from_metadata(&metadata);
         Ok(current.stable_id == self.stable_id
             && current.len == self.len
@@ -2527,7 +2584,8 @@ async fn atomic_write_chunks(
     expected: Option<&TargetIdentity>,
 ) -> Result<FileMetadata, AtomicSaveError> {
     #[cfg(unix)]
-    if fs::metadata(target)
+    if tokio_fs::metadata(target)
+        .await
         .map(|metadata| metadata.permissions().mode() & 0o222 == 0)
         .unwrap_or(false)
     {
@@ -2539,7 +2597,8 @@ async fn atomic_write_chunks(
     // Preserve the original file's permissions (Unix mode). Metadata of a
     // missing target is ignored; the temp then keeps its `0o600` start mode,
     // which is a safe default for a brand-new file.
-    let original_permissions = fs::metadata(target)
+    let original_permissions = tokio_fs::metadata(target)
+        .await
         .ok()
         .map(|metadata| metadata.permissions());
 
@@ -2572,7 +2631,7 @@ async fn atomic_write_chunks(
         if let Some(perms) = original_permissions {
             // Fail closed: a save that cannot preserve the target's required
             // permissions must not silently loosen them.
-            fs::set_permissions(&temp_path, perms)?;
+            tokio_fs::set_permissions(&temp_path, perms).await?;
         }
         #[cfg(not(unix))]
         {
@@ -2597,7 +2656,7 @@ async fn atomic_write_chunks(
         // replace: an external edit, atomic-replace, or symlink swap during
         // the temp write fails the save instead of being silently clobbered.
         if let Some(expected) = expected {
-            match expected.matches_current(target) {
+            match expected.matches_current(target).await {
                 Ok(true) => {}
                 Ok(false) => return Err(AtomicSaveError::TargetChanged),
                 Err(error) => return Err(AtomicSaveError::Io(error)),
@@ -2785,7 +2844,7 @@ pub(crate) async fn save_document_unlocked(
     }
     let plan = {
         let workspace = workspace.lock().await;
-        workspace.prepare_save(document_id)?
+        workspace.prepare_save(document_id).await?
     };
     let io = save_io(&plan).await?;
     let mut workspace = workspace.lock().await;
@@ -3055,9 +3114,7 @@ static LISTING_CANCELLATIONS: LazyLock<std::sync::Mutex<HashMap<String, ListingC
 /// token when the caller created it first. Reusing the token prevents a cancel
 /// racing list startup from being lost through replacement.
 pub(crate) fn register_listing_cancel_token(id: String) -> ListingCancelToken {
-    let mut map = LISTING_CANCELLATIONS
-        .lock()
-        .expect("listing-cancellation registry mutex poisoned");
+    let mut map = LISTING_CANCELLATIONS.lock_or_recover();
     map.entry(id)
         .or_insert_with(|| Arc::new(AtomicBool::new(false)))
         .clone()
@@ -3079,9 +3136,7 @@ pub(crate) fn create_listing_cancel_token() -> (String, ListingCancelToken) {
 
 /// Cancel a registered listing by token id. Returns true if the token existed.
 pub(crate) fn cancel_listing(token_id: &str) -> bool {
-    let map = LISTING_CANCELLATIONS
-        .lock()
-        .expect("listing-cancellation registry mutex poisoned");
+    let map = LISTING_CANCELLATIONS.lock_or_recover();
     if let Some(token) = map.get(token_id) {
         token.store(true, Ordering::Relaxed);
         true
@@ -3092,9 +3147,7 @@ pub(crate) fn cancel_listing(token_id: &str) -> bool {
 
 /// Remove a registered cancellation token. Called when the listing ends.
 pub(crate) fn remove_listing_cancel_token(token_id: &str) {
-    let mut map = LISTING_CANCELLATIONS
-        .lock()
-        .expect("listing-cancellation registry mutex poisoned");
+    let mut map = LISTING_CANCELLATIONS.lock_or_recover();
     map.remove(token_id);
 }
 

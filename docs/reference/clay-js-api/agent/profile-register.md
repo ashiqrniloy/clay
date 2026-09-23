@@ -15,7 +15,27 @@ phase: Phase 2
 visibility: public
 permissions: ["agent-host"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: description
+    type: string
+    default: optional
+    description: short profile description shown in pickers.
+  - name: instructions
+    type: string
+    default: optional
+    description: the profile's system prompt layer.
+  - name: name
+    type: string
+    default: required
+    description: the profile name; sessions select it by name. Duplicate names fail closed.
+  - name: skills
+    type: string[]
+    default: optional
+    description: skill names resolved against the daemon skill registry; register skills before the profile that references them.
+  - name: tools
+    type: string[]
+    default: optional
+    description: tool names resolved against the daemon tool registry; unknown names fail closed at session start.
 security: Forwards an inert profile declaration to the daemon's validated registry; re-registering a profile name replaces the definition, and unknown tool or skill ids fail closed at session start, before any provider turn. Tool execution authority stays governed by the acceptance policy, not by registration. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `agent.profileRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register referenced skills first (`agent.skillRegister`); a profile that names an unregistered skill fails closed before any provider turn.
 lookup_tags: [agent, profile, registration, tools, skills, js-api]

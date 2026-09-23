@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use crate::packages::authorization::RuntimeProfile;
 use crate::packages::extension_points::{MAX_EXTENSION_SCOPES, MAX_SCOPE_CHARS};
 use crate::packages::manager::PackageProvenance;
 use crate::packages::manifest::PackageGraphRelations;
@@ -74,6 +75,9 @@ pub struct PackageApprovalRecord {
     pub api_prefix: String,
     /// Complete granted capability set (permission strings).
     pub capabilities: Vec<String>,
+    /// Explicit capability grant, if the user issued one. Absent means no
+    /// grant: adoption alone never authorizes a capability (Plan 136 task 4).
+    pub grant: Option<CapabilityGrant>,
     /// Complete granted language-server contribution id set.
     pub processes: Vec<String>,
     pub relations: Vec<ApprovedRelation>,
@@ -196,6 +200,76 @@ impl ApprovedReplacement {
     }
 }
 
+/// Explicit user/CLI/config capability grant carried by an approval record
+/// (Plan 136 task 4). It is bound to the record's identity fields, so a
+/// version/source change makes it inert until the user grants again, and it
+/// stays a subset of the record's `capabilities` (the adoption ceiling).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityGrant {
+    /// Granted capability names; always a subset of the record's
+    /// `capabilities`.
+    pub capabilities: Vec<String>,
+    pub runtime_profile: RuntimeProfile,
+    pub granted_by: String,
+    /// RFC 3339 timestamp supplied by the grant flow.
+    pub granted_at: String,
+}
+
+impl CapabilityGrant {
+    fn from_json(value: &Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "approval grant must be an object".to_string())?;
+        let runtime_profile = json_required_string(object, "runtime_profile")?;
+        Ok(Self {
+            capabilities: json_strings(object.get("capabilities"), "grant.capabilities")?,
+            runtime_profile: RuntimeProfile::parse(&runtime_profile).ok_or_else(|| {
+                format!("approval grant has unknown runtime profile `{runtime_profile}`")
+            })?,
+            granted_by: json_required_string(object, "granted_by")?,
+            granted_at: json_required_string(object, "granted_at")?,
+        })
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::json!({
+            "capabilities": self.capabilities,
+            "runtime_profile": self.runtime_profile.as_str(),
+            "granted_by": self.granted_by,
+            "granted_at": self.granted_at,
+        })
+    }
+
+    /// Grants must be non-empty, name who granted them and when, and stay a
+    /// subset of the record's adoption ceiling (validated at load and upsert).
+    fn validate(&self, approved_capabilities: &[String]) -> Result<(), String> {
+        if self.capabilities.is_empty() {
+            return Err("approval grant must list at least one capability".to_string());
+        }
+        if self.granted_by.trim().is_empty() || self.granted_at.trim().is_empty() {
+            return Err("approval grant must record who granted it and when".to_string());
+        }
+        for capability in &self.capabilities {
+            if !approved_capabilities
+                .iter()
+                .any(|approved| approved == capability)
+            {
+                return Err(format!(
+                    "approval grant capability `{capability}` is not in the record's capabilities"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether this grant covers `capability`.
+    pub fn grants(&self, capability: &str) -> bool {
+        self.capabilities
+            .iter()
+            .any(|granted| granted == capability)
+    }
+}
+
 impl PackageApprovalRecord {
     fn from_json(value: &Value) -> Result<Self, String> {
         let object = value
@@ -209,6 +283,10 @@ impl PackageApprovalRecord {
             package_root: json_required_string(object, "package_root")?,
             api_prefix: json_required_string(object, "api_prefix")?,
             capabilities: json_strings(object.get("capabilities"), "capabilities")?,
+            grant: match object.get("grant") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(CapabilityGrant::from_json(value)?),
+            },
             processes: json_strings(object.get("processes"), "processes")?,
             relations: object
                 .get("relations")
@@ -242,6 +320,7 @@ impl PackageApprovalRecord {
             "package_root": self.package_root,
             "api_prefix": self.api_prefix,
             "capabilities": self.capabilities,
+            "grant": self.grant.as_ref().map(CapabilityGrant::to_json),
             "processes": self.processes,
             "relations": self.relations.iter().map(ApprovedRelation::to_json).collect::<Vec<_>>(),
             "replacements": self
@@ -444,15 +523,80 @@ impl PackageApprovalStore {
         self.save()
     }
 
-    /// Mark a record revoked and persist. Revocation keeps the record so
-    /// diagnostics can distinguish "revoked" from "never approved".
+    /// Mark a record revoked, clear its capability grant, and persist.
+    /// Revocation keeps the record so diagnostics can distinguish "revoked"
+    /// from "never approved"; the grant goes with the approval it belonged to
+    /// (Plan 136 task 4), so a revoked record contributes no authority even if
+    /// a reader ignored the flag.
     pub fn revoke(&mut self, package: &str) -> Result<bool, ApprovalStoreError> {
         let Some(record) = self.approvals.get_mut(package) else {
             return Ok(false);
         };
         record.revoked = true;
+        record.grant = None;
         self.save()?;
         Ok(true)
+    }
+
+    /// Write (or replace) the explicit capability grant on a current,
+    /// unrevoked approval whose identity still matches `provenance`. Returns
+    /// `false` when no such record exists: a grant never manufactures an
+    /// approval and never re-points one at a different package identity, it
+    /// only annotates an adoption the user already made (Plan 136 task 4).
+    pub fn record_grant(
+        &mut self,
+        provenance: &PackageProvenance,
+        api_prefix: &str,
+        capabilities: &[PackagePermission],
+        runtime_profile: RuntimeProfile,
+        granted_by: &str,
+    ) -> Result<bool, ApprovalStoreError> {
+        let Some(record) = self.approvals.get_mut(&provenance.resolved_name) else {
+            return Ok(false);
+        };
+        if record.revoked || identity_matches(record, provenance, api_prefix).is_err() {
+            return Ok(false);
+        }
+        record.grant = Some(CapabilityGrant {
+            capabilities: capabilities
+                .iter()
+                .map(|capability| capability.as_str().to_string())
+                .collect(),
+            runtime_profile,
+            granted_by: granted_by.to_string(),
+            granted_at: rfc3339_now(),
+        });
+        self.save()?;
+        Ok(true)
+    }
+
+    /// The current, unrevoked approval record whose identity still matches
+    /// `provenance`, if any. `None` covers every "no durable authority
+    /// contributes" case: no record, revoked record, or identity no longer
+    /// matching the installed package.
+    pub fn current_record(
+        &self,
+        provenance: &PackageProvenance,
+        api_prefix: &str,
+    ) -> Option<&PackageApprovalRecord> {
+        let record = self.approvals.get(&provenance.resolved_name)?;
+        if record.revoked || identity_matches(record, provenance, api_prefix).is_err() {
+            return None;
+        }
+        Some(record)
+    }
+
+    /// The grant a current, unrevoked approval carries for `provenance`, if
+    /// any. `None` covers every "no durable grant contributes" case: no
+    /// record, revoked record, identity no longer matching the installed
+    /// package, or a record that was never granted. Cheap by construction: two
+    /// map lookups and one field compare, no I/O and no allocation.
+    pub fn current_grant(
+        &self,
+        provenance: &PackageProvenance,
+        api_prefix: &str,
+    ) -> Option<&CapabilityGrant> {
+        self.current_record(provenance, api_prefix)?.grant.as_ref()
     }
 
     fn save(&self) -> Result<(), ApprovalStoreError> {
@@ -502,31 +646,7 @@ impl PackageApprovalStore {
         if record.revoked {
             return Err(ApprovalMismatch::Revoked);
         }
-        for (field, expected, actual) in [
-            (
-                "resolved_version",
-                record.resolved_version.as_str(),
-                provenance.resolved_version.as_str(),
-            ),
-            (
-                "source",
-                record.source.as_str(),
-                provenance.requested_spec.as_str(),
-            ),
-            (
-                "package_root",
-                record.package_root.as_str(),
-                provenance.package_root.to_string_lossy().as_ref(),
-            ),
-            ("api_prefix", record.api_prefix.as_str(), api_prefix),
-        ] {
-            if expected != actual {
-                return Err(ApprovalMismatch::IdentityChanged { field });
-            }
-        }
-        if record.integrity != provenance.integrity {
-            return Err(ApprovalMismatch::IdentityChanged { field: "integrity" });
-        }
+        identity_matches(record, provenance, api_prefix)?;
         for permission in capabilities {
             let raw = permission.as_str();
             if !record.capabilities.iter().any(|approved| approved == raw) {
@@ -582,6 +702,42 @@ impl PackageApprovalStore {
     }
 }
 
+/// Identity rule an approval binds: a record only covers the exact installed
+/// package it was approved for (Plan 061 task 6). Shared by `approval_covers`
+/// and the durable grant read so identity is checked one way (Plan 136 task 4).
+fn identity_matches(
+    record: &PackageApprovalRecord,
+    provenance: &PackageProvenance,
+    api_prefix: &str,
+) -> Result<(), ApprovalMismatch> {
+    for (field, expected, actual) in [
+        (
+            "resolved_version",
+            record.resolved_version.as_str(),
+            provenance.resolved_version.as_str(),
+        ),
+        (
+            "source",
+            record.source.as_str(),
+            provenance.requested_spec.as_str(),
+        ),
+        (
+            "package_root",
+            record.package_root.as_str(),
+            provenance.package_root.to_string_lossy().as_ref(),
+        ),
+        ("api_prefix", record.api_prefix.as_str(), api_prefix),
+    ] {
+        if expected != actual {
+            return Err(ApprovalMismatch::IdentityChanged { field });
+        }
+    }
+    if record.integrity != provenance.integrity {
+        return Err(ApprovalMismatch::IdentityChanged { field: "integrity" });
+    }
+    Ok(())
+}
+
 /// Validate one record's shape and bounds (used at load and upsert).
 fn validate_record(record: &PackageApprovalRecord) -> Result<(), String> {
     if record.package.trim().is_empty()
@@ -589,6 +745,9 @@ fn validate_record(record: &PackageApprovalRecord) -> Result<(), String> {
         || record.api_prefix.trim().is_empty()
     {
         return Err("approval record identity fields must be non-empty".to_string());
+    }
+    if let Some(grant) = &record.grant {
+        grant.validate(&record.capabilities)?;
     }
     for relation in &record.relations {
         if relation.scopes.len() > MAX_EXTENSION_SCOPES
@@ -720,6 +879,7 @@ mod tests {
                 "mode-registration".to_string(),
                 "completion-provider".to_string(),
             ],
+            grant: None,
             processes: vec!["example.server".to_string()],
             relations: vec![ApprovedRelation {
                 package: "@clay/markdown".to_string(),
@@ -754,6 +914,7 @@ mod tests {
                 "approved_at",
                 "approved_by",
                 "capabilities",
+                "grant",
                 "integrity",
                 "package",
                 "package_root",
@@ -772,6 +933,156 @@ mod tests {
                 "approval record must not carry {forbidden} keying"
             );
         }
+    }
+
+    fn provenance() -> PackageProvenance {
+        PackageProvenance {
+            requested_spec: "npm:@vendor/example@1.2.3".to_string(),
+            source_kind: crate::packages::manager::PackageSourceKind::NpmRegistry,
+            resolved_name: "@vendor/example".to_string(),
+            resolved_version: "1.2.3".to_string(),
+            package_root: PathBuf::from("/clay/packages/node_modules/@vendor/example"),
+            lockfile_path: None,
+            integrity: Some("sha512-abc".to_string()),
+            diagnostics: String::new(),
+        }
+    }
+
+    /// Plan 136 task 4: the grant is an explicit section of the approval
+    /// record, persists with it, and is only readable while the record's
+    /// identity still matches the installed provenance.
+    #[test]
+    fn grant_round_trips_and_is_identity_bound() {
+        let root = temp_root("grant-roundtrip");
+        let mut store = PackageApprovalStore::open(&root).expect("empty store opens");
+        assert!(
+            !store
+                .record_grant(
+                    &provenance(),
+                    "example",
+                    &[PackagePermission::CompletionProvider],
+                    RuntimeProfile::NativeTrust,
+                    "cli",
+                )
+                .unwrap(),
+            "a grant must not manufacture an approval record"
+        );
+        store.upsert(record("@vendor/example")).unwrap();
+        assert!(
+            store
+                .record_grant(
+                    &provenance(),
+                    "example",
+                    &[PackagePermission::CompletionProvider],
+                    RuntimeProfile::NativeTrust,
+                    "cli",
+                )
+                .unwrap(),
+            "a current approval record accepts the grant"
+        );
+
+        let reopened = PackageApprovalStore::open(&root).expect("store reloads");
+        let grant = reopened
+            .current_grant(&provenance(), "example")
+            .expect("grant persisted and readable");
+        assert_eq!(grant.capabilities, vec!["completion-provider"]);
+        assert_eq!(grant.runtime_profile, RuntimeProfile::NativeTrust);
+        assert_eq!(grant.granted_by, "cli");
+        assert!(!grant.granted_at.is_empty());
+
+        let mut updated = provenance();
+        updated.resolved_version = "9.9.9".to_string();
+        assert!(
+            reopened.current_grant(&updated, "example").is_none(),
+            "a grant is inert once the installed provenance changes"
+        );
+        assert!(
+            reopened
+                .current_grant(&provenance(), "other-prefix")
+                .is_none(),
+            "a grant is inert once the api prefix changes"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Plan 136 task 4: revoke withdraws the persisted grant with the
+    /// approval, and a grant outside the adoption ceiling is rejected at load
+    /// and upsert (fail closed).
+    #[test]
+    fn revoke_clears_the_grant_and_oversized_grants_fail_closed() {
+        let root = temp_root("grant-revoke");
+        let mut store = PackageApprovalStore::open(&root).expect("empty store opens");
+        store.upsert(record("@vendor/example")).unwrap();
+        store
+            .record_grant(
+                &provenance(),
+                "example",
+                &[PackagePermission::ModeRegistration],
+                RuntimeProfile::Sandboxed,
+                "user",
+            )
+            .unwrap();
+        assert!(store.revoke("@vendor/example").unwrap());
+        let reopened = PackageApprovalStore::open(&root).unwrap();
+        assert!(
+            reopened.current_grant(&provenance(), "example").is_none(),
+            "a revoked record contributes no grant"
+        );
+        let persisted = reopened.get("@vendor/example").expect("record kept");
+        assert!(persisted.revoked && persisted.grant.is_none());
+        let _ = fs::remove_dir_all(&root);
+
+        let mut store = PackageApprovalStore::in_memory();
+        let mut expanded = record("@vendor/example");
+        expanded.grant = Some(CapabilityGrant {
+            capabilities: vec!["network".to_string()],
+            runtime_profile: RuntimeProfile::NativeTrust,
+            granted_by: "cli".to_string(),
+            granted_at: "2026-09-23T00:00:00Z".to_string(),
+        });
+        let error = store
+            .upsert(expanded.clone())
+            .expect_err("a grant outside the ceiling must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("not in the record's capabilities"),
+            "got {error}"
+        );
+        // The same record loaded from disk fails closed instead of silently
+        // dropping the oversized grant.
+        let root = temp_root("grant-ceiling-load");
+        let path = root.join(APPROVAL_STORE_FILE_NAME);
+        let document = serde_json::json!({
+            "version": APPROVAL_STORE_VERSION,
+            "approvals": [expanded.to_json()],
+        });
+        fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let error = PackageApprovalStore::open(&root).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("not in the record's capabilities"),
+            "got {error}"
+        );
+        let _ = fs::remove_dir_all(&root);
+        assert!(
+            !store
+                .record_grant(
+                    &provenance(),
+                    "example",
+                    &[PackagePermission::Network],
+                    RuntimeProfile::NativeTrust,
+                    "cli",
+                )
+                .unwrap(),
+            "no record means no durable grant"
+        );
     }
 
     #[test]

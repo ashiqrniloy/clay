@@ -70,6 +70,7 @@ setDesignSystem("@clay/design-instrument");
 Pass either a specifier string or `{ specifier }`. `@clay/core`, `clay:core`, and `core` select the built-in baseline; other specifiers name packages that contribute `clay.contributions.uiDesignSystem`.
 
 Shipped choice set: `@clay/core` (baseline, always first) and the bundled `@clay/design-instrument` contributor. A bundled contributor is selectable without a prior `loadPackage` because the bundled manifest is validated and resolved on demand — this is what makes the shipped design system reachable from the Settings dropdown on a fresh install. The Settings panel enumerates the server's `ui_choices` snapshot rather than a hand-maintained list, so removed or unknown specifiers are never offered; a hand-written `init.js` specifier that names one still fails closed with `theme.load_failed`.
+- `specifier` (`string`, default `required`): Installed or canonical design-system package specifier to activate.
 
 ## Return and async behavior
 

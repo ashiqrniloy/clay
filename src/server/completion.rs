@@ -28,6 +28,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
@@ -808,8 +809,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_builtin(meta, provider)
     }
@@ -833,8 +833,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package(package, meta, provider)
     }
@@ -846,8 +845,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package_replacing_older(package, meta, provider)
     }
@@ -860,10 +858,7 @@ impl CompletionCoordinator {
         document_id: DocumentId,
         generation: CompletionProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_generations.insert(document_id, generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -877,10 +872,7 @@ impl CompletionCoordinator {
     /// Cancel active completion work and advance canonical version after an
     /// accepted edit. Submission is synchronous and never waits for providers.
     pub fn document_changed(&self, document_id: DocumentId, version: DocumentVersion) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.insert(document_id, version);
         let task_keys = inner
             .active_tasks
@@ -895,10 +887,7 @@ impl CompletionCoordinator {
     /// document: version/generation tracking and active completion work for
     /// the document (Plan 060 T6, P1-4).
     pub(crate) fn remove_document(&self, document_id: DocumentId) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.remove(&document_id);
         inner.current_generations.remove(&document_id);
         let task_keys: Vec<_> = inner
@@ -918,10 +907,7 @@ impl CompletionCoordinator {
         target: impl Into<String>,
         generation: CompletionProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.registry.disable_completion(target.into()) {
             return;
         }
@@ -941,10 +927,7 @@ impl CompletionCoordinator {
     /// is the package-scoped disable/revoke hook; it reuses the same abort
     /// path as generation replacement and never waits for provider completion.
     pub fn cancel_package(&self, package_prefix: &str) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_package(package_prefix);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -968,10 +951,7 @@ impl CompletionCoordinator {
     /// above `active_generation`, abort older in-flight work, and drain queued
     /// results so late old-generation output cannot publish.
     pub fn cancel_older_generations(&self, active_generation: CompletionProviderGeneration) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_older_generations(active_generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -1009,8 +989,7 @@ impl CompletionCoordinator {
     /// Snapshot the registry metadata, deterministically priority-ordered.
     pub fn providers(&self) -> Vec<CompletionProviderMeta> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .list_ordered()
             .into_iter()
@@ -1042,10 +1021,7 @@ impl CompletionCoordinator {
         validate_window(&request, &window)?;
 
         let (provider, meta, task_key) = {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("completion coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             let (meta, provider) = inner.registry.provider_clone(provider_id).ok_or_else(|| {
                 CompletionCoordinatorError::ProviderNotRegistered {
                     id: provider_id.to_string(),
@@ -1118,8 +1094,7 @@ impl CompletionCoordinator {
         });
 
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .active_tasks
             .insert(task_key, task);
         Ok(reply_rx)
@@ -1137,20 +1112,14 @@ impl CompletionCoordinator {
         let mut result = match result {
             Ok(result) => result,
             Err(CompletionProviderError::Timeout) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.timed_out_tasks += 1;
                 inner.stats.failed_tasks += 1;
                 return;
             }
             Err(_) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
                 return;
@@ -1158,10 +1127,7 @@ impl CompletionCoordinator {
         };
 
         if self.validate_task_freshness(&task_key).is_err() {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("completion coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner.active_tasks.remove(&task_key);
             inner.stats.stale_results_rejected += 1;
             return;
@@ -1170,20 +1136,14 @@ impl CompletionCoordinator {
         rank_completion_items(&mut result.items, &prefix, &recent_completions);
         match self.validate_result(&result, max_items) {
             Ok(()) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_results += 1;
                 drop(inner);
                 let _ = reply_tx.send(result);
             }
             Err(_) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.stale_results_rejected += 1;
             }
@@ -1194,10 +1154,7 @@ impl CompletionCoordinator {
         &self,
         task_key: &TaskKey,
     ) -> Result<(), CompletionCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&task_key.document_id)
@@ -1222,10 +1179,7 @@ impl CompletionCoordinator {
         result: &CompletionResultSet,
         max_items: usize,
     ) -> Result<(), CompletionCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&result.document_id)
@@ -1278,11 +1232,7 @@ impl CompletionCoordinator {
     }
 
     pub fn stats(&self) -> CompletionCoordinatorStats {
-        self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
-            .stats
-            .clone()
+        self.inner.lock_or_recover().stats.clone()
     }
 }
 
@@ -1525,10 +1475,7 @@ mod tests {
 
         coordinator.disable_completion("core.words", 2);
 
-        let inner = coordinator
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = coordinator.inner.lock_or_recover();
         assert!(
             inner
                 .registry

@@ -90,6 +90,14 @@ pub(crate) enum PackageCliSubcommand {
     /// Approve an installed package for execution (writes a durable exact
     /// approval record after host-side fact assembly).
     Adopt { package_name: String },
+    /// Grant declared capabilities to an adopted package (writes the durable
+    /// grant on its approval record).
+    Authorize {
+        package_name: String,
+        capabilities: Vec<String>,
+        runtime_profile: Option<String>,
+        approved_by: String,
+    },
     /// Revoke a package's durable approval and disable it if enabled.
     Revoke { package_name: String },
     /// Roll back an active replacement: disable the replacement and restore
@@ -119,7 +127,7 @@ impl std::fmt::Display for CliError {
 
 impl Error for CliError {}
 
-pub(crate) const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay install                        # binary presence check (never installs)\n  clay install npm:<spec> [--allow-scripts]\n  clay install --bin <name> --yes [--allow-scripts]\n  clay remove npm:<spec>\n  clay list [--bundled]\n  clay update [--extensions|--all|npm:<spec>]\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay package adopt <name>\n  clay package revoke <name>\n  clay package rollback <name>\n  clay <endpoint>\n\nModes:\n  clay                  Stop leftover servers on the default endpoint, then launch the Tauri desktop.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Open another Tauri desktop against a running server (does not kill servers).\n  clay restart          Stop leftover servers on the endpoint, start a fresh background server, then exit.\n  clay smoke-gui        Start an isolated server, launch the Tauri desktop, then clean up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay install          No argument: binary check. npm:<spec>: install a package (no enable/adopt). --bin <name> --yes: permissioned binary install.\n  clay remove           Uninstall a Clay-installed package and strip its init.js load line.\n  clay list             List installed packages (add --bundled for first-party inventory).\n  clay update           Self-update from the install channel. --extensions updates floating packages; --all does both.\n  clay package          Trust-lifecycle verbs (enable/disable/inspect/adopt/revoke/rollback).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay install` (dangerous).\n  --bin <name>             Provision an inventory binary (requires --yes).\n  --yes                    Approve the exact provisioning command for this invocation.\n  --bundled                Include bundled first-party packages in `clay list`.\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
+pub(crate) const CLI_USAGE: &str = "Usage:\n  clay\n  clay server [endpoint] [--config-fixture <name>]\n  clay client [endpoint]\n  clay restart [endpoint]\n  clay smoke-gui [--config-fixture <name>]\n  clay perf-fixture --kind <kind> --size-mib <n> [--output <path>] [--seed <n>]\n  clay install                        # binary presence check (never installs)\n  clay install npm:<spec> [--allow-scripts]\n  clay install --bin <name> --yes [--allow-scripts]\n  clay remove npm:<spec>\n  clay list [--bundled]\n  clay update [--extensions|--all|npm:<spec>]\n  clay package enable <name>\n  clay package disable <name>\n  clay package inspect <name>\n  clay package adopt <name>\n  clay package authorize <name> --capability <cap> [--capability <cap>]... [--runtime-profile <p>] [--approved-by <who>]\n  clay package revoke <name>\n  clay package rollback <name>\n  clay <endpoint>\n\nModes:\n  clay                  Stop leftover servers on the default endpoint, then launch the Tauri desktop.\n  clay server           Run a foreground server on the default local endpoint.\n  clay client           Open another Tauri desktop against a running server (does not kill servers).\n  clay restart          Stop leftover servers on the endpoint, start a fresh background server, then exit.\n  clay smoke-gui        Start an isolated server, launch the Tauri desktop, then clean up.\n  clay perf-fixture     Generate deterministic large UTF-8 plain-text performance fixtures.\n  clay install          No argument: binary check. npm:<spec>: install a package (no enable/adopt). --bin <name> --yes: permissioned binary install.\n  clay remove           Uninstall a Clay-installed package and strip its init.js load line.\n  clay list             List installed packages (add --bundled for first-party inventory).\n  clay update           Self-update from the install channel. --extensions updates floating packages; --all does both.\n  clay package          Trust-lifecycle verbs (enable/disable/inspect/adopt/authorize/revoke/rollback).\n  clay <endpoint>       Advanced debugging shorthand for 'clay client <endpoint>'.\n\nOptions:\n  --config-fixture <name>  Development smoke fixture under tests/fixtures/configuration/<name>.\n  --allow-scripts          Allow package lifecycle scripts during `clay install` (dangerous).\n  --bin <name>             Provision an inventory binary (requires --yes).\n  --yes                    Approve the exact provisioning command for this invocation.\n  --bundled                Include bundled first-party packages in `clay list`.\n  --capability <cap>       Capability to grant (repeatable; replaces the previous grant); the manifest must declare it.\n  --runtime-profile <p>    native-trust | sandboxed | restricted (default native-trust).\n  --approved-by <who>      user | cli | config (default cli) for `clay package authorize`.\n  --profile-perf          Enable internal developer performance metric snapshots for this process.\n\nEnvironment:\n  CLAY_ALLOW_LIFECYCLE_SCRIPTS=1  Same as --allow-scripts (dangerous).\n\nPerf fixture kinds:\n  long-lines, many-short-lines, mixed-unicode, newline-heavy\n";
 
 pub(crate) fn extract_profile_perf_flag(
     args: impl Iterator<Item = OsString>,
@@ -539,7 +547,7 @@ pub(crate) fn parse_package_subcommand(
     let mut args = args.peekable();
     let Some(op) = args.next() else {
         return Err(CliError::new(
-            "clay package requires a subcommand: enable | disable | inspect | adopt | revoke | rollback",
+            "clay package requires a subcommand: enable | disable | inspect | adopt | authorize | revoke | rollback",
         ));
     };
     match op.to_string_lossy().as_ref() {
@@ -592,6 +600,41 @@ pub(crate) fn parse_package_subcommand(
                 },
             })
         }
+        "authorize" => {
+            let name = args
+                .next()
+                .ok_or_else(|| CliError::new("clay package authorize requires a package name"))?;
+            let package_name = name.to_string_lossy().into_owned();
+            let mut capabilities = Vec::new();
+            let mut runtime_profile = None;
+            let mut approved_by = None;
+            while let Some(arg) = args.next() {
+                let text = arg.to_string_lossy();
+                let mut value_for = |flag: &str| -> Result<String, CliError> {
+                    args.next()
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .ok_or_else(|| CliError::new(format!("{flag} requires a value")))
+                };
+                match text.as_ref() {
+                    "--capability" => capabilities.push(value_for("--capability")?),
+                    "--runtime-profile" => runtime_profile = Some(value_for("--runtime-profile")?),
+                    "--approved-by" => approved_by = Some(value_for("--approved-by")?),
+                    other => {
+                        return Err(CliError::new(format!(
+                            "unknown option `{other}` for clay package authorize"
+                        )));
+                    }
+                }
+            }
+            Ok(ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Authorize {
+                    package_name,
+                    capabilities,
+                    runtime_profile,
+                    approved_by: approved_by.unwrap_or_else(|| "cli".to_string()),
+                },
+            })
+        }
         "revoke" => {
             let name = args
                 .next()
@@ -613,7 +656,7 @@ pub(crate) fn parse_package_subcommand(
             })
         }
         unknown => Err(CliError::new(format!(
-            "unknown clay package subcommand `{unknown}`; expected: enable | disable | inspect | adopt | revoke | rollback"
+            "unknown clay package subcommand `{unknown}`; expected: enable | disable | inspect | adopt | authorize | revoke | rollback"
         ))),
     }
 }
@@ -712,6 +755,54 @@ mod tests {
                 subcommand: PackageCliSubcommand::Adopt { .. }
             }
         ));
+        assert_eq!(
+            parse_command(args(&[
+                "package",
+                "authorize",
+                "@arnilo/st",
+                "--capability",
+                "completion-provider",
+                "--capability",
+                "parse-document",
+                "--runtime-profile",
+                "sandboxed",
+                "--approved-by",
+                "user",
+            ]))
+            .unwrap(),
+            ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Authorize {
+                    package_name: "@arnilo/st".into(),
+                    capabilities: vec!["completion-provider".into(), "parse-document".into()],
+                    runtime_profile: Some("sandboxed".into()),
+                    approved_by: "user".into(),
+                },
+            }
+        );
+        assert_eq!(
+            parse_command(args(&["package", "authorize", "@arnilo/st"])).unwrap(),
+            ClayCommand::Package {
+                subcommand: PackageCliSubcommand::Authorize {
+                    package_name: "@arnilo/st".into(),
+                    capabilities: Vec::new(),
+                    runtime_profile: None,
+                    approved_by: "cli".into(),
+                },
+            }
+        );
+        let missing_value = parse_command(args(&[
+            "package",
+            "authorize",
+            "@arnilo/st",
+            "--capability",
+        ]))
+        .unwrap_err()
+        .to_string();
+        assert!(missing_value.contains("--capability requires a value"));
+        let unknown_flag = parse_command(args(&["package", "authorize", "@arnilo/st", "--nope"]))
+            .unwrap_err()
+            .to_string();
+        assert!(unknown_flag.contains("unknown option `--nope`"));
     }
 
     #[test]

@@ -53,7 +53,7 @@ This split keeps package metadata single-source while leaving package JavaScript
 for runtime work such as parse handlers. Invalid package chords or routing
 policies fail the load rather than creating raw-character or accepted no-op
 routes. The behavior is covered by the live package catalogue and runtime
-reload tests in `src/server/mod.rs`.
+reload tests in `src/server/runtime_generation_tests.rs`.
 
 ### Phase 18.9 mode discovery commands
 

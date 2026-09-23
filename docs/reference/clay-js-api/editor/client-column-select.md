@@ -20,6 +20,10 @@ custom_properties:
     type: enum
     default: none
     description: Column-select direction (down, up, left, right).
+  - name: documentId
+    type: string
+    default: optional
+    description: Reserved surface target; the client applies the command to the focused editor.
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientColumnSelect` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, multi-cursor, column-select, selection]
@@ -61,6 +65,7 @@ clientColumnSelect({ direction: "right" });
 
 ## Options
 
+- `documentId` (`string`, optional): Reserved surface target; the client applies the command to the focused editor.
 - `direction` (`enum`): `down` | `up` | `left` | `right`.
 
 ## Key bindings
@@ -75,6 +80,7 @@ Users may rebind or remove these through documented key binding APIs in `~/.clay
 ## Custom properties
 
 - `direction` (`enum`): Column-select direction (see Options).
+- `documentId`: Reserved surface target; the client applies the command to the focused editor.
 
 ## Return and async behavior
 

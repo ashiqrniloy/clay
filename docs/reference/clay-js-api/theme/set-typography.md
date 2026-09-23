@@ -208,6 +208,10 @@ Each family stack must end with one supported generic fallback: `system-ui`, `se
 When `hierarchy` is present it must contain exactly the seven named scale fields `display`, `title`, `section`, `body`, `status`, `detail`, and `caption`. Each must be a finite number greater than `0` and at most `4`; the ratio multiplies the selected role's base size to produce a variant's pixel size. Omitting `hierarchy` keeps Clay defaults. Partial hierarchies are rejected atomically.
 
 Unknown fields, partial profiles, partial hierarchies, and separate per-profile updates are rejected. There is no parallel JSON, TOML, environment-variable, or package setting for concrete typography.
+- `hierarchy` (`object`, default `optional`): Optional seven-field scale (`display`, `title`, `section`, `body`, `status`, `detail`, `caption`), each a finite number greater than 0 and at most 4; partial hierarchies are rejected.
+- `monospace` (`object`, default `required`): Monospace profile: `families` (1-8 stacks ending in a supported generic fallback) and `size` (6..=96 logical pixels).
+- `proportional` (`object`, default `required`): Proportional profile: `families` (1-8 stacks ending in a supported generic fallback) and `size` (6..=96 logical pixels).
+- `ui` (`object`, default `required`): UI profile: `families` (1-8 stacks ending in a supported generic fallback) and `size` (6..=96 logical pixels).
 
 ## Return and async behavior
 
@@ -309,3 +313,8 @@ No default key bindings. This API is startup/reload configuration, not key routi
   - name: hierarchy.caption
   - type: number
   - default: `0.75`
+- `monospace.ligatures`: Optional OpenType ligature/feature policy for code text.
+- `proportional.ligatures`: Optional OpenType ligature/feature policy for prose text; same schema as monospace.ligatures.
+- `ui.ligatures`: Optional OpenType ligature/feature policy for Clay UI text; same schema as monospace.ligatures.
+
+## 

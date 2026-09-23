@@ -7,6 +7,7 @@ use std::{
     time::Instant,
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -328,7 +329,7 @@ impl ParseCoordinator {
         mpsc::Receiver<IncrementalParseUpdate>,
         mpsc::Receiver<RuntimeDiagnostic>,
     ) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         let updates = inner.updates_router.subscribe_client(client_id);
         let diagnostics = inner.diagnostics_router.subscribe_client(client_id);
         (updates, diagnostics)
@@ -336,7 +337,7 @@ impl ParseCoordinator {
 
     /// Authorize `client_id` to receive parse updates for `document_id`.
     pub(crate) fn subscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner
             .updates_router
             .subscribe_document(document_id, client_id);
@@ -344,7 +345,7 @@ impl ParseCoordinator {
 
     /// Withdraw `client_id`'s parse subscription for one document.
     pub(crate) fn unsubscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner
             .updates_router
             .unsubscribe_document(document_id, client_id);
@@ -352,7 +353,7 @@ impl ParseCoordinator {
 
     /// Remove every subscription held by one connection (disconnect).
     pub(crate) fn unsubscribe_client(&self, client_id: ClientId) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.updates_router.unsubscribe_client(client_id);
         inner.diagnostics_router.unsubscribe_client(client_id);
     }
@@ -423,7 +424,7 @@ impl ParseCoordinator {
             package_prefix: meta.package_prefix.clone(),
             mode_id: meta.mode_id.clone(),
         };
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if inner
             .handlers
             .get(&key)
@@ -468,7 +469,7 @@ impl ParseCoordinator {
         package_prefix: &str,
         mode_id: &str,
     ) -> Option<Arc<dyn ParseHandler>> {
-        let inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         inner
             .handlers
             .get(&HandlerKey {
@@ -480,7 +481,7 @@ impl ParseCoordinator {
 
     /// Cancel handlers and active work for one exact generation.
     pub fn cancel_generation(&self, generation_id: u64) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner
             .handlers
             .retain(|_, registered| registered.generation_id != generation_id);
@@ -497,7 +498,7 @@ impl ParseCoordinator {
     /// in-flight task older than `active_generation`, then drain any already
     /// queued parse outputs so late old-generation results cannot publish.
     pub fn cancel_older_generations(&self, active_generation: u64) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner
             .handlers
             .retain(|_, registered| registered.generation_id >= active_generation);
@@ -516,7 +517,7 @@ impl ParseCoordinator {
     /// holder closes a document: version tracking, native-edit acceptance
     /// state, and active parse work for the document (Plan 060 T6, P1-4).
     pub(crate) fn remove_document(&self, document_id: DocumentId) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.remove(&document_id);
         inner.accepted_native_edits.remove(&document_id);
         let task_keys: Vec<_> = inner
@@ -532,7 +533,7 @@ impl ParseCoordinator {
     /// is the package-scoped disable/revoke hook; it reuses the same abort path
     /// as runtime generation replacement and never waits for handler completion.
     pub fn cancel_package(&self, package_prefix: &str) {
-        let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner
             .handlers
             .retain(|key, _| key.package_prefix != package_prefix);
@@ -567,8 +568,7 @@ impl ParseCoordinator {
     pub(crate) fn registered_generations(&self) -> Vec<u64> {
         let mut generations = self
             .inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
+            .lock_or_recover()
             .handlers
             .values()
             .map(|registered| registered.generation_id)
@@ -587,14 +587,10 @@ impl ParseCoordinator {
         if !self.perf.is_enabled() {
             return;
         }
-        self.inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
-            .accepted_native_edits
-            .insert(
-                document_id,
-                (document_version, Instant::now(), false, trace_id),
-            );
+        self.inner.lock_or_recover().accepted_native_edits.insert(
+            document_id,
+            (document_version, Instant::now(), false, trace_id),
+        );
         self.perf.record_with_metadata(
             SYNTAX_LOGICAL_WORK_ITEMS,
             MetricValue::Counter { amount: 1 },
@@ -622,7 +618,7 @@ impl ParseCoordinator {
             );
         }
         let started = {
-            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner
                 .accepted_native_edits
                 .get_mut(&update.document_id)
@@ -697,7 +693,7 @@ impl ParseCoordinator {
         let notification_document_version = notification.document_version;
 
         let (handler, task_key, native_edit) = {
-            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             let registered = inner.handlers.get(&handler_key).ok_or_else(|| {
                 ParseCoordinatorError::HandlerNotRegistered {
                     package_prefix: handler_key.package_prefix.clone(),
@@ -775,20 +771,16 @@ impl ParseCoordinator {
                 .await;
         });
 
-        self.inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
-            .active_tasks
-            .insert(
-                task_key,
-                ActiveParseTask {
-                    mailbox,
-                    document_version: notification_document_version,
-                    native_edit,
-                    request_id,
-                    request_client_id,
-                },
-            );
+        self.inner.lock_or_recover().active_tasks.insert(
+            task_key,
+            ActiveParseTask {
+                mailbox,
+                document_version: notification_document_version,
+                native_edit,
+                request_id,
+                request_client_id,
+            },
+        );
         Ok(())
     }
 
@@ -871,7 +863,7 @@ impl ParseCoordinator {
         // closed) — the job's output is stale and must not publish, but a
         // request-scoped job still owes the connection its empty completion.
         let superseded_or_closed = {
-            let inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             match inner.active_tasks.get(&task_key) {
                 None => true,
                 Some(task) => task.document_version != task_version,
@@ -884,11 +876,7 @@ impl ParseCoordinator {
                 request_id,
                 request_client_id,
             );
-            self.inner
-                .lock()
-                .expect("parse coordinator lock poisoned")
-                .stats
-                .stale_results_rejected += 1;
+            self.inner.lock_or_recover().stats.stale_results_rejected += 1;
             return;
         }
         // Every terminal path of a request-scoped task must publish exactly
@@ -917,7 +905,7 @@ impl ParseCoordinator {
         let Ok(update) = result else {
             let error = result.expect_err("parse result error present");
             let diagnostic = parse_failure_diagnostic(&task_key, &error);
-            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner.stats.failed_tasks += 1;
             inner.diagnostics_router.broadcast(&diagnostic);
             drop(inner);
@@ -927,7 +915,7 @@ impl ParseCoordinator {
         };
 
         if self.validate_task_generation(&task_key).is_err() {
-            let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner.stats.stale_results_rejected += 1;
             drop(inner);
             completion(self);
@@ -936,7 +924,7 @@ impl ParseCoordinator {
 
         match self.validate_update(&update) {
             Ok(()) => {
-                let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.stats.published_updates += 1;
                 inner
                     .updates_router
@@ -946,14 +934,14 @@ impl ParseCoordinator {
                 let _ = self.updates_tx.try_send(update);
             }
             Err(ParseCoordinatorError::StaleDocumentVersion { .. }) => {
-                let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.stats.stale_results_rejected += 1;
                 drop(inner);
                 completion(self);
             }
             Err(error) => {
                 let diagnostic = parse_failure_diagnostic(&task_key, &error);
-                let mut inner = self.inner.lock().expect("parse coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.stats.failed_tasks += 1;
                 inner.diagnostics_router.broadcast(&diagnostic);
                 drop(inner);
@@ -991,8 +979,7 @@ impl ParseCoordinator {
         };
         let active_generation = self
             .inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
+            .lock_or_recover()
             .handlers
             .get(&handler_key)
             .map(|registered| registered.generation_id);
@@ -1020,8 +1007,7 @@ impl ParseCoordinator {
         }
         let current_version = self
             .inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
+            .lock_or_recover()
             .current_versions
             .get(&update.document_id)
             .copied()
@@ -1095,11 +1081,7 @@ impl ParseCoordinator {
     }
 
     pub fn stats(&self) -> ParseCoordinatorStats {
-        self.inner
-            .lock()
-            .expect("parse coordinator lock poisoned")
-            .stats
-            .clone()
+        self.inner.lock_or_recover().stats.clone()
     }
 }
 
@@ -1751,10 +1733,7 @@ mod tests {
             mode_id: "rust.rust".to_string(),
             window_id: Some(0),
         };
-        let mut inner = coordinator
-            .inner
-            .lock()
-            .expect("parse coordinator lock poisoned");
+        let mut inner = coordinator.inner.lock_or_recover();
         inner.active_tasks.insert(
             task_key.clone(),
             ActiveParseTask {

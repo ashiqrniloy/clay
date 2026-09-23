@@ -24,10 +24,22 @@ custom_properties:
     type: number
     default: required
     description: Server document version the spans were produced for.
-  - name: viewportByteRange
-    type: byte-range
+  - name: currentDocumentVersion
+    type: number
+    default: documentVersion
+    description: Validation override used by tests/server integration; defaults to `documentVersion`.
+  - name: viewport
+    type: object
     default: required
-    description: Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+    description: Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+  - name: viewport.byteStart
+    type: number
+    default: required
+    description: First byte of the visible range.
+  - name: viewport.byteEnd
+    type: number
+    default: required
+    description: Last byte of the visible range.
   - name: spans
     type: DecorationSpan[]
     default: []
@@ -164,7 +176,7 @@ semantics.
 - `documentId` (`number`, required): Target document.
 - `documentVersion` (`number`, required): Version used by the parser.
 - `currentDocumentVersion` (`number`, optional): Validation override used by tests/server integration; defaults to `documentVersion`.
-- `viewportByteRange` / `viewport` (`{ byteStart: number; byteEnd: number }`, required): Viewport byte range.
+- `viewport` (`{ byteStart: number; byteEnd: number }`, required): Viewport byte range.
 - `spans` (`DecorationSpan[]`, required): Known inert span records.
 
 Known span kinds are `syntax`, `semantic`, `diagnostic`, `search-match`, `link`, and `inlayHint`. Each span must provide either direct two-axis vocabulary (`tokenType` such as `Function`/`Variable`/`Keyword` plus optional `modifiers` such as `Declaration`/`Readonly`/`Bold`) or a legacy `styleToken` compatibility string such as `markup.heading.1`, `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `diagnostic.error`, and `search.match`. Link targets use `target.kind` `workspacePath`, `documentRange`, or `displayOnly`; inlay hints use `inlay.label` plus `inlay.placement` `before` or `after`. `language-server` permission does not grant decoration publication; packages still need `render-decorations`.
@@ -177,9 +189,13 @@ No default key binding is assigned.
 
 - `documentId`: target open document.
 - `documentVersion`: stale-version guard.
-- `viewportByteRange`: publication range and IPC bound.
+- `viewport`: publication range and IPC bound.
 - `spans`: bounded inert decorations.
 - `packagePrefix`: provenance and conflict identity.
+- `currentDocumentVersion`: Validation override used by tests/server integration; defaults to `documentVersion`.
+- `viewport`: Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+- `viewport.byteStart`: First byte of the visible range.
+- `viewport.byteEnd`: Last byte of the visible range.
 
 ## Return and async behavior
 

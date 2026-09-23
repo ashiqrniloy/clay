@@ -1,0 +1,768 @@
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/icons.rs:369:35
+    |
+369 |                 if p[3] != 0.0 && p[3] != 1.0 {
+    |                                   ^^^^^^^^^^^ help: consider comparing them within some margin of error: `(p[3] - 1.0).abs() > error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+    = note: `-W clippy::float-cmp` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::float_cmp)]`
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/icons.rs:375:35
+    |
+375 |                 if p[4] != 0.0 && p[4] != 1.0 {
+    |                                   ^^^^^^^^^^^ help: consider comparing them within some margin of error: `(p[4] - 1.0).abs() > error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/icons.rs:564:28
+    |
+564 |         if value == 0.0 || value == 1.0 {
+    |                            ^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(value - 1.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../package_ui_conformance.rs:914:5
+    |
+914 |     assert_eq!(btn.border_radius, 6.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+    = note: `-W clippy::float-cmp` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::float_cmp)]`
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../package_ui_conformance.rs:918:5
+    |
+918 |     assert_eq!(btn.border_width, 0.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:1546:5
+     |
+1546 |     assert_eq!(radius("radius.xs"), 5.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:1547:5
+     |
+1547 |     assert_eq!(radius("radius.control"), 8.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:1548:5
+     |
+1548 |     assert_eq!(radius("radius.panel"), 12.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:1549:5
+     |
+1549 |     assert_eq!(radius("radius.surface"), 16.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:1550:5
+     |
+1550 |     assert_eq!(radius("radius.pill"), 9999.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:2602:43
+     |
+2602 | ...                   let tint = if layer.opacity == 1.0 {
+     |                                     ^^^^^^^^^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(layer.opacity - 1.0).abs() < error_margin`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:2674:43
+     |
+2674 |         if *prop == "background-color" && recipe.background_opacity != 1.0 {
+     |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(recipe.background_opacity - 1.0).abs() > error_margin`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:2730:13
+     |
+2730 | /             assert_ne!(
+2731 | |                 recipe.border_radius, 0.0,
+2732 | |                 "`{name}` may not be 0px (DESIGN.md §5)"
+2733 | |             );
+     | |_____________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:2754:13
+     |
+2754 | /             assert_eq!(
+2755 | |                 recipe.outline_width, 2.0,
+2756 | |                 "`{name}` ring width (DESIGN.md §11)"
+2757 | |             );
+     | |_____________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> tests/suites/../package_ui_conformance.rs:2758:13
+     |
+2758 | /             assert_eq!(
+2759 | |                 recipe.outline_offset, 2.0,
+2760 | |                 "`{name}` ring offset (DESIGN.md §11)"
+2761 | |             );
+     | |_____________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../theme_packages.rs:482:5
+    |
+482 |     assert_eq!(failure.threshold, 4.5);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../theme_packages.rs:786:9
+    |
+786 |         assert_eq!(failure.threshold, 3.0, "{specifier}");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../theme_packages.rs:879:13
+    |
+879 |             assert_eq!(failure.threshold, 3.0, "{specifier}");
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../theme_packages.rs:943:9
+    |
+943 |         assert_eq!(failure.threshold, 1.2, "{specifier}");
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../example_config_control_center_chord.rs:289:5
+    |
+289 |     assert_eq!(button.border_radius, 8.0, "control radius ladder");
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+    = note: `-W clippy::float-cmp` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::float_cmp)]`
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../example_config_control_center_chord.rs:290:5
+    |
+290 |     assert_eq!(button.border_width, 1.0, "hairline border width");
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../example_config_control_center_chord.rs:291:5
+    |
+291 |     assert_eq!(button.transition_duration, 150.0, "motion.fast tier");
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> tests/suites/../performance_budgets.rs:596:5
+    |
+596 |     assert_eq!(COMPLETION_MAX_WIDTH_PX, 480.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/editor/theme.rs:785:17
+    |
+785 |                 color.split().1 == 1.0,
+    |                 ^^^^^^^^^^^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(color.split().1 - 1.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+    = note: `-W clippy::float-cmp` implied by `-W clippy::pedantic`
+    = help: to override `-W clippy::pedantic` add `#[allow(clippy::float_cmp)]`
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/editor/theme.rs:790:13
+    |
+790 |             r.semantic.split().1 == 1.0,
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(r.semantic.split().1 - 1.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/design_system.rs:2127:9
+     |
+2127 |         assert_eq!(button_primary.border_radius, 8.0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/design_system.rs:2130:9
+     |
+2130 |         assert_eq!(button_primary.border_width, 0.0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/design_system.rs:2142:9
+     |
+2142 |         assert_eq!(modal_dialog.border_width, 1.0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/design_system.rs:2143:9
+     |
+2143 |         assert_eq!(modal_dialog.border_radius, 16.0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/icons.rs:997:91
+    |
+997 | ... == 0.0 || p[3] == 1.0) && (p[4] == 0.0 || p[4] == 1.0))
+    |               ^^^^^^^^^^^ help: consider comparing them within some margin of error: `(p[3] - 1.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/icons.rs:997:123
+    |
+997 | ... == 0.0 || p[4] == 1.0))
+    |               ^^^^^^^^^^^ help: consider comparing them within some margin of error: `(p[4] - 1.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:580:5
+    |
+580 |     assert_eq!(slot.size, 100.0); // clamped to min
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:582:5
+    |
+582 |     assert_eq!(slot.size, 400.0); // clamped to max
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:584:5
+    |
+584 |     assert_eq!(slot.size, 300.0); // within bounds
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:598:5
+    |
+598 |     assert_eq!(slot.effective_size(800.0), 200.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:601:5
+    |
+601 |     assert_eq!(slot.effective_size(800.0), 0.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:604:5
+    |
+604 |     assert_eq!(slot.effective_size(800.0), 200.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:613:5
+    |
+613 |     assert_eq!(slot.size, original_size);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:666:5
+    |
+666 |     assert_eq!(slot.size, 300.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/layout/tests.rs:686:5
+    |
+686 |     assert_eq!(slot.size, 200.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/layout/tests.rs:1083:5
+     |
+1083 |     assert_eq!(slot.effective_size(available), 0.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1263:9
+     |
+1263 |         assert_eq!(bottom_rect(Rect::new(0.0, 0.0, 300.0, 80.0)).height(), 80.0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1303:9
+     |
+1303 |         assert_eq!(overlay_rect.y1, geometry.main_rect.y1);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1304:9
+     |
+1304 |         assert_eq!(overlay_rect.x0, geometry.main_rect.x0);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1305:9
+     |
+1305 |         assert_eq!(overlay_rect.x1, geometry.main_rect.x1);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1359:9
+     |
+1359 |         assert_eq!(below.width(), COMPLETION_MAX_WIDTH_PX);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1390:9
+     |
+1390 |         assert_eq!(many.height(), eight.height());
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/package_ui.rs:1392:9
+     |
+1392 |         assert_eq!(many.width(), COMPLETION_MAX_WIDTH_PX);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+  --> src/shell/theme/tests.rs:61:5
+   |
+61 |     assert_eq!(style.panel_padding, 14.0);
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/theme/tests.rs:529:9
+    |
+529 | /         assert_eq!(
+530 | |             resolve_f64(&resolver, &token, ThemeTokenType::Spacing),
+531 | |             value,
+532 | |             "{token}"
+533 | |         );
+    | |_________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1042:5
+     |
+1042 |     assert_eq!(defaults.sidebar_width, SIDEBAR_DEFAULT_WIDTH);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1043:5
+     |
+1043 |     assert_eq!(defaults.side_default, PANEL_SIDE_DEFAULT);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1044:5
+     |
+1044 |     assert_eq!(defaults.sidebar_width, defaults.side_default);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1045:5
+     |
+1045 |     assert_eq!(defaults.side_min, PANEL_SIDE_MIN);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1046:5
+     |
+1046 |     assert_eq!(defaults.side_max, PANEL_SIDE_MAX);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1055:5
+     |
+1055 |     assert_eq!(defaults.vertical_default, PANEL_VERTICAL_DEFAULT);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1056:5
+     |
+1056 |     assert_eq!(defaults.vertical_min, PANEL_VERTICAL_MIN);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1057:5
+     |
+1057 |     assert_eq!(defaults.vertical_max, PANEL_VERTICAL_MAX);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1075:9
+     |
+1075 |         assert_eq!(state.size, size);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1076:9
+     |
+1076 |         assert_eq!(state.max_size, max);
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1130:5
+     |
+1130 |     assert_eq!(base.spacing_scale(), 1.0);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1154:5
+     |
+1154 |     assert_ne!(widened.side_default, base.side_default);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+    --> src/shell/theme/tests.rs:1155:5
+     |
+1155 |     assert_ne!(widened.side_max, base.side_max);
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/shell/theme/theme_snapshot_tests.rs:184:5
+    |
+184 | /     assert_eq!(
+185 | |         density_spacing_scale(&std::collections::BTreeMap::new()),
+186 | |         1.0
+187 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/connection/tests/protocol_and_bootstrap.rs:287:44
+    |
+287 |             if typography.revision == 1 && typography.monospace.size == 16.0
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: consider comparing them within some margin of error: `(typography.monospace.size - 16.0).abs() < error_margin`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/connection/tests/mod.rs:711:5
+    |
+711 | /     assert_eq!(
+712 | |         server
+713 | |             .runtime_generation
+714 | |             .active_typography()
+...   |
+719 | |         "reloaded generation must come from the hermetic config root"
+720 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/connection/tests/mod.rs:833:5
+    |
+833 | /     assert_eq!(
+834 | |         server
+835 | |             .runtime_generation
+836 | |             .active_typography()
+...   |
+841 | |         "replaced generation must come from the hermetic config root"
+842 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/editor_layout_and_design_system.rs:516:5
+    |
+516 |     assert_eq!(panel_recipe.border_radius, 8.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/facades_and_modes.rs:567:5
+    |
+567 | /     assert_eq!(
+568 | |         caret.width_px,
+569 | |         crate::protocol::CaretStyle::default().width_px
+570 | |     );
+    | |_____^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/load_package_markdown_defaults.rs:492:5
+    |
+492 |     assert_eq!(typography.monospace.size, 18.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/load_package_markdown_defaults.rs:493:5
+    |
+493 |     assert_eq!(typography.proportional.size, 17.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/runtime_themes_and_typography.rs:126:5
+    |
+126 |     assert_eq!(typography.proportional.size, 17.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/js_runtime/tests/runtime_themes_and_typography.rs:179:5
+    |
+179 |     assert_eq!(typography.monospace.size, 18.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/ops/modes.rs:744:9
+    |
+744 |         assert_eq!(style.width_px, 2.0);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/ops/modes.rs:754:9
+    |
+754 |         assert_eq!(style.width_px, CaretStyle::default().width_px);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/ops/theme.rs:836:9
+    |
+836 |         assert_eq!(btn_recipe.border_radius, 6.0);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/ops/theme.rs:849:9
+    |
+849 |         assert_eq!(input_recipe.border_width, 1.0);
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/runtime_generation_tests.rs:617:5
+    |
+617 |     assert_eq!(typography.monospace.size, 16.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/runtime_generation_tests.rs:618:5
+    |
+618 |     assert_eq!(typography.proportional.size, 17.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/runtime_generation_tests.rs:619:5
+    |
+619 |     assert_eq!(typography.ui.size, 13.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+
+warning: strict comparison of `f32` or `f64`
+   --> src/server/runtime_generation_tests.rs:838:5
+    |
+838 |     assert_eq!(typography.monospace.size, 16.0);
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#float_cmp
+
+

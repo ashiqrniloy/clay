@@ -5,6 +5,7 @@ pub mod color;
 pub mod docs;
 pub mod editor;
 pub mod ipc;
+pub(crate) mod lock_util;
 pub mod packages;
 pub mod perf;
 pub mod protocol;

@@ -85,6 +85,11 @@ pub enum PackageServiceError {
         package_name: String,
         capability: PackagePermission,
     },
+    /// An approval listed a capability the package manifest never declares.
+    UndeclaredCapability {
+        package_name: String,
+        capability: PackagePermission,
+    },
     /// A language-server capability lacks a current contribution/root-scoped grant.
     MissingLanguageServerGrant { package_name: String },
     /// Bundled-default trust was requested for a non-Clay-shipped package.
@@ -155,6 +160,14 @@ impl std::fmt::Display for PackageServiceError {
             } => write!(
                 f,
                 "package `{package_name}` requested capability `{}` without a user authorization grant",
+                capability.as_str()
+            ),
+            Self::UndeclaredCapability {
+                package_name,
+                capability,
+            } => write!(
+                f,
+                "package `{package_name}` does not declare capability `{}` in its manifest",
                 capability.as_str()
             ),
             Self::MissingLanguageServerGrant { package_name } => write!(
@@ -280,8 +293,29 @@ pub struct PackageInspection {
     pub requested_capabilities: Vec<String>,
     pub approved_capabilities: Vec<String>,
     pub runtime_profile: Option<String>,
+    pub grant_provenance: Option<GrantProvenance>,
     pub native_syntax_languages: Vec<String>,
     pub preset: Option<String>,
+}
+
+/// Who granted and who approved, and when. Read from the durable approval
+/// record so `clay package inspect` can show the audit trail of the grant
+/// itself (Plan 136 task 5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrantProvenance {
+    pub granted_by: String,
+    pub granted_at: String,
+    pub approved_by: String,
+    pub approved_at: String,
+}
+
+/// The current grants for one package: the union of the in-memory
+/// authorization and the durable grant, plus the durable record's provenance.
+#[derive(Debug, Default)]
+struct GrantView {
+    capabilities: Vec<String>,
+    runtime_profile: Option<String>,
+    provenance: Option<GrantProvenance>,
 }
 
 /// Adoption state of an installed package for inspection surfaces.
@@ -568,6 +602,10 @@ impl PackageService {
             processes,
             relations,
             replacements,
+            // Adoption never grants: a fresh record starts ungranted, and the
+            // user's grant is recorded by `authorize_package` afterwards
+            // (Plan 136 task 4).
+            grant: None,
             approved_by: approved_by.to_string(),
             approved_at: crate::packages::approvals::rfc3339_now(),
             revoked: false,
@@ -604,26 +642,66 @@ impl PackageService {
         }
     }
 
-    /// Revoke a durable approval (kept for diagnostics) and persist.
+    /// Revoke a durable approval (kept for diagnostics) and persist. Also
+    /// withdraws the in-memory capability grant, so a revoked approval cannot
+    /// leave an enabled/loadable package authorized by state the user just
+    /// revoked (Plan 136 task 3 G5).
     pub fn revoke_package_approval(
         &mut self,
         package_name: &str,
     ) -> Result<bool, PackageServiceError> {
-        self.approvals
-            .revoke(package_name)
-            .map_err(|error| PackageServiceError::ApprovalStore {
+        let revoked = self.approvals.revoke(package_name).map_err(|error| {
+            PackageServiceError::ApprovalStore {
                 message: error.to_string(),
+            }
+        })?;
+        self.authorizations.remove(package_name);
+        Ok(revoked)
+    }
+
+    /// Pre-execution adoption gate (Plan 061 task 10): NO third-party package
+    /// executes without an exact current durable user approval covering
+    /// identity, capabilities, processes, and relations — relation-bearing or
+    /// not. Trusted bundled packages are exempt (their authority is the
+    /// compiled inventory, not user adoption). Runs before the capability
+    /// grant check so a revoked/stale approval reports `AdoptionRequired`
+    /// rather than a withdrawn grant (Plan 136 task 3).
+    fn ensure_execution_adoption(&self, record: &PackageRecord) -> Result<(), PackageServiceError> {
+        if record.runtime_domain != crate::packages::bundled::RuntimeDomain::ThirdParty {
+            return Ok(());
+        }
+        let installed = self.installed.get(&record.manifest.name).ok_or_else(|| {
+            PackageServiceError::NotInstalled {
+                package_name: record.manifest.name.clone(),
+            }
+        })?;
+        let processes: Vec<String> = record
+            .contributions
+            .language_servers
+            .iter()
+            .map(|descriptor| descriptor.id.clone())
+            .collect();
+        self.approvals
+            .approval_covers(
+                &installed.provenance,
+                &record.manifest.clay.api_prefix,
+                &record.manifest.clay.permissions,
+                &processes,
+                &record.manifest.clay.graph,
+            )
+            .map_err(|mismatch| PackageServiceError::AdoptionRequired {
+                package_name: record.manifest.name.clone(),
+                code: mismatch.code(),
+                detail: format!("{:?}", mismatch),
             })
     }
 
     /// Verify owner-plus-user consent for structured relation requests before
     /// the requester is enabled (and therefore before any of its code runs).
     /// Owner consent: the target's enabled record declares the exact
-    /// versioned extension point and operation. User consent: third-party
-    /// requesters additionally need an exact durable approval covering
-    /// identity, capabilities, processes, and relation edges; trusted-domain
-    /// packages are pre-authorized by the bundled inventory and skip the
-    /// durable-approval requirement.
+    /// versioned extension point and operation; the owner-side diagnostics run
+    /// first. User consent: [`Self::ensure_execution_adoption`] runs after
+    /// them.
     fn verify_relation_authority(&self, record: &PackageRecord) -> Result<(), PackageServiceError> {
         let requests = &record.manifest.clay.graph.relation_requests;
         for request in requests {
@@ -644,38 +722,7 @@ impl PackageService {
                 detail: format!("{:?}", error),
             })?;
         }
-        // Pre-execution adoption gate (Plan 061 task 10): NO third-party
-        // package executes without an exact current durable user approval
-        // covering identity, capabilities, processes, and relations —
-        // relation-bearing or not. Trusted bundled packages are exempt (their
-        // authority is the compiled inventory, not user adoption).
-        if record.runtime_domain == crate::packages::bundled::RuntimeDomain::ThirdParty {
-            let installed = self.installed.get(&record.manifest.name).ok_or_else(|| {
-                PackageServiceError::NotInstalled {
-                    package_name: record.manifest.name.clone(),
-                }
-            })?;
-            let processes: Vec<String> = record
-                .contributions
-                .language_servers
-                .iter()
-                .map(|descriptor| descriptor.id.clone())
-                .collect();
-            self.approvals
-                .approval_covers(
-                    &installed.provenance,
-                    &record.manifest.clay.api_prefix,
-                    &record.manifest.clay.permissions,
-                    &processes,
-                    &record.manifest.clay.graph,
-                )
-                .map_err(|mismatch| PackageServiceError::AdoptionRequired {
-                    package_name: record.manifest.name.clone(),
-                    code: mismatch.code(),
-                    detail: format!("{:?}", mismatch),
-                })?;
-        }
-        Ok(())
+        self.ensure_execution_adoption(record)
     }
 
     /// Repopulate the `installed` map from the package-manager store.
@@ -929,6 +976,13 @@ impl PackageService {
     }
 
     /// Record user/admin authorization for an installed package.
+    ///
+    /// Also writes the durable grant onto the package's current approval
+    /// record, so a later process (CLI `inspect`/`enable`, a fresh server)
+    /// reads the same authority (Plan 136 task 4). A grant never manufactures
+    /// an approval: when no current record exists — or it was revoked, or its
+    /// identity no longer matches the installed package — the grant stays
+    /// in-memory for this generation and adoption keeps failing closed.
     pub fn authorize_package(
         &mut self,
         package_name: &str,
@@ -936,6 +990,7 @@ impl PackageService {
         runtime_profile: RuntimeProfile,
         approved_by: impl Into<String>,
     ) -> Result<(), PackageServiceError> {
+        let approved_by = approved_by.into();
         let installed =
             self.installed
                 .get(package_name)
@@ -944,6 +999,30 @@ impl PackageService {
                 })?;
         let record = assemble_package_record(&installed.package_json)
             .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
+        // An approval may only cover capabilities the manifest declares: a
+        // grant for an undeclared capability is a silent no-op at enable time
+        // and would make an authorization record claim authority the package
+        // never requested (Plan 136 task 3 G4). Generic check, so every
+        // caller of `authorize_package` inherits it.
+        for capability in &approved_capabilities {
+            if !record.manifest.clay.permissions.contains(capability) {
+                return Err(PackageServiceError::UndeclaredCapability {
+                    package_name: package_name.to_string(),
+                    capability: *capability,
+                });
+            }
+        }
+        self.approvals
+            .record_grant(
+                &installed.provenance,
+                &record.manifest.clay.api_prefix,
+                &approved_capabilities,
+                runtime_profile,
+                &approved_by,
+            )
+            .map_err(|error| PackageServiceError::ApprovalStore {
+                message: error.to_string(),
+            })?;
         let authorization = PackageAuthorizationRecord::new(
             &installed.provenance,
             record.manifest.clay.api_prefix,
@@ -1328,6 +1407,7 @@ impl PackageService {
             requested_capabilities: permissions,
             approved_capabilities: Vec::new(),
             runtime_profile: None,
+            grant_provenance: None,
             native_syntax_languages: native_syntax_languages(&record.manifest.clay.api_prefix),
             preset: record.manifest.clay.preset.clone(),
         })
@@ -1352,15 +1432,33 @@ impl PackageService {
             .filter(|record| record.manifest.version == package_version)
     }
 
-    /// Whether the current authorization record approves `permission` for
-    /// `package_name` (never caller-declared permissions).
-    pub(crate) fn has_approved_capability(
+    /// Whether `permission` is granted for `record`: the in-memory
+    /// authorization record when it still matches the installed provenance, or
+    /// the identity-matched durable grant (Plan 136 task 4). This is the one
+    /// capability read used by the enable gate and by op dispatch, so a grant
+    /// recorded by an earlier process authorizes the same package here. Never
+    /// caller-declared permissions.
+    pub(crate) fn capability_granted(
         &self,
-        package_name: &str,
+        record: &PackageRecord,
         permission: crate::packages::permissions::PackagePermission,
     ) -> bool {
-        self.authorization_for(package_name)
-            .is_some_and(|authorization| authorization.approved_capabilities.contains(&permission))
+        let Some(installed) = self.installed.get(&record.manifest.name) else {
+            return false;
+        };
+        if self
+            .authorizations
+            .get(&record.manifest.name)
+            .is_some_and(|authorization| {
+                authorization_matches(&installed.provenance, authorization)
+                    && authorization.grants(permission)
+            })
+        {
+            return true;
+        }
+        self.approvals
+            .current_grant(&installed.provenance, &record.manifest.clay.api_prefix)
+            .is_some_and(|grant| grant.grants(permission.as_str()))
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -1412,10 +1510,20 @@ impl PackageService {
         let mut record = assemble_package_record(&installed.package_json)
             .map_err(|err| PackageServiceError::InvalidClayMetadata(Box::new(err)))?;
         record.runtime_domain = crate::packages::bundled::runtime_domain(&installed.provenance);
-        self.ensure_capability_grants(package_name, &record)?;
+        // A revoked or stale approval is a user decision, not a missing
+        // capability grant: report it first so the fix is "re-adopt", not
+        // "re-authorize" (Plan 136 task 3 revoke withdraws the grant with the
+        // approval, and a version/source change makes the grant inert).
+        if matches!(
+            self.adoption_state(&record.manifest.name),
+            Some(AdoptionState::Revoked | AdoptionState::Stale)
+        ) {
+            self.ensure_execution_adoption(&record)?;
+        }
+        self.ensure_capability_grants(&record)?;
         let graph = PackageGraphPlan::from_relations(&record.manifest.clay.graph);
         if graph.requires_package_control() {
-            self.ensure_package_control_grant(package_name)?;
+            self.ensure_package_control_grant(&record)?;
         }
 
         let resolved_graph = self.resolve_graph_targets(package_name, &graph)?;
@@ -1425,6 +1533,8 @@ impl PackageService {
         }
         stack.pop();
 
+        // Pre-execution adoption gate (Plan 061 task 10) runs inside
+        // `verify_relation_authority` after the owner-side relation checks.
         self.verify_relation_authority(&record)?;
 
         for target in &resolved_graph.disables {
@@ -1593,49 +1703,39 @@ impl PackageService {
             })
     }
 
-    fn ensure_package_control_grant(&self, package_name: &str) -> Result<(), PackageServiceError> {
-        if self
-            .authorization_for(package_name)
-            .is_some_and(|authorization| authorization.grants(PackagePermission::PackageControl))
-        {
+    fn ensure_package_control_grant(
+        &self,
+        record: &PackageRecord,
+    ) -> Result<(), PackageServiceError> {
+        if self.capability_granted(record, PackagePermission::PackageControl) {
             return Ok(());
         }
         Err(PackageServiceError::MissingPackageControlGrant {
-            package_name: package_name.to_string(),
+            package_name: record.manifest.name.clone(),
         })
     }
 
-    fn ensure_capability_grants(
-        &self,
-        package_name: &str,
-        record: &PackageRecord,
-    ) -> Result<(), PackageServiceError> {
+    fn ensure_capability_grants(&self, record: &PackageRecord) -> Result<(), PackageServiceError> {
         // Phase 24.5 decision (2026-08-13-2223 decision log): a missing
         // `language-server` grant no longer blocks loadPackage —
         // grantLanguageServer degrades independently per the examples
         // contract, and the capability stays inert because session start is
         // strictly grant-gated in authorize_language_server. All other
         // capabilities keep their hard load-time requirement.
-        let required: Vec<&PackagePermission> = record
+        for capability in record
             .manifest
             .clay
             .permissions
             .iter()
             .filter(|capability| **capability != PackagePermission::LanguageServer)
-            .collect();
-        let Some(authorization) = self.authorizations.get(package_name) else {
-            let Some(capability) = required.first().copied() else {
-                return Ok(());
-            };
-            return Err(PackageServiceError::MissingCapabilityGrant {
-                package_name: package_name.to_string(),
-                capability: *capability,
-            });
-        };
-        for capability in required {
-            if !authorization.grants(*capability) {
+        {
+            // The grant is only read when it still matches the installed
+            // provenance (in-memory) or the approval identity (durable): a
+            // version/source change makes it inert until the user re-authorizes
+            // (Plan 136 tasks 3 and 4).
+            if !self.capability_granted(record, *capability) {
                 return Err(PackageServiceError::MissingCapabilityGrant {
-                    package_name: package_name.to_string(),
+                    package_name: record.manifest.name.clone(),
                     capability: *capability,
                 });
             }
@@ -1664,8 +1764,38 @@ impl PackageService {
             })
     }
 
-    fn authorization_for(&self, package_name: &str) -> Option<&PackageAuthorizationRecord> {
-        self.authorizations.get(package_name)
+    /// Grant view for inspection (Plan 136 task 4): the in-memory
+    /// authorization when it still matches the installed provenance, unioned
+    /// with the identity-matched durable grant, so a fresh CLI process sees
+    /// grants recorded by an earlier one. Both sources describe the same
+    /// explicit user decision; the durable one is what survives a process.
+    fn granted_view(&self, provenance: &PackageProvenance, api_prefix: &str) -> GrantView {
+        let mut view = GrantView::default();
+        if let Some(authorization) = self.authorizations.get(&provenance.resolved_name)
+            && authorization_matches(provenance, authorization)
+        {
+            view.capabilities
+                .extend(authorization.approved_capability_names());
+            view.runtime_profile = Some(authorization.runtime_profile.as_str().to_string());
+        }
+        if let Some(record) = self.approvals.current_record(provenance, api_prefix)
+            && let Some(grant) = &record.grant
+        {
+            for name in &grant.capabilities {
+                if !view.capabilities.iter().any(|existing| existing == name) {
+                    view.capabilities.push(name.clone());
+                }
+            }
+            view.runtime_profile
+                .get_or_insert_with(|| grant.runtime_profile.as_str().to_string());
+            view.provenance = Some(GrantProvenance {
+                granted_by: grant.granted_by.clone(),
+                granted_at: grant.granted_at.clone(),
+                approved_by: record.approved_by.clone(),
+                approved_at: record.approved_at.clone(),
+            });
+        }
+        view
     }
 
     fn inspection_from_record(&self, record: &PackageRecord) -> PackageInspection {
@@ -1685,7 +1815,6 @@ impl PackageService {
                     "enabled package record",
                 )
             });
-        let authorization = self.authorization_for(&record.manifest.name);
         let requested_capabilities: Vec<String> = record
             .manifest
             .clay
@@ -1693,6 +1822,7 @@ impl PackageService {
             .iter()
             .map(|p| p.as_str().to_string())
             .collect();
+        let grants = self.granted_view(&provenance, &record.manifest.clay.api_prefix);
         PackageInspection {
             name: record.manifest.name.clone(),
             version: record.manifest.version.clone(),
@@ -1705,11 +1835,9 @@ impl PackageService {
             configuration_count: record.contributions.configuration.len(),
             provenance,
             requested_capabilities,
-            approved_capabilities: authorization
-                .map(PackageAuthorizationRecord::approved_capability_names)
-                .unwrap_or_default(),
-            runtime_profile: authorization
-                .map(|record| record.runtime_profile.as_str().to_string()),
+            approved_capabilities: grants.capabilities,
+            runtime_profile: grants.runtime_profile,
+            grant_provenance: grants.provenance,
             native_syntax_languages: native_syntax_languages(&record.manifest.clay.api_prefix),
             preset: record.manifest.clay.preset.clone(),
         }
@@ -1742,7 +1870,7 @@ impl PackageService {
         )
         .unwrap_or_else(|_| json.clone());
         let requested_capabilities = requested_capability_names(&expanded);
-        let authorization = self.authorization_for(name);
+        let grants = self.granted_view(&installed.provenance, &api_prefix);
         let native_syntax_languages = native_syntax_languages(&api_prefix);
         let preset = json
             .pointer("/clay/preset")
@@ -1760,11 +1888,9 @@ impl PackageService {
             configuration_count: 0,
             provenance: installed.provenance.clone(),
             requested_capabilities,
-            approved_capabilities: authorization
-                .map(PackageAuthorizationRecord::approved_capability_names)
-                .unwrap_or_default(),
-            runtime_profile: authorization
-                .map(|record| record.runtime_profile.as_str().to_string()),
+            approved_capabilities: grants.capabilities,
+            runtime_profile: grants.runtime_profile,
+            grant_provenance: grants.provenance,
             native_syntax_languages,
             preset,
         }

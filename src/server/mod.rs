@@ -1,3 +1,5 @@
+use crate::lock_util::LockOrRecover;
+
 #[doc(hidden)]
 pub mod agent;
 pub mod agent_agui;
@@ -341,7 +343,8 @@ impl IpcServer {
             launcher::record_recent_workspace(
                 self.config.configuration_root.as_deref(),
                 Path::new(&workspace_root),
-            );
+            )
+            .await;
         }
         let tab_id = registry.create_tab(client_id, root_id, workspace_root);
         let state_for_connection = state.clone();
@@ -415,6 +418,15 @@ impl IpcServer {
     /// per-user default (`~/.clay`), resolved by the launcher module.
     pub(crate) fn configuration_root(&self) -> Option<PathBuf> {
         self.config.configuration_root.clone()
+    }
+
+    /// Plan 136 task 7: record the live runtime generation's per-lane JS
+    /// runtime metrics into the developer perf recorder. Called once by the
+    /// server's report-time path (`src/launch.rs`, the CLI's SIGTERM hook)
+    /// before the summary is written; a no-op recorder makes this free outside
+    /// the harness. Public because that hook lives in the binary crate.
+    pub async fn record_lane_metrics(&self, recorder: &crate::perf::metrics::PerfRecorder) {
+        self.runtime_generation.record_lane_metrics(recorder).await;
     }
 
     pub(crate) async fn state_for_client(&self, client_id: ClientId) -> Option<TabServerState> {
@@ -551,10 +563,7 @@ impl IpcServer {
         let sweep_states = Arc::clone(&self.tab_states);
         let sweep_tx = self.tab_registry_tx.clone();
         let sweep_live = Arc::clone(&self.live_clients);
-        sweep_live
-            .lock()
-            .expect("live-client set mutex poisoned")
-            .insert(client_id);
+        sweep_live.lock_or_recover().insert(client_id);
         let codec = self.codec;
         connections.spawn(async move {
             // The permit lives exactly as long as the connection task.
@@ -617,10 +626,7 @@ async fn sweep_expired_tabs(
 ) {
     let snapshot = {
         let mut registry = tab_registry.lock().await;
-        let live = live_clients
-            .lock()
-            .expect("live-client set mutex poisoned")
-            .clone();
+        let live = live_clients.lock_or_recover().clone();
         let removed = registry.sweep_expired(
             std::time::Instant::now(),
             crate::perf::budgets::REGISTRY_TAB_TTL,
@@ -648,10 +654,7 @@ struct LiveClientGuard {
 
 impl Drop for LiveClientGuard {
     fn drop(&mut self) {
-        self.set
-            .lock()
-            .expect("live-client set mutex poisoned")
-            .remove(&self.client_id);
+        self.set.lock_or_recover().remove(&self.client_id);
     }
 }
 

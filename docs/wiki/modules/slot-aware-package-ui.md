@@ -188,13 +188,50 @@ not an anchor at all.
 
 The parity gate is `tests/primitives_docs.rs::plan088_ui_catalog_and_package_authoring_contract_are_consistent`, alongside the existing component/token drift and package-boundary tests. It must fail when catalog markers, package-guide limits, UI navigation links, or the exact package anchor contract drift from source/docs.
 
+## Plan 133 table-driven validation and theme module split
+
+Plan 133 task 5 made the closed-choice validators data-driven without changing
+what they accept. `src/server/ui.rs` declares one `CHOICE_FIELDS` table row per
+closed-choice field — `(key, allowed values, UiContributionRule, message label)`
+— and one `validate_choice` reads that row, so adding an allowed value is one
+edit in the `VALID_*` slice the row points at and the diagnostic text follows the
+slice (`choice_message` completes the label with `a, b, or c`). The 21 rows are
+the same field set as before; the 17 `UiContributionRule` error kinds, the
+diagnostic rule each field reports, and every message string are unchanged
+(verified by recomposing the baseline literals from the table and by the moved
+`src/server/ui/tests.rs` assertions — see
+`test-plan/artifacts/133-file-decomposition/task9-js-api-verification.txt`).
+`src/server/ops/ui.rs` (the op/provenance boundary the JS facade calls) is
+byte-identical.
+
+Cost characteristics: each closed-choice field is at most a 21-row linear scan
+over static string slices at contribution-registration / override-validation
+time, with no allocation on the accepted path; nothing in the table is consulted
+by the SDUI snapshot/update, paint, layout, pointer, or scroll hot paths, which
+keep reading already-validated inert state.
+
+Plan 133 task 7 also split the shell theme module (distinct from the editor
+`StyleRegistry`): `src/shell/theme.rs` is now the re-export hub for
+`src/shell/theme/parse.rs` (token/level enums, core `core_theme_value` catalog,
+`CORE_TOKEN_NAMES`, `ThemeTokenResolver`),
+`src/shell/theme/validate.rs` (`DesignTokenError`,
+`validate_design_token_override`, and the WCAG floors
+`TEXT_CONTRAST_MIN`/`UI_CONTRAST_MIN`/`HAIRLINE_VISIBILITY_MIN`,
+`REQUIRED_CONTRAST_PAIRS`, `REQUIRED_FILL_PAIRS`, `theme_meets_contrast`,
+`validate_active_theme_contrast`), and `src/shell/theme/resolve.rs`
+(`SduiThemeStyle`, `PanelDefaults`, the cached `ResolvedUiTheme`,
+`resolve_theme_token_snapshot`, `density_spacing_scale`). The hub re-exports all
+three (`pub use …::*`), so every `crate::shell::theme::X` call site — including
+the package-token resolver this page uses — is unchanged, and the package token
+types/fallback rules themselves moved verbatim.
+
 ## Tests
 
 - `src/server/js_runtime/mod.rs::runtime_imports_clay_ui_facade_and_registers_contributions`: imports `clay:ui`, registers panel/component/overlay/token declarations, and verifies registry snapshots preserve accepted records.
 - `src/server/js_runtime/mod.rs::runtime_clay_ui_rejects_invalid_prefix_unregistered_action_and_raw_css`: verifies invalid package prefixes, stale/unregistered actions, and raw CSS-style input fail.
-- `src/server/ui.rs` unit tests: validate accepted contribution records, input contribution records, UI state-scope lifecycle records, duplicate IDs/slots, prohibited authority fields, hidden state key rejection, key-routing rejection, action target validation, payload budgets, component tree bounds, and typed theme-token fallback rules.
+- `src/server/ui/tests.rs` unit tests (plan 133 task 5 moved them out of `src/server/ui.rs`): validate accepted contribution records, input contribution records, UI state-scope lifecycle records, duplicate IDs/slots, prohibited authority fields, hidden state key rejection, key-routing rejection, action target validation, payload budgets, component tree bounds, and typed theme-token fallback rules.
 - `src/shell/components.rs` unit tests: validate supported/deferred component kinds and typed style variables.
-- `src/shell/theme.rs` unit tests: validate core token resolution, package-token fallback resolution, type mismatch rejection, design-token validation, panel-default resolution, density spacing scale, and Gruvbox core-fallback compatibility.
+- `src/shell/theme/tests.rs` + `src/shell/theme/theme_snapshot_tests.rs` unit tests (plan 133 task 7): validate core token resolution, package-token fallback resolution, type mismatch rejection, design-token validation, panel-default resolution, density spacing scale, and Gruvbox core-fallback compatibility.
 - `src/shell/package_ui.rs` unit tests: validate fixed panel slot composition with `PanelDefaults`, duplicate exclusive slot rejection, and transient overlay geometry.
 - `src/masonry_sdui.rs` unit tests: validate package fixed-panel geometry, transient overlay geometry, action routing, observation privacy, resolved theme-token rendering, semantic package font-role selection, and shared row/hit/accessibility geometry.
 - `src/server/ui.rs::package_component_font_role_is_semantic_and_text_only`: accepts allowed enum roles and rejects unsupported roles, concrete family/size fields, and structural-component use.

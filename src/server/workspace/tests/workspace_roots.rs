@@ -82,8 +82,8 @@ fn add_root_from_cwd_is_noop_when_roots_already_configured() {
     let _ = fs::remove_dir(other);
 }
 
-#[test]
-fn discover_root_for_path_finds_marker_ancestor() {
+#[tokio::test]
+async fn discover_root_for_path_finds_marker_ancestor() {
     let root = temp_workspace("discover-marker");
     fs::write(root.join("Cargo.toml"), "[package]").unwrap();
     let nested = root.join("src").join("nested");
@@ -92,7 +92,7 @@ fn discover_root_for_path_finds_marker_ancestor() {
     fs::write(&file, "fn main() {}").unwrap();
 
     let mut workspace = WorkspaceState::new();
-    let root_id = workspace.discover_root_for_path(&file).unwrap();
+    let root_id = workspace.discover_root_for_path(&file).await.unwrap();
     assert!(root_id.is_some());
     assert_eq!(workspace.list_root_metadata().len(), 1);
     assert!(
@@ -105,8 +105,8 @@ fn discover_root_for_path_finds_marker_ancestor() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn discover_root_for_path_returns_existing_root_when_already_covered() {
+#[tokio::test]
+async fn discover_root_for_path_returns_existing_root_when_already_covered() {
     let root = temp_workspace("discover-covered");
     let nested = root.join("deep");
     fs::create_dir_all(&nested).unwrap();
@@ -115,7 +115,7 @@ fn discover_root_for_path_returns_existing_root_when_already_covered() {
 
     let mut workspace = WorkspaceState::new();
     let existing = workspace.add_root(&root).unwrap();
-    let discovered = workspace.discover_root_for_path(&file).unwrap();
+    let discovered = workspace.discover_root_for_path(&file).await.unwrap();
     assert_eq!(discovered, Some(existing));
     assert_eq!(workspace.list_root_metadata().len(), 1);
 
@@ -123,14 +123,14 @@ fn discover_root_for_path_returns_existing_root_when_already_covered() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[test]
-fn discover_root_for_path_without_marker_returns_none() {
+#[tokio::test]
+async fn discover_root_for_path_without_marker_returns_none() {
     let root = temp_workspace("discover-no-marker");
     let file = root.join("note.txt");
     fs::write(&file, "hello").unwrap();
 
     let mut workspace = WorkspaceState::new();
-    let discovered = workspace.discover_root_for_path(&file).unwrap();
+    let discovered = workspace.discover_root_for_path(&file).await.unwrap();
     assert_eq!(discovered, None);
     assert!(workspace.list_root_metadata().is_empty());
 
@@ -138,15 +138,15 @@ fn discover_root_for_path_without_marker_returns_none() {
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn discover_root_for_path_ignores_unknown_marker() {
+#[tokio::test]
+async fn discover_root_for_path_ignores_unknown_marker() {
     let root = temp_workspace("discover-unknown-marker");
     fs::write(root.join("myproject.marker"), "").unwrap();
     let file = root.join("note.txt");
     fs::write(&file, "hello").unwrap();
 
     let mut workspace = WorkspaceState::new();
-    let discovered = workspace.discover_root_for_path(&file).unwrap();
+    let discovered = workspace.discover_root_for_path(&file).await.unwrap();
     assert_eq!(discovered, None);
 
     let _ = fs::remove_file(file);
@@ -154,23 +154,23 @@ fn discover_root_for_path_ignores_unknown_marker() {
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn explicit_user_grant_adds_directory_root() {
+#[tokio::test]
+async fn explicit_user_grant_adds_directory_root() {
     let root = temp_workspace("grant-dir");
     let mut workspace = WorkspaceState::new();
-    let root_id = workspace.add_explicit_user_grant(&root).unwrap();
+    let root_id = workspace.add_explicit_user_grant(&root).await.unwrap();
     assert_eq!(workspace.list_root_metadata().len(), 1);
     assert_eq!(workspace.list_root_metadata()[0].workspace_root_id, root_id);
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn explicit_user_grant_adds_file_as_single_file_grant() {
+#[tokio::test]
+async fn explicit_user_grant_adds_file_as_single_file_grant() {
     let root = temp_workspace("grant-file");
     let file = root.join("note.md");
     fs::write(&file, "# note").unwrap();
     let mut workspace = WorkspaceState::new();
-    let root_id = workspace.add_explicit_user_grant(&file).unwrap();
+    let root_id = workspace.add_explicit_user_grant(&file).await.unwrap();
     // Single-file grants are not listed by list_root_metadata.
     assert!(workspace.list_root_metadata().is_empty());
     assert_eq!(root_id, 1);
@@ -178,34 +178,56 @@ fn explicit_user_grant_adds_file_as_single_file_grant() {
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn explicit_user_grant_deduplicates_single_file_grant() {
+#[tokio::test]
+async fn explicit_user_grant_deduplicates_single_file_grant() {
     let root = temp_workspace("grant-file-dedup");
     let file = root.join("note.md");
     fs::write(&file, "# note").unwrap();
     let mut workspace = WorkspaceState::new();
-    let first = workspace.add_explicit_user_grant(&file).unwrap();
-    let second = workspace.add_explicit_user_grant(&file).unwrap();
+    let first = workspace.add_explicit_user_grant(&file).await.unwrap();
+    let second = workspace.add_explicit_user_grant(&file).await.unwrap();
     assert_eq!(first, second);
     let _ = fs::remove_file(file);
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn explicit_user_grant_rejects_missing_path() {
+#[tokio::test]
+async fn explicit_user_grant_rejects_missing_path() {
     let root = temp_workspace("grant-missing");
     let missing = root.join("missing");
     let mut workspace = WorkspaceState::new();
-    let error = workspace.add_explicit_user_grant(&missing).unwrap_err();
+    let error = workspace
+        .add_explicit_user_grant(&missing)
+        .await
+        .unwrap_err();
     assert!(matches!(error, WorkspaceError::RootUnavailable { .. }));
     let _ = fs::remove_dir(root);
 }
 
-#[test]
-fn discover_root_for_path_rejects_directory() {
+/// Plan 134 P3: the async open path surfaces the existing `FileUnavailable`
+/// mapping (not a panic or a new error) when the root disappears after the
+/// tokio::fs canonicalize/metadata probe would find it gone.
+#[tokio::test]
+async fn open_existing_file_reports_file_unavailable_when_root_disappears() {
+    let root = temp_workspace("open-vanished-root");
+    let file = root.join("note.txt");
+    fs::write(&file, "hello").unwrap();
+    let mut workspace = WorkspaceState::new();
+    let root_id = workspace.add_root(&root).unwrap();
+    fs::remove_dir_all(&root).unwrap();
+
+    let error = workspace
+        .open_existing_file(root_id, "note.txt", 1)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, WorkspaceError::FileUnavailable { .. }));
+}
+
+#[tokio::test]
+async fn discover_root_for_path_rejects_directory() {
     let root = temp_workspace("discover-dir");
     let mut workspace = WorkspaceState::new();
-    let error = workspace.discover_root_for_path(&root).unwrap_err();
+    let error = workspace.discover_root_for_path(&root).await.unwrap_err();
     assert!(matches!(error, WorkspaceError::DirectoryOpen));
     let _ = fs::remove_dir(root);
 }

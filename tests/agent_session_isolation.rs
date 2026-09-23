@@ -591,13 +591,24 @@ async fn two_workspaces_keep_their_agent_writes_in_their_own_root() {
         fs::read_to_string(&log).unwrap_or_default()
     );
     eprintln!("server log:\n{}", server.log_tail());
-    let logged = fs::read_to_string(&log).unwrap_or_default();
-    assert!(
-        logged
+    // The daemon logs its write attempts before the stale-session probe
+    // attempts, so wait (bounded) for the rejection line instead of racing the
+    // log flush that follows the server-side diagnostic.
+    let deadline = Instant::now() + EVENT_TIMEOUT;
+    loop {
+        let logged = fs::read_to_string(&log).unwrap_or_default();
+        if logged
             .lines()
-            .any(|line| line.starts_with("probe ") && line.contains(" err ")),
-        "the probe against the closed session was rejected: {logged}"
-    );
+            .any(|line| line.starts_with("probe ") && line.contains(" err "))
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the probe against the closed session was rejected: {logged}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 
     // 4. A daemon restart must not move the session to another root: the next
     // prompt reaches the same session (bound id unchanged) and writes again

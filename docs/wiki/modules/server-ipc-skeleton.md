@@ -4,11 +4,13 @@
 
 - `src/bin/clay-server.rs`
 - `src/server/mod.rs`
+- `src/server/runtime_state.rs` — `ServerConfig`, runtime generation stores, typed runtime-output application (Plan 133 task 3).
+- `src/server/runtime_reload.rs` — configuration load + generation prepare/commit/reload pipeline (Plan 133 task 3).
 - `src/server/tab_registry.rs`
 - `src/server/connection/mod.rs` — thin router, `ConnectionCtx` + `ctx!`, first-message handshake, identity/routing, cleanup.
 - `src/server/connection/documents.rs`, `workspace.rs`, `tabs.rs`, `menus.rs`, `runtime.rs` — per-family dispatch handlers (Plan 129).
 - `src/server/connection/delivery.rs` — Plan 119 per-lane delivery policy.
-- `src/server/connection/tests.rs` — router/handler suite incl. the `DirectHandlerState` handler harness (Plan 129).
+- `src/server/connection/tests/` — router/handler suite incl. the `DirectHandlerState` handler harness (Plan 129).
 - `src/server/workspace/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
@@ -46,7 +48,25 @@ Each arm builds a `ConnectionCtx` through the loop-local `ctx!` macro instead of
 
 Authorization checks live at handler entry points. The loop performs only the handler-agnostic boundaries — the post-`Hello` identity check (`client_message_identity` against the handshake id, fail-closed before any arm runs) and the tab-state route — then hands off; each handler re-authorizes the exact resource it touches: `documents::document_for_message` resolves a document only when the routed tab owns it **and** the requesting `client_id` holds access (an unknown ID never falls back to welcome text, which would leak text across tabs), `workspace::handle_open_selected_file`/`handle_add_selected_workspace_root` consume single-use selected-path capabilities from the context pool, `tabs::handle_tab_command` goes through `TabRegistry`, and `runtime::handle_agent_command` keeps the session/approval boundary it had. A missing binding, unknown document, or spent capability is a typed rejection, never a silent no-op or an implicit grant.
 
-Future sizes (Plan 129). Extraction was also a compile-cost fix: with every arm inline in one generator, the loop's future was sized around ~21 KB and `clippy::large_futures` reported 15 library sites on the connection path (85 unique sites repo-wide including collocated test helpers) at 20–28 KB. Two changes brought every connection-path future under the 8 KB target: per-arm work now runs in its own handler future (the loop no longer carries all arms' temporaries in one frame), and the remaining cold paths are `Box::pin`ed at their call sites so a nested future is not inlined into its caller — `load_configuration_for_service`, `prepare_runtime_generation_candidate`, `commit_runtime_generation`, `reload_runtime_generation_inner`, and `execute_reload_command` in `src/server/mod.rs`; `runtime::persist_settings_change` and `runtime::execute_command_intent`; and `IpcServer::try_new` in `src/bin/clay-server.rs` (each site carries an in-code comment naming the reason). Results: zero library-code `large_futures` sites on the connection path (default threshold), zero library-code sites above 8 KB repo-wide under a temporary `clippy.toml` (`future-size-threshold = 8192`; the 13 residual sites are test modules), the loop's own future ≈ 4.3 KB, its largest awaited handlers all below 8 KB (`menus::handle_menu_activate` 6,488 B, `tabs::handle_tab_command` 5,232 B, `runtime::handle_sdui_action` 5,040 B, `runtime::handle_agent_command` 4,984 B, `runtime::handle_command_intent` 4,504 B), and the function down from 1,073 to 603 lines with a 249-line dispatch `match` (49 `.await`s, down from 68). The `#[allow(clippy::too_many_arguments)]` attributes the old per-handler argument lists forced are gone from the extracted handlers (the loop itself and the genuinely wide state-threading helpers keep theirs).
+Future sizes (Plan 129). Extraction was also a compile-cost fix: with every arm inline in one generator, the loop's future was sized around ~21 KB and `clippy::large_futures` reported 15 library sites on the connection path (85 unique sites repo-wide including collocated test helpers) at 20–28 KB. Two changes brought every connection-path future under the 8 KB target: per-arm work now runs in its own handler future (the loop no longer carries all arms' temporaries in one frame), and the remaining cold paths are `Box::pin`ed at their call sites so a nested future is not inlined into its caller — `load_configuration_for_service`, `prepare_runtime_generation_candidate`, `commit_runtime_generation`, `reload_runtime_generation_inner`, and `execute_reload_command` in `src/server/runtime_reload.rs`; `runtime::persist_settings_change` and `runtime::execute_command_intent`; and `IpcServer::try_new` in `src/bin/clay-server.rs` (each site carries an in-code comment naming the reason). Results: zero library-code `large_futures` sites on the connection path (default threshold), zero library-code sites above 8 KB repo-wide under a temporary `clippy.toml` (`future-size-threshold = 8192`; the 13 residual sites are test modules), the loop's own future ≈ 4.3 KB, its largest awaited handlers all below 8 KB (`menus::handle_menu_activate` 6,488 B, `tabs::handle_tab_command` 5,232 B, `runtime::handle_sdui_action` 5,040 B, `runtime::handle_agent_command` 4,984 B, `runtime::handle_command_intent` 4,504 B), and the function down from 1,073 to 603 lines with a 249-line dispatch `match` (49 `.await`s, down from 68). The `#[allow(clippy::too_many_arguments)]` attributes the old per-handler argument lists forced are gone from the extracted handlers (the loop itself and the genuinely wide state-threading helpers keep theirs).
+
+## Server module map (Plan 133 task 3)
+
+Plan 133 split the former 6,203-line `src/server/mod.rs` by concern:
+
+| File | Contents |
+| --- | --- |
+| `src/server/mod.rs` (1,028) | module declarations + prelude, the `IpcServer` struct, tab-state plumbing, `run`/`accept_unix_loop`, `spawn_connection`, expired-tab sweep, `LiveClientGuard`, Unix socket / Windows named-pipe binding and validation, `ServerError` |
+| `src/server/runtime_state.rs` | `ServerConfig`, `RuntimeGeneration`/`RuntimeGenerationStore`, `ActiveRuntimeStateFanout`, `ActiveTypographyState`, `shell_command_catalogue`, `RuntimeOutputApplication` + `apply_runtime_outputs*` |
+| `src/server/runtime_reload.rs` | `effective_agent_root`, the runtime generation candidate/prepare/commit pipeline, configuration loading, diagnostic recording, `refresh_open_documents_after_reload`, `enumerate_ui_choices` |
+
+The inline `#[cfg(test)]` modules moved to sibling test files declared with the
+same `cfg` gates: `src/server/runtime_outputs_tests.rs`,
+`runtime_generation_tests.rs` (the generation/reload suite),
+`tab_server_state_tests.rs`, and `windows_tests.rs`, which keeps their private
+access without an integration-root shim. The split is a pure relocation: socket
+binding, permission validation, and the dispatch boundaries stay in
+`src/server/mod.rs`, and no behavior changed.
 
 ## Overview
 
@@ -151,10 +171,10 @@ Plan 059 fixes a root-cause framing corruption: `tokio::io::AsyncReadExt::read_e
 - `src/server/document.rs`: canonical rope edit application, base-version enforcement, lease validation, region-lock rejection, and UTF-8 boundary rejection.
 - `src/ipc.rs`: endpoint tests verify platform-valid default endpoint selection, isolated smoke endpoints, and printable diagnostics.
 - `src/main.rs`: launch tests verify direct child-process command construction, restart parsing/default-server command-line matching, config-fixture smoke forwarding, bounded readiness retry diagnostics, local-fallback messages, and early child-exit handling for smoke mode.
-- `src/server/mod.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync, region-lock rejection, and runtime reload open-document refresh coverage; `src/server/tests.rs::server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies typed construction failure, and `src/server/tests.rs::production_server_binaries_use_fallible_constructor` prevents panic-constructor regression. Plan 030 adds `src/server/tests.rs::unix_socket_is_created_with_owner_only_permissions` and `windows_pipe_creation_applies_current_user_security_descriptor`.
+- `src/server/tests.rs`: listener-level Unix socket accept smoke test plus end-to-end stale-resync and region-lock rejection coverage; `src/server/tests.rs::server_accepts_configured_workspace_roots_and_reports_invalid_roots` verifies typed construction failure, and `src/server/tests.rs::production_server_binaries_use_fallible_constructor` prevents panic-constructor regression; `src/server/runtime_generation_tests.rs` covers the runtime reload open-document refresh. Plan 030 adds `src/server/tests.rs::unix_socket_is_created_with_owner_only_permissions` and `windows_pipe_creation_applies_current_user_security_descriptor`.
 - `src/client/mod.rs`: client queue tests cover selected-file and selected-folder non-edit messages, and Windows named-pipe integration tests cover deferred initial snapshot delivery, edit acknowledgement, independent per-tab welcome documents, and stale-edit resync recovery; tests are now robust to an ambient default `~/.clay/init.js` that publishes a behavior manifest.
 - `src/server/connection/delivery.rs`: unit tests pin State replay, Advice drop, closed-lane flow, agent restart survival, and oversized-event diagnostics (`cargo test --lib server::connection::delivery`).
-- `src/server/connection/tests.rs`: Plan 129's `DirectHandlerState` builds the connection state without a socket or server so extracted handlers are callable directly — `extracted_list_documents_handler_answers_without_the_loop`, `extracted_launcher_handler_answers_without_the_loop`, and `extracted_duplicate_hello_handler_rejects_without_the_loop` (`cargo test --lib server::connection`).
+- `src/server/connection/tests/`: Plan 129's `DirectHandlerState` builds the connection state without a socket or server so extracted handlers are callable directly — `extracted_list_documents_handler_answers_without_the_loop`, `extracted_launcher_handler_answers_without_the_loop`, and `extracted_duplicate_hello_handler_rejects_without_the_loop` (`cargo test --lib server::connection`).
 - Relevant commands: `cargo test server --quiet`, `cargo test protocol --quiet`, `cargo test --all-targets`, `cargo check --all-targets`.
 
 ## Related

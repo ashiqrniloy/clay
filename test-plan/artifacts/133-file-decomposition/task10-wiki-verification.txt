@@ -1,0 +1,23 @@
+Plan 133 task 10 — code wiki update (2026-09-22)
+
+Structural pages updated:
+  protocol-codec.md           — protocol family module map (task 2) + string_enum note (task 6)
+  server-ipc-skeleton.md      — server module map (task 3) + moved test files; Plan 129 paragraphs retargeted
+  slot-aware-package-ui.md    — table-driven CHOICE_FIELDS validation + cost + unchanged allowed sets/kinds/messages; theme split (task 5/7)
+  package-input-state-configuration.md — theme module paths
+  maintenance-validation.md   — suite topology fixed (presentation root, 38 modules) + Plan 133 decomposition/test-layout section; wait_until path
+  frontend-theme-runtime.md   — Rust resolution module map (task 7/protocol typography)
+  editor-theme-registry.md    — protocol/theme module paths + moved theme test files
+  react-shell.md              — 91-token snapshot now in src/shell/theme/resolve.rs
+
+Mechanical test-path sweep (task 4/3 moves):
+  61 references rewritten across 18 pages to the suite directories
+
+Targeted retargets to moved test files (23 edits across 12 pages):
+  runtime_generation_tests.rs / runtime_reload.rs / runtime_state.rs / tests.rs
+
+docs/wiki/index.md: 6 page descriptions updated; every wiki page remains linked (no page added/removed)
+
+Guards:
+  cargo test --test protocol     -> 227 passed (primitives_docs wiki index/current-page path checks, documentation_coverage)
+  cargo test --test presentation -> 62 passed

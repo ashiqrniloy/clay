@@ -1,0 +1,3 @@
+12|list item|enabled,focusable,sensitive,showing,visible|notes.md||20,191,243x35|Action,Component
+15|list item|enabled,focusable,selected,sensitive,showing,visible|Add Equal Pane client — built-in Ctrl+Shift+\||295,831,1260x41|Action,Component
+11|list item|enabled,sensitive,showing,visible|||1595,284,323x30|Text,Action,Component

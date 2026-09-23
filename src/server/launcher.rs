@@ -10,10 +10,10 @@
 //! path back, and opening an entry rides the ordinary tab/root path. Recents
 //! hold no credentials, and nothing here is auto-opened.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use tokio::fs as tokio_fs;
 
 use super::configuration::ConfigurationRuntime;
 use crate::protocol::{LauncherAgentEntry, LauncherEntries, LauncherWorkspaceEntry};
@@ -55,8 +55,8 @@ fn store_path(data_root: &Path) -> PathBuf {
 
 /// Read the recents store. Missing, unreadable or malformed ⇒ empty list
 /// (the launcher shows its first-run state instead of failing).
-fn read_store(data_root: &Path) -> RecentStore {
-    let Ok(raw) = fs::read_to_string(store_path(data_root)) else {
+async fn read_store(data_root: &Path) -> RecentStore {
+    let Ok(raw) = tokio_fs::read_to_string(store_path(data_root)).await else {
         return RecentStore::default();
     };
     let Ok(mut store) = serde_json::from_str::<RecentStore>(&raw) else {
@@ -75,7 +75,7 @@ fn read_store(data_root: &Path) -> RecentStore {
 /// Write the recents store. Best-effort: a failed write never fails the
 /// folder open that triggered it (temp + rename so a crash cannot truncate
 /// the list).
-fn write_store(data_root: &Path, store: &RecentStore) {
+async fn write_store(data_root: &Path, store: &RecentStore) {
     let Ok(json) = serde_json::to_string_pretty(&RecentStore {
         version: STORE_VERSION,
         workspaces: store.workspaces.clone(),
@@ -83,65 +83,81 @@ fn write_store(data_root: &Path, store: &RecentStore) {
         return;
     };
     let path = store_path(data_root);
-    if fs::create_dir_all(data_root).is_err() {
+    if tokio_fs::create_dir_all(data_root).await.is_err() {
         return;
     }
     let temp = data_root.join(format!("{STORE_FILE}.tmp"));
-    if fs::write(&temp, json).is_ok() {
-        let _ = fs::rename(&temp, &path);
+    if tokio_fs::write(&temp, json).await.is_ok() {
+        let _ = tokio_fs::rename(&temp, &path).await;
     } else {
-        let _ = fs::remove_file(&temp);
+        let _ = tokio_fs::remove_file(&temp).await;
     }
 }
 
 /// Record a workspace root as the most recent one. Non-directories are
 /// ignored (the launcher never lists a path it cannot open).
-pub(crate) fn record_recent_workspace(configuration_root: Option<&Path>, root: &Path) {
-    if !root.is_dir() {
+pub(crate) async fn record_recent_workspace(configuration_root: Option<&Path>, root: &Path) {
+    if !tokio_fs::metadata(root)
+        .await
+        .map(|metadata| metadata.is_dir())
+        .unwrap_or(false)
+    {
         return;
     }
     let Some(data_root) = data_root(configuration_root) else {
         return;
     };
-    let display = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let display = tokio_fs::canonicalize(root)
+        .await
+        .unwrap_or_else(|_| root.to_path_buf());
     let display = display.to_string_lossy().into_owned();
     if display.is_empty() || display.chars().count() > MAX_PATH_CHARS {
         return;
     }
-    let mut store = read_store(&data_root);
+    let mut store = read_store(&data_root).await;
     store.workspaces.retain(|path| path != &display);
     store.workspaces.insert(0, display);
     store.workspaces.truncate(MAX_RECENTS);
-    write_store(&data_root, &store);
+    write_store(&data_root, &store).await;
 }
 
 /// Drop one recent by index in the *server's* list (the webview never sends a
 /// path). Out-of-range indices are no-ops.
-pub(crate) fn remove_recent_workspace(configuration_root: Option<&Path>, index: u32) {
+pub(crate) async fn remove_recent_workspace(configuration_root: Option<&Path>, index: u32) {
     let Some(data_root) = data_root(configuration_root) else {
         return;
     };
-    let mut store = read_store(&data_root);
+    let mut store = read_store(&data_root).await;
     let index = index as usize;
     if index >= store.workspaces.len() {
         return;
     }
     store.workspaces.remove(index);
-    write_store(&data_root, &store);
+    write_store(&data_root, &store).await;
 }
 
 /// Server-resolved launcher entries. `pruned` counts entries dropped because
 /// their directory is gone (the caller surfaces it as a bounded diagnostic).
-pub(crate) fn launcher_entries(configuration_root: Option<&Path>) -> LauncherEntries {
+pub(crate) async fn launcher_entries(configuration_root: Option<&Path>) -> LauncherEntries {
     let Some(data_root) = data_root(configuration_root) else {
         return LauncherEntries::default();
     };
-    let mut store = read_store(&data_root);
+    let mut store = read_store(&data_root).await;
     let before = store.workspaces.len();
-    store.workspaces.retain(|path| Path::new(path).is_dir());
-    let pruned = before - store.workspaces.len();
+    let mut live = Vec::with_capacity(before);
+    for path in std::mem::take(&mut store.workspaces) {
+        if tokio_fs::metadata(&path)
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+        {
+            live.push(path);
+        }
+    }
+    let pruned = before - live.len();
+    store.workspaces = live;
     if pruned > 0 {
-        write_store(&data_root, &store);
+        write_store(&data_root, &store).await;
     }
     let home = home_dir();
     LauncherEntries {
@@ -153,36 +169,41 @@ pub(crate) fn launcher_entries(configuration_root: Option<&Path>) -> LauncherEnt
                 root: root.clone(),
             })
             .collect(),
-        agents: list_agents(&data_root, home.as_deref()),
+        agents: list_agents(&data_root, home.as_deref()).await,
         pruned: pruned as u32,
     }
 }
 
 /// Configured agent types under `<data root>/agents/`: one per directory that
 /// actually resolves. Sorted by name, capped, never panicking.
-fn list_agents(data_root: &Path, home: Option<&Path>) -> Vec<LauncherAgentEntry> {
-    let Ok(entries) = fs::read_dir(data_root.join(AGENTS_DIR)) else {
+async fn list_agents(data_root: &Path, home: Option<&Path>) -> Vec<LauncherAgentEntry> {
+    let Ok(mut entries) = tokio_fs::read_dir(data_root.join(AGENTS_DIR)).await else {
         return Vec::new();
     };
-    let mut agents: Vec<(String, PathBuf)> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            (path.is_dir() && valid_agent_name(&name)).then_some((name, path))
-        })
-        .collect();
+    let mut agents: Vec<(String, PathBuf)> = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let is_dir = tokio_fs::metadata(&path)
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false);
+        if is_dir && valid_agent_name(&name) {
+            agents.push((name, path));
+        }
+    }
     agents.sort_by(|left, right| left.0.cmp(&right.0));
     agents.truncate(MAX_AGENTS);
-    agents
-        .into_iter()
-        .map(|(name, path)| LauncherAgentEntry {
+    let mut resolved = Vec::with_capacity(agents.len());
+    for (name, path) in agents {
+        resolved.push(LauncherAgentEntry {
             label: display_label(&name),
-            skill_count: count_skills(&path),
+            skill_count: count_skills(&path).await,
             config_root: tilde_display(&path, home),
             name,
-        })
-        .collect()
+        });
+    }
+    resolved
 }
 
 /// Resolve one agent type to its per-agent config root (plan 118 task 35).
@@ -194,6 +215,10 @@ fn list_agents(data_root: &Path, home: Option<&Path>) -> Vec<LauncherAgentEntry>
 /// stale or hostile name resolves to `None` instead of a root that is not
 /// configured. `configuration_root` is the Clay data root (explicit config
 /// root, else `~/.clay`).
+///
+/// Plan 134 P3: kept synchronous — it performs exactly one bounded `is_dir`
+/// stat on the tab-command path, and its other caller is sync (`agent`). The
+/// launcher store scans are the async ones above.
 pub(crate) fn resolve_agent_type(
     configuration_root: Option<&Path>,
     agent_type: &str,
@@ -217,15 +242,24 @@ pub(crate) fn valid_agent_name(name: &str) -> bool {
 }
 
 /// Number of seeded skills (`skills/<name>/`) for one agent, bounded.
-fn count_skills(agent_root: &Path) -> u32 {
-    let Ok(entries) = fs::read_dir(agent_root.join(SKILLS_DIR)) else {
+async fn count_skills(agent_root: &Path) -> u32 {
+    let Ok(mut entries) = tokio_fs::read_dir(agent_root.join(SKILLS_DIR)).await else {
         return 0;
     };
-    entries
-        .flatten()
-        .take(MAX_SKILL_DIRS)
-        .filter(|entry| entry.path().is_dir())
-        .count() as u32
+    let mut count = 0;
+    while count < MAX_SKILL_DIRS {
+        let Ok(Some(entry)) = entries.next_entry().await else {
+            break;
+        };
+        if tokio_fs::metadata(entry.path())
+            .await
+            .map(|metadata| metadata.is_dir())
+            .unwrap_or(false)
+        {
+            count += 1;
+        }
+    }
+    count as u32
 }
 
 /// `projects/clay` → `clay`; a path with no final component keeps its text.
@@ -275,6 +309,7 @@ fn home_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn temp_root(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
@@ -293,17 +328,17 @@ mod tests {
         path
     }
 
-    #[test]
-    fn recents_round_trip_newest_first_and_dedupe() {
+    #[tokio::test]
+    async fn recents_round_trip_newest_first_and_dedupe() {
         let data = temp_root("recents");
         let first = workspace(&data, "first");
         let second = workspace(&data, "second");
 
-        record_recent_workspace(Some(&data), &first);
-        record_recent_workspace(Some(&data), &second);
-        record_recent_workspace(Some(&data), &first);
+        record_recent_workspace(Some(&data), &first).await;
+        record_recent_workspace(Some(&data), &second).await;
+        record_recent_workspace(Some(&data), &first).await;
 
-        let entries = launcher_entries(Some(&data));
+        let entries = launcher_entries(Some(&data)).await;
         assert_eq!(entries.pruned, 0);
         let roots: Vec<&str> = entries
             .workspaces
@@ -316,21 +351,21 @@ mod tests {
         assert_eq!(entries.workspaces[0].name, "first");
     }
 
-    #[test]
-    fn recents_cap_and_prune_missing_directories() {
+    #[tokio::test]
+    async fn recents_cap_and_prune_missing_directories() {
         let data = temp_root("prune");
         let mut paths = Vec::new();
         for index in 0..MAX_RECENTS + 2 {
             let path = workspace(&data, &format!("ws-{index}"));
-            record_recent_workspace(Some(&data), &path);
+            record_recent_workspace(Some(&data), &path).await;
             paths.push(path);
         }
-        let entries = launcher_entries(Some(&data));
+        let entries = launcher_entries(Some(&data)).await;
         assert_eq!(entries.workspaces.len(), MAX_RECENTS, "capped");
 
         // A folder deleted between sessions is pruned with a count.
         fs::remove_dir_all(&paths[MAX_RECENTS + 1]).unwrap();
-        let entries = launcher_entries(Some(&data));
+        let entries = launcher_entries(Some(&data)).await;
         assert_eq!(entries.pruned, 1);
         assert_eq!(entries.workspaces.len(), MAX_RECENTS - 1);
         assert!(
@@ -342,38 +377,38 @@ mod tests {
             entries.workspaces
         );
         // Pruning is persisted: the next read reports nothing to prune.
-        assert_eq!(launcher_entries(Some(&data)).pruned, 0);
+        assert_eq!(launcher_entries(Some(&data)).await.pruned, 0);
     }
 
-    #[test]
-    fn remove_recent_drops_one_by_index_only() {
+    #[tokio::test]
+    async fn remove_recent_drops_one_by_index_only() {
         let data = temp_root("remove");
         let first = workspace(&data, "keep");
         let second = workspace(&data, "drop");
-        record_recent_workspace(Some(&data), &first);
-        record_recent_workspace(Some(&data), &second);
+        record_recent_workspace(Some(&data), &first).await;
+        record_recent_workspace(Some(&data), &second).await;
 
-        remove_recent_workspace(Some(&data), 0);
-        let entries = launcher_entries(Some(&data));
+        remove_recent_workspace(Some(&data), 0).await;
+        let entries = launcher_entries(Some(&data)).await;
         assert_eq!(entries.workspaces.len(), 1);
         assert!(entries.workspaces[0].root.ends_with("keep"));
 
         // Out-of-range indices are no-ops.
-        remove_recent_workspace(Some(&data), 9);
-        assert_eq!(launcher_entries(Some(&data)).workspaces.len(), 1);
+        remove_recent_workspace(Some(&data), 9).await;
+        assert_eq!(launcher_entries(Some(&data)).await.workspaces.len(), 1);
     }
 
-    #[test]
-    fn malformed_store_degrades_to_first_run() {
+    #[tokio::test]
+    async fn malformed_store_degrades_to_first_run() {
         let data = temp_root("malformed");
         fs::write(store_path(&data), "{ not json").unwrap();
-        assert!(launcher_entries(Some(&data)).workspaces.is_empty());
+        assert!(launcher_entries(Some(&data)).await.workspaces.is_empty());
         fs::write(store_path(&data), r#"{"version":99,"workspaces":["/tmp"]}"#).unwrap();
-        assert!(launcher_entries(Some(&data)).workspaces.is_empty());
+        assert!(launcher_entries(Some(&data)).await.workspaces.is_empty());
     }
 
-    #[test]
-    fn agents_list_configured_directories_with_skill_counts() {
+    #[tokio::test]
+    async fn agents_list_configured_directories_with_skill_counts() {
         let data = temp_root("agents");
         let agent = data.join(AGENTS_DIR).join("coding-agent");
         fs::create_dir_all(agent.join(SKILLS_DIR).join("one")).unwrap();
@@ -383,7 +418,7 @@ mod tests {
         fs::write(data.join(AGENTS_DIR).join("notes.md"), "x").unwrap();
         fs::create_dir_all(data.join(AGENTS_DIR).join("has space")).unwrap();
 
-        let agents = launcher_entries(Some(&data)).agents;
+        let agents = launcher_entries(Some(&data)).await.agents;
         assert_eq!(
             agents
                 .iter()
@@ -437,11 +472,11 @@ mod tests {
         let _ = fs::remove_dir_all(&data);
     }
 
-    #[test]
-    fn missing_data_root_lists_nothing_and_never_panics() {
+    #[tokio::test]
+    async fn missing_data_root_lists_nothing_and_never_panics() {
         let root = temp_root("absent");
         let missing = root.join("nested-that-does-not-exist");
-        let entries = launcher_entries(Some(&missing));
+        let entries = launcher_entries(Some(&missing)).await;
         assert!(entries.workspaces.is_empty());
         assert!(entries.agents.is_empty());
         // Listing is read-only: it must not create the data root as a side effect.

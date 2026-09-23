@@ -222,7 +222,7 @@ const router = createMemoryRouter(routes, {
   and palette activation.
 - `frontend/src/test/performance.test.tsx`: store notify count, reducer
   identity for non-lifecycle envelopes.
-- `src/shell/theme.rs` + `tests/theme_packages.rs`: 91-token snapshot and
+- `src/shell/theme/resolve.rs` (`resolve_theme_token_snapshot`; hub `src/shell/theme.rs`) + `tests/theme_packages.rs`: 91-token snapshot and
   bundled-theme contrast.
 - Commands: `cd frontend && npm test && npm run build && npm run check:budget`
 

@@ -650,22 +650,33 @@ async fn generic_fake_lsp_server_initialize_and_shutdown_through_process_service
         .await
         .expect("initialize write");
 
-    let response = service
-        .read(
-            session,
-            "fake.pkg".to_string(),
-            "fake.srv".to_string(),
-            0,
-            LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
-            2_000,
-        )
-        .await
-        .expect("initialize read");
-    let body = String::from_utf8_lossy(&response);
-    assert!(
-        body.contains("clay-fake-lsp") && body.contains("Content-Length:"),
-        "expected framed initialize response, got {body}"
-    );
+    // The process service returns whatever stdout delivered per read; under
+    // suite load a frame can arrive in chunks. Accumulate (bounded) until the
+    // response is complete instead of assuming one read.
+    let mut response = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let chunk = service
+            .read(
+                session,
+                "fake.pkg".to_string(),
+                "fake.srv".to_string(),
+                0,
+                LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES,
+                2_000,
+            )
+            .await
+            .expect("initialize read");
+        response.extend_from_slice(&chunk);
+        let body = String::from_utf8_lossy(&response);
+        if body.contains("clay-fake-lsp") && body.contains("Content-Length:") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "expected framed initialize response, got {body}"
+        );
+    }
 
     let shutdown = content_length_frame(&serde_json::json!({
         "jsonrpc": "2.0",

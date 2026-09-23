@@ -423,19 +423,20 @@ fn style_variable_catalog_matches_components_md() {
 }
 
 /// Phase 20.7 task 6: the core token catalog in code (`core_theme_value` match
-/// arms in `src/shell/theme.rs`) must match the "Core Tokens (implemented)"
+/// arms in `src/shell/theme/parse.rs`) must match the "Core Tokens (implemented)"
 /// tables in `references/tokens.md` exactly. A token added to code without a
 /// doc row (or vice versa) fails here.
 #[test]
 fn core_token_catalog_matches_tokens_md() {
     // Code set: `core_theme_value` match arms — `"token" => CoreThemeValue {`.
-    let theme_path = format!("{}/src/shell/theme.rs", manifest_dir());
+    // Plan 133 task 7 moved the catalog out of `src/shell/theme.rs`.
+    let theme_path = format!("{}/src/shell/theme/parse.rs", manifest_dir());
     let theme_src =
-        fs::read_to_string(&theme_path).unwrap_or_else(|err| panic!("read theme.rs: {err}"));
+        fs::read_to_string(&theme_path).unwrap_or_else(|err| panic!("read theme/parse.rs: {err}"));
     let body = theme_src
         .split("fn core_theme_value(")
         .nth(1)
-        .expect("theme.rs must define `core_theme_value`");
+        .expect("theme/parse.rs must define `core_theme_value`");
     let body = body.split("\n}\n").next().unwrap_or(body);
     let mut code_tokens = Vec::new();
     for line in body.lines() {
@@ -910,11 +911,11 @@ fn design_system_enforces_color_authority_and_bounds() {
         .expect("button primary recipe present");
 
     assert_eq!(btn.background_color.as_str(), "accent.primary");
-    assert_eq!(btn.border_radius, 6.0);
+    assert!((btn.border_radius - 6.0).abs() < f64::EPSILON);
     // Missing properties come from the core fallback for that key: the shipped
     // primary button is a fill-only control with no border of its own (DESIGN.md §11).
     assert_eq!(btn.border_style, BorderStyle::None);
-    assert_eq!(btn.border_width, 0.0);
+    assert!((btn.border_width - 0.0).abs() < f64::EPSILON);
     assert_eq!(btn.text_color.as_str(), "surface.main");
 }
 
@@ -1542,11 +1543,11 @@ fn plan118_design_instrument_is_inert_data_with_the_quiet_instrument_profile() {
         Some(clay::shell::design_system::DesignSystemValue::Radius(v)) => *v,
         other => panic!("values.{name} must be a radius, got {other:?}"),
     };
-    assert_eq!(radius("radius.xs"), 5.0);
-    assert_eq!(radius("radius.control"), 8.0);
-    assert_eq!(radius("radius.panel"), 12.0);
-    assert_eq!(radius("radius.surface"), 16.0);
-    assert_eq!(radius("radius.pill"), 9999.0);
+    assert!((radius("radius.xs") - 5.0).abs() < f64::EPSILON);
+    assert!((radius("radius.control") - 8.0).abs() < f64::EPSILON);
+    assert!((radius("radius.panel") - 12.0).abs() < f64::EPSILON);
+    assert!((radius("radius.surface") - 16.0).abs() < f64::EPSILON);
+    assert!((radius("radius.pill") - 9999.0).abs() < f64::EPSILON);
     assert_eq!(decl.values.len(), 14, "the profile's value table is exact");
 
     // Payload budget: the declaration is inert data shipped to the client.
@@ -1745,7 +1746,7 @@ fn plan118_design_instrument_radius_state_and_material_discipline() {
                 "{key} selection must be the accent fill at 0.15"
             );
             assert!(
-                recipe.border_width.unwrap_or(0.0) == 0.0,
+                (recipe.border_width.unwrap_or(0.0) - 0.0).abs() < f64::EPSILON,
                 "{key} selection must not add an edge"
             );
             assert!(
@@ -2459,7 +2460,7 @@ fn plan125_palette_and_mentions_take_the_halo_not_a_drop_shadow() {
         );
         assert!(
             got.iter()
-                .all(|(x, _, blur, _, _)| *x == 0.0 && *blur > 0.0),
+                .all(|(x, _, blur, _, _)| (*x - 0.0).abs() < f64::EPSILON && *blur > 0.0),
             "`{key}` halo layers are zero-offset and keep a visible blur (§14.1)"
         );
     }
@@ -2556,7 +2557,7 @@ fn plan118_host_fallback_block_matches_the_resolved_package() {
     /// runtime snapshot must project a recipe to the same CSS text.
     fn projected(prop: &str, recipe: &ResolvedComponentRecipe) -> String {
         fn number(value: f64) -> String {
-            if value.fract() == 0.0 {
+            if (value.fract() - 0.0).abs() < f64::EPSILON {
                 format!("{value:.0}")
             } else {
                 format!("{value}")
@@ -2598,7 +2599,7 @@ fn plan118_host_fallback_block_matches_the_resolved_package() {
                         .iter()
                         .map(|layer| {
                             let role = role_css(layer.color_role.as_str());
-                            let tint = if layer.opacity == 1.0 {
+                            let tint = if (layer.opacity - 1.0).abs() < f64::EPSILON {
                                 role
                             } else {
                                 format!(
@@ -2670,7 +2671,7 @@ fn plan118_host_fallback_block_matches_the_resolved_package() {
             // family was the last exemption (plan 118's chat-frontend task).
             panic!("host fallback variable `{name}` has no shipped recipe");
         };
-        if *prop == "background-color" && recipe.background_opacity != 1.0 {
+        if *prop == "background-color" && (recipe.background_opacity - 1.0).abs() >= f64::EPSILON {
             continue;
         }
         let want = normalize(&projected(prop, recipe));
@@ -2726,14 +2727,16 @@ fn plan118_core_fallbacks_obey_the_language_rules() {
             recipe.border_radius
         );
         if !FLUSH_KEYS.contains(&name.as_str()) {
-            assert_ne!(
-                recipe.border_radius, 0.0,
+            assert!(
+                (recipe.border_radius - 0.0).abs() >= f64::EPSILON,
                 "`{name}` may not be 0px (DESIGN.md §5)"
             );
         }
         for layer in &recipe.shadow {
             assert!(
-                !(layer.blur == 0.0 && (layer.x != 0.0 || layer.y != 0.0)),
+                !((layer.blur - 0.0).abs() < f64::EPSILON
+                    && ((layer.x - 0.0).abs() >= f64::EPSILON
+                        || (layer.y - 0.0).abs() >= f64::EPSILON)),
                 "`{name}` reintroduces a hard offset shadow (DESIGN.md §14)"
             );
         }
@@ -2750,12 +2753,12 @@ fn plan118_core_fallbacks_obey_the_language_rules() {
             );
         }
         if recipe.outline_style.as_str() == "solid" {
-            assert_eq!(
-                recipe.outline_width, 2.0,
+            assert!(
+                (recipe.outline_width - 2.0).abs() < f64::EPSILON,
                 "`{name}` ring width (DESIGN.md §11)"
             );
-            assert_eq!(
-                recipe.outline_offset, 2.0,
+            assert!(
+                (recipe.outline_offset - 2.0).abs() < f64::EPSILON,
                 "`{name}` ring offset (DESIGN.md §11)"
             );
         }

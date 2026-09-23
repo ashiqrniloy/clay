@@ -63,6 +63,7 @@ impl AgentCheckpointStore {
             // another root's document into this session's checkpoint.
             if workspace
                 .contained_existing_path(root_id, &canonical_path)
+                .await
                 .is_err()
             {
                 continue;

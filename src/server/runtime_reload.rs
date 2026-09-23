@@ -3,6 +3,7 @@
 //! and open-document refresh.
 
 use super::*;
+use crate::lock_util::LockOrRecover;
 
 /// Daemon data location fallback: when the server was started without an
 /// explicit configuration root, keep agent state (sessions, credentials,
@@ -171,6 +172,23 @@ fn stage_typography(
         current.revision.saturating_add(1)
     };
     Ok(requested)
+}
+
+/// Read the persisted appearance off Tokio's blocking pool (plan 134 P3):
+/// `effective_configuration_root` (canonicalize + `is_file`), the config-root
+/// canonicalize, and the preferences read are all `std::fs`.
+/// Any failure degrades to `None`, exactly like the previous inline chain.
+async fn persisted_appearance(server: crate::server::IpcServer) -> Option<String> {
+    tokio::task::spawn_blocking(move || {
+        let config_root = server.effective_configuration_root()?;
+        crate::server::configuration::ConfigurationRuntime::from_config_root(&config_root)
+            .ok()
+            .and_then(|runtime| runtime.load_preferences().appearance)
+            .map(|appearance| appearance.as_str().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 #[allow(
@@ -705,10 +723,7 @@ impl IpcServer {
         let mut active_design_system = if let Some(selected) =
             evaluation.active_design_system.clone()
         {
-            let packages = service
-                .package_service()
-                .lock()
-                .expect("package service mutex poisoned");
+            let packages = service.package_service().lock_or_recover();
             if selected.provenance.package_name != "core" {
                 let is_valid = packages.enabled_records().any(|r| {
                     r.manifest.name == selected.provenance.package_name
@@ -724,10 +739,7 @@ impl IpcServer {
                 selected
             }
         } else {
-            let packages = service
-                .package_service()
-                .lock()
-                .expect("package service mutex poisoned");
+            let packages = service.package_service().lock_or_recover();
             if expected_design_system.provenance.package_name != "core" {
                 let is_valid = packages.enabled_records().any(|r| {
                     r.manifest.name == expected_design_system.provenance.package_name
@@ -752,10 +764,7 @@ impl IpcServer {
         let expected_icon_pack = self.active_icon_pack.lock().await.clone();
         let mut active_icon_pack = if let Some(selected) = evaluation.active_icon_pack.clone() {
             let icon_pack_valid = {
-                let packages = service
-                    .package_service()
-                    .lock()
-                    .expect("package service mutex poisoned");
+                let packages = service.package_service().lock_or_recover();
                 packages.enabled_records().any(|r| {
                     r.manifest.name == selected.provenance.package_name
                         && r.manifest.version == selected.provenance.package_version
@@ -765,10 +774,7 @@ impl IpcServer {
             icon_pack_valid.then_some(selected)
         } else if let Some(previous) = expected_icon_pack.clone() {
             let icon_pack_valid = {
-                let packages = service
-                    .package_service()
-                    .lock()
-                    .expect("package service mutex poisoned");
+                let packages = service.package_service().lock_or_recover();
                 packages.enabled_records().any(|r| {
                     r.manifest.name == previous.provenance.package_name
                         && r.manifest.version == previous.provenance.package_version
@@ -784,10 +790,7 @@ impl IpcServer {
         }
         let mut runtime_diagnostics = self.runtime_diagnostics.lock().await.snapshot();
         let package_ui = {
-            let packages = service
-                .package_service()
-                .lock()
-                .expect("package service mutex poisoned");
+            let packages = service.package_service().lock_or_recover();
             evaluation
                 .ui_contributions
                 .wire_snapshot(generation_id, |provenance| {
@@ -829,6 +832,7 @@ impl IpcServer {
                     .unwrap_or_default()
             }
         };
+        let ui_choices = self.enumerate_ui_choices(&service).await;
         let runtime_snapshot = build_runtime_state_snapshot(
             generation_id,
             &behavior,
@@ -842,7 +846,7 @@ impl IpcServer {
             evaluation.published_diagnostic_set.clone(),
             runtime_diagnostics,
             package_ui,
-            self.enumerate_ui_choices(&service),
+            ui_choices,
         )?;
         // Fail closed before commit when the complete snapshot cannot fit one
         // bounded IPC frame. Partial/live mutation must not begin.
@@ -1090,7 +1094,7 @@ impl IpcServer {
     /// one inventory pass, no new scan, so the Settings dropdowns render from
     /// the snapshot the client already receives. Deterministic (sorted) so
     /// snapshot equality stays stable across reloads.
-    fn enumerate_ui_choices(
+    async fn enumerate_ui_choices(
         &self,
         service: &ClayJsRuntimeService,
     ) -> crate::protocol::UiChoicesSnapshot {
@@ -1103,41 +1107,41 @@ impl IpcServer {
                     .as_ref()
                     .map(|ds| ds.display_name.clone()),
             };
-        let package_service = service
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
-        let records: Vec<&crate::packages::record::PackageRecord> =
-            package_service.enabled_records().collect();
-        let mut themes: Vec<_> = records
-            .iter()
-            .filter(|record| record.manifest.name.starts_with("@clay/theme-"))
-            .map(|record| option(record))
-            .collect();
-        let mut design_systems: Vec<_> = records
-            .iter()
-            .filter(|record| record.contributions.ui_design_system.is_some())
-            .map(|record| option(record))
-            .collect();
-        // Plan 118 task 20: a bundled design-system package is selectable without
-        // a prior `loadPackage` — `settings.setDesignSystem` accepts it and the
-        // apply path enables the record on demand — so the panel must offer it,
-        // not only enumerate what happens to be enabled. Without this pass the
-        // shipped system is unreachable from the Settings dropdown on a fresh
-        // install. Bundled manifests are read, never installed or enabled.
-        for name in crate::packages::bundled::bundled_package_names() {
-            if design_systems.iter().any(|option| option.specifier == name) {
-                continue;
+        let (mut themes, mut design_systems) = {
+            let package_service = service.package_service().lock_or_recover();
+            let records: Vec<&crate::packages::record::PackageRecord> =
+                package_service.enabled_records().collect();
+            let themes: Vec<_> = records
+                .iter()
+                .filter(|record| record.manifest.name.starts_with("@clay/theme-"))
+                .map(|record| option(record))
+                .collect();
+            let mut design_systems: Vec<_> = records
+                .iter()
+                .filter(|record| record.contributions.ui_design_system.is_some())
+                .map(|record| option(record))
+                .collect();
+            // Plan 118 task 20: a bundled design-system package is selectable without
+            // a prior `loadPackage` — `settings.setDesignSystem` accepts it and the
+            // apply path enables the record on demand — so the panel must offer it,
+            // not only enumerate what happens to be enabled. Without this pass the
+            // shipped system is unreachable from the Settings dropdown on a fresh
+            // install. Bundled manifests are read, never installed or enabled.
+            for name in crate::packages::bundled::bundled_package_names() {
+                if design_systems.iter().any(|option| option.specifier == name) {
+                    continue;
+                }
+                if let Some(display_name) =
+                    crate::packages::bundled::bundled_design_system_display_name(name)
+                {
+                    design_systems.push(crate::protocol::UiChoiceOption {
+                        specifier: name.to_string(),
+                        display_name: Some(display_name),
+                    });
+                }
             }
-            if let Some(display_name) =
-                crate::packages::bundled::bundled_design_system_display_name(name)
-            {
-                design_systems.push(crate::protocol::UiChoiceOption {
-                    specifier: name.to_string(),
-                    display_name: Some(display_name),
-                });
-            }
-        }
+            (themes, design_systems)
+        };
         themes.sort_by(|a, b| a.specifier.cmp(&b.specifier));
         design_systems.sort_by(|a, b| a.specifier.cmp(&b.specifier));
         // The built-in core baseline is always selectable and never a record.
@@ -1148,14 +1152,7 @@ impl IpcServer {
                 display_name: Some("Core baseline".to_string()),
             },
         );
-        let appearance = self
-            .effective_configuration_root()
-            .and_then(|root| {
-                crate::server::configuration::ConfigurationRuntime::from_config_root(&root).ok()
-            })
-            .map(|runtime| runtime.load_preferences().appearance)
-            .and_then(|appearance| appearance)
-            .map(|appearance| appearance.as_str().to_string());
+        let appearance = persisted_appearance(self.clone()).await;
         crate::protocol::UiChoicesSnapshot {
             themes,
             design_systems,

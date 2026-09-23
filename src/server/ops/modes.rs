@@ -741,7 +741,7 @@ mod tests {
         let style = parse_caret_style(Some(&value)).expect("present object parses");
         assert_eq!(style.shape, CaretShape::Block);
         assert!(matches!(style.blink, BlinkStyle::Blink { .. }));
-        assert_eq!(style.width_px, 2.0);
+        assert!((style.width_px - 2.0).abs() < f32::EPSILON);
         assert!(style.hollow);
     }
 
@@ -751,7 +751,7 @@ mod tests {
         let style = parse_caret_style(Some(&value)).expect("partial parses");
         assert_eq!(style.shape, CaretShape::Underline);
         assert_eq!(style.blink, BlinkStyle::Solid);
-        assert_eq!(style.width_px, CaretStyle::default().width_px);
+        assert!((style.width_px - CaretStyle::default().width_px).abs() < f32::EPSILON);
         assert!(!style.hollow);
     }
 

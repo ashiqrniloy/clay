@@ -66,6 +66,7 @@ setTheme("@clay/theme-gruvbox-material-dark");
 ## Options
 
 Pass either a theme specifier string or `{ specifier }`. Only bundled first-party theme packages are accepted, for example `@clay/theme-gruvbox-material-dark`.
+- `specifier` (`string`, default `required`): Installed or canonical theme package specifier to activate (for example `@clay/theme-mono`).
 
 ## Shipped choice set
 

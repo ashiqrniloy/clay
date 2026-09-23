@@ -1,0 +1,37 @@
+Plan 134 task 8 — code wiki update (poison policy, async-fs rule, float policy, R2/R4 ceilings)
+tree: HEAD 40022f6 + plan 133 split + plan 134 tasks 2-7; no source changed by this task.
+
+Pages edited (all already linked from docs/wiki/index.md; index one-liners extended):
+- docs/wiki/modules/persistent-runtime-hardening.md   new "## Lock Poison Policy (plan 134 D5)"
+- docs/wiki/modules/server-file-workspace.md         new "### Async Filesystem Rule (plan 134 P3)" + R4 ceiling bullet
+- docs/wiki/modules/server-state-fanout.md           R2 snapshot-clone ceiling bullet (revisit triggers)
+- docs/wiki/modules/maintenance-validation.md        new "## Plan 134 hygiene policies" (all three policies)
+- docs/wiki/index.md                                 four one-liner updates
+
+Coverage vs acceptance criteria:
+OK poison policy: which class recovers (330 self-healing production sites via
+   src/lock_util.rs::LockOrRecover::lock_or_recover), which fails loudly
+   (embedded tree-sitter Parser; 25 test-only locks), inline condvar recovery,
+   mailbox byte-accounting ceiling
+OK async-fs rule: hot path tokio::fs/spawn_blocking (named functions + callers),
+   cold-path std::fs ceilings listed
+OK float-comparison policy: identity (to_bits / pre-boundary values, is_arc_flag
+   example) vs tolerance (f32::EPSILON/f64::EPSILON) vs exact contrast floors;
+   81 sites -> 0, no #[allow(clippy::float_cmp)]
+OK R2/R4 ceilings with revisit triggers noted on their topical pages
+OK security: recovery re-validates authority (allowlist miss denies,
+   set_current_package re-resolved through the enabled set, PackageService
+   checks before mutation, server-issued capability tokens re-validated)
+OK linked from docs/wiki/index.md (wiki_index_links_every_wiki_page green)
+
+=== guard suites ===
+$ cargo test --test protocol primitives_docs
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 192 filtered out; finished in 0.01s
+$ cargo test --test protocol
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 50.10s
+$ cargo test --test presentation
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+Manual review: read back every new section; heading order intact in all four
+pages; no broken relative links (plan evidence uses backticked repo paths);
+markdown tables render; index descriptions match the new content.

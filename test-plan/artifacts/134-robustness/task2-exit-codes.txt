@@ -1,0 +1,27 @@
+Plan 134 task 2 — D4 float comparisons: gate exit codes (2026-09-22, HEAD 40022f6 +
+plan 133 uncommitted tree + plan 134 task 2 edits)
+Log: test-plan/artifacts/134-robustness/task2-check-full.log
+Elapsed: 2026-09-22 21:28:27 → 21:34:33 (+0600), ≈366 s.
+
+scripts/check.sh full:
+
+  audit          PASS exit 0 (9 allowed RUSTSEC advisory warnings, pre-existing)
+  fmt            PASS exit 0
+  check          PASS exit 0 (cargo check --all-targets)
+  clippy         PASS exit 0 (cargo clippy --all-targets -- -D warnings, zero warnings)
+  test           PASS exit 0 (2001 passed / 0 failed / 1 ignored:
+                  root 1945 = 1420 lib + 9 + 62 + 227 + 75 + 152 — baseline was 1944,
+                  +1 new `arc_flag_identity_accepts_only_exact_zero_and_one`;
+                  desktop 55; bindings 1 / 32 filtered)
+  bench-compile  PASS exit 0
+  desktop-clippy PASS exit 0
+  desktop-test   PASS exit 0
+  bindings       PASS exit 0 ("webview bindings up to date")
+
+Pedantic inventory (not part of check.sh):
+
+  cargo clippy --all-targets --message-format=json -- -W clippy::pedantic → exit 0
+  clippy::float_cmp diagnostics: 84 raw / 81 unique baseline → **0**.
+  Raw JSON: task2-clippy-pedantic-final.json. No other pedantic lint code added
+  (task-1 baseline lint-code set minus clippy::float_cmp only); no `#[allow]`
+  added anywhere.

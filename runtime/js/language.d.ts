@@ -4,7 +4,6 @@ export type LanguageIntelligenceProviderDeclaration = {
     modes?: string[];
     features: LanguageIntelligenceFeature[];
     priority?: number;
-    module?: string;
     exportName?: string;
     timeoutMs?: number;
     budgets?: {
@@ -21,6 +20,10 @@ export type LanguageIntelligenceProviderDeclaration = {
     languageServer?: never;
 };
 export type ServerRegisterLanguageIntelligenceProviderOptions = {
+    /** A pre-assembled provider declaration; equivalent to passing `id`,
+     *  `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and
+     *  `budgets` at the top level. A nested `moduleSpecifier` is honored; an
+     *  inline handler is only bound from the top-level `module` object. */
     provider?: LanguageIntelligenceProviderDeclaration;
     id?: string;
     modes?: string[];

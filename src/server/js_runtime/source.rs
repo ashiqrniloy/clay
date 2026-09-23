@@ -7,6 +7,7 @@ use deno_core::{
 };
 use deno_error::JsErrorBox;
 
+use crate::lock_util::LockOrRecover;
 use crate::server::configuration::ConfigurationRuntime;
 use crate::server::facades;
 use crate::server::ops::PackageLoadEntryAllowlist;
@@ -58,10 +59,7 @@ impl ClayModuleLoader {
         main_source: Option<String>,
         configuration: Option<Arc<ConfigurationRuntime>>,
     ) {
-        *self
-            .state
-            .lock()
-            .expect("Clay module loader state mutex poisoned") = ClayModuleLoaderState {
+        *self.state.lock_or_recover() = ClayModuleLoaderState {
             main_specifier,
             main_source,
             configuration,
@@ -82,10 +80,7 @@ impl ModuleLoader for ClayModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        let state = self
-            .state
-            .lock()
-            .expect("Clay module loader state mutex poisoned");
+        let state = self.state.lock_or_recover();
         if specifier == state.main_specifier.as_str() {
             return Ok(state.main_specifier.clone());
         }
@@ -168,10 +163,7 @@ impl ModuleLoader for ClayModuleLoader {
         _maybe_referrer: Option<&ModuleLoadReferrer>,
         _options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
-        let state = self
-            .state
-            .lock()
-            .expect("Clay module loader state mutex poisoned");
+        let state = self.state.lock_or_recover();
         if module_specifier == &state.main_specifier
             && let Some(source) = &state.main_source
         {

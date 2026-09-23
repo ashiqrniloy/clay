@@ -64,6 +64,14 @@ custom_properties:
     type: string
     default: optional
     description: Package-owned module specifier (max 512 chars), typically `import.meta.resolve("./provider.js")`. When present the provider runs on the domain's latency lane via module import; omit it to keep an inline `module` handler on the general lane.
+  - name: provider
+    type: object
+    default: optional
+    description: Pre-assembled provider declaration, equivalent to passing `id`, `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and `budgets` at the top level; a nested `moduleSpecifier` is honored.
+  - name: budgets.timeoutMs
+    type: number
+    default: 500
+    description: Nested timeout form accepted inside a `provider` declaration; bounded 1..=5000 and equal to `timeoutMs`.
 hot_path_policy: Registration is package-load time only. Requests are cancellable UiReactivePriority work that never blocks typing, local paint, or layout. Provider JavaScript is invoked on the persistent Deno worker thread with per-request timeout and bounded Clay-provided document window data.
 security: Requires parse-document. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript. Providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields are rejected. Hover/definition/code-action/signature results are inert validated data with UTF-8 byte offsets; no commands auto-execute. Code-action edits are inert versioned previews in Phase 18.20. Provider provenance is stamped by the coordinator, not trusted from provider output.
 agent_guidance: Use only from package load entries. Prefer loadPackage from user configuration. Do not pass callbacks, modules from other packages, raw Deno ops, shell commands, process handles, or network/data authorities.
@@ -157,6 +165,7 @@ serverRegisterLanguageIntelligenceProvider({
 - `timeoutMs`: per-request timeout, bounded to 1..=5000.
 - `module`: optional package-root-confined module with the handler export.
 - `moduleSpecifier`: optional package-owned module specifier (max 512 chars, e.g. `import.meta.resolve("./provider.js")`) that routes the provider to the latency lane by module import. Must resolve to a loaded module owned by the registering package.
+- `provider` (`object`, default `optional`): Pre-assembled provider declaration, equivalent to passing `id`, `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and `budgets` at the top level; a nested `moduleSpecifier` is honored.
 
 ## Key bindings
 
@@ -176,6 +185,8 @@ No key bindings are registered by this API. Language intelligence commands (`lan
 - `timeoutMs`
 - `module`
 - `moduleSpecifier`
+- `provider`: Pre-assembled provider declaration, equivalent to passing `id`, `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and `budgets`...
+- `budgets.timeoutMs`: Nested timeout form accepted inside a `provider` declaration; bounded 1..=5000 and equal to `timeoutMs`.
 
 ## Return and async behavior
 

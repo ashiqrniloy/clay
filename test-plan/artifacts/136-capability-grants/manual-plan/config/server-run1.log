@@ -1,0 +1,13 @@
+clay server listening on /tmp/clay-plan136-manual-config/clay.sock
+[agent-reg] agentProfile.register 'coding' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/compact' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/new' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/n' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/branch' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/tree' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/discard' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/fork' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/clone' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/open-session' host=live -> Ok(Object {"queued": Bool(true)})
+[agent-reg] command.register '/open-session-as-fork' host=live -> Ok(Object {"queued": Bool(true)})
+[agent] ensure_tab_session(1): empty book (provider='' model='')

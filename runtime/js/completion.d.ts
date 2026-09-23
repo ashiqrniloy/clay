@@ -1,3 +1,6 @@
+/** A completion provider's declared item shape, as written in
+ *  `clay.contributions.completionProviders` in `package.json`. This call never
+ *  reads items from its options object (plan 136 task 8). */
 export type CompletionProviderItem = string | {
     label: string;
     insertText: string;
@@ -5,20 +8,6 @@ export type CompletionProviderItem = string | {
     textFormat?: "plainText" | "snippet";
 };
 export type ServerRegisterCompletionProviderOptions = {
-    completionProvider?: unknown;
-    contribution?: unknown;
-    providerId?: string;
-    triggerCharacters?: string[];
-    triggers?: {
-        characters?: string[];
-        wordBoundary?: boolean;
-    };
-    wordBoundaryChars?: string[];
-    items?: CompletionProviderItem[];
-    priority?: number;
-    exclusive?: boolean;
-    timeoutMs?: number;
-    maxItems?: number;
     handler?: never;
     callback?: never;
     complete?: never;

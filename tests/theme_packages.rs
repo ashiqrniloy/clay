@@ -479,7 +479,7 @@ fn theme_package_below_aa_contrast_is_rejected() {
         .expect_err("low-contrast text.primary/surface.main pair must be rejected");
     assert_eq!(failure.foreground, "text.primary");
     assert_eq!(failure.background, "surface.main");
-    assert_eq!(failure.threshold, 4.5);
+    assert!((failure.threshold - 4.5).abs() < f64::EPSILON);
     assert!(
         failure.ratio < 4.5,
         "ratio {:.2} must be below 4.5",
@@ -783,7 +783,10 @@ fn shipped_theme_accent_below_the_floor_is_rejected() {
         ));
         assert_eq!(failure.foreground, "accent.primary", "{specifier}");
         assert_eq!(failure.background, "surface.main", "{specifier}");
-        assert_eq!(failure.threshold, 3.0, "{specifier}");
+        assert!(
+            (failure.threshold - 3.0).abs() < f64::EPSILON,
+            "{specifier}"
+        );
         assert!(
             failure.ratio < 3.0,
             "{specifier} mutated ratio {:.2} must be below the UI floor",
@@ -876,7 +879,10 @@ fn shipped_theme_invisible_boundary_is_rejected() {
                 "{specifier} {role} failed against {}, not a boundary surface",
                 failure.background
             );
-            assert_eq!(failure.threshold, 3.0, "{specifier}");
+            assert!(
+                (failure.threshold - 3.0).abs() < f64::EPSILON,
+                "{specifier}"
+            );
             assert!(
                 failure.ratio < 1.2,
                 "{specifier} mutated {role}/{} ratio {:.2} must collapse",
@@ -940,7 +946,10 @@ fn shipped_theme_invisible_hairline_is_rejected() {
             "{specifier}: an invisible hairline must be rejected"
         ));
         assert_eq!(failure.foreground, "border.hairline", "{specifier}");
-        assert_eq!(failure.threshold, 1.2, "{specifier}");
+        assert!(
+            (failure.threshold - 1.2).abs() < f64::EPSILON,
+            "{specifier}"
+        );
         assert!(
             failure.ratio < 1.2,
             "{specifier} invisible hairline measured {:.2}",

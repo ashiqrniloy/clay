@@ -20,7 +20,26 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the registered daemon command name (for example `\"/compact\"`)."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "optional",
+          "description": "the session to act on. Session-scoped handlers (`compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`) require it and fail closed without it."
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "default": "optional",
+          "description": "handler arguments, e.g. `{ \"entryId\": \"...\" }` for `/branch`, `/fork`, `/clone`, or `{ \"sessionId\": \"...\" }` for the open-session commands."
+        }
+      ],
       "security": "Dispatches a registered daemon command (slash surface) against daemon session state; handlers call daemon session RPCs only and cannot elevate acceptance policy or spawn processes. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.commandDispatch` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Dispatch is live-only: an unavailable daemon is a typed failure, never a deferred execution.",
       "lookup_tags": ["agent", "command", "dispatch", "slash-commands", "js-api"],
@@ -47,7 +66,26 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short description shown in command discovery."
+        },
+        {
+          "name": "handler",
+          "type": "string",
+          "default": "optional",
+          "description": "a host-built-in handler — `compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`, `openSession`, `openSessionAsFork`, `startRun`, `startWorkflow`, or `steer`. Omitted handlers are data-only commands (dispatch rejects them)."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the daemon command name. Slash names (`\"/compact\"`) are invocable from prompt text; other names are dispatch-only. Duplicate names fail closed."
+        }
+      ],
       "security": "Forwards an inert command declaration (name, optional handler name and description) to the daemon's validated command registry; handlers are host-built-in only and can never inject drivers or execute client code. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.commandRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Commands are data; the daemon's built-in handlers execute them under existing session authority.",
       "lookup_tags": ["agent", "command", "registration", "slash-commands", "js-api"],
@@ -80,6 +118,18 @@
           "type": "number",
           "default": "80000",
           "description": "Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session to compact."
+        },
+        {
+          "name": "strategy",
+          "type": "enum",
+          "default": "default",
+          "description": "`default`, `llm`, or `om`. Defaults to `agent.setRunOptions` `compaction` (default `llm`)."
         }
       ],
       "security": "Forwards user intent to the clay-agent daemon through a validated op; the daemon applies the secret redactor to the compaction run. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -108,7 +158,44 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "graft",
+          "type": "boolean",
+          "default": "optional",
+          "description": "`true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required)."
+        },
+        {
+          "name": "graftCliPath",
+          "type": "string",
+          "default": "optional",
+          "description": "explicit path to a `graft` CLI entry (host-owned)."
+        },
+        {
+          "name": "graftDeepModel",
+          "type": "object",
+          "default": "optional",
+          "description": "Explicit model for `/graft-build-deep`; requires `graft: true`."
+        },
+        {
+          "name": "graftMode",
+          "type": "enum",
+          "default": "optional",
+          "description": "graft extension mode — `pull` (tools + commands + skill, default), `push` (retrieval pack + first-turn orientation + edit blast radius), or `both`."
+        },
+        {
+          "name": "wiki",
+          "type": "boolean",
+          "default": "optional",
+          "description": "`true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required)."
+        },
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "default": "required",
+          "description": "absolute workspace root the knowledge base binds to."
+        }
+      ],
       "security": "Forwards a configuration intent (workspace root, opt-in flags, and an optional graft deep-build model identity) to the daemon, which owns activation; writes stay inside the workspace `.wiki/` tree, the optional qmd binary is never spawned unless explicitly configured, and a graft deep-build key is read from the credential vault unless the trusted caller passes one inline (it joins the redactor and reaches the child process only in its environment, never argv). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript.",
       "agent_guidance": "Use `agent.knowledgeSetOptions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. The call is queued while the daemon is down and applies after the daemon initializes, so load entries never block on daemon startup.",
       "lookup_tags": ["agent", "knowledge", "wiki", "graft", "prism-memory", "options", "js-api"],
@@ -135,7 +222,38 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short profile description shown in pickers."
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "default": "optional",
+          "description": "the profile's system prompt layer."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the profile name; sessions select it by name. Duplicate names fail closed."
+        },
+        {
+          "name": "skills",
+          "type": "string[]",
+          "default": "optional",
+          "description": "skill names resolved against the daemon skill registry; register skills before the profile that references them."
+        },
+        {
+          "name": "tools",
+          "type": "string[]",
+          "default": "optional",
+          "description": "tool names resolved against the daemon tool registry; unknown names fail closed at session start."
+        }
+      ],
       "security": "Forwards an inert profile declaration to the daemon's validated registry; re-registering a profile name replaces the definition, and unknown tool or skill ids fail closed at session start, before any provider turn. Tool execution authority stays governed by the acceptance policy, not by registration. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.profileRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register referenced skills first (`agent.skillRegister`); a profile that names an unregistered skill fails closed before any provider turn.",
       "lookup_tags": ["agent", "profile", "registration", "tools", "skills", "js-api"],
@@ -162,7 +280,38 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "decision",
+          "type": "enum",
+          "default": "optional",
+          "description": "single decision for the pending interruption."
+        },
+        {
+          "name": "decisions",
+          "type": "object[]",
+          "default": "optional",
+          "description": "batch of per-tool-call decisions with outcomes (`allow_once`, `allow_for_run`, `deny_once`, `deny_for_run`). Mutually exclusive with `decision`."
+        },
+        {
+          "name": "expectedVersion",
+          "type": "number",
+          "default": "required",
+          "description": "optimistic run-state version; mismatch fails closed."
+        },
+        {
+          "name": "runId",
+          "type": "string",
+          "default": "required",
+          "description": "the suspended run to resume."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the session that owns the suspended run."
+        }
+      ],
       "security": "Forwards the user's decision to the daemon, which validates the decision shape and run-state version fail-closed; stale or malformed resumes have no side effects. Surfaces the pending approval to the user when not resuming programmatically. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.resumeRun` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Only resume with a decision the user actually made; automated approval without user intent is forbidden.",
       "lookup_tags": ["agent", "approval", "resume", "run", "durable", "js-api"],
@@ -189,7 +338,26 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "limit",
+          "type": "number",
+          "default": "optional",
+          "description": "maximum hits (server caps the page size)."
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "default": "optional",
+          "description": "full-text query. Omitted queries list recent sessions."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live session whose workspace scopes the search."
+        }
+      ],
       "security": "Workspace scoping is server-owned (the daemon filters by the session's stamped workspaceRoot); snippets are redacted daemon-side. Results are transcript metadata for explicit user-facing flows and are never auto-injected into agent context. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.searchSessions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Never treat search hits as injectable context; content becomes context only when the user explicitly opens or attaches a result.",
       "lookup_tags": ["agent", "search", "sessions", "workspace", "fts", "js-api"],
@@ -216,7 +384,26 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "entryId",
+          "type": "string",
+          "default": "required",
+          "description": "the target tree entry."
+        },
+        {
+          "name": "method",
+          "type": "enum",
+          "default": "required",
+          "description": "the tree operation."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session."
+        }
+      ],
       "security": "Checkout first restores server-recorded document checkpoints (buffer-only, lease-respecting) before moving the conversation leaf; abandoned branches are kept, never deleted. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.sessionTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Checkout rewrites the live branch; confirm with the user before discarding their current position.",
       "lookup_tags": ["agent", "tree", "checkout", "fork", "clone", "checkpoint", "js-api"],
@@ -249,6 +436,18 @@
           "type": "boolean",
           "default": "true",
           "description": "The autonomy default itself — sessions are fully autonomous unless a caller explicitly blocks it (decision 2026-09-20-2049, superseding the \"off by default\" part of decision 2157). Documented as a property, not a settable option; there is no \"default autonomy\" key in init.js."
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "required",
+          "description": "true skips approval prompts for gated calls; false restores them. New sessions start with true unless their creator passed `fullAutonomy: false`."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session."
         }
       ],
       "security": "Autonomy is on by default and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls — out-of-workspace writes, delete/move, and shell-metacharacter commands — run without an approval prompt in that session, and a fresh session inherits the same default. Callers who want prompts must block autonomy explicitly (`fullAutonomy: false` at creation, or this API with `enabled: false`). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -353,7 +552,32 @@
       "visibility": "public",
       "permissions": ["agent-host"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short description shown in the skill catalog."
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "default": "optional",
+          "description": "full instructions loaded on demand through `load_skill`."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the skill name; profiles reference it by name. Duplicate names fail closed."
+        },
+        {
+          "name": "toolNames",
+          "type": "string[]",
+          "default": "optional",
+          "description": "tools the skill documents; validated against the tool registry."
+        }
+      ],
       "security": "Forwards an inert skill declaration (name, description, instructions, tool names) to the daemon's validated skill registry; re-registering a name replaces the definition. Skills surface only through the daemon's load_skill progressive-disclosure tool and never execute anything by being registered. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `agent.skillRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register skills before the profile that references them; keep instructions as documentation, never as an execution surface.",
       "lookup_tags": ["agent", "skill", "registration", "progressive-disclosure", "js-api"],
@@ -371,7 +595,7 @@
       "js_facade": "runtime/js/application.js::quit",
       "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_application_quit",
-      "deno_op_path": "src/server/ops/application.rs::op_clay_application_quit",
+      "deno_op_path": "planned: src/server/ops/application.rs::op_clay_application_quit",
       "name": "quit",
       "user_facing_name": "Quit Clay",
       "summary": "Quit Clay through the planned `clay:application` Clay JavaScript facade.",
@@ -380,7 +604,20 @@
       "visibility": "public",
       "permissions": [],
       "key_bindings": ["Escape"],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "force",
+          "type": "boolean",
+          "default": "planned",
+          "description": "Planned force-quit flag that skips the save/confirm prompts."
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "default": "planned",
+          "description": "Planned reason string recorded for diagnostics and shutdown prompts."
+        }
+      ],
       "security": "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["application", "escapequitapplicationactions", "js-api"],
@@ -1055,10 +1292,28 @@
           "description": "Server document version the spans were produced for."
         },
         {
-          "name": "viewportByteRange",
-          "type": "byte-range",
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "documentVersion",
+          "description": "Validation override used by tests/server integration; defaults to `documentVersion`."
+        },
+        {
+          "name": "viewport",
+          "type": "object",
           "default": "required",
-          "description": "Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+          "description": "Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+        },
+        {
+          "name": "viewport.byteStart",
+          "type": "number",
+          "default": "required",
+          "description": "First byte of the visible range."
+        },
+        {
+          "name": "viewport.byteEnd",
+          "type": "number",
+          "default": "required",
+          "description": "Last byte of the visible range."
         },
         {
           "name": "spans",
@@ -1135,6 +1390,12 @@
           "type": "string",
           "default": "package context",
           "description": "Package API prefix retained as provenance."
+        },
+        {
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Validation override used by tests/server integration; defaults to `documentVersion`."
         }
       ],
       "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
@@ -1298,7 +1559,20 @@
       "visibility": "public",
       "permissions": ["workspace-read", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": "required",
+          "description": "Workspace-relative path to an existing UTF-8 text file."
+        },
+        {
+          "name": "workspaceRootId",
+          "type": "string",
+          "default": "required",
+          "description": "Configured server workspace root identifier advertised by Clay."
+        }
+      ],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "open", "js-api"],
@@ -1325,7 +1599,26 @@
       "visibility": "public",
       "permissions": ["workspace-read", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Open document to reload."
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "default": "false",
+          "description": "Permit replacing a dirty server document when the user has explicitly chosen to discard edits."
+        },
+        {
+          "name": "knownVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Version the caller expects."
+        }
+      ],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "reload", "dirty-state", "js-api"],
@@ -1352,7 +1645,20 @@
       "visibility": "public",
       "permissions": ["workspace-write", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Open document to save."
+        },
+        {
+          "name": "knownVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Confirmed server version known by the caller. Values at or below the canonical version are accepted; a value newer than the server is rejected as protocol/state confusion. Omission uses the server-internal baseline."
+        }
+      ],
       "security": "The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "save", "dirty-state", "js-api"],
@@ -1385,6 +1691,12 @@
           "type": "enum",
           "default": "none",
           "description": "Where the new caret is added relative to the primary (below, above)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Reserved surface target; the client applies the command to the focused editor."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1446,6 +1758,12 @@
           "type": "enum",
           "default": "none",
           "description": "Column-select direction (down, up, left, right)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Reserved surface target; the client applies the command to the focused editor."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1640,6 +1958,12 @@
           "type": "number",
           "default": "1",
           "description": "Repeat count for the motion (clamped to >= 1)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1794,6 +2118,12 @@
           "type": "boolean",
           "default": "false",
           "description": "Behavior-changing setting `revealCursor` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -2071,6 +2401,12 @@
           "type": "enum",
           "default": "current",
           "description": "Selection direction (current, next, prev)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -2111,6 +2447,12 @@
           "type": "number",
           "default": "4",
           "description": "Behavior-changing setting `overscanLines` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
@@ -2308,7 +2650,26 @@
       "visibility": "public",
       "permissions": ["document-edit"],
       "key_bindings": ["Backspace", "Delete"],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier."
+        },
+        {
+          "name": "end",
+          "type": "number",
+          "default": "required",
+          "description": "Exclusive end offset of the range to delete."
+        },
+        {
+          "name": "start",
+          "type": "number",
+          "default": "required",
+          "description": "Start offset of the range to delete."
+        }
+      ],
       "security": "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["backspacedelete", "editor", "js-api"],
@@ -2347,6 +2708,18 @@
           "type": "manifest",
           "default": "//",
           "description": "Behavior-changing setting `commentContinuation` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier."
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "default": "required",
+          "description": "Insertion offset for the newline."
         }
       ],
       "security": "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -2381,6 +2754,24 @@
           "type": "boolean",
           "default": "true",
           "description": "Behavior-changing setting `normalizeLineEndings` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier such as `\"current\"` once runtime document IDs exist."
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "default": "required",
+          "description": "Protocol-defined insertion offset."
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "default": "required",
+          "description": "Inert text to insert."
         }
       ],
       "security": "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -2514,6 +2905,12 @@
           "type": "string",
           "default": "package context",
           "description": "Package API prefix retained as provenance."
+        },
+        {
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Validation override; defaults to `documentVersion`. A mismatch drops the publication."
         }
       ],
       "security": "Requires render-folding permission plus server validation of package provenance, current document version, byte ranges, nesting, and FOLDING_RANGE_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority.",
@@ -2963,6 +3360,18 @@
           "type": "string",
           "default": "optional",
           "description": "Package-owned module specifier (max 512 chars), typically `import.meta.resolve(\"./provider.js\")`. When present the provider runs on the domain's latency lane via module import; omit it to keep an inline `module` handler on the general lane."
+        },
+        {
+          "name": "provider",
+          "type": "object",
+          "default": "optional",
+          "description": "Pre-assembled provider declaration, equivalent to passing `id`, `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and `budgets` at the top level; a nested `moduleSpecifier` is honored."
+        },
+        {
+          "name": "budgets.timeoutMs",
+          "type": "number",
+          "default": "500",
+          "description": "Nested timeout form accepted inside a `provider` declaration; bounded 1..=5000 and equal to `timeoutMs`."
         }
       ],
       "security": "Requires parse-document. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript. Providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields are rejected. Hover/definition/code-action/signature results are inert validated data with UTF-8 byte offsets; no commands auto-execute. Code-action edits are inert versioned previews in Phase 18.20. Provider provenance is stamped by the coordinator, not trusted from provider output.",
@@ -3121,6 +3530,42 @@
           "description": "Behavior-changing setting `fileNamePatterns` for this primitive gate API."
         },
         {
+          "name": "shebangPatterns",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Shebang patterns matched against the first line during classification (declaration field read by the registration op)."
+        },
+        {
+          "name": "contentProbes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Bounded leading-content probes matched during classification (declaration field read by the registration op)."
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "default": "Mode",
+          "description": "Human-readable mode name stored with the declaration."
+        },
+        {
+          "name": "defaultFontRole",
+          "type": "enum",
+          "default": "proportional",
+          "description": "Default document font role for this mode; `monospace` or `proportional`."
+        },
+        {
+          "name": "commands",
+          "type": "object[]",
+          "default": "[]",
+          "description": "Command declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated."
+        },
+        {
+          "name": "keymaps",
+          "type": "object[]",
+          "default": "[]",
+          "description": "Keymap declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated."
+        },
+        {
           "name": "modeId",
           "type": "string",
           "default": "required",
@@ -3142,6 +3587,64 @@
       "security": "Requires mode-registration permission and server validation of package prefix, static pattern schema, duplicate modes, and bounded open-document metadata only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, filesystem-scan, package installation, enable/disable, or arbitrary client behavior authority.",
       "agent_guidance": "Use `modes.serverRegisterModePattern` only for its documented primitive gate responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["js-api", "modedocumentclassification", "modes"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "packages.authorize",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/authorize.md",
+      "js_module": "clay:packages",
+      "js_export": "authorize",
+      "js_facade": "runtime/js/packages.js::authorize",
+      "backing_rust": "src/server/ops/packages.rs::op_clay_packages_authorize; src/packages/service.rs::PackageService::authorize_package; src/packages/authorization.rs::PackageAuthorizationRecord",
+      "deno_op": "op_clay_packages_authorize",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_authorize",
+      "name": "authorize",
+      "user_facing_name": "Authorize Package Capabilities and Runtime Profile",
+      "summary": "Record an explicit user capability grant and runtime profile for an installed package.",
+      "owner": "server",
+      "phase": "Phase 18.6",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "package",
+          "type": "string",
+          "default": "required",
+          "description": "Installed package name or the original requested source specifier, e.g. \"@vendor/words\" or \"github:user/repo\"."
+        },
+        {
+          "name": "capabilities",
+          "type": "string[]",
+          "default": "required",
+          "description": "Manifest-declared capability names to approve, e.g. [\"completion-provider\", \"parse-document\"]."
+        },
+        {
+          "name": "runtimeProfile",
+          "type": "enum",
+          "default": "native-trust",
+          "description": "One of \"native-trust\", \"sandboxed\", or \"restricted\"; recorded with the grant."
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "default": "optional",
+          "description": "Optional provenance match; must equal the original requested specifier or the resolved package name."
+        },
+        {
+          "name": "approvedBy",
+          "type": "enum",
+          "default": "required",
+          "description": "One of \"user\", \"cli\", or \"config\"; names who approved the grant. Package activation can never approve."
+        }
+      ],
+      "security": "Records an explicit user/CLI/config capability grant and runtime profile for an installed package's exact provenance. The trusted-only packages facade cannot be imported by third-party code, the op refuses while a package load entry is activating, and every granted capability must be declared by the manifest, so no package can grant itself authority. Grants are visible, revocable, provenance-bound, and fail-closed when absent; hidden JSON/TOML/ad hoc keys cannot grant capabilities. The grant authorizes a package to use separately implemented documented APIs; it does not materialize surfaces, bypass client validation, or grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, client-side JavaScript, package-manager, native-widget, raw-op, or implicit package-control authority.",
+      "agent_guidance": "Call this only from trusted user configuration (init.js), the CLI, or an explicit user action, after installing the package. Grant only the capabilities the package declares and the user intends. Grants are required before a package that requests powerful capabilities can be enabled; revoke with `clay package revoke`.",
+      "lookup_tags": ["packages", "js-api", "authorize", "capability-grant", "provenance", "init"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed",
@@ -3351,10 +3854,10 @@
           "description": "Export name resolved from module; the export must be a function and is never serialized to Rust."
         },
         {
-          "name": "modeId",
+          "name": "mode",
           "type": "string",
           "default": "required",
-          "description": "Active mode ID this handler serves."
+          "description": "Active mode ID this handler serves; the registration op reads `mode` (not `modeId`)."
         },
         {
           "name": "parseUnit",
@@ -3379,6 +3882,12 @@
           "type": "number",
           "default": "65536",
           "description": "Maximum bytes included in one bounded parse-window snapshot."
+        },
+        {
+          "name": "parseWindowBytes",
+          "type": "number",
+          "default": "65536",
+          "description": "Alias of `maxWindowBytes`, read with `maxWindowBytes` when both are absent."
         },
         {
           "name": "guardBytes",
@@ -4878,6 +5387,18 @@
           "description": "Bounded child component declarations."
         },
         {
+          "name": "style",
+          "type": "object",
+          "default": "optional",
+          "description": "Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed style-variable names."
+        },
+        {
+          "name": "action",
+          "type": "object",
+          "default": "optional",
+          "description": "UI action intent validated against the registered package-prefixed command IDs (`action.commandId`)."
+        },
+        {
           "name": "styleTokens",
           "type": "string[]",
           "default": "[]",
@@ -5524,6 +6045,18 @@
       "permissions": ["workspace-read"],
       "key_bindings": [],
       "custom_properties": [
+        {
+          "name": "rootId",
+          "type": "WorkspaceRootId",
+          "default": "required",
+          "description": "Workspace root returned by the root-listing API; the listing is confined to it."
+        },
+        {
+          "name": "relativePath",
+          "type": "string",
+          "default": "package-relative-path",
+          "description": "Package-root-relative path inside the workspace root; defaults to the root itself."
+        },
         {
           "name": "maxDepth",
           "type": "number",

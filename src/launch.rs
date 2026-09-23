@@ -219,6 +219,9 @@ pub(crate) fn run_package_subcommand(
                         None => "unknown",
                     };
                     println!("Adoption:    {adoption}");
+                    for line in clay::packages::verbs::format_grant_lines(&inspection) {
+                        println!("{line}");
+                    }
                 }
                 None => eprintln!("Package `{package_name}` is not installed."),
             }
@@ -246,6 +249,21 @@ pub(crate) fn run_package_subcommand(
             for replacement in &approval.replacements {
                 println!("  replaces:     {}", replacement.target);
             }
+        }
+        PackageCliSubcommand::Authorize {
+            package_name,
+            capabilities,
+            runtime_profile,
+            approved_by,
+        } => {
+            clay::packages::verbs::authorize(
+                &mut service,
+                &package_name,
+                &capabilities,
+                runtime_profile.as_deref(),
+                &approved_by,
+                &mut std::io::stdout(),
+            )?;
         }
         PackageCliSubcommand::Revoke { package_name } => {
             if service.inspect(&package_name).is_none() {
@@ -283,6 +301,10 @@ pub(crate) fn run_server(
         .build()?
         .block_on(async {
             let server = IpcServer::try_new(config)?;
+            // Report-time lane metrics need the server after `run()` consumes
+            // it, so the SIGTERM arm holds its own handle (Arc clones; plan 136
+            // task 7).
+            let report_server = server.clone();
             #[cfg(unix)]
             {
                 let mut terminate =
@@ -290,8 +312,13 @@ pub(crate) fn run_server(
                 tokio::select! {
                     result = server.run() => result.map_err(Box::<dyn Error>::from)?,
                     _ = terminate.recv() => {
-                        // Editor performance harness: dump the sanitized server
-                        // summary before exit. No-op without CLAY_PERF_REPORT_DIR.
+                        // Editor performance harness: record the live JS runtime
+                        // lane occupancy (plan 136 task 7) and dump the
+                        // sanitized server summary before exit. No-op without
+                        // CLAY_PERF_REPORT_DIR.
+                        report_server
+                            .record_lane_metrics(&clay::perf::metrics::global_recorder())
+                            .await;
                         if let Some(path) = clay::perf::metrics::write_perf_report("clay-server") {
                             eprintln!("clay perf report written to {}", path.display());
                         }

@@ -248,62 +248,76 @@ pub(super) async fn persist_settings_change(
     command_id: &str,
     arguments: &serde_json::Value,
 ) -> Result<PersistOutcome, String> {
-    use crate::server::configuration::ConfigurationRuntime;
-    let Some(config_root) = server.effective_configuration_root() else {
-        return Err("settings persistence requires an active configuration root".to_string());
-    };
-    let runtime = ConfigurationRuntime::from_config_root(&config_root)
-        .map_err(|error| format!("settings persistence root error: {error}"))?;
-    let should_reload = match command_id {
-        "settings.setTheme" => {
-            let value = settings_value(arguments).ok_or_else(|| {
-                "settings.setTheme requires an item_id/specifier argument".to_string()
-            })?;
-            runtime
-                .persist_preference("theme", serde_json::Value::String(value))
-                .map(|_| true)
-                .map_err(|error| format!("settings.setTheme persistence failed: {error}"))?
-        }
-        "settings.setAppearance" => {
-            let value = settings_value(arguments).ok_or_else(|| {
-                "settings.setAppearance requires an item_id/appearance argument".to_string()
-            })?;
-            runtime
-                .persist_preference("appearance", serde_json::Value::String(value))
-                .map(|_| true)
-                .map_err(|error| format!("settings.setAppearance persistence failed: {error}"))?
-        }
-        "settings.setDesignSystem" => {
-            let value = settings_value(arguments).ok_or_else(|| {
-                "settings.setDesignSystem requires an item_id/specifier argument".to_string()
-            })?;
-            runtime
-                .persist_preference("designSystem", serde_json::Value::String(value))
-                .map(|_| true)
-                .map_err(|error| format!("settings.setDesignSystem persistence failed: {error}"))?
-        }
-        "settings.setTypography" => {
-            let raw = arguments
-                .as_object()
-                .and_then(|object| object.get("typography"))
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    "settings.setTypography requires a complete typography argument".to_string()
+    // Plan 134 P3: `effective_configuration_root` (canonicalize + is_file) and
+    // the preferences read/write are blocking std::fs; run the whole root
+    // resolution and persistence step on Tokio's blocking pool so a slow/cold
+    // filesystem cannot stall the connection reactor.
+    let blocking_server = server.clone();
+    let command_id = command_id.to_string();
+    let arguments = arguments.clone();
+    let should_reload = tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        use crate::server::configuration::ConfigurationRuntime;
+        let Some(config_root) = blocking_server.effective_configuration_root() else {
+            return Err("settings persistence requires an active configuration root".to_string());
+        };
+        let runtime = ConfigurationRuntime::from_config_root(&config_root)
+            .map_err(|error| format!("settings persistence root error: {error}"))?;
+        match command_id.as_str() {
+            "settings.setTheme" => {
+                let value = settings_value(&arguments).ok_or_else(|| {
+                    "settings.setTheme requires an item_id/specifier argument".to_string()
                 })?;
-            let value: serde_json::Value = serde_json::from_str(raw)
-                .map_err(|_| "settings.setTypography typography is not valid JSON".to_string())?;
-            crate::server::ops::typography::validate_typography_request(&value)?;
-            runtime
-                .persist_preference("typography", value)
+                runtime
+                    .persist_preference("theme", serde_json::Value::String(value))
+                    .map(|_| true)
+                    .map_err(|error| format!("settings.setTheme persistence failed: {error}"))
+            }
+            "settings.setAppearance" => {
+                let value = settings_value(&arguments).ok_or_else(|| {
+                    "settings.setAppearance requires an item_id/appearance argument".to_string()
+                })?;
+                runtime
+                    .persist_preference("appearance", serde_json::Value::String(value))
+                    .map(|_| true)
+                    .map_err(|error| format!("settings.setAppearance persistence failed: {error}"))
+            }
+            "settings.setDesignSystem" => {
+                let value = settings_value(&arguments).ok_or_else(|| {
+                    "settings.setDesignSystem requires an item_id/specifier argument".to_string()
+                })?;
+                runtime
+                    .persist_preference("designSystem", serde_json::Value::String(value))
+                    .map(|_| true)
+                    .map_err(|error| {
+                        format!("settings.setDesignSystem persistence failed: {error}")
+                    })
+            }
+            "settings.setTypography" => {
+                let raw = arguments
+                    .as_object()
+                    .and_then(|object| object.get("typography"))
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        "settings.setTypography requires a complete typography argument".to_string()
+                    })?;
+                let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| {
+                    "settings.setTypography typography is not valid JSON".to_string()
+                })?;
+                crate::server::ops::typography::validate_typography_request(&value)?;
+                runtime
+                    .persist_preference("typography", value)
+                    .map(|_| true)
+                    .map_err(|error| format!("settings.setTypography persistence failed: {error}"))
+            }
+            "settings.reset" => runtime
+                .clear_preferences()
                 .map(|_| true)
-                .map_err(|error| format!("settings.setTypography persistence failed: {error}"))?
+                .map_err(|error| format!("settings.reset failed: {error}")),
+            _ => Ok(false),
         }
-        "settings.reset" => runtime
-            .clear_preferences()
-            .map(|_| true)
-            .map_err(|error| format!("settings.reset failed: {error}"))?,
-        _ => false,
-    };
+    })
+    .await
+    .map_err(|_| "settings persistence task failed".to_string())??;
     if should_reload {
         // Plan 129 P4: box the reload future so the settings-persistence,
         // command-intent, and connection-loop futures that await this helper

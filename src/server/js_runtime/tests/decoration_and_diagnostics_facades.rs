@@ -26,7 +26,6 @@ async fn phase18_parse_and_decoration_facades_are_runtime_backed() {
             const decorations = serverPublishDecorations({
               documentId: 1,
               documentVersion: 1,
-              behaviorVersion: 1,
               viewport: { byteStart: 0, byteEnd: 12 },
               spans: [{ byteStart: 0, byteEnd: 5, kind: "syntax", styleToken: "markup.inline-code", fontRole: "monospace", priority: 10 }],
             });

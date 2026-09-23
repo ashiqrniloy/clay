@@ -611,8 +611,17 @@ fn inventory_rust_paths_name_existing_source_files() {
     }
     for entry in inventory_entries() {
         let id = entry.get("id");
-        for field in ["backing_rust", "current_rust_owner"] {
-            for path in names_rust_paths(entry.get(field)) {
+        for field in ["backing_rust", "current_rust_owner", "deno_op_path"] {
+            // Plan 136 task 8 (delegated from plan 131 task 6): a planned row may
+            // name a future op or module, but only with the explicit `planned:`
+            // marker the `packages.*` rows use. Without it the row reads as a
+            // path that exists today, which is how `application.quit` cited a
+            // file that was never written.
+            let value = entry.get(field);
+            if value.starts_with("planned:") {
+                continue;
+            }
+            for path in names_rust_paths(value) {
                 let message = format!(
                     concat!(
                         "{id}: {field} names missing source file {path}; point at a retained ",
@@ -886,4 +895,454 @@ fn plan118_configuration_documents_choice_set_fallback_and_every_option() {
             "configuration guide must name rejected key {rejected} in the closed boundary"
         );
     }
+}
+
+/// Plan 136 task 10: the capability grant is a documented configuration
+/// surface. The configuration guide must teach the `init.js` form, the
+/// grant-before-load order, the config attribution, the rejected hidden keys,
+/// and the trusted-only boundary; the grant page must state its authority and
+/// hot-path position; and the option surface stays declared, not implied (the
+/// task 8 guard walks it with every other public API).
+#[test]
+fn plan136_configuration_documents_the_capability_grant_surface() {
+    let configuration =
+        fs::read_to_string(root().join("docs/reference/clay-js-api/configuration.md"))
+            .expect("read configuration guide");
+    for marker in [
+        "## Plan 136 third-party capability grant configuration review",
+        "`packages.authorize`",
+        "packages/authorize.md",
+        "grant before load",
+        "`approvedBy: \"config\"`",
+        "import { authorize, loadPackage } from \"clay:packages\";",
+        "await loadPackage(\"@vendor/words\");",
+        "clay package authorize",
+        "clay package revoke",
+        "MissingCapabilityGrant",
+        "No hidden JSON/TOML/ad hoc key can grant a capability",
+        "capabilityGrant",
+        "packages.authorizedCapabilities",
+        "absent from the shared third-party runtime",
+        "packages.grant_during_activation",
+        "adds no keypress, paint, layout, scroll",
+    ] {
+        assert!(
+            configuration.contains(marker),
+            "configuration guide must document plan 136 marker {marker}"
+        );
+    }
+
+    let registry = ClayJsApiRegistry::from_docs(&root()).expect("build registry from docs");
+    let entry = registry
+        .by_id("packages.authorize")
+        .expect("packages.authorize must stay a public configuration API");
+    assert!(
+        !entry.custom_properties.is_empty(),
+        "packages.authorize must declare its behaviour-changing options"
+    );
+    let path = root().join(&entry.documentation_path);
+    let page = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("packages.authorize: read {}: {error}", path.display()));
+    for marker in [
+        "Authority: `user-authorized-package-capability-grant`",
+        "never runs from keypress, paint, layout, scroll",
+        "authorizes the use of separately implemented, separately validated documented Clay APIs",
+    ] {
+        assert!(
+            page.contains(marker),
+            "packages/authorize.md must document plan 136 marker {marker}"
+        );
+    }
+
+    // The canonical example tree is the reference users copy, so the grant
+    // surface is documented where the third-party lifecycle lives — with the
+    // parser's real option names and defaults, not prose — and the base config
+    // points at it. All of it stays commented, so the active config is
+    // unchanged (also covered by the copy-safe scan).
+    let template = fs::read_to_string(root().join("examples/config/packages/third-party.js"))
+        .expect("read canonical third-party package template");
+    for marker in [
+        "Capability grants — explicit, per capability, revocable (plan 136)",
+        "clay package authorize @vendor/my-package --capability completion-provider",
+        "--runtime-profile <p>    native-trust (default) | sandboxed | restricted",
+        "--approved-by <who>      cli (default) | user | config",
+        "capabilities: [\"completion-provider\"], // declared capabilities (required, 1+)",
+        "runtimeProfile: \"native-trust\",        // default \"native-trust\"",
+        "approvedBy: \"config\",                  // \"config\" | \"user\" | \"cli\"",
+        "A later grant REPLACES the whole granted set",
+        "clay package inspect @vendor/my-package",
+        "clay package revoke @vendor/my-package",
+        "no JSON/TOML key (`capabilityGrant`",
+        "cannot grant itself anything",
+        "MissingCapabilityGrant",
+    ] {
+        assert!(
+            template.contains(marker),
+            "canonical third-party template must document plan 136 marker {marker}"
+        );
+    }
+    let init_js = fs::read_to_string(root().join("examples/config/init.js"))
+        .expect("read canonical example config");
+    assert!(
+        init_js.contains("Capability grants are the other half of that contract"),
+        "canonical init.js must point at the capability-grant section"
+    );
+}
+
+/// Plan 136 task 8: declared option keys that are not documented as call
+/// options because the API's declared type mirrors a manifest descriptor the op
+/// reads from the host-enabled package record. Each entry is a decision with a
+/// one-line reason, not a hole (api id, reason).
+const MANIFEST_MIRROR_OPTION_SURFACES: &[(&str, &str)] = &[(
+    "syntax.serverRegisterSyntaxGrammar",
+    "the declared type mirrors the `clay.contributions.syntaxGrammars` manifest descriptor, \
+     which the op reads from the host-enabled package record; the page documents every key as \
+     manifest metadata rather than as a call option",
+)];
+
+/// Plan 136 task 8: the Clay JS option-surface drift guard.
+///
+/// A key declared in a facade's options type is a promise to package authors:
+/// TypeScript autocomplete offers it, so the call must read it and the API must
+/// document it. Plan 127 found by hand that
+/// `completion.serverRegisterCompletionProvider` declared eleven metadata options
+/// the op never read — a silent-ignore trap that no gate could see, because both
+/// `.d.ts` and page stayed "valid" while disagreeing (plan 127 `## Further
+/// Actions` item 4).
+///
+/// For every public inventory entry whose facade declares an `options` (or
+/// `declaration`) parameter with a locally declared object type, each non-`never`
+/// member must be documented for that API in **both**
+///
+/// - the machine-readable `custom_properties` (page frontmatter and
+///   `api-inventory.toml`; a dotted path such as `analyzer.id` documents the
+///   nested member `id` of the `analyzer` object, and `viewport.byteStart`
+///   documents that member), and
+/// - a bullet or code-span-led line of the page's `## Options` section.
+///
+/// The machine-readable half is what generated help, the Clay JS API registry,
+/// and `ClayJsApiRegistry::by_custom_property` lookups consume, so an option that
+/// only exists in the typings is invisible to every agent-facing surface. The
+/// Options half is the human contract. A `Record<string, unknown>` member is a
+/// named option with an open value type (`module`, `args`) and is checked like any
+/// other key.
+///
+/// Deliberately out of scope, each with a reason: `never`-typed members are the
+/// denial list (`handler`, `callback`, …), and positional/`unknown` parameters
+/// declare no option surface at all. None of these loosen the existing
+/// frontmatter↔inventory↔registry equality or the denied-authority checks: the
+/// guard only adds the facade-side direction that was missing.
+///
+/// Mutation checks (run by hand in plan 136 task 8, not kept here): dropping
+/// `moduleSpecifier` from the completion page fails, and re-declaring an ignored
+/// key such as `priority` in `runtime/js/completion.d.ts` fails again.
+#[test]
+fn declared_option_keys_are_documented_for_every_public_api() {
+    let registry = ClayJsApiRegistry::from_docs(&root()).expect("parse Clay JS API pages");
+    let mut checked_apis = BTreeSet::new();
+    let mut checked_keys = 0usize;
+    let mut failures = Vec::new();
+
+    for entry in inventory_entries()
+        .into_iter()
+        .filter(|entry| entry.get("visibility") == "public" && entry.is_public())
+    {
+        let id = entry.get("id");
+        if let Some((_, reason)) = MANIFEST_MIRROR_OPTION_SURFACES
+            .iter()
+            .find(|(api, _)| *api == id)
+        {
+            assert!(
+                !reason.is_empty(),
+                "{id}: manifest-mirror allowlist entry must carry a reason"
+            );
+            continue;
+        }
+        let Some((facade_path, export)) = entry.get("facade_path").split_once("::") else {
+            continue;
+        };
+        if !facade_path.ends_with(".js") {
+            continue;
+        }
+        let declarations_path = root().join(facade_path.replace(".js", ".d.ts"));
+        let Ok(source) = fs::read_to_string(&declarations_path) else {
+            continue;
+        };
+        let source = strip_typescript_comments(&source);
+        let Some(parameters) = declared_function_parameters(&source, export) else {
+            continue;
+        };
+        let Some(type_name) = option_object_type_name(&parameters) else {
+            continue;
+        };
+        let Some(body) = declared_type_body(&source, &type_name) else {
+            continue;
+        };
+        let declared = object_type_members(&body);
+        if declared.is_empty() {
+            continue;
+        }
+        let page = registry
+            .by_id(id)
+            .unwrap_or_else(|| panic!("{id}: missing Clay JS API page for the option guard"));
+        let page_text = fs::read_to_string(root().join(&page.documentation_path))
+            .unwrap_or_else(|error| panic!("{id}: read {}: {error}", page.documentation_path));
+        let options_section = page_text
+            .split_once("## Options")
+            .map(|(_, rest)| {
+                rest.split_once("\n## ")
+                    .map_or(rest, |(section, _)| section)
+            })
+            .unwrap_or("");
+        let listed_options = options_section_code_spans(options_section);
+        let inventory_properties = custom_property_names(entry.get("custom_properties"));
+        let page_properties: Vec<String> = page
+            .custom_properties
+            .iter()
+            .map(|property| property.name.clone())
+            .collect();
+
+        checked_apis.insert(id.to_string());
+        for key in declared.keys() {
+            checked_keys += 1;
+            let in_machine_surface = documents_property(&inventory_properties, key)
+                && documents_property(&page_properties, key);
+            let in_options_listing = listed_options.iter().any(|listed| listed == key);
+            match (in_machine_surface, in_options_listing) {
+                (true, true) => {}
+                (false, true) => failures.push(format!(
+                    "{id}: `{key}` is declared in {} and listed under ## Options but is missing \
+                     from custom_properties (add it to the page frontmatter and \
+                     api-inventory.toml)",
+                    facade_path.replace(".js", ".d.ts")
+                )),
+                (true, false) => failures.push(format!(
+                    "{id}: `{key}` is declared in {} and inventoried as a custom property but has \
+                     no ## Options line; document it or delete the key from the typings",
+                    facade_path.replace(".js", ".d.ts")
+                )),
+                (false, false) => failures.push(format!(
+                    "{id}: `{key}` is declared in {} but is documented in neither \
+                     custom_properties (frontmatter + api-inventory.toml) nor a ## Options \
+                     listing; delete the key from the typings or document it",
+                    facade_path.replace(".js", ".d.ts")
+                )),
+            }
+        }
+    }
+
+    println!(
+        "option-surface guard: {checked_keys} declared keys across {} APIs",
+        checked_apis.len()
+    );
+    for required in [
+        "completion.serverRegisterCompletionProvider",
+        "language.serverRegisterLanguageIntelligenceProvider",
+        "packages.authorize",
+    ] {
+        assert!(
+            checked_apis.contains(required),
+            "the option-surface guard must keep covering {required}"
+        );
+    }
+    assert!(
+        checked_keys >= 200 && checked_apis.len() >= 55,
+        "the guard must actually walk the option surface (checked {checked_keys} keys in {} APIs)",
+        checked_apis.len()
+    );
+    assert!(
+        failures.is_empty(),
+        "declared Clay JS option keys are undocumented:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn strip_typescript_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some((before, after)) = rest.split_once("/*") {
+        out.push_str(before);
+        match after.split_once("*/") {
+            Some((_, tail)) => rest = tail,
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out.lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn declared_function_parameters(source: &str, export: &str) -> Option<String> {
+    let marker = format!("export declare function {export}");
+    let start = source.find(&marker)? + marker.len();
+    let open = source[start..].find('(')? + start;
+    let mut depth = 0usize;
+    for (offset, character) in source[open..].char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(source[open + 1..open + offset].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The facade's options parameter. Only `options`/`declaration` name an option
+/// object; positional parameters and `unknown` declare no surface.
+fn option_object_type_name(parameters: &str) -> Option<String> {
+    let parameters = parameters.trim();
+    let (name, rest) = parameters.split_once(':')?;
+    if !matches!(name.trim(), "options" | "declaration") {
+        return None;
+    }
+    let type_name = rest.trim().trim_start_matches('?').trim();
+    let type_name = type_name
+        .split(|character: char| {
+            !(character.is_alphanumeric() || character == '_' || character == '$')
+        })
+        .next()
+        .unwrap_or("");
+    if type_name.is_empty() || type_name == "unknown" {
+        return None;
+    }
+    Some(type_name.to_string())
+}
+
+/// Body text of `export type Name = …;` or `export interface Name { … }`, ending
+/// at the `}` that closes the statement (union members continue past a `}`).
+fn declared_type_body(source: &str, name: &str) -> Option<String> {
+    let type_marker = format!("export type {name}");
+    let interface_marker = format!("export interface {name}");
+    let start = match source.find(&type_marker) {
+        Some(index) => index,
+        None => source.find(&interface_marker)?,
+    };
+    let mut index = source[start..].find('{')? + start;
+    let begin = index;
+    let mut depth = 0usize;
+    while index < source.len() {
+        match source.as_bytes()[index] {
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let rest = source[index + 1..].trim_start();
+                    if !rest.starts_with('|') && !rest.starts_with('&') {
+                        return Some(source[begin..=index].to_string());
+                    }
+                }
+            }
+            b']' | b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Top-level `key?: Type` members of every object-literal group in a type body
+/// (a union of object literals contributes the members of each member).
+fn object_type_members(body: &str) -> BTreeMap<String, String> {
+    let mut members = BTreeMap::new();
+    let bytes = body.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] != b'{' {
+            index += 1;
+            continue;
+        }
+        let mut depth = 0usize;
+        let start = index + 1;
+        let mut end = None;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(index);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        let Some(end) = end else { break };
+        for (key, value) in split_members(&body[start..end]) {
+            if value.trim() != "never" {
+                members.insert(key, value);
+            }
+        }
+        index = end + 1;
+    }
+    members
+}
+
+fn split_members(group: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut buffer = String::new();
+    for character in group.chars().chain(std::iter::once(';')) {
+        match character {
+            '{' | '[' | '(' | '<' => depth += 1,
+            '}' | ']' | ')' | '>' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if matches!(character, ';' | ',') && depth == 0 {
+            if let Some((key, value)) = buffer.trim().split_once(':') {
+                let key = key.trim().trim_end_matches('?').trim();
+                if !key.is_empty() && !key.starts_with('[') {
+                    out.push((key.to_string(), value.trim().to_string()));
+                }
+            }
+            buffer.clear();
+        } else {
+            buffer.push(character);
+        }
+    }
+    out
+}
+
+/// A declared key is documented by an exact custom property or by a dotted
+/// property path for its nested members (`analyzer.id` documents `analyzer`).
+fn documents_property(properties: &[String], key: &str) -> bool {
+    properties
+        .iter()
+        .any(|property| property == key || property.starts_with(&format!("{key}.")))
+}
+
+/// Option keys named by the `## Options` listing: code spans on bullet lines or
+/// on lines that begin with a code span. Prose paragraphs (such as the
+/// completion page's list of ignored metadata fields) are not a listing.
+fn options_section_code_spans(section: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    for line in section.lines() {
+        let trimmed = line.trim_start();
+        if !(trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('`')) {
+            continue;
+        }
+        let mut rest = trimmed;
+        while let Some((_, after)) = rest.split_once('`') {
+            let Some((key, tail)) = after.split_once('`') else {
+                break;
+            };
+            if !key.is_empty()
+                && key.chars().all(|character| {
+                    character.is_alphanumeric() || matches!(character, '.' | '_' | '$')
+                })
+            {
+                keys.push(key.to_string());
+            }
+            rest = tail;
+        }
+    }
+    keys
 }

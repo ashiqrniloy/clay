@@ -149,6 +149,8 @@ export default function loadRustGrammar() {
 
 ## Options
 
+Grammar metadata is **not** read from this call's options object (plan 136 task 8): the op registers the grammar contributions declared by the host-enabled package record (`clay.contributions.syntaxGrammars` in `package.json`), so the descriptor keys below describe manifest metadata. Passing them as call options has no effect.
+
 - `packageManifest` (`object`, optional): Full package manifest containing `clay.contributions.syntaxGrammars`. If provided, Clay validates and registers that manifest's grammar contributions.
 - `packageName`, `packageVersion`, `packagePrefix`/`apiPrefix`, `permissions`: Package context fields used when a load entry passes one grammar descriptor instead of a full manifest. `packageName` must be first-party `@clay/*` in Phase 18.10.
 - `syntaxGrammar` / `contribution`: A syntax grammar contribution descriptor. Top-level `languageId`, `filePatterns`, `grammar`, `queries`, `styleMap`, and `budgets` are also accepted and normalized into a descriptor.
@@ -173,6 +175,9 @@ No default key binding is assigned.
 - `queries`: package-root-confined highlight query metadata.
 - `styleMap`: capture-to-`TokenType`/`Modifiers` vocabulary map with validated legacy compatibility.
 - `budgets`: load-time syntax parse budget metadata.
+- `packageManifest`: Full package.json-shaped manifest; when provided, Clay validates its syntaxGrammars metadata directly.
+- `packageName`: First-party package name such as @clay/rust.
+- `syntaxGrammar`: Inert syntax grammar contribution descriptor matching clay.contributions.syntaxGrammars.
 
 ## Return and async behavior
 

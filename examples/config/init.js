@@ -416,7 +416,7 @@ clientSetEditorLayout({ wrapPolicy: "column", columnCap: 72 });
 // every shipped default chord (they are already active without init.js;
 // re-declaring them is an idempotent no-op override and doubles as the
 // complete reference). Source of truth: default_keymaps() in
-// src/protocol/mod.rs. Both call forms are shown: batch tables for the
+// src/protocol/behavior.rs. Both call forms are shown: batch tables for the
 // defaults, single-form calls for one-off binds.
 
 import { bindKey, unbindKey } from "clay:keybindings";
@@ -680,6 +680,13 @@ import { clientExecuteEditorCommand } from "clay:editor";
 // Idempotent, removed by `clay remove npm:<spec>`, and inert until
 // `clay package adopt` — see packages/third-party.js for the full
 // install/remove/update/adopt contract.
+//
+// Capability grants are the other half of that contract: a third-party package
+// that declares capabilities (completion-provider, parse-document, …) needs
+// `clay package authorize <name> --capability <cap>...` (or `authorize({...})`
+// from clay:packages) before its load line can enable, and the CLI grants it
+// with attribution. The full option surface, replacement semantics, inspection,
+// and revocation are documented in packages/third-party.js ("Capability grants").
 //
 // Optional modules may not exist at evaluation time; paths are still
 // validated to stay inside the config root.

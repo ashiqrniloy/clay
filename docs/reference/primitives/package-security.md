@@ -71,7 +71,7 @@ Required install/enable/load behavior:
 
 Authorization work happens at install, enable, load, reload, startup, explicit user command, or background verification time. It must not run from keypress, render, layout, scroll, input, edit-ack, or other client hot paths.
 
-Current implementation: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. `PackageAuthorizationRecord` stores package identity/source, approved capability list, runtime profile, and approver. `PackageService::authorize_package` records user/admin grants, `enable` fails closed on requested capabilities without matching grants, and `PackageInspection` shows requested capabilities, approved capabilities, runtime profile, and source provenance. `validate_manifest_value` parses package graph declarations (`dependsOn`, `extends`, `disables`, `replaces`) into `PackageGraphRelations`; `src/packages/graph.rs` builds the enable-time graph plan; `PackageService::enable` loads dependency/extension targets, reports missing targets/cycles deterministically, and requires an explicit `package-control` authorization grant before `disables` or `replaces` can withdraw another enabled package. Remaining gaps are durable on-disk authorization persistence, package-scoped revocation indexes, package-import boundary enforcement, and conflict override/extend/replace resolution.
+Current implementation: `PackageRecord`, `PackageService`, and conflict checks already carry package name, version, `apiPrefix`, contribution provenance, and deterministic conflict diagnostics. `PackageAuthorizationRecord` stores package identity/source, approved capability list, runtime profile, and approver. `PackageService::authorize_package` records user/admin grants (in memory and, when the package is adopted, durably on its approval record), `enable` fails closed on requested capabilities without matching grants, and `PackageInspection` shows requested capabilities, approved capabilities, runtime profile, and source provenance. `validate_manifest_value` parses package graph declarations (`dependsOn`, `extends`, `disables`, `replaces`) into `PackageGraphRelations`; `src/packages/graph.rs` builds the enable-time graph plan; `PackageService::enable` loads dependency/extension targets, reports missing targets/cycles deterministically, and requires an explicit `package-control` authorization grant before `disables` or `replaces` can withdraw another enabled package. Remaining gaps are package-scoped revocation indexes, package-import boundary enforcement, and conflict override/extend/replace resolution.
 
 ## Package Runtime Trust Domains and Extension Authority
 
@@ -138,6 +138,7 @@ integrity = "sha512-..."
 package_root = "/clay/packages/node_modules/@vendor/example"
 api_prefix = "example"
 capabilities = ["mode-registration", "completion-provider"]
+grant = { capabilities = ["completion-provider"], runtime_profile = "native-trust", granted_by = "cli", granted_at = "2026-09-23T00:00:00Z" }
 processes = ["example.server"]
 relations = [
   { package = "@clay/markdown", extension_point = "markdown.completionProviders", version = 1, operation = "append", scopes = ["example.wikilinks"] },
@@ -150,7 +151,11 @@ revoked = false
 
 Closed rules: identity fields bind name/resolved version/source/integrity/root/api-prefix exactly; `capabilities` and `processes` are the complete granted sets; `relations` uses the relation schema above; `replacements` uses the replacement schema below. Any identity or request-set change requires a new explicit approval; a narrower request may reuse an approval only when it is an exact subset of the approved sets. The store is host-owned, bounded, fail-closed on corruption, and re-verified at candidate-generation build time.
 
+Capability grants (Plan 136 task 4) are an explicit, optional `grant` section on the same record: the granted subset of `capabilities` (validated as a subset at load and write), the granted runtime profile, and who granted it when. An absent section means no grant — adoption alone never authorizes a capability. A grant is read only while the record's identity still matches the installed package and the record is not revoked, so a version/source change or a revoke makes it inert until the user grants again; revoke clears the section with the approval.
+
 Implemented store (Plan 061 task 6): `src/packages/approvals.rs` persists one JSON document at `<package store root>/clay-package-approvals.json` (format version 1, max 256 records, max 256 KiB) with owner-only permissions (Unix `0o600`) and atomic temp-file + fsync + rename writes. Loading fails closed on corruption, truncation, unknown version, duplicate records, oversize payloads, or unsafe permissions. `PackageService::open` is the durable constructor (used by the CLI); `PackageService::new` keeps an in-memory store for tests/ephemeral services. `approval_covers` enforces the stale-approval rules: exact identity match plus exact-subset capabilities/processes/relations; revocation is durable.
+
+Grant enforcement (Plan 136 tasks 3-4): `PackageService::capability_granted` is the one capability read — the provenance-matched in-memory authorization or the identity-matched durable grant — used by `ensure_capability_grants`, the `package-control` gate, and package-op dispatch, so a grant recorded by an earlier process authorizes the same package here. `authorize_package` writes the durable section (no-op when no current approval record exists: a grant never manufactures an adoption) and `revoke_package_approval` clears it.
 
 ### `clay-package-replacement-v1` — Replacement Record
 

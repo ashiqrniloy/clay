@@ -65,7 +65,7 @@ These APIs are runtime-backed for declaration/override records. They do **not** 
 6. Cross-package checks in `src/packages/conflict.rs` reject duplicate input IDs, UI state scope IDs, layout override target/property pairs, package option schemas, theme tokens, fixed-slot claims, and ambiguous action/input conflicts with deterministic provenance diagnostics.
 7. Accepted input declarations become inert `PackageInputRouting` values in `src/shell/package_ui.rs`. `src/masonry_sdui.rs` can read those values while composing native panels/overlays and routing already-validated component actions, but it does not parse manifests, evaluate configuration, execute JavaScript, or mutate the child tree during layout.
 8. Accepted UI state scope declarations remain inert schema/lifecycle metadata. Phase 18.4 does not accept state values, hidden globals, raw JSON blobs, or persisted workspace/document mutation authority.
-9. Theme-token remaps stay typed: package tokens and remap records resolve through `src/shell/theme.rs` and Clay core token fallbacks before native paint/layout reads resolved values.
+9. Theme-token remaps stay typed: package tokens and remap records resolve through `src/shell/theme/{resolve,validate}.rs` (hub `src/shell/theme.rs`) and Clay core token fallbacks before native paint/layout reads resolved values.
 
 ## Runtime-Backed vs Deferred
 
