@@ -216,11 +216,13 @@
       check:budget (22 s) and clay-agent `npm ci` + `npm test` (17 s, 182
       pass / 1 skip / 0 fail) — exit 0 throughout, confirming downstream
       steps work on mise-provided node/npm with no separate installs.
-    - CI-run evidence still pending: `migration/bun` is not on origin,
-      CI triggers only on `main` push or a PR, and this host has no `gh` CLI
-      or GitHub token to open a PR or read run status. Push/PR the branch
-      (commit `mise.toml` + `.github/workflows/ci.yml` together) and record
-      the run link here to close the acceptance test case.
+    - CI-run evidence: branch pushed and PR opened —
+      https://github.com/ashiqrniloy/clay/pull/1. Green run:
+      https://github.com/ashiqrniloy/clay/actions/runs/35924092903 on
+      `e8ccb7b` (linux job: mise provisioning, frontend gates,
+      clay-agent tests, package-smoke, `scripts/check.sh full`). The first
+      run (`35922880660`) failed on a stale `performance_budgets`
+      npm-command doc expectation, fixed in `e8ccb7b`.
 
 - [x] Docs: mise-first setup
   - Acceptance Criteria:
@@ -312,11 +314,12 @@
       indexing and intra-wiki link resolution intact).
 
 ## Compromises Made
-- CI-run evidence for task 3 is still pending: `migration/bun` is not on
-  origin, the workflow triggers only on `main` push or a PR, and this host
-  has no `gh` CLI or GitHub token. Local equivalents (actionlint, exact JS
-  steps under `mise exec --`, scratch-clone `mise install`) are green and
-  recorded in the task evidence; a push/PR must supply the run link.
+- CI-run evidence for task 3 closed on 2026-09-24: `migration/bun` pushed,
+  PR https://github.com/ashiqrniloy/clay/pull/1 opened, green run
+  https://github.com/ashiqrniloy/clay/actions/runs/35924092903 recorded in
+  the task evidence. The first run caught the stale
+  `performance_budgets::tauri_react_bundle_budgets_are_documented`
+  npm-command expectation, fixed in `e8ccb7b`.
 - The task-2 scratch-clone `cargo check` reused the main checkout's
   `target/` to avoid a cold full dependency compile; the clone, `mise
   install`, and tool resolution were genuinely fresh, and the workspace-root
@@ -328,14 +331,13 @@
   drill needed no trust prompt.
 
 ## Further Actions
-- Push `migration/bun` (commit `mise.toml`, `.github/workflows/ci.yml`,
-  docs/README/wiki, and this plan together) and record the CI run link in
-  task 3 evidence; open a PR because CI runs on `main` pushes and PRs only.
-  Priority: high — closes the one open acceptance test case in this plan.
-- Plan 138: swap npm installs/tests to bun, then update
+- Done 2026-09-24: `migration/bun` pushed, PR
+  https://github.com/ashiqrniloy/clay/pull/1 opened, and the green run
+  https://github.com/ashiqrniloy/clay/actions/runs/35924092903 recorded in
+  task 3 evidence.
+- Plan 138: swap npm installs/tests to bun — completed (all six tasks);
   `docs/wiki/modules/dev-toolchain.md`, the build-and-test docs, and the
-  workflow comment to drop the npm-cache tradeoff note. Priority: next plan
-  in sequence.
+  workflow comment are updated. Priority: next plan in sequence.
 - Plan 139: delete the transitional `node` pin from `mise.toml` and remove
   the wiki/docs/README references that explain why it exists. Priority:
   with the daemon migration.

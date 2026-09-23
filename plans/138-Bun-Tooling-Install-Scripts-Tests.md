@@ -674,8 +674,9 @@
   `build.sh`'s `pkill` daemon pattern, `src/server/agent.rs`
   `resolve_node()`, and clay-agent's `MIN_NODE` guard, and revisit the LSP
   fixture suites.
-- Prerequisite still open from plan 137: push `migration/bun`, open the PR,
-  and record the green CI run link in plan 137's task-3 evidence (this host
-  has no `gh` CLI or token).
+- Plan 137 prerequisite closed on 2026-09-24: `migration/bun` pushed, PR
+  https://github.com/ashiqrniloy/clay/pull/1 opened, and the green CI run
+  https://github.com/ashiqrniloy/clay/actions/runs/35924092903 recorded in
+  plan 137's task-3 evidence.
 - `npm pack`/publish for the `@arnilo/clay` distribution wrapper stays on
   npm by design (product distribution, not dev tooling).
