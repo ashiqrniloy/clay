@@ -921,7 +921,7 @@ fn tauri_react_bundle_budgets_are_documented() {
     for expected in [
         "<= 180 kB gzip (startup shell)",
         "<= 404 kB gzip (total frontend)",
-        "npm --prefix frontend run check:budget",
+        "bun --cwd frontend run check:budget",
     ] {
         assert!(
             doc.contains(expected),

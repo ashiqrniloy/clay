@@ -424,6 +424,12 @@
         `bun.lock`/`package.json` change; the node-based bench then ran
         a 64 KiB markdown-it sample.
       - `bash -n` clean on every touched shell script.
+      - Post-push CI (PR #1) caught one doc-contract expectation still
+        pinned to npm: `tests/performance_budgets.rs`
+        `tauri_react_bundle_budgets_are_documented` now expects
+        `bun --cwd frontend run check:budget`, matching
+        `docs/development/performance.md`. Full `cargo test --test
+        protocol` re-run green (230 passed).
     - Documented stays: `node --expose-gc` markdown bench (V8 GC
       methodology), LSP `node --test` fixture suites, daemon
       spawn/pkill/usage (plan 139), `npm pack` for the `@arnilo/clay`
