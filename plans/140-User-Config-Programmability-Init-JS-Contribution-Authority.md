@@ -1,4 +1,4 @@
-# Plan 137 — User-Config Programmability: init.js Contribution Authority
+# Plan 140 — User-Config Programmability: init.js Contribution Authority
 
 Source: the 2026-09-20 configurability review ("modern day Emacs, AI native"
 goal). Deviation D1: the user can `setq` but never `defun`. `~/.clay/init.js`
@@ -31,7 +31,7 @@ Binding prior decisions:
 
 Roadmap position: prerequisite for the roadmap's
 "Third-Party Workflow/Command Package Platform" exit gate making sense for
-*users* too, and for plan 139 (the agent edits init.js — it must be able to
+*users* too, and for plan 142 (the agent edits init.js — it must be able to
 *do something* there).
 
 ## Objectives
@@ -54,7 +54,7 @@ Roadmap position: prerequisite for the roadmap's
   custom properties, and the generated registry.
 
 Out of scope: new UI component kinds or slots (existing catalog only), local
-package installation (plan 138), agent-side config editing (plan 139).
+package installation (plan 141), agent-side config editing (plan 142).
 
 ## Expected Outcome
 

@@ -435,10 +435,10 @@ place, evidence below) or **Deferred** (carried into a numbered plan).
   attempts hit the pre-existing flakes instead (`…-flake-security.log`,
   `…-rerun-flake-security.log`): the security races, and a new finding — the
   UI-review harness can block indefinitely on a stuck desktop portal, which is
-  now in plan 145 (task 1 item d, task 2).
+  now in plan 148 (task 1 item d, task 2).
 - **Resolved — four pre-existing client gaps found by the manual pass.** Not
   fixed here (they are webview behavior, not lane delivery): carried into
-  `plans/144-Client-Lane-Gaps-Caret-Wrap-and-Pane-Focus.md` as tasks 2-4, with
+  `plans/147-Client-Lane-Gaps-Caret-Wrap-and-Pane-Focus.md` as tasks 2-4, with
   the initial-sync caret drop, the `"none" in wrap` throw, the unread
   `heightPct`/`hollow`/`blink`/`stopBlinkOnTyping` fields, and the missing
   `paneFocusPolicy` consumer all reproduced and inventoried there.
@@ -446,18 +446,18 @@ place, evidence below) or **Deferred** (carried into a numbered plan).
   for blink/caret evidence is now in `test-plan/index.md` → `## Conventions`, so
   a later pass reads it before judging a single frame.
 - **Deferred — security integration suite flakiness.** Carried into
-  `plans/145-Gate-Hygiene-Flake-Determinism-and-Toolchain-Pinning.md` task 2
+  `plans/148-Gate-Hygiene-Flake-Determinism-and-Toolchain-Pinning.md` task 2
   (unique per-test roots, explicit close/write ordering, collision-free daemon
   paths, 20-run verification loop). Baseline and mechanism in that plan's task 1.
   The gate review also found a second, different gate failure mode worth fixing
   there: the UI-review harness test can block indefinitely on a stuck desktop
   portal (no timeout on the portal capture step), which hung the protocol suite
   for 304 s and would hang `cargo test --all-targets` forever.
-- **Deferred — toolchain pinning decision.** Carried into plan 145 task 3
+- **Deferred — toolchain pinning decision.** Carried into plan 148 task 3
   (`rust-toolchain.toml` vs an explicit CI version vs a recorded decision to
   float `stable`), which requires a decision log and user approval.
 - **Deferred — correct the 2026-09-14 SC-1 decision log's boundary wording.**
-  Carried into plan 145 task 4 as an errata amendment (three claims at lines 23,
+  Carried into plan 148 task 4 as an errata amendment (three claims at lines 23,
   104, 143-144 contradict the 73 shipped feature-gated derives); needs explicit
   user approval per the decision-log skill.
 - **No action — `ActiveRuntimeStateFanout` / `ActiveTypographyState` stores stay

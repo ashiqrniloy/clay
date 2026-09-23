@@ -11,6 +11,13 @@
 > (evidence: `plans/130-Agent-Host-Decomposition-and-Ownership-Cleanup.md`, task
 > A1). Do not build a test-only isolation seam on removed state — the tasks below
 > are moot and kept only for their failure-matrix history.
+>
+> Task 1 was still executed (2026-09-23) as the post-A1 baseline a plan of this
+> shape should start from: the registration-queue red is recorded as
+> unreproducible (0/10 parallel lib runs, formerly red test green in all ten),
+> the deleted mechanism is pinned by removal commit and by its per-lane
+> replacements, and the one flake the matrix did hit — an npm fixture ETXTBSY
+> spawn race, 1/10 runs — is recorded in Further Actions. Tasks 2-4 stay moot.
 
 ## Objectives
 
@@ -52,7 +59,7 @@
 
 ## Tasks
 
-- [ ] Baseline: pin the flake and its mechanism on the current tree
+- [x] Baseline: pin the flake and its mechanism on the current tree
   - Acceptance Criteria:
     - Functional: reproduce at least three failures in five default-thread
       `cargo test --lib` runs and record the failing test set; identify the
@@ -101,6 +108,91 @@
   - Test Cases to Write:
     - None (evidence task). Record the run matrix, the drained method list, and
       the op path that triggered the drain in the task outcome.
+  - Baseline Outcome (2026-09-23) — recorded on the post-A1 tree; the criterion
+    above ("three failures in five runs", "the drain site that consumes another
+    test's declarations") names a mechanism that no longer exists, so it is
+    recorded as unattainable rather than met:
+    - Superseded before start: plan 130 A1 (commit `36eabd2`, 2026-09-21)
+      deleted the process-global authority. Pre-A1 code, kept for the record:
+      `static AGENT_HOST_AUTHORITY: OnceLock<AgentHostHandle>`
+      (`36eabd2^:src/server/agent.rs:293`, first-install-wins `install_global`
+      `:353`, `take_pending_package_registrations` `:340`), the host-queue drain
+      inside `ensure_running` (`:1155-1165`, the site that consumed another
+      test's declarations), and the `host=live` branch of
+      `agent_registration_rpc`. Current-tree negative guard:
+      `tests/agent_protocol.rs:514
+      agent_authority_is_server_state_not_a_process_global` asserts those
+      symbols are absent from `src/server/agent.rs`.
+    - What replaced it (pinned): declarations queue on the lane that made them —
+      `ClayOpState::agent_host: Mutex<Option<AgentHostHandle>>`
+      (`src/server/ops/mod.rs:294`) +
+      `pending_agent_registrations: Mutex<Vec<PackageRegistration>>` (`:297`),
+      `queue_agent_registration` (`:644`, `PENDING_REGISTRATION_CAP` 64),
+      `take_pending_agent_registrations` (`:665`), hand-off on attach
+      `set_agent_host` (`:611`), fail-closed read `agent_host()` (`:631`); op
+      path `src/server/ops/agent.rs:191-221` (`host=absent` → lane queue,
+      `host=live` → the lane's own host); the host's own queue still drains
+      after the first initialize (`src/server/agent.rs:1122-1134`). The test
+      helper reads its own service
+      (`src/server/js_runtime/tests/mod.rs:556` → `test_op_state()` →
+      `src/server/js_runtime/mod.rs:1573`), so no test can drain another's
+      queue.
+    - Run matrix (`cargo test --lib`, default threads, 10 consecutive runs):
+      9 × rc=0, 1425 passed / 0 failed / 1 ignored each; run 5 rc=101 with one
+      failure, and it is not a registration test:
+      `packages::manager::tests::npm_backend_list_parses_npm_json_shape`
+      (`src/packages/manager.rs:1163`, panic `:1185`) —
+      `BackendError { kind: ProcessSpawnFailed, message: "failed to spawn
+      \`/tmp/clay-manager-resolver-499761-fake-npm-list/npm\`: Text file busy
+      (os error 26)" }`. Wall clock 13.22-14.24 s of suite time (13-14 s per
+      invocation, i.e. no build cost in the figure); no prior figure exists to
+      compare against, so this is the before-number for any later change.
+    - Registration flake: 0/10 reproductions.
+      `server::js_runtime::tests::coding_agent_clean_init_one_line_activates_working_defaults`
+      is `... ok` in all ten logs, including the failing run. The formerly
+      coupled set is 10/10 green as well: `agent_facade_fails_closed_without_an_attached_host`,
+      `coding_agent_double_load_is_idempotent_within_one_generation`,
+      `coding_agent_malformed_registration_fails_closed_without_queue_corruption`,
+      `coding_agent_and_launcher::launcher_claims_the_empty_tab_landing_and_the_agent_keeps_its_pane`,
+      `example_configuration_loads_cleanly_and_applies_effects`,
+      `agent_host_wiring_reaches_every_lane_and_stays_per_service`,
+      `registrations_queued_hostless_hand_over_to_a_late_attached_host`,
+      `lane_registration_queue_fails_closed_at_capacity`.
+    - Experiments from the Approach (the old failure-amplifiers):
+      `-- --skip agent_facade_fails_closed_without_an_attached_host` → ok,
+      1424 passed / 0 failed / 1 filtered out (14.24 s) — skipping that sibling
+      used to make five more declaration tests fail, now it changes nothing;
+      `--test-threads=1 coding_agent_clean_init_one_line` → ok (0.02 s);
+      `--test-threads=1 agent_lane_host_wiring` → 8 passed / 0 failed (0.10 s).
+    - Op path the formerly red test actually takes (targeted `--nocapture`
+      run): exactly 11 `[agent-reg]` lines, all `host=absent -> queued` —
+      `agentProfile.register 'coding'` plus the ten `command.register` entries
+      (`/compact /new /n /branch /tree /fork /clone /open-session
+      /open-session-as-fork /discard`). Its declarations never reach a host, so
+      nothing in the process can redirect or drain them; that is the drained
+      method list in its post-A1 form.
+    - Code Quality: no code changes and no instrumentation. Instrumentation at
+      the old drain site is impossible (state deleted) and unnecessary (the
+      negative guard test plus per-service queue pin it). No `src/` or `tests/`
+      file was modified today (`find src tests -name '*.rs' -newermt 2026-09-23`
+      empty); the only new path is the untracked evidence directory
+      `test-plan/artifacts/135-registration-queue-baseline/`. `git diff
+      --check` reports one pre-existing WIP trailing-whitespace warning in
+      `docs/wiki/modules/icon-pack-runtime.md` (mtime 2026-09-22, untouched
+      here).
+    - Security: no diagnostics were added, so nothing new can print
+      credentials, vault contents, or session data; the one failure message
+      names a `/tmp` fixture path only.
+    - Evidence files: `test-plan/artifacts/135-registration-queue-baseline/` —
+      `runs.txt` (per-run rc, result line, failing set), `run1.log`-`run10.log`,
+      `experiments.txt`, `hostless-path-nocapture.txt`.
+    - Finding for Further Actions (a different flake, not this plan's subject):
+      the remaining non-determinism in `cargo test --lib` is the npm fixture
+      spawn race above (1/10 runs) — a pre-existing repo-wide class (plans
+      041/078/084/088/098/134) with an in-repo fix precedent in `fake_git`
+      (`src/server/git.rs:1285-1287`: 20 ms settle after writing the script,
+      comment naming exactly this ETXTBSY race). `fake_bin`
+      (`src/packages/manager.rs:1006-1026`) has no settle step.
 
 - [ ] Make the package-registration path deterministic under test
   - Acceptance Criteria:
@@ -328,8 +420,41 @@
 
 ## Compromises Made
 
-- To be filled after tasks are completed and tests pass.
+- Task 1's functional criterion is recorded as unattainable, not met: it asks to
+  reproduce three failures in five runs of a mechanism plan 130 A1 had already
+  deleted (2026-09-21, one week before this plan was started). The task was
+  executed in its post-A1 form instead — ten parallel runs, 0/10 reproductions
+  of the registration red with the formerly red test green 10/10, pinned
+  mechanism, wall clock, and the failing set the matrix did produce — so the
+  checkbox carries evidence rather than a false positive.
+- The registration-queue flake is closed by removal, not by the test-only seam
+  this plan designed: tasks 2-4 (authority suspend/restore, seam test, facade
+  test suspension) are moot and unexecuted. No `cfg(test)` isolation seam exists
+  in the tree; the queue is production per-lane state.
+- The one parallel-suite failure found (npm fixture ETXTBSY, 1/10 runs) is left
+  unfixed: it belongs to `packages::manager`'s test fixture, not to the
+  registration queue, and fixing it here would widen a diagnostic task into a
+  second subsystem. It is recorded in Further Actions with the in-repo
+  precedent.
+- Task 6's wiki duty and task 7's JS-API inventory duty are unaffected by this
+  task (no code change, no new surface); the wiki already documents the per-lane
+  queue and ownership from plan 130 A1.
 
 ## Further Actions
 
-- To be filled after task completion with improvements, rationale, and priority.
+- **High — `cargo test --lib` can still fail ~1 in 10 parallel runs, for an
+  unrelated reason.** `packages::manager::tests::npm_backend_list_parses_npm_json_shape`
+  (`src/packages/manager.rs:1163`) failed once in ten default-thread runs (run
+  5, `test-plan/artifacts/135-registration-queue-baseline/run5.log`) with
+  `ProcessSpawnFailed … Text file busy (os error 26)`. Mechanism: `fake_bin`
+  (`:1006-1026`) writes the fake `npm` script and the test execs it
+  immediately, the same ETXTBSY race `fake_git` already handles with a 20 ms
+  settle (`src/server/git.rs:1285-1287`). Cheapest fix: mirror that settle
+  (or write-then-rename) in `fake_bin`, then re-run the 10× matrix. Rationale:
+  this is now the only thing keeping the lib suite from being deterministic, so
+  the "`test` stage passes on an untouched tree" claim is 9/10 rather than
+  certain. Not covered by plan 148, which owns the security-suite fake-LSP and
+  agent-session flakes plus the UI-review harness hang.
+- **Low — close the remaining checkboxes** (tasks 2, 3, 4 moot; 5-7 unaffected)
+  so a plan scanner does not read them as pending work; the supersession note
+  and this outcome already say why.

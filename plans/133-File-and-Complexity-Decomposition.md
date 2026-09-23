@@ -495,7 +495,7 @@ behavior changes.
       `task6-u4-match-arms.md`, `task6-string-enum.md`; codemod
       `task6-string-enum.py`.
 
-- [ ] Split `src/shell/theme.rs` into resolution and validation modules
+- [x] Split `src/shell/theme.rs` into resolution and validation modules
   - Acceptance Criteria:
     - Functional: `shell/theme.rs` (3,050 lines) separates token/enum string parsing + validation from theme resolution/compositing (e.g. `shell/theme/parse.rs`, `shell/theme/resolve.rs` — final names per inventory); all call sites updated; theme suites + `tests/theme_packages.rs` green.
     - Performance: none (moves only).
@@ -515,8 +515,66 @@ behavior changes.
       - Review §8.
   - Test Cases to Write:
     - Existing theme suites are the net (move-only).
+  - Evidence (2026-09-21):
+    - Result: `src/shell/theme.rs` **2,938 → 26 lines** (re-export facade); new
+      `src/shell/theme/parse.rs` (739) — token/level enums, `ThemeTokenResolver`,
+      `CoreThemeValue` catalog, `CORE_TOKEN_NAMES`; `theme/validate.rs` (249) —
+      `DesignTokenError`, `validate_design_token_override`, contrast floors and
+      `theme_meets_contrast`/`validate_active_theme_contrast`; `theme/resolve.rs`
+      (599) — `SduiThemeStyle`, `PanelDefaults`, `ResolvedUiTheme`,
+      `ThemeTokenValueDto`, `resolve_theme_token_snapshot`,
+      `density_spacing_scale`. Largest file is the moved `theme/tests.rs`
+      (1,167) — every file under the `< ~1,600` target. Module docs, imports,
+      module map and per-file item inventory: `task7-theme-split.md`.
+    - Zero call-site edits: the hub globs `pub use parse/resolve/validate::*`
+      (the `src/protocol/*` pattern), so every `crate::shell::theme::X` and
+      `super::theme::{…}` path (`components.rs`, `package_ui.rs`,
+      `design_system.rs`, `server/ops/theme.rs`, `editor/theme.rs`'s `pub use`,
+      the Tauri bridge) is unchanged. Public bindings
+      (`ContrastFailure`, `validate_active_theme_contrast`,
+      `ThemeTokenValueDto`, `resolve_theme_token_snapshot`,
+      `density_spacing_scale`, `CORE_TOKEN_NAMES`) keep their visibility.
+    - Tests: the two inline modules moved to sibling files with names and
+      module paths unchanged — `theme/tests.rs` (22 tests) and
+      `theme/theme_snapshot_tests.rs` (7), 29/29 same-named tests green
+      (`cargo test --lib shell::theme`); `theme_packages` and
+      `package_ui_conformance` green via `cargo test --test presentation`
+      (62 pass), `primitives_docs` (35) and `rust_visibility` (6) green.
+    - Visibility plumbing (only production edits): six `pub(crate)` additions
+      for items the moved tests or sibling modules reach (`CoreThemeValue` +
+      its fields, `core_theme_value`, `resolve_f64`,
+      `ResolvedUiTheme::resolved`); nothing added, removed, or renamed. The
+      contrast floors and their `#[cfg(test)]` assertion moved verbatim.
+    - Move proof: `task7-split-theme.py` refuses unless every production line
+      reappears exactly once with only the six documented substitutions;
+      `task7-verify.py` re-checks each destination order-preserving against
+      `git show HEAD:src/shell/theme.rs` (`verbatim: OK`) and prints the
+      added-line inventory (docs/imports/declarations + two rustfmt reflows).
+      Only `cargo fmt` reindented the moved tests.
+    - Forced guard path updates (moved catalog):
+      `package_ui_conformance::core_token_catalog_matches_tokens_md` and the
+      two `primitives_docs` catalog guards read `src/shell/theme/parse.rs`;
+      `rust_visibility_api_mapping` pins `HAIRLINE_VISIBILITY_MIN` /
+      `REQUIRED_FILL_PAIRS` in `src/shell/theme/validate.rs`. The
+      `src/shell/theme.rs` path itself still exists, so no wiki/doc path change
+      is needed in this task.
+    - Gates: `scripts/check.sh full` — audit, fmt, check, clippy `-D warnings`
+      (zero warnings), test, bench-compile **PASS**; root totals **1944 passed /
+      0 failed / 1 ignored**, identical to task 6. Log `task7-check-full.log`,
+      codes `task7-exit-codes.txt`. The gate aborts at `desktop-clippy` because
+      this host has no WebKitGTK dev packages (`javascriptcoregtk-4.1` missing,
+      fails at HEAD too; no sudo to install) — supplementary
+      `cargo check`/`cargo clippy -p clay-desktop --all-targets` with stubbed
+      `.pc` files and a stub `frontend/dist` type-check the desktop crate
+      (including `src-tauri/src/bridge/dto.rs`) clean; the `bindings` stage
+      needs a real link and is deferred to the next full-green host.
+    - **Resolved (2026-09-22):** WebKitGTK 4.1 (2.52.6) is now installed on this
+      host; the re-run `scripts/check.sh full` is **exit 0 / `full check
+      PASSED`** with `desktop-clippy`, `desktop-test` (55 passed) and
+      `bindings` (`webview bindings up to date`) green — log
+      `task8-check-full-desktop.log`, details in the task-8 evidence.
 
-- [ ] Execute and update the manual test plan (test-plan/)
+- [x] Execute and update the manual test plan (test-plan/)
   - Acceptance Criteria:
     - Functional: pure refactor — record explicitly that no user-visible behavior changed and which regression modules were re-run (packages-and-modes for ui validation, theme modules), with the reason no new steps are added.
     - Performance: none.
@@ -533,8 +591,73 @@ behavior changes.
       - None beyond index.
   - Test Cases to Write:
     - None.
+  - Evidence (2026-09-22):
+    - Record: `test-plan/index.md` gained the dated section **"Plan 133
+      file/complexity decomposition execution record (2026-09-22, task 8)"** —
+      the plan is a pure internal refactor, so no step was added, deleted, or
+      weakened and no module file needed an edit; modules
+      `test-plan/09-packages-and-modes.md` (package/mode UI-token validation)
+      and `test-plan/15-ui-design-systems.md` (theme tokens/contrast,
+      design-system activation) were re-run as a regression pass.
+    - Regression modules re-run (all PASS, 654 targeted tests):
+      `cargo test --lib server::ui` 24 and `--lib packages::` 83 with
+      `--test security` 152 (module 09: the task-5 table-driven contribution/
+      override validation, every error kind unchanged); `--lib shell::theme` 29
+      (22 + 7 same-named tests after the task-7 split — module 15) and
+      `--test presentation` 62 (`theme_packages` 15 + `package_ui_conformance`);
+      `--lib str_enum` 2 (`string_roundtrip_per_enum` pins the shipped strings)
+      with `--test protocol` 227 (incl. `primitives_docs` 35) and `--test
+      runtime` 75 for the task-2/task-6 protocol-visible surfaces.
+    - Whole-refactor gate: `scripts/check.sh full` audit/fmt/check/
+      clippy `-D warnings`/test/bench-compile green, root totals **1944 passed /
+      0 failed / 1 ignored** — identical to the task-1 baseline
+      (`task7-check-full.log`). Re-run after WebKitGTK 4.1 (2.52.6) was installed
+      on this host: **exit 0, `full check PASSED`**, with `desktop-clippy`,
+      `desktop-test` (55 passed) and the bindings guard
+      (`webview bindings up to date`) green — the task-7 desktop caveat is
+      closed (`task8-check-full-desktop.log`).
+    - Live server launch smoke (module 01 launch-gate class, server half) PASS:
+      fresh `target/debug/clay` on an isolated mode-700 root/socket with
+      `--config-fixture ui-review-default` → `clay server listening on
+      /tmp/clay133/clay.sock`, mode-700 socket bound, process alive, no
+      configuration diagnostics, clean kill.
+    - Desktop GUI steps (modules 01/09/15) **PASS live, 4 fixtures** on a freshly
+      built `clay` + `clay-desktop` via `scripts/capture-ui-review.sh`
+      (xdg-desktop-portal screenshot, AT-SPI dump, isolated mode-700 root and
+      private socket): `ui-review-default` 1906×1099 (shell, workspace file
+      browser, empty-tab Open File/Open Folder landing);
+      `ui-review-design-system` 1906×1099 (shipped `@clay/design-instrument` +
+      gruvbox-material-dark active, SDUI review panel with Primary action and
+      Enabled/Disabled rows, editor pane, AT-SPI landmark/button/listbox/listitem
+      nodes present); `ui-review-design-system-light` (same geometry under
+      gruvbox-material-light — UI-DS-15 recoloring, no stale color);
+      `ui-review-large-typography` (enlarged user-owned UI typography in outline
+      rows, status bar, landing). All four `review.status=PASS`,
+      `configuration_failed_lines=0`; captures under
+      `test-plan/artifacts/133-file-decomposition/live/<fixture>/`.
+    - Frontend suites (not covered by `scripts/check.sh`) PASS:
+      `npm ci` + `npm run build` (tsc + vite) + `npm test` **51 files / 497
+      tests passed**, `npm run check:budget` shell 178.6/180 kB and total
+      403.5/404 kB gzip. **Finding fixed by this pass:**
+      `frontend/src/test/core-baseline-hierarchy.test.ts` still read
+      `src/protocol/mod.rs` for the typography `DEFAULT` block that task 2 moved
+      to `src/protocol/typography.rs`, so its slice was empty and the test failed
+      (`expected '' to contain 'title: 15.0 / 13.0'`); the guard now reads
+      `src/protocol/typography.rs` (values unchanged) and the suite, typecheck
+      and prettier are green. This is a forced guard-path update like task 2's
+      Rust doc guards, found by the regression pass rather than by the Rust gate.
+      The same sweep retargeted the two live `default_keymaps()` “source of
+      truth” comments (`examples/config/init.js` and its `plan080-manual` fixture
+      copy) from `src/protocol/mod.rs` to `src/protocol/behavior.rs`; protocol
+      (227) and presentation (62) suites green after the change.
+    - Artifacts: `test-plan/artifacts/133-file-decomposition/task8-manual-regression.txt`
+      (raw regression output, launch smoke, GUI captures table, frontend finding),
+      `task8-check-full-desktop.log` (full gate exit 0 with desktop+bindings),
+      `live/` (four capture directories), plus the existing `task2`–`task7`
+      records. The parity-ledger guard (`tests/documentation_coverage.rs`,
+      `cargo test --test protocol`) stays green because no step ID changed.
 
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
+- [x] Create or verify Clay JS APIs for public programmatic surfaces
   - Acceptance Criteria:
     - Functional: no public programmatic surface changed; SDUI validation error kinds identical (the JS-visible `ui.*` op results unchanged); verify via diff.
     - Performance: none.
@@ -551,8 +674,40 @@ behavior changes.
       - Decision log 2026-05-08-1509.
   - Test Cases to Write:
     - None.
+  - Evidence (2026-09-22):
+    - Result: **no public programmatic surface changed — verify-only, zero
+      production edits.** Diffed against the pre-plan baseline `6ee3b4c`
+      (`task9-js-api-verify.py`, report `task9-js-api-verification.txt`): the
+      JS-API artifact paths (`runtime/js/`, `docs/reference/clay-js-api/`,
+      `docs/generated/`, `docs/index.md`, `frontend/src/bridge/`,
+      `src-tauri/bindings/`) are byte-identical both in the task-2/6 commit and
+      in the uncommitted task-7/8 tree; `cargo run --bin update-doc-registry`
+      rewrites `docs/generated/clay-js-api-registry.json` to identical bytes
+      (no `git status` diff), so no facade export, stable ID, op wrapper, doc
+      page, generated registry entry, or ts-rs binding moved.
+    - `ui.*` op results: `src/server/ops/ui.rs` is byte-identical (the task-5
+      rewrite is inside `src/server/ui.rs`); `UiContributionRule` (the
+      JS-visible error-kind enum) is unchanged at 17 variants; and all 21
+      closed-choice diagnostic messages recompose byte-for-byte from the new
+      `CHOICE_FIELDS`/`VALID_*` table plus `choice_message` (the baseline's
+      literal set and the composed set are identical; the other 39 baseline
+      diagnostics remain unchanged literals), and the moved
+      `src/server/ui/tests.rs` asserts every one of the 21 full strings.
+    - The only op-wrapper diffs vs baseline are task-6 `match_same_arms` merges:
+      `ops/modes.rs` drops `None | Some(Value::Null)` in favor of the existing
+      `_ => Vec::new()` catch-all and `ops/packages.rs` merges `Ok(_)` with the
+      already-identical `DuplicateContributionId` arm — same behavior, no
+      JS-visible value changed.
+    - Guards: `cargo test --lib server::ui` 24, `--lib str_enum` 2 (enum string
+      tables byte-identical), `--test protocol` 227 (`clay_js_api_inventory`,
+      `clay_js_doc_registry`, `clay_js_facade_layout`, `documentation_coverage`),
+      `--test presentation` 62 (`package_ui_conformance`),
+      `--test security` 152 (`rust_visibility_api_mapping`) — all pass.
+    - Artifact: `test-plan/artifacts/133-file-decomposition/task9-js-api-verification.txt`
+      (checks + guard counts + registry no-op) with the verifier
+      `task9-js-api-verify.py`.
 
-- [ ] Update or verify the code wiki after implementation
+- [x] Update or verify the code wiki after implementation
   - Acceptance Criteria:
     - Functional: wiki pages for protocol structure, ui validation, and the moved test suites updated; master index current.
     - Performance: notes the table-driven validation's cost characteristics.
@@ -567,9 +722,68 @@ behavior changes.
       - Affected wiki pages, `docs/wiki/index.md`.
   - Test Cases to Write:
     - Manual wiki review.
+  - Evidence (2026-09-22):
+    - Structural pages updated (no page added or removed; every page stays
+      linked from the master index): **protocol structure** — `protocol-codec.md`
+      gained the task-2 family module map (`src/protocol/mod.rs` hub over
+      `messages/behavior/editor_rules/typography/theme/caret/document/shell/launcher`)
+      with the move-only/no-wire-change statement and the task-6
+      `src/str_enum.rs` golden-string note; **ui validation** —
+      `slot-aware-package-ui.md` gained the task-5 `CHOICE_FIELDS` table section
+      with the cost characteristics (one ≤21-row static scan per closed-choice
+      field at registration/override-validation time, no allocation on the
+      accepted path, nothing on the SDUI snapshot/update, paint, layout,
+      pointer, or scroll hot paths) and the security note that all 21 allowed
+      sets, the 17 `UiContributionRule` kinds, and every message are unchanged
+      with `src/server/ops/ui.rs` byte-identical; the same section records the
+      task-7 `src/shell/theme.rs` hub over `theme/parse.rs`,
+      `theme/validate.rs`, `theme/resolve.rs` with unchanged call-site paths;
+      **moved test suites** — `maintenance-validation.md` corrected the suite
+      topology (`tests/suites/{security,runtime,presentation,protocol}.rs`, 38
+      `#[path]` modules, was “editor”/33) and gained a Plan 133
+      decomposition/test-layout section listing the four
+      `src/**/tests/` directories (js_runtime 24, connection 14, client 8,
+      workspace 9 suites) and the `src/server/*_tests.rs` siblings.
+    - Path sweep: 61 references across 18 pages rewritten to the split suite
+      directories, plus 23 targeted retargets to the moved test files / modules
+      (`runtime_generation_tests.rs`, `runtime_reload.rs`, `runtime_state.rs`,
+      `src/server/ui/tests.rs`, the theme suites) in `embedded-js-runtime.md`,
+      `configuration-runtime.md`, `control-center.md`, `command-registry.md`,
+      `behavior-manifests.md`, `package-loading.md`, `server-driven-ui.md`,
+      `server-ipc-skeleton.md`, `editor-theme-registry.md`,
+      `react-shell.md`, `package-input-state-configuration.md`, and
+      `maintenance-validation.md`; the protocol/typography/theme paths were
+      retargeted from `src/protocol/mod.rs` to the family files.
+    - Master index current: six `docs/wiki/index.md` entries (frontend theme
+      runtime, protocol codec, maintenance validation, server IPC skeleton,
+      slot-aware package UI, editor theme registry) now name the Plan 133
+      decomposition; the wiki-index link guard is green.
+    - Guards: `cargo test --test protocol` 227 (includes
+      `primitives_docs::wiki_index_links_every_wiki_page`,
+      `documentation_coverage` parity/current-page path checks, and
+      `plan125_wiki_pages_describe_the_one_palette_surface` /
+      `plan129_wiki_pages_describe_the_dispatch_router_and_future_sizes` /
+      `plan088_code_wiki_documents_modernization_contract`), `--test
+      presentation` 62 — all pass after the edits.
+    - Artifact: `test-plan/artifacts/133-file-decomposition/task10-wiki-verification.txt`
+      (per-page change list, sweep counts, guard results).
 
 ## Compromises Made
-- To be filled after tasks are completed and tests pass.
+- **Task 7 test placement**: the two inline test modules moved to sibling
+  files (`src/shell/theme/tests.rs`, `theme/theme_snapshot_tests.rs`) declared
+  from the hub with the same `#[cfg(test)] mod …;` form and unchanged module
+  paths, rather than being split per-unit into each new module. The plan's
+  "tests follow their units" is satisfied at the module boundary (all three
+  units are in the same `shell::theme` subtree) and this matches the
+  task-3/task-5 sibling-file precedent; the 29 tests are unchanged and green.
+- **Task 7 desktop gate not runnable on this host** (resolved 2026-09-22):
+  `desktop-clippy` (and therefore `desktop-test`/`bindings`) originally aborted
+  on missing WebKitGTK dev packages, which also fails at HEAD and could not be
+  installed without sudo; the desktop crate was instead type-checked with
+  stubbed pkg-config entries. WebKitGTK 4.1 (2.52.6) was then installed by the
+  user, `frontend/dist` built, and the re-run `scripts/check.sh full` passed
+  **exit 0 / `full check PASSED`** with desktop-clippy, desktop-test (55) and
+  bindings green (`task8-check-full-desktop.log`).
 
 ## Further Actions
 

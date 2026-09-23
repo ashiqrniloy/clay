@@ -1,4 +1,4 @@
-# Plan 141 — Config Discoverability: help.lookup, Palette Help Rows, openConfigurationFile
+# Plan 144 — Config Discoverability: help.lookup, Palette Help Rows, openConfigurationFile
 
 Source: the 2026-09-20 configurability review, deviation D4. Clay compiles a
 full Clay JS documentation registry (`docs/generated/clay-js-api-registry.json`,
@@ -8,7 +8,7 @@ agent discovery", but nothing consumes it at runtime: no `apropos`, no
 in-app help surface, and the Emacs self-documentation pillar is absent.
 Likewise there is no command that opens the user's own `init.js` — users
 must find the Path Browser themselves. The registry also cannot serve the
-agent (plan 139's skill points at "live lookup when available").
+agent (plan 142's skill points at "live lookup when available").
 
 Binding prior decisions:
 
@@ -25,7 +25,7 @@ Binding prior decisions:
   init.js is the edit target; watcher reloads it.
 
 Roadmap position: completes the self-documenting pillar for users and
-agents; feeds plan 139's skill with non-drifting lookup once exposed to the
+agents; feeds plan 142's skill with non-drifting lookup once exposed to the
 daemon (recorded there as a further action).
 
 ## Objectives
@@ -137,7 +137,7 @@ daemon (recorded there as a further action).
     - Code Quality: op wrapper + facade + `.d.ts` per the boundary rules;
       new Rust internals `pub(crate)`.
     - Security: read-only; no environment, path, or credential data in
-      results; callable from user config (trusted) and, via plan 139's
+      results; callable from user config (trusted) and, via plan 142's
       follow-up, the daemon — not from the third-party runtime unless a
       later decision adds it.
   - Approach:
@@ -420,5 +420,5 @@ daemon (recorded there as a further action).
 ## Further Actions
 - To be filled after execution. Known candidates: settings-panel "Open
 config" button (own prototype loop); exposing `help.lookup` to the daemon
-for plan 139's skill (reverse-RPC mirror); an interactive config eval
+for plan 142's skill (reverse-RPC mirror); an interactive config eval
 surface (`*scratch*`-style) — needs its own security pass.

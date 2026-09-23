@@ -1,4 +1,4 @@
-# Plan 139 — Agent Configuration Authority and the Config Feedback Loop
+# Plan 142 — Agent Configuration Authority and the Config Feedback Loop
 
 Source: the 2026-09-20 configurability review, deviation D5 and Part 3. The
 stated product goal is "download Clay, ask the agent to modify it" — but the
@@ -32,11 +32,11 @@ Binding prior decisions:
   *new* process/authority surface needs its own decision log — which task 2
   is.
 
-Roadmap position: the "AI-native" pillar. Independent of plans 137/138, but
-compounds with them: plan 137 makes init.js worth editing; this plan makes
+Roadmap position: the "AI-native" pillar. Independent of plans 140/141, but
+compounds with them: plan 140 makes init.js worth editing; this plan makes
 the agent the one who edits it. Tier model (from the review): tier 1 =
 config files (this plan, hot-reload loop), tier 2 = local packages
-(plan 138), tier 3 = Clay source (already works when the workspace is the
+(plan 141), tier 3 = Clay source (already works when the workspace is the
 clay repo).
 
 ## Objectives
@@ -296,7 +296,7 @@ clay repo).
     - Options Considered: generate the cheat sheet from
       `docs/generated/clay-js-api-registry.json` at seed time — deferred:
       the registry is a repo artifact not shipped beside the daemon;
-      plan 141's `help.lookup` is the non-drifting answer, cited from the
+      plan 144's `help.lookup` is the non-drifting answer, cited from the
       skill as "when available".
     - Chosen Approach: static skill + explicit pointer to live lookup when
       the workspace is the clay repo (graft + docs there).
@@ -418,4 +418,4 @@ clay repo).
   config changes" lane toggle (narrower than full autonomy) — needs its own
   approval-UX pass; bounded agent-facing screenshot/diff tool for visual
   verification of theme changes (structural + diagnostic feedback first);
-  live `help.lookup` wiring for the skill (plan 141).
+  live `help.lookup` wiring for the skill (plan 144).

@@ -1,4 +1,4 @@
-# 143 — Editor Comment Continuation, Test-Plan Gutter Accuracy, and the Interactive Input Path
+# 146 — Editor Comment Continuation, Test-Plan Gutter Accuracy, and the Interactive Input Path
 
 Source: `plans/129-Connection-Loop-Decomposition.md` → `## Further Actions`
 (all three items, recorded 2026-09-20 from its manual pass over modules 04,
@@ -196,7 +196,7 @@ full-bleed editor, and the input-path item is harness/host work.
     - Files to Create/Edit:
       - `docs/development/launch-and-gui-smoke.md` (host-input procedure and readiness flags).
       - `test-plan/index.md` (host note: what works, what is unresolved, and the recovery rule).
-      - A per-run artifacts README under `test-plan/artifacts/143-manual-follow-ups/` for the doctor output and the typing leg.
+      - A per-run artifacts README under `test-plan/artifacts/146-manual-follow-ups/` for the doctor output and the typing leg.
     - References:
       - Plan 129's host-ceiling record (`test-plan/artifacts/129-connection-loop/README.md`); `test-plan/index.md:396–402` (portal path works) and `test-plan/index.md:241` (`can_send_development_input=false`).
   - Test Cases to Write:
@@ -207,7 +207,7 @@ full-bleed editor, and the input-path item is harness/host work.
   - Acceptance Criteria:
     - Functional: `test-plan/04-core-editing.md` E4 is re-run on a real Linux build (`@clay/rust` fixture) and passes — `Enter` at the end of `// caret-here comment line` yields `\n    // ` — and the recorded outcome replaces the current **FAIL live** row in both the module file and `test-plan/index.md`; the re-scoped `07` T25 step is executed against the shipped full-bleed editor (no gutter painted) with its result recorded; new numbered steps are added only for genuinely new user-visible behavior (the re-scope changes step wording, not IDs).
     - Performance: the record states the client-local nature of the change (no measurable IPC/server leg) and does not invent a latency number; if a keypress→paint number is claimed it comes from the perf harness, not the AT-SPI walk.
-    - Code Quality: artifacts land under `test-plan/artifacts/143-manual-follow-ups/` (screenshots, AT-SPI text captures, logs) and are referenced from the module records; `test-plan/index.md` module map/records stay consistent.
+    - Code Quality: artifacts land under `test-plan/artifacts/146-manual-follow-ups/` (screenshots, AT-SPI text captures, logs) and are referenced from the module records; `test-plan/index.md` module map/records stay consistent.
     - Security: no existing step is weakened or deleted; the negative checks stay (plain-text mode performs no continuation; the editor keeps its focus/selection behavior).
     - Note: this plan changes inserted text, not chrome/layout/tokens, so the UI prototype gate does not apply; the visual/accessibility review duty for the change is performed inside this task (per-state screenshots of the continued comment line, AT-SPI focus/role check on the editor, and a keyboard-only pass over the continuation flow).
   - Approach:
@@ -225,7 +225,7 @@ full-bleed editor, and the input-path item is harness/host work.
       python3 test-plan/artifacts/129-connection-loop/probe.py text
       ```
     - Files to Create/Edit:
-      - `test-plan/04-core-editing.md`, `test-plan/07-caret-and-typography.md`, `test-plan/index.md`, `test-plan/artifacts/143-manual-follow-ups/`.
+      - `test-plan/04-core-editing.md`, `test-plan/07-caret-and-typography.md`, `test-plan/index.md`, `test-plan/artifacts/146-manual-follow-ups/`.
     - References:
       - Plan 129 task 4 records for the harness and evidence style; `.agents/skills/clay-execution/references/planning-checklist.md` (Visual and Accessibility Review Duty).
   - Test Cases to Write:
@@ -253,7 +253,7 @@ full-bleed editor, and the input-path item is harness/host work.
     - Files to Create/Edit:
       - None expected (verification-only); `docs/reference/clay-js-api/behavior/build-code-editing-manifest.md` only if the wording needs to state that the client now honors it.
     - References:
-      - Plan 142's verify-only JS API task (same pattern) and plan 136's option-surface drift guard (context for keeping the facade honest).
+      - Plan 145's verify-only JS API task (same pattern) and plan 136's option-surface drift guard (context for keeping the facade honest).
   - Test Cases to Write:
     - None beyond the existing registry/doc guards.
 

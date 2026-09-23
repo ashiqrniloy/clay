@@ -104,7 +104,7 @@ plan makes the route *survive* what the index now makes affordable.
       });
       ```
     - Files to Create/Edit:
-      - `plans/142-...md`: record the decision + rejected options (this task's evidence).
+      - `plans/145-...md`: record the decision + rejected options (this task's evidence).
       - `docs/reference/primitives/registry.md`, `docs/wiki/modules/decoration-transport.md`: only if the primitive inventory changes.
     - References:
       - `packages/lsp-shared/bridge.js:199,262,283` (all viewport fields are the whole document); `src/server/decorations.rs:96,109,272,283`; plans 057/058/099 records.
@@ -271,7 +271,7 @@ plan makes the route *survive* what the index now makes affordable.
       - Reuse the plan-128 harness and fixtures: consistent evidence shape and comparable numbers. (Chosen.)
       - Build a new harness: no benefit; the harness is already parameterized by document size.
     - Chosen Approach:
-      - Re-run the existing harness in `mid` mode (≈250 KiB) and `large` mode (≥1 MiB) plus the diagnostics fixture; capture window crops and the perf summary into `test-plan/artifacts/142-lsp-bounds/`.
+      - Re-run the existing harness in `mid` mode (≈250 KiB) and `large` mode (≥1 MiB) plus the diagnostics fixture; capture window crops and the perf summary into `test-plan/artifacts/145-lsp-bounds/`.
     - API Notes and Examples:
       ```bash
       test-plan/artifacts/128-lsp-incremental-index/launch-live.sh start mid
@@ -279,7 +279,7 @@ plan makes the route *survive* what the index now makes affordable.
       test-plan/artifacts/128-lsp-incremental-index/launch-live.sh stop
       ```
     - Files to Create/Edit:
-      - `test-plan/artifacts/142-lsp-bounds/` (new evidence dir: screenshots, perf summary, log excerpts); reuse of the plan-128 scripts rather than copies.
+      - `test-plan/artifacts/145-lsp-bounds/` (new evidence dir: screenshots, perf summary, log excerpts); reuse of the plan-128 scripts rather than copies.
     - References:
       - `src/server/document_analysis.rs` (status messages), `packages/lsp-shared/bridge.js`.
   - Test Cases to Write:
@@ -378,4 +378,4 @@ Known items deliberately not scheduled here (trigger conditions instead):
 
 - Port the frontend's long-line scan blocks (`SEGMENT_UNITS`) into `lsp-shared/positions.js` only if a workflow hits multi-megabyte single-line files on the LSP route; `long_single_line_does_not_regress` bounds current behavior (plan 128, task 2).
 - Expose a package-facing byte-offset helper from the position index only if a package needs it; that becomes a real Clay JS API change (inventory + generated registry + facade guards).
-- Host input consent for live typing legs (portal "Allow Remote Interaction") is environment state recorded in `test-plan/index.md`, not plan work; plan 143's input-path task settles the durable local procedure (`ydotoold`/uinput or the portal short-burst fallback) this task's typing legs can then use.
+- Host input consent for live typing legs (portal "Allow Remote Interaction") is environment state recorded in `test-plan/index.md`, not plan work; plan 146's input-path task settles the durable local procedure (`ydotoold`/uinput or the portal short-burst fallback) this task's typing legs can then use.

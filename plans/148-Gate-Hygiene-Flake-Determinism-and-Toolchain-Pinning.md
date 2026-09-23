@@ -86,7 +86,7 @@ an automated-only surface instead of executing steps.
       cargo test --test security -- generic_fake_lsp
       ```
     - Files to Create/Edit:
-      - `test-plan/artifacts/145-gate-hygiene/baseline.md`: reproduction, mechanisms, run counts, runtime.
+      - `test-plan/artifacts/148-gate-hygiene/baseline.md`: reproduction, mechanisms, run counts, runtime.
     - References:
       - `plans/132-Fanout-and-Protocol-Contract-Deduplication.md` → task 3 evidence and `## Further Actions`.
   - Test Cases to Write:
@@ -102,7 +102,7 @@ an automated-only surface instead of executing steps.
     - Documentation Reviewed:
       - `std::thread::current().id()`, `std::process::id()`, and `std::sync::atomic::AtomicU64` for collision-free naming without a new dependency.
       - `tests/language_server_authority.rs` `fake_lsp_shell_child`/`fake_lsp_spawn`; `tests/agent_session_isolation.rs` session lifecycle; `tests/agent_protocol.rs` `mock_daemon`.
-      - Every other test that builds a temp root by hand: `tests/agent_session_isolation.rs:145`, `tests/agent_settings_listing.rs:26`, `tests/editor_performance.rs:619`, `tests/example_config_control_center_chord.rs:32` — the helper replaces all of them, so the next collision cannot appear in a file this plan did not touch.
+      - Every other test that builds a temp root by hand: `tests/agent_session_isolation.rs:148`, `tests/agent_settings_listing.rs:26`, `tests/editor_performance.rs:619`, `tests/example_config_control_center_chord.rs:32` — the helper replaces all of them, so the next collision cannot appear in a file this plan did not touch.
     - Options Considered:
       - One shared `unique_root(label)` helper over `temp_dir()` using pid + thread id + a process-wide `AtomicU64` counter (chosen): stdlib only, no dependency change, one place to reason about.
       - `tempfile::TempDir`: collision-free and self-cleaning, but `tempfile` is a dependency of the `clay-desktop` package (`src-tauri/Cargo.toml:43`) and these integration tests belong to the root `clay` package, so it would mean adding a dev-dependency to the root manifest for a path-naming fix.
@@ -222,7 +222,7 @@ an automated-only surface instead of executing steps.
 
 - [ ] Record the manual test plan as not applicable (automated-only surface)
   - Acceptance Criteria:
-    - Functional: the task records explicitly that this plan changes no user-visible behavior, so no `test-plan/` step is executed or added; the reason (test-only and CI/toolchain changes) is written into `test-plan/index.md`'s plan-145 record so the omission is visible rather than silent.
+    - Functional: the task records explicitly that this plan changes no user-visible behavior, so no `test-plan/` step is executed or added; the reason (test-only and CI/toolchain changes) is written into `test-plan/index.md`'s plan-148 record so the omission is visible rather than silent.
     - Performance: the record notes that the security suite's runtime and the gate-set runtime are the relevant budgets, both captured in the baseline.
     - Code Quality: no existing step is weakened or deleted; the index record links the plan and the flake evidence.
     - Security: the record notes that the fixed tests guard sanitization and workspace isolation, and that their assertions were not relaxed.
@@ -235,9 +235,9 @@ an automated-only surface instead of executing steps.
     - Chosen Approach: add one execution-record entry stating the plan's surface is automated-only.
     - API Notes and Examples: none.
     - Files to Create/Edit:
-      - `test-plan/index.md`: plan-145 record.
+      - `test-plan/index.md`: plan-148 record.
     - References:
-      - `plans/144-Client-Lane-Gaps-Caret-Wrap-and-Pane-Focus.md`: the plan that carries the manual pass for the user-visible work from the same Further-Actions list.
+      - `plans/147-Client-Lane-Gaps-Caret-Wrap-and-Pane-Focus.md`: the plan that carries the manual pass for the user-visible work from the same Further-Actions list.
   - Test Cases to Write:
     - Manual review of the index entry.
 

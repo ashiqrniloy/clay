@@ -1,4 +1,4 @@
-# Plan 138 — Local Package Sources: `path:` Specs Without npm
+# Plan 141 — Local Package Sources: `path:` Specs Without npm
 
 Source: the 2026-09-20 configurability review, deviation D2. Making a
 personal theme/mode today requires build → npm publish →
@@ -25,8 +25,8 @@ Binding prior decisions:
   lifecycle scripts stay off absent an explicit per-invocation flag (the same
   posture `PnpmBackend::add` already carries via `--ignore-scripts`).
 
-Roadmap position: Phase 3 package-platform follow-through; unblocks plan 140's
-personal-theme workflow and plan 139's tier-2 agent changes (agent authors a
+Roadmap position: Phase 3 package-platform follow-through; unblocks plan 143's
+personal-theme workflow and plan 142's tier-2 agent changes (agent authors a
 local package instead of publishing).
 
 ## Objectives
@@ -316,7 +316,7 @@ local package instead of publishing).
     - Options Considered: headless-only — fallback on GUI blocker with
       headless generation-commit assertion.
     - Chosen Approach: full GUI launch.
-    - API Notes and Examples: see plan 137 sibling task for the launch
+    - API Notes and Examples: see plan 140 sibling task for the launch
       pattern.
     - Files to Create/Edit: evidence in plan file.
     - References: `plans/109-…md` review lesson (config never

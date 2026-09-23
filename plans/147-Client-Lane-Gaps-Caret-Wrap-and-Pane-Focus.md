@@ -88,7 +88,7 @@ prototype/approval loop instead of choosing values ad hoc.
       // WrapPolicy = "none" | "viewport" | { "column": number }
       ```
     - Files to Create/Edit:
-      - `test-plan/artifacts/144-client-lane-gaps/baseline.md`: reproduction, code paths, stale-document inventory, primitive confirmation.
+      - `test-plan/artifacts/147-client-lane-gaps/baseline.md`: reproduction, code paths, stale-document inventory, primitive confirmation.
     - References:
       - `plans/132-Fanout-and-Protocol-Contract-Deduplication.md` → `## Further Actions`.
       - `frontend/src/editor/extensions/controller.ts:419-421`, `:627-671`.
@@ -208,7 +208,7 @@ prototype/approval loop instead of choosing values ad hoc.
 
 - [ ] Perform visual screenshot and accessibility review of changed UI
   - Acceptance Criteria:
-    - Functional: a real Linux build is exercised for every changed state — caret shape/width/height/hollow/blink variants (default, block hollow, underline, blinking, reduced-motion), the three wrap policies with a long-line fixture, and both pane-focus policies in a split layout — with screenshots stored under `test-plan/artifacts/144-client-lane-gaps/review/` and the paths recorded; caret evidence is a burst capture (at least four frames spanning a blink cycle), never a single frame.
+    - Functional: a real Linux build is exercised for every changed state — caret shape/width/height/hollow/blink variants (default, block hollow, underline, blinking, reduced-motion), the three wrap policies with a long-line fixture, and both pane-focus policies in a split layout — with screenshots stored under `test-plan/artifacts/147-client-lane-gaps/review/` and the paths recorded; caret evidence is a burst capture (at least four frames spanning a blink cycle), never a single frame.
     - Performance: the review notes any visible input latency or layout jank introduced by the new handlers, and the automated editor suite runtime is compared with the baseline.
     - Code Quality: findings are recorded per state with the screenshot path, and each deviation is either fixed or filed as a prioritized follow-up; the review explicitly states whether caret appearance needed design decisions beyond the declared values (which would require the prototype/approval loop).
     - Security: the review confirms the caret colour still resolves through the active theme token, that reduced-motion suppresses blinking, and that keyboard-only focus order is unchanged under `paneFocusPolicy: "cursor"` (pointer focus must not trap or steal keyboard focus).
@@ -226,7 +226,7 @@ prototype/approval loop instead of choosing values ad hoc.
       # burst capture of one blink cycle, then crop to the caret region
       ```
     - Files to Create/Edit:
-      - `test-plan/artifacts/144-client-lane-gaps/review/**`: screenshots + findings.
+      - `test-plan/artifacts/147-client-lane-gaps/review/**`: screenshots + findings.
     - References:
       - `test-plan/artifacts/132-fanout-dedup/README.md`: the false-negative lesson that motivated burst capture.
   - Test Cases to Write:
@@ -325,7 +325,7 @@ prototype/approval loop instead of choosing values ad hoc.
       test-plan/artifacts/132-fanout-dedup/live/run-live.sh caret
       ```
     - Files to Create/Edit:
-      - `test-plan/artifacts/144-client-lane-gaps/example-config-launch.md`: command, paths, observations.
+      - `test-plan/artifacts/147-client-lane-gaps/example-config-launch.md`: command, paths, observations.
     - References:
       - User instruction 2026-09-07 (example config must be launch-tested, not just edited).
   - Test Cases to Write:
@@ -335,7 +335,7 @@ prototype/approval loop instead of choosing values ad hoc.
   - Acceptance Criteria:
     - Functional: `test-plan/07-caret-and-typography.md` T2/T3/T5/T21-T24 and `test-plan/13-window-splits.md` S14/S17 are executed on a real Linux build and recorded pass/fail against the numbered steps; if a step's expectation changes (e.g. the pane-focus fallback), the step is re-worded with the reason and the known ceiling recorded in the file's ceilings section, never deleted.
     - Performance: the pass records any step that could not be judged because the harness cannot sample the state (e.g. blink rhythm) and the method used instead (burst capture).
-    - Code Quality: `test-plan/index.md` gains the plan-144 execution record and any module/coverage-matrix update the changes require; existing dated records stay untouched.
+    - Code Quality: `test-plan/index.md` gains the plan-147 execution record and any module/coverage-matrix update the changes require; existing dated records stay untouched.
     - Security: no step's authority or permission check is weakened to make a pass; the record notes that all changed values remain server-validated.
   - Approach:
     - Documentation Reviewed:
@@ -349,7 +349,7 @@ prototype/approval loop instead of choosing values ad hoc.
       test-plan/artifacts/132-fanout-dedup/live/run-live.sh caret
       ```
     - Files to Create/Edit:
-      - `test-plan/index.md`: plan-144 execution record.
+      - `test-plan/index.md`: plan-147 execution record.
       - `test-plan/07-caret-and-typography.md`, `test-plan/13-window-splits.md`: results, re-worded steps if the fallback is taken.
     - References:
       - `test-plan/artifacts/132-fanout-dedup/README.md`: prior false-negative lesson.

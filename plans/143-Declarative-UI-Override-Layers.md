@@ -1,10 +1,10 @@
-# Plan 140 — Declarative Override Layers: User Theme, Recipe, and Status Segments
+# Plan 143 — Declarative Override Layers: User Theme, Recipe, and Status Segments
 
 Source: the 2026-09-20 configurability review, deviation D3. The UI layer
 contract intentionally fixes geometry/material/motion ownership
 (DESIGN.md §3; decision `2026-08-28-2234`), but the result is that a user
 wanting one different color must ship a full 48-entry theme package to npm
-(plan 138 softens distribution, not authoring), design-system recipes have
+(plan 141 softens distribution, not authoring), design-system recipes have
 no user overlay, and the status bar — Emacs' most-hacked surface — has no
 declarative user-contributable segments (the `statusItem` SDUI component and
 status-region contributions exist for packages:
@@ -27,8 +27,8 @@ Binding prior decisions:
   `src/shell/theme.rs:987-1099`) are non-negotiable.
 
 Roadmap position: deepens the "design it in their own way" goal as data, not
-renderer authority; depends on plan 137's user-config identity for the
-status-segment imperative path; plan 138 makes personal theme *packages*
+renderer authority; depends on plan 140's user-config identity for the
+status-segment imperative path; plan 141 makes personal theme *packages*
 easy — this plan makes small theme edits not need a package at all.
 
 ## Objectives
@@ -42,7 +42,7 @@ easy — this plan makes small theme edits not need a package at all.
   schema/bounds as package recipes; colors remain theme-role references
   only.
 - Declarative status-bar segments settable from init.js (via the existing
-  status-region contribution family once plan 137's identity makes the
+  status-region contribution family once plan 140's identity makes the
   imperative facade callable), with package-vs-user precedence documented
   and deterministic.
 - Zero renderer authority added: all three surfaces are validated inert
@@ -77,7 +77,7 @@ easy — this plan makes small theme edits not need a package at all.
   - Approach:
     - Documentation Reviewed: AGENTS.md platform validation;
       planning-checklist.md.
-    - Options Considered: share plan-137 baseline — rejected: this plan
+    - Options Considered: share plan-140 baseline — rejected: this plan
       touches theme validation, a different regression surface.
     - Chosen Approach: gates + surface inventory notes.
     - API Notes and Examples:
@@ -207,7 +207,7 @@ easy — this plan makes small theme edits not need a package at all.
 - [ ] Enable user status-bar segments through the status-region contribution family
   - Acceptance Criteria:
     - Functional: the imperative status-region facade is callable from
-      init.js (plan 137 identity; if the family is manifest-only today, add
+      init.js (plan 140 identity; if the family is manifest-only today, add
       the generic imperative facade with the same declaration validator);
       segments render via the cataloged `statusItem` component; user vs
       package precedence deterministic (documented order, conflict
@@ -220,7 +220,7 @@ easy — this plan makes small theme edits not need a package at all.
   - Approach:
     - Documentation Reviewed: `references/components.md` (statusItem),
       `references/ui.md`, `docs/reference/packages/creating-packages.md`
-      (status contributions), plan 137 (identity dependency).
+      (status contributions), plan 140 (identity dependency).
     - Options Considered: a bespoke "user statusline" config schema —
       rejected: the contribution family already exists; one more caller is
       the smaller diff.
@@ -436,6 +436,6 @@ easy — this plan makes small theme edits not need a package at all.
 
 ## Further Actions
 - To be filled after execution. Known candidates: per-theme (dark/light)
-  override maps; moving the status-segment path earlier if plan 137 lands
+  override maps; moving the status-segment path earlier if plan 140 lands
   late; pane-content contribution points (terminal, image viewer) —
   separate plans with their own primitive reviews.
