@@ -31,23 +31,25 @@ jobs:
             librsvg2-dev \
             libxdo-dev \
             libssl-dev
-      - uses: actions/setup-node@v4
+      # JS toolchain (bun + transitional node) comes from the root mise.toml
+      # so local and CI cannot drift.
+      - uses: jdx/mise-action@v4
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: true
       - name: Frontend gates (lint, format, unit tests, production build)
         run: |
-          npm ci --prefix frontend
-          npm run lint --prefix frontend
-          npm run format:check --prefix frontend
-          npm test --prefix frontend
-          npm run build --prefix frontend
-          npm run check:budget --prefix frontend
+          cd frontend
+          bun install --frozen-lockfile
+          bun run lint
+          bun run format:check
+          bun run test
+          bun run build
+          bun run check:budget
       - name: clay-agent unit tests
         run: |
-          npm ci --prefix clay-agent
-          npm test --prefix clay-agent
+          cd clay-agent
+          bun install --frozen-lockfile
+          bun run test
       - name: Packaged-release smoke (identity, artifacts, budgets)
         run: scripts/package-smoke.sh
       - run: scripts/check.sh full

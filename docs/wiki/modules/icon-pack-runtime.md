@@ -163,7 +163,7 @@ Mirrors the design-system lifecycle (`src/server/ops/theme.rs`,
 - One generation-stamped wire snapshot is sent on pack change only; unchanged
   config reloads re-send no icon state (persistent worker module cache).
 - Adding a pack: vendor upstream SVGs, run
-  `node scripts/generate-icon-packs.mjs` (or author a manifest with
+  `bun scripts/generate-icon-packs.mjs` (or author a manifest with
   own-prefixed keys for third-party), load with `loadPackage`, select with
   `setIconPack`. Adding a core key: extend `CORE_ICON_KEYS`, regenerate both
   packs + fallback, update the record validator, renderer fallbacks, and the
@@ -182,7 +182,7 @@ Mirrors the design-system lifecycle (`src/server/ops/theme.rs`,
 - `frontend/src/test/icons.test.tsx`: geometry rendering, a11y contract,
   pack-matrix semantics, DOM continuity, no-color-authority leakage.
 - Commands: `cargo test --lib shell::icons`, `cargo test --test icon_packages`,
-  `pnpm --dir frontend test icons` (or `npm --prefix frontend run test`).
+  `pnpm --dir frontend test icons` (or `bun --cwd frontend run test`).
 
 ## Related
 

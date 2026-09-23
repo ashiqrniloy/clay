@@ -47,7 +47,7 @@ The daemon does not hard-code Chat. Clay (`@clay/chat`) registers profiles throu
 
 Encrypted file vault is the source of truth. OS keychain is used when the secret service answers; a locked/denied keychain fails closed at initialize (Prism 0.5 typed `CredentialStoreLockedError` — never treated as an empty vault), while an unavailable backend degrades to vault-only; there is no plaintext fallback. `credential.put` never echoes the secret. Logs and errors run through secret-shape redaction.
 
-Native addon: the `@arnilo/prism-core/sessions/sqlite` subpath uses `better-sqlite3` (pinned directly in this package). If install scripts are blocked, run `npm rebuild better-sqlite3` in this directory.
+Native addon: the `@arnilo/prism-core/sessions/sqlite` subpath uses `better-sqlite3` (pinned directly in this package). If install scripts are blocked, run `bun install` in this directory (`better-sqlite3` is listed in `trustedDependencies`).
 
 ## Chat honesty
 
@@ -134,9 +134,9 @@ providers are rejected for Phase 1. Antigravity lands in Phase 6.
    reintroduce retired `@arnilo/prism-provider-*` / `-credentials-node` /
    `-session-store-sqlite` / `-tool-validator-json-schema` names or the 27
    exports removed in 0.5.
-3. `npm install` in this directory. Rebuild `better-sqlite3` if install scripts
-   were skipped.
-4. `npm test` here, then `cargo test --test protocol agent_protocol`.
+3. `bun install` in this directory (better-sqlite3 ships platform prebuilds
+   and is listed in `trustedDependencies`).
+4. `bun run test` here, then `cargo test --test protocol agent_protocol`.
 5. Confirm `package.json` still has no ACP, AG-UI, office, coding-agent, or
    Antigravity deps, and that MCP appears only as the `@arnilo/prism-mcp`
    bridge (never `@modelcontextprotocol/*` direct, `prism-acp`,

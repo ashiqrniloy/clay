@@ -132,7 +132,7 @@ Run focused coverage with:
 ```bash
 cargo test --lib server::folding
 cargo test --test protocol editor_intelligence_protocol::folding_range_set_round_trips_through_codec_within_budget
-cd frontend && npm test -- --run src/editor/extensions/extensions.test.ts
+cd frontend && bun run test src/editor/extensions/extensions.test.ts
 ```
 
 ## Related

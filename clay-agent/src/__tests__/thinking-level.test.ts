@@ -7,7 +7,7 @@
 // (Prism `thinkingLevelsForModel`). Wire-field assertions use a capturing
 // mock provider so the per-run `providerOptions.compat` patch is visible
 // exactly as a provider package would read it.
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

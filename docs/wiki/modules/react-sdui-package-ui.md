@@ -206,7 +206,7 @@ cargo test --lib server::ui::
 cargo test -p clay-desktop --all-targets
 cargo test --test security package_graph::
 cargo test --test security package_loading::
-cd frontend && npx vitest run && npm run build && npm run check:budget
+cd frontend && bun run test && bun run build && bun run check:budget
 ```
 
 ## Related

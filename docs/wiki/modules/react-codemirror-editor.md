@@ -227,7 +227,7 @@ view.dispatch({
 ```bash
 cargo test -p clay --lib editor::position_map
 cargo test -p clay-desktop --lib bridge::editor
-cd frontend && npm test
+cd frontend && bun run test
 ```
 
 ## Related

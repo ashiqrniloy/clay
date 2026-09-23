@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { CredentialStoreLockedError, CredentialStoreUnavailableError } from "@arnilo/prism-core/credentials/node";
 import { resolveKeychain } from "../host.js";

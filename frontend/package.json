@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check:budget": "node scripts/bundle-budget.mjs"
+    "check:budget": "bun scripts/bundle-budget.mjs"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.58",

@@ -9,7 +9,7 @@
 // beside it (mutually exclusive). The over-ratio case proves the gate is live:
 // the run fails with Prism's `AttentionBudgetError` before any provider turn
 // instead of silently evicting history.
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

@@ -149,7 +149,7 @@ async function importModuleFromPackage(packageName) {
     return await import(pathToFileURL(packageRequire.resolve(packageName)).href);
   } catch (error) {
     if (error.code === 'MODULE_NOT_FOUND' || error.message.includes('Cannot find package')) {
-      throw new Error(`missing ${packageName}; run: npm install --prefix packages/markdown --no-save --no-package-lock --ignore-scripts markdown-it@^14.1.0`);
+      throw new Error(`missing ${packageName}; run: bun add --cwd packages/markdown --no-save --ignore-scripts markdown-it@^14.1.0`);
     }
     throw error;
   }

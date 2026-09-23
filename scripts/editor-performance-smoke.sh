@@ -64,7 +64,7 @@ done
 command -v python3 >/dev/null || { echo "python3 is required for report analysis" >&2; exit 2; }
 
 echo "== building instrumented frontend (VITE_CLAY_PERF_PROFILE=1)"
-( cd frontend && VITE_CLAY_PERF_PROFILE=1 npm run build >/dev/null )
+( cd frontend && VITE_CLAY_PERF_PROFILE=1 bun run build >/dev/null )
 
 echo "== building clay binaries"
 cargo build --bin clay --quiet

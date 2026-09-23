@@ -137,11 +137,14 @@
     - Functional: `node` entry removed from `mise.toml` (bun remains the
       only pinned JS runtime); CI no longer provisions Node;
       `docs/development/build-and-test.md` states bun as the daemon
-      runtime; `CLAY_NODE` gone from docs.
+      runtime; `CLAY_NODE` gone from docs; the transitional-Node
+      rationale removed from `README.md`, `docs/development/windows.md`,
+      and `docs/wiki/modules/dev-toolchain.md`.
     - Performance: none.
     - Code Quality: single JS runtime across dev, CI, and the shipped
-      daemon; no stale Node references (`grep -rn "CLAY_NODE\|setup-node"`
-      clean).
+      daemon; no stale Node references (`grep -rn
+      "node = \"24.21.0\"\|24\.21\.0\|CLAY_NODE\|setup-node"` clean
+      outside immutable plan/decision history).
     - Security: none.
   - Approach:
     - Documentation Reviewed: `mise.toml` (from plan 137), CI workflow.
@@ -150,7 +153,8 @@
         rollback is git revert.
     - Chosen Approach: delete the pin, update docs.
     - Files to Create/Edit: `mise.toml`, `.github/workflows/ci.yml`,
-      `docs/development/build-and-test.md`.
+      `docs/development/build-and-test.md`, `README.md`,
+      `docs/development/windows.md`, `docs/wiki/modules/dev-toolchain.md`.
     - References: decisions 2026-09-23-1946 (both).
   - Test Cases to Write: none.
 
@@ -183,8 +187,10 @@
   - Acceptance Criteria:
     - Functional: `docs/wiki/modules/clay-agent.md` (and the spawn
       module page if separate) updated: bun runtime, `CLAY_BUN`,
-      `RuntimeMissing`, no dist build on the runtime path; wiki
-      maintenance validation passes.
+      `RuntimeMissing`, no dist build on the runtime path; and
+      `docs/wiki/modules/dev-toolchain.md` updated to the bun-only
+      toolchain story (transitional Node pin and rationale removed);
+      wiki maintenance validation passes.
     - Performance: none.
     - Code Quality: standard code-wiki template per
       `.agents/skills/clay-execution/references/docs-as-code.md`.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { providerDone, providerTextDelta } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
 import { connectAllowListedMcpServers } from "../mcp.js";
@@ -162,6 +162,8 @@ test("no brave/exa/firecrawl imports in daemon source", async () => {
   }
 });
 
+// Obscura CDP readiness takes ~10 s to fail-close on a dead binary; node:test
+// had no default timeout, so this only needs a bun:test override (5 s default).
 test("session on coding profile does not error when Obscura harness fails to spawn", async () => {
   // Obscura failures hide the capability (capability reduction), they never
   // fail the coding session.
@@ -190,4 +192,4 @@ test("session on coding profile does not error when Obscura harness fails to spa
   })) as { tools: string[]; sessionId: string };
   assert.ok(created.tools.includes("read"));
   host.close();
-});
+}, 20_000);

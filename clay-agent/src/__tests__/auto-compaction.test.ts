@@ -11,7 +11,7 @@
 // Prism runs `autoCompact` once per run, before provider turns; the strategy
 // stays Prism's local deterministic default so an unattended gate can never
 // turn a provider outage into a failed run at assembly.
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

@@ -138,7 +138,7 @@ composer `/` -> server menu snapshot -> CommandPalette field child
 
 ```bash
 cargo test --test protocol
-npm --prefix frontend test
+bun --cwd frontend run test
 ```
 
 ## Related

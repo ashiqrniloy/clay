@@ -163,7 +163,7 @@ Run focused coverage with:
 ```bash
 cargo test --lib protocol_round_trips_viewport_render_patches
 cargo test --lib viewport_render_requests_answer_one_patch_per_request_id
-cd frontend && npm test -- --run src/editor/extensions/render-patch.test.ts
+cd frontend && bun run test src/editor/extensions/render-patch.test.ts
 ```
 
 ## Related

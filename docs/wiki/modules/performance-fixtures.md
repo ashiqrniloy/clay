@@ -217,7 +217,7 @@ Run focused coverage with:
 ```bash
 cargo test --test protocol perf_fixtures:: performance_budgets::
 cargo test --test runtime editor_performance_
-cd frontend && npm test -- --run src/editor/performance.test.ts src/editor/extensions/performance.test.ts
+cd frontend && bun run test src/editor/performance.test.ts src/editor/extensions/performance.test.ts
 ```
 
 ## Security and extension

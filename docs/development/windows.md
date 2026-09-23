@@ -30,6 +30,16 @@ rustc -vV
 
 `rustc -vV` should report a host such as `x86_64-pc-windows-msvc` when the MSVC toolchain is active.
 
+### JavaScript runtimes
+
+The root `mise.toml` pins Bun 1.4.2 and Node 24.21.0. mise's native Windows
+support is newer and less exercised than Linux — treat it as experimental
+here — so the supported fallback is manual installs of those versions (Node
+24.21.0 from <https://nodejs.org>, or `winget install OpenJS.NodeJS.LTS`
+for the current LTS line; Bun 1.4.2 from <https://bun.sh>) with `bun` (and
+the transitional `node`/`npm` for the daemon until plan 139) on `PATH`
+before running the commands below.
+
 ### Symlink Builds
 
 Some dependencies may create symlinks during their build scripts. If Windows reports a symlink permission error during `cargo check` or `cargo test`, enable Windows Developer Mode or run from an elevated developer shell, then rerun the command.
@@ -85,8 +95,8 @@ Windows MSI/NSIS bundle targets are not required for Phase 11. When a Windows
 host is available, optional checks are:
 
 ```powershell
-npm --prefix frontend ci
-npm --prefix frontend run build
+bun --cwd frontend install
+bun --cwd frontend run build
 cargo test -p clay-desktop --lib --quiet
 cargo test -p clay-desktop --test config_security --quiet
 ```

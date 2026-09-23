@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { access, chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { providerDone, providerTextDelta } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
 

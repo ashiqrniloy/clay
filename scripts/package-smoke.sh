@@ -26,13 +26,15 @@ fi
 test -f src-tauri/icons/icon.png
 test -x scripts/security-audit.sh
 
-if command -v node >/dev/null 2>&1; then
+if command -v bun >/dev/null 2>&1; then
     echo "== canonical example configuration syntax"
-    node --check examples/config/init.js
-    node --check examples/config/packages/first-party.js
-    node --check examples/config/packages/third-party.js
+    # bun has no `--check`; --no-bundle only transpiles (no execution or import
+    # resolution), so syntax errors still exit non-zero without running configs.
+    bun build --no-bundle examples/config/init.js >/dev/null
+    bun build --no-bundle examples/config/packages/first-party.js >/dev/null
+    bun build --no-bundle examples/config/packages/third-party.js >/dev/null
 else
-    echo "node not found; skipping canonical example node --check"
+    echo "bun not found; skipping canonical example syntax check"
 fi
 
 echo "== distribution checks (plan 115 task 8)"
@@ -78,12 +80,12 @@ cargo test -p clay-desktop missing_server_binary -- --test-threads=1 --quiet
 
 if [ -d frontend/dist/assets ]; then
     echo "== frontend bundle budget"
-    npm run check:budget --prefix frontend
+    (cd frontend && bun run check:budget)
 fi
 
 if [ -d clay-agent/node_modules ]; then
     echo "== clay-agent tests"
-    npm test --prefix clay-agent
+    (cd clay-agent && bun run test)
 fi
 
 if [ "${CLAY_TAURI_BUNDLE:-}" = "1" ]; then

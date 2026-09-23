@@ -11,7 +11,7 @@
 // the session model, and fail closed — unknown providers are rejected
 // and unset workers never reuse the session model
 // (`requireExplicitModel: true` skips them).
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

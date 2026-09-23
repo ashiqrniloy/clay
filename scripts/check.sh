@@ -82,7 +82,7 @@ case "${1:-}" in
         # stale fixture can sit broken unnoticed (plan 132 follow-up). Both
         # stages need `frontend/dist` to exist (the Tauri build script requires
         # it), which the bindings stage below needs as well — build the frontend
-        # first (`npm run build --prefix frontend`).
+        # first (`cd frontend && bun run build`).
         run_stage desktop-clippy cargo clippy -p clay-desktop --all-targets -- -D warnings
         run_stage desktop-test cargo test -p clay-desktop --all-targets --quiet
         # Last: this stage compiles `clay` with the codegen-only feature, which

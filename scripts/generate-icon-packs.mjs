@@ -2,7 +2,7 @@
 // host safety fallback from pinned, integrity-checked upstream SVG sources.
 //
 // Deterministic: same inputs (vendored SVGs + packages/icon-sources.json)
-// produce byte-identical outputs. Run `node scripts/generate-icon-packs.mjs`
+// produce byte-identical outputs. Run `bun scripts/generate-icon-packs.mjs`
 // to (re)generate; `--check` verifies no drift (used by tests/icon_packages.rs
 // and CI). No network access, no dependencies.
 

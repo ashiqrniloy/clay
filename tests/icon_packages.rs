@@ -127,11 +127,11 @@ fn host_fallback_matches_regular_pack_geometry() {
 fn icon_pack_generation_is_deterministic_and_drift_free() {
     // Regeneration must produce no diff (task 4 acceptance: generated
     // artifacts are deterministic and checked for drift).
-    let output = Command::new("node")
+    let output = Command::new("bun")
         .arg("scripts/generate-icon-packs.mjs")
         .arg("--check")
         .output()
-        .expect("run node (frontend toolchain requires node; CI provides it)");
+        .expect("run bun (frontend toolchain requires bun; CI provides it via mise)");
     assert!(
         output.status.success(),
         "generation drift detected:\n{}{}",

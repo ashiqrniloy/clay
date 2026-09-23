@@ -4,8 +4,11 @@ Clay is a client/server code editor. See [Clay documentation](docs/index.md) and
 
 ## Run from a source checkout
 
+Requires `rustup` and [mise](https://mise.jdx.dev) (`curl -fsSL https://mise.run | sh`); `mise install` provisions the pinned Bun/Node from `mise.toml` (see [Build and Test](docs/development/build-and-test.md)).
+
 ```bash
-cd frontend && npm ci && npm run build
+mise install
+cd frontend && bun install && bun run build
 cd .. && cargo build -p clay -p clay-desktop
 cargo run
 ```

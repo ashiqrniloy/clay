@@ -7,7 +7,7 @@
 // tool results, and a secret-carrying agent message; `skill.register`
 // activates the real `load_skill` tool; `session.compact` appends a real
 // compaction entry; `session.checkout` restores a pre-compaction branch.
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import type { ToolExecutionContext } from "@arnilo/prism";
 import { providerDone, providerTextDelta } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
@@ -164,7 +164,7 @@ test("engine present: web tools answer through the CLI with untrusted-labeled re
   }
 });
 
-test("e2e: CDP composition drives a fixture page with the browser tools", { skip: !process.env.CLAY_WEB_E2E }, async () => {
+test.skipIf(!process.env.CLAY_WEB_E2E)("e2e: CDP composition drives a fixture page with the browser tools", async () => {
   // Real composition minus the obscura process: launch Chromium with a CDP
   // endpoint, attach with connectOverCDP (the exact Phase 1 seam target),
   // and drive a local fixture page through the prism browser tools.

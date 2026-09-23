@@ -69,7 +69,7 @@ workspace.openPath("notes.md"); // focuses the owner pane if already open
 ## Tests
 
 ```bash
-cd frontend && npx vitest run src/shell
+cd frontend && bun run test src/shell
 cargo test -p clay-desktop --all-targets
 ```
 

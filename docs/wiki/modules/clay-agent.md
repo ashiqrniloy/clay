@@ -983,10 +983,15 @@ existing knowledge binding.
 ## Tests
 
 ```text
-cd clay-agent && npm test
+cd clay-agent && bun run test
 ```
 
-The Plan 119 verification run (`cd clay-agent && npm test`) reported 149
+The script typechecks first (`tsc -p tsconfig.json`) and then runs
+`bun test src --parallel` on the `bun:test` suite (plan 138 task 4). The
+`src` scope avoids re-running the compiled `dist/__tests__` copies, and
+`--parallel` matches the file parallelism the old `node --test` run had.
+
+The Plan 119 verification run (then `cd clay-agent && npm test`) reported 149
 passed and 1 skipped across the suite: host (mock prompt/persist/resume,
 cancel, oversize frames, secret redaction, missing
 tools, unreadable-vault process exit), rpc framing, coding tools

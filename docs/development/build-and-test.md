@@ -61,6 +61,28 @@ Tauri v2 shell lives in `src-tauri/` (`clay-desktop`) and the React frontend
 in `frontend/`. The existing gates above run across all workspace members,
 including `clay-desktop`.
 
+### Dev toolchain (mise + rustup)
+
+JavaScript runtimes are pinned in the root `mise.toml` (Bun exactly, plus
+an exact transitional Node pin until plan 139 replaces the Node daemon
+runtime). Rust stays on `rustup` (pin policy owned by plan 148). Install
+the tools once, then let `mise install` provision the pinned versions:
+
+```bash
+curl -fsSL https://mise.run | sh   # official mise installer
+mise install                       # pinned Bun + Node from mise.toml
+mise trust                         # only if mise reports the project config as untrusted
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # if rustup is missing
+```
+
+Then either activate mise in your shell (`eval "$(mise activate bash)"`, or
+the equivalent in your shell's rc file) or prefix commands with
+`mise exec -- ` so `bun` is the pinned version on `PATH` (the transitional
+`node`/`npm` pins exist only for the Node daemon until plan 139). `mise
+install` is the single JS setup command locally and in CI (the workflow uses
+`jdx/mise-action` against the same file); no separate Bun install is needed
+on Linux.
+
 ### Linux prerequisites
 
 Ubuntu/Debian CI (see `.github/workflows/ci.yml`):
@@ -85,7 +107,7 @@ Without the WebKit/GTK/dbus headers, workspace-wide Cargo commands fail inside
 ```bash
 scripts/build.sh           # stop any running clay, then frontend/dist + debug clay and clay-desktop
 scripts/build.sh run       # same, then target/debug/clay (GUI)
-# equivalent: cd frontend && npm run build && cd .. && cargo build -p clay -p clay-desktop
+# equivalent: (cd frontend && bun run build) && cargo build -p clay -p clay-desktop
 cargo run                  # kill leftover default-endpoint servers, then open GUI
 cargo run -- restart       # replace the server, no GUI
 cargo run -- client        # extra GUI against a running server
@@ -99,7 +121,7 @@ the rebuild. The match is anchored to this checkout's `target/`, so `cargo`/`rus
 (whose argv mentions `target/debug/deps`) and unrelated processes are never hit;
 SIGTERM first, SIGKILL after a 4 s grace.
 
-Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). `src-tauri/build.rs` watches that directory, and `scripts/build.sh` explicitly builds `clay-desktop` after `npm run build`, so production-renderer changes cannot leave a stale embedded GUI. Hot-reload uses Vite instead: `cd frontend && npm run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
+Debug `clay-desktop` embeds `frontend/dist` (`custom-protocol` is the default feature). `src-tauri/build.rs` watches that directory, and `scripts/build.sh` explicitly builds `clay-desktop` after `bun run build`, so production-renderer changes cannot leave a stale embedded GUI. Hot-reload uses Vite instead: `cd frontend && bun run dev` in one terminal and `cargo tauri dev` in another (`tauri dev` disables `custom-protocol` and loads `http://localhost:1420`).
 
 The desktop shell resolves `clay-server` as `$CLAY_SERVER_BIN` → sibling of
 its own executable → `PATH`. If an endpoint already has a live listener
@@ -109,14 +131,28 @@ window kills and reaps only servers it spawned.
 
 ### Frontend gates
 
+Frontend tooling runs on the mise-provided Bun (see Dev toolchain above):
+
 ```bash
 cd frontend
-npm ci          # deterministic install from package-lock.json
-npm run lint    # eslint (typescript-eslint + react-hooks)
-npm run format:check
-npm test        # vitest (theme adapter, components, shell, bridge)
-npm run build   # tsc -b && vite build → dist/
-npm run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 404 kB
+bun install     # exact install from bun.lock; add --frozen-lockfile for a no-drift check
+bun run lint    # eslint (typescript-eslint + react-hooks)
+bun run format:check
+bun run test    # vitest (theme adapter, components, shell, bridge)
+bun run build   # tsc -b && vite build → dist/
+bun run check:budget  # shell gzip ≤ 180 kB; total (incl. editor) ≤ 404 kB
+```
+
+Vitest runs on the Bun runtime by default (decision recorded 2026-09-24,
+plan 138 task 5): all 51 files / 497 tests pass under `bun run test`, and
+the suite is slightly faster than the same run on mise's Node
+(8.99–9.27 s vs 9.58–9.78 s wall). No worker-pool incompatibility has been
+observed (vitest's default `forks` pool). If a future vitest or Bun release
+does break the pool, the fallback is to run the same suite on mise's Node:
+
+```bash
+cd frontend
+node node_modules/vitest/vitest.mjs run
 ```
 
 ### Plan 099 editor performance verification

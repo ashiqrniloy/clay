@@ -30,13 +30,13 @@ cargo fmt --check
 cargo check --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
-npm --prefix frontend run format:check
-npm --prefix frontend run lint
-npm --prefix frontend run typecheck
-npm --prefix frontend test
-npm --prefix frontend run build
-npm --prefix frontend run check:budget
-npm --prefix clay-agent test
+bun --cwd frontend run format:check
+bun --cwd frontend run lint
+bun --cwd frontend run typecheck
+bun --cwd frontend run test
+bun --cwd frontend run build
+bun --cwd frontend run check:budget
+bun --cwd clay-agent run test
 scripts/security-audit.sh
 scripts/package-smoke.sh
 ```

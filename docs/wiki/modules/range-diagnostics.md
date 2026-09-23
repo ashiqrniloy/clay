@@ -141,7 +141,7 @@ Run focused coverage with:
 ```bash
 cargo test --lib server::diagnostics
 cargo test --test protocol performance_budgets::
-cd frontend && npm test -- --run src/editor/extensions/render-patch.test.ts
+cd frontend && bun run test src/editor/extensions/render-patch.test.ts
 ```
 
 ## Related

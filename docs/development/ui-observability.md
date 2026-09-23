@@ -57,7 +57,7 @@ a policy label for partial/viewport-only highlighting and plain-text fallback.
 The main focused commands for this coverage are:
 
 ```text
-npm --prefix frontend run test
+bun --cwd frontend run test
 cargo test --all-targets
 ```
 

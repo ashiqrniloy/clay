@@ -205,7 +205,7 @@ Run focused coverage with:
 ```bash
 cargo test -p clay-desktop --all-targets
 cargo test --test runtime editor_performance_
-cd frontend && npm test -- --run src/test/bridge.test.ts
+cd frontend && bun run test src/test/bridge.test.ts
 ```
 
 ## Related

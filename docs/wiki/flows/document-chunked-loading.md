@@ -195,7 +195,7 @@ Run focused coverage with:
 ```bash
 cargo test --test runtime large_document::
 cargo test --lib server::workspace::tests::open_existing_file_streams_large_utf8_text_and_bounds_head
-cd frontend && npm test -- --run src/editor/sync/session.test.ts
+cd frontend && bun run test src/editor/sync/session.test.ts
 ```
 
 ## Related

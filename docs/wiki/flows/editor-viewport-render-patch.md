@@ -144,7 +144,7 @@ Run focused coverage with:
 ```bash
 cargo test --test protocol protocol_round_trips_viewport_render_patches
 cargo test --test runtime viewport_render_requests_answer_one_patch_per_request_id
-cd frontend && npm test -- --run src/editor/extensions/controller.test.ts
+cd frontend && bun run test src/editor/extensions/controller.test.ts
 ```
 
 ## Related

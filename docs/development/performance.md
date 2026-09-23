@@ -73,7 +73,7 @@ by the lib `server::syntax` tests.
 Run the large Markdown parser harness. The install command populates local `packages/markdown/node_modules` only; do not commit it.
 
 ```text
-npm install --prefix packages/markdown --no-save --no-package-lock --ignore-scripts markdown-it@^14.1.0
+bun add --cwd packages/markdown --no-save --ignore-scripts markdown-it@^14.1.0
 node --check tools/bench/markdown-parser.mjs
 node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8
 node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json
@@ -1169,7 +1169,7 @@ No performance budget was changed.
 ## Tauri / React client budgets
 
 The webview bundle replaces the removed native-client Criterion groups as the
-client-side size gate. `npm --prefix frontend run check:budget` is the hard
+client-side size gate. `bun --cwd frontend run check:budget` is the hard
 gzip gate (`frontend/scripts/bundle-budget.mjs`, wired into CI).
 
 | Surface        | Budget                          | Enforcement                          |

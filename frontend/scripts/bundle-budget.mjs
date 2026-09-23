@@ -1,4 +1,4 @@
-// Bundle-size budget check (Plan 097 Phase 4/5). Run after `npm run build`.
+// Bundle-size budget check (Plan 097 Phase 4/5). Run after `bun run build`.
 // Startup shell excludes code-split editor, package, desktop-workflow, and
 // agent (AG-UI) chunks. Total gzip includes every lazy renderer.
 
@@ -14,7 +14,7 @@ const SHELL_BUDGET_GZIP_KB = 180;
 const TOTAL_BUDGET_GZIP_KB = 404;
 
 if (!existsSync(dist)) {
-  console.error("dist/assets missing — run `npm run build` first");
+  console.error("dist/assets missing — run `bun run build` first");
   process.exit(1);
 }
 

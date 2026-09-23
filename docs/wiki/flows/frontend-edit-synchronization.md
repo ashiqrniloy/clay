@@ -100,7 +100,7 @@ stay pane-local and do not cause whole-shell persistence churn.
 Run focused coverage with:
 
 ```bash
-cd frontend && npm test -- --run src/editor/sync/session.test.ts
+cd frontend && bun run test src/editor/sync/session.test.ts
 cargo test --test runtime editor_performance_
 ```
 

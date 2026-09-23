@@ -9,7 +9,7 @@
 // - wait_agent on a foreign/stale delegationId is a tool error
 // - parent abort (session.cancel) stops a running async child
 // - document-registry authority: no createWorktreeChildFactory import
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

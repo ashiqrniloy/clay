@@ -224,7 +224,7 @@ const router = createMemoryRouter(routes, {
   identity for non-lifecycle envelopes.
 - `src/shell/theme/resolve.rs` (`resolve_theme_token_snapshot`; hub `src/shell/theme.rs`) + `tests/theme_packages.rs`: 91-token snapshot and
   bundled-theme contrast.
-- Commands: `cd frontend && npm test && npm run build && npm run check:budget`
+- Commands: `cd frontend && bun run test && bun run build && bun run check:budget`
 
 ## Related
 

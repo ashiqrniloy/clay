@@ -84,7 +84,7 @@ cargo test --test protocol performance_budgets::
 cargo bench --no-run
 node --check tools/bench/markdown-parser.mjs
 node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8
-npm install --prefix packages/markdown --no-save --no-package-lock --ignore-scripts markdown-it@^14.1.0
+bun add --cwd packages/markdown --no-save --ignore-scripts markdown-it@^14.1.0
 node --expose-gc tools/bench/markdown-parser.mjs --sizes 1MiB,5MiB,16MiB --parser markdown-it,adapter --iterations 1 --warmup 0
 cargo test markdown_package_runtime_loads_markdown_it_workflow --lib
 cargo test markdown_parser_adapter_publishes_viewport_bounded_decorations --lib

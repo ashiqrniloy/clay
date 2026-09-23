@@ -8,7 +8,7 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { providerDone, providerTextDelta, providerToolCall, toolCallContent, type AIProvider } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
@@ -105,6 +105,10 @@ test("resumable list is workspace-scoped, most-recent first, and bounded", async
       model: "demo",
       workspaceRoot: "/ws/beta",
     })) as { sessionId: string };
+    // Prism orders by updated_at (millisecond resolution) with a random
+    // session-id tie-break, so make sure the prompt lands in a later
+    // millisecond than the creations it must outrank.
+    await new Promise((resolve) => setTimeout(resolve, 5));
     // A prompt bumps alpha1's updatedAt: it must sort first.
     await host.handle("session.prompt", { sessionId: alpha1.sessionId, text: "latest" });
 

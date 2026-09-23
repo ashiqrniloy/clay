@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "bun:test";
 import { providerDone, providerTextDelta } from "@arnilo/prism";
 import { ClayAgentHost } from "../host.js";
 

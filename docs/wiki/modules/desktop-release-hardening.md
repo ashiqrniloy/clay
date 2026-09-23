@@ -50,7 +50,7 @@ Not this module: document authority, package trust domains, AG-UI mapping.
    the release/missing-binary tests and the frontend gzip budget when `dist/`
    exists. `CLAY_TAURI_BUNDLE=1` optionally runs `cargo tauri build`.
 5. `scripts/security-audit.sh` runs `cargo audit` plus the capability/CSP
-   suite. Frontend `npm audit` is advisory.
+   suite. Frontend `bun audit` is advisory.
 
 ## Code Examples
 

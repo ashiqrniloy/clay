@@ -13,6 +13,7 @@ cd "$repo"
 # you then see (and a live server still owns the endpoint socket). Stop them
 # first. The pattern is anchored to this checkout's target/ so cargo/rustc
 # (whose argv mentions target/debug/deps) and unrelated processes never match.
+# The daemon pattern is transitional: plan 139 moves clay-agent to Bun.
 clay_procs="^$repo/target/(debug|release)/clay(-server|-desktop)?( |$)|node [^ ]*clay-agent/dist/main\.js( |$)"
 if pgrep -f "$clay_procs" >/dev/null 2>&1; then
   echo "== stopping running clay: $(pgrep -f "$clay_procs" | tr '\n' ' ')"
@@ -26,7 +27,7 @@ if pgrep -f "$clay_procs" >/dev/null 2>&1; then
 fi
 
 echo "== frontend"
-(cd frontend && npm run build)
+(cd frontend && bun run build)
 
 if [ "${1:-}" = "run" ]; then
   shift

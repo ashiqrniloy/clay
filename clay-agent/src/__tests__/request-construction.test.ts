@@ -3,7 +3,7 @@
 // and stamps default cache breakpoints for cache-control models (decision
 // 2026-09-07-2149; the host createSessionCachePolicy stopgap from decision
 // 1325 is deleted and denied in tests/agent_protocol.rs).
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

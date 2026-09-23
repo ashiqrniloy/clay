@@ -7,7 +7,7 @@
 // `[]` = no tools, a list = that subset. Unknown names fail closed inside
 // Prism's `selectRunTools` during run assembly — before any provider turn —
 // so the provider-visible tool schemas are the behavioral evidence used here.
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
