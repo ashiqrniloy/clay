@@ -1,0 +1,31 @@
+
+> clay-frontend@0.1.0 lint
+> eslint .
+
+
+/home/arn/Projects/clay/frontend/src/coding-agent/CodingAgentPanel.test.tsx
+  471:22  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+  487:22  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+  698:34  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+  698:34  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+  716:26  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+
+/home/arn/Projects/clay/frontend/src/coding-agent/CodingAgentPanel.tsx
+  333:5   warning  React Hook useMemo has a missing dependency: 'snapshot.state'. Either include it or remove the dependency array                         react-hooks/exhaustive-deps
+  333:6   warning  React Hook useMemo has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked  react-hooks/exhaustive-deps
+  333:32  warning  React Hook useMemo has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked  react-hooks/exhaustive-deps
+
+/home/arn/Projects/clay/frontend/src/shell/WorkspacePanes.test.tsx
+  20:10  error  '_event' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/arn/Projects/clay/frontend/src/test/components.test.tsx
+  361:22  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+
+/home/arn/Projects/clay/frontend/src/test/core-baseline-hierarchy.test.ts
+  26:10  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+
+/home/arn/Projects/clay/frontend/src/test/settings-panel-choices.test.tsx
+  131:10  error  Forbidden non-null assertion  @typescript-eslint/no-non-null-assertion
+
+✖ 12 problems (9 errors, 3 warnings)
+

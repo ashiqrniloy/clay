@@ -1,0 +1,28 @@
+chars=2799 head='kpub fn helper_000000() -> usi' tail='1() -> usize { 71 } '
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2799 caret=0 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2798 head='pub fn helper_000000() -> usize { 0 } pu' tail='1() -> usize { 71 } '
+chars=2803 head='moji pub fn helper_000000() -> usize { 0' tail='1() -> usize { 71 } '
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2803 caret=5 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2801 head='mojiub fn helper_000000() -> usize { 0 }' tail='1() -> usize { 71 } '
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2801 caret=4 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,696x36108
+chars=2697 head='pub fn helper_001936' tail='6 } pub fn helper_001997() -> usize { 1997 } pub fn helper_001998() -> usize { 1998 } pub fn helper_001999() -> usize { 1999 }  fn indented_sample() {     let x = 1;     // caret-here comment line }  '
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2697 caret=2696 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36108
+chars=2697 head='pub fn helper_001936' tail='01998() -> usize { 1998 }\npub fn helper_001999() -> usize { 1999 }\n\nfn indented_sample() {\n    let x = 1;\n    // caret-here comment line\n}\n\n'
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2697 caret=2663 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36108
+chars=2698 head='pub fn helper_001936' tail='7 }\npub fn helper_001998() -> usize { 1998 }\npub fn helper_001999() -> usize { 1999 }\n\nfn indented_sample() {\n    let x = 1;\n\n    // caret-here comment line\n}\n\n'
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2698 caret=2668 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36126
+chars=2698 tail=999·}⏎⏎fn·indented_sample()·{⏎····let·x·=·1;⏎⏎····//·caret-here·comment·line⏎}⏎⏎
+chars=2702 tail=ze·{·1999·}⏎⏎fn·indented_sample()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎····⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2702 caret=2698 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36126
+chars=2699 tail=usize·{·1999·}⏎⏎fn·indented_sample()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎}⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2699 caret=2694 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36126
+chars=2701 tail=le()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎()}⏎}⏎⏎
+chars=2701 tail=le()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎()}⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2701 caret=2696 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36126
+chars=2705 tail=·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎····()}⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2705 caret=-1 states=editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35188,696x36126
+chars=2740 tail=ndented_sample()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎}⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2740 caret=2735 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35175,696x36126
+chars=2740 tail=ndented_sample()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎}⏎}⏎⏎
+chars=2740 tail=}⏎pub·fn·helper_001997()·->·usize·{·1997·}⏎pub·fn·helper_001998()·->·usize·{·1998·}⏎pub·fn·helper_001999()·->·usize·{·1999·}⏎⏎fn·indented_sample()·{⏎····let·x·=·1;⏎····//·caret-here·comment·line⏎}⏎}⏎⏎
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2740 caret=-1 states=editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,-35175,696x36126

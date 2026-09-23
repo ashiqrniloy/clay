@@ -1,0 +1,32 @@
+Plan 133 task 6 (U5 string-enum macro + U4 match-arm dedup) — 2026-09-21,
+working tree with plan 133 tasks 2-6 applied
+
+  scripts/check.sh full     -> 0   ("full check PASSED"; log: task6-check-full.log)
+  cargo test totals         -> 2000 passed / 0 failed / 1 ignored
+                               (task-1 baseline 1996 + 2 from task 5
+                                + example_round_trips, string_roundtrip_per_enum)
+  cargo test --all-targets  -> 0   (all five suites + lib green)
+  cargo clippy --all-targets -- -D warnings -> 0 (zero warnings)
+  cargo fmt --check         -> 0
+  cargo audit               -> 0 (9 allowed RUSTSEC warnings, unchanged from baseline)
+  cargo test --lib str_enum -> 2 passed (example_round_trips,
+                               string_roundtrip_per_enum = 15 enums, 89 strings)
+
+  cargo clippy --all-targets --message-format=json -- -W clippy::pedantic
+    -> exit 0; clippy::match_same_arms warnings: 38 (baseline, task-1 artifact)
+       -> 0 (final tree); total pedantic warnings 2498 (informational; not gated)
+
+Failed intermediate runs (kept in the record):
+  gate attempt 1: presentation suite red — package_ui_conformance::
+    core_token_catalog_matches_tokens_md (aliased U4 arms) and
+    catalog_is_drift_free_across_doc_enum_and_react_registry (U5 table moved
+    into the macro invocation); both guards updated, then the
+    primitives_docs guards (phase20_1 token catalog, no_rename markers) and
+    four clippy::single_match sites minted by the merges were fixed.
+  U4 first application corrupted 16 files (byte offsets used as string
+    indices); restored from HEAD + re-applied byte-safely, 6 files repaired by
+    hand. See task6-u4-match-arms.md.
+
+Files added: src/str_enum.rs (126), src/str_enum/tests.rs (332).
+U5 converted 15 enums / 89 (variant, string) pairs in 7 files; U4 resolved 38
+match_same_arms sites in 22 files + 3 guard files updated.

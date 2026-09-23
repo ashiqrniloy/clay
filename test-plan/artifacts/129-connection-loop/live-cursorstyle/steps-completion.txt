@@ -1,0 +1,2 @@
+chars=107 head='// Ligature sample: =>  !=  ==' tail='in() {\n    let sample = 0;\n}\n\n'
+no completion surface or status text

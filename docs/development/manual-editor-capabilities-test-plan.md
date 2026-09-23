@@ -5,7 +5,7 @@ movement primitives, caret styling/blink, font ligatures, unified multi-cursor
 selection, tree-sitter text objects + smart select, package prose movement,
 keybinding override, and the `editor-control` execution push channel.
 
-Everything below runs through the real product path: `~/.config/clay/init.js`
+Everything below runs through the real product path: `~/.clay/init.js`
 + bundled `@clay/*` packages + default keybindings. No test-only code paths.
 
 ## 0. Setup
@@ -50,7 +50,7 @@ Second paragraph after a blank line. Word movement should jump between
 these two paragraphs with Ctrl+Up and Ctrl+Down.
 ```
 
-### 0.2 `~/.config/clay/init.js`
+### 0.2 `~/.clay/init.js`
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -244,7 +244,7 @@ with "not a known editor command" diagnostic; nothing is published.
 
 ## I. Cleanup
 
-Remove the scratch workspace and restore your normal `~/.config/clay/init.js`:
+Remove the scratch workspace and restore your normal `~/.clay/init.js`:
 
 ```bash
 rm -rf /tmp/clay-manual

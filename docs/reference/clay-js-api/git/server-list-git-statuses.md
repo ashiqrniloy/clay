@@ -35,7 +35,7 @@ List cached read-only Git status metadata for known workspace roots.
 
 `serverListGitStatuses` is the Phase 18.13 runtime-backed Clay JS API for **List Git Statuses**. It is exposed through the curated `clay:git` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-It returns the current `GitStatusCache` entries for server-authorized workspace roots. It does not spawn Git by default; use `serverRefreshGitStatus` for explicit refresh. This API is background/query work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+It returns the current `GitStatusCache` entries for server-authorized workspace roots. It does not spawn Git by default; use `serverRefreshGitStatus` for explicit refresh. This API is background/query work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 

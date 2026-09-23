@@ -1,0 +1,121 @@
+# Plan 125 launch test — canonical example config, live Linux build
+
+Task: "Launch-test the app with the canonical example config". Driver:
+`launch-drive.sh` (this directory); captures in `screenshots/`; AX evidence in
+`accessibility.txt`; numbers in `geometry-halo.txt`.
+
+## Build / environment
+
+* repo build of the day: `cd frontend && npm run build` then
+  `cargo build --bin clay` (the dist assets are embedded at compile time), so
+  the run exercises the shipped bundle, not a dev server.
+* Linux, GNOME/Wayland session; window 1500x1151 after the harness activated it.
+* canonical config copied unmodified from `examples/config/` (its shipped
+  `setTheme("@clay/theme-gruvbox-material-dark")` is what the run shows — the
+  review script that rewrites the theme was *not* used).
+* isolated root `/tmp/plan125-launchtest` with `HOME`, `XDG_CONFIG_HOME`,
+  `XDG_DATA_HOME`, `TMPDIR`, the socket, and the server's cwd/workspace all
+  inside it; captures are window-cropped (plan 097 privacy rule).
+
+```bash
+mkdir -p "$root"/{home/.clay,config,data,tmp,workspace}
+cp -r examples/config/. "$root/home/.clay/"
+( cd "$root/workspace" && exec env HOME="$root/home" XDG_CONFIG_HOME="$root/config" \
+    XDG_DATA_HOME="$root/data" TMPDIR="$root/tmp" target/debug/clay server "$root/review.sock" ) &
+env HOME="$root/home" XDG_CONFIG_HOME="$root/config" XDG_DATA_HOME="$root/data" \
+    TMPDIR="$root/tmp" target/debug/clay client "$root/review.sock" &
+```
+
+## Startup time
+
+* window visible **267 ms** after the client was spawned (plan 124 baseline
+  312 ms) — no regression beyond noise. Measured by polling the compositor's
+  window list for the `clay-desktop` window, before the harness's own
+  activate/size stabilisation, so the number is comparable with the 124 one.
+
+## Connected + configuration generation
+
+* server log: `clay server listening on <root>/review.sock`, agent profile
+  registration applied (`[daemon] agentProfile.register 'coding' applied`), no
+  `clay server configuration failed` diagnostic and no configuration diagnostic
+  in the shell.
+* the configuration is demonstrably live, not defaulted: the canvas samples the
+  canonical theme's own background (40,40,40 = gruvbox-material-dark; the
+  fallback would be modus-vivendi) and the palette lists the config-loaded
+  package rows (`/branch server-first — @clay/coding-agent@0.1.0`, `@clay/rust`,
+  `@clay/typescript`, `@clay/markdown`, `@clay/settings`…) plus the built-ins the
+  config re-declares (`Ctrl X P` / `Ctrl X O` visible on the shell hints).
+* the shell renders server-owned state (workspace `notes.md` from the sidebar,
+  95 catalogue results), i.e. the session is past `Connecting`.
+* pre-existing environment notes, present in the plan 125 review log too:
+  `clay: package discovery failed (… npm list --json …); store packages stay
+  unloaded` (npm-less review host; bundled first-party packages still load) and
+  the shell status message showing the pre-existing `unknown workspace document
+  1` diagnostic instead of the `Connected` word.
+
+## States
+
+| # | capture | action | observed |
+|---|---------|--------|----------|
+| 01 | `01-rest` | launch | lane visible: composer box (`entry "Message"`, agent-type combo, model combo), hint row, `Session environment` foot; sidebar lists `notes.md`; hints `hide lane Ctrl X P`, `palette Ctrl X O`, `files Ctrl B`, `hide outline Ctrl I`, `filter /` |
+| 02 | `02-palette-titlebar` | click titlebar `Control Center` (the `controlCenter.open` command) | draft becomes `/`; one bottom-anchored sheet `dialog "Commands" 44,531 1124x420` = the composer box width, 6px above the field shell, `95 results`, scope chips `All/Session/Shell/Files`, selected first row, mode-aware foot (`navigate / run / Esc close`) |
+| 03 | `03-palette-via-hint` | click the status-bar `palette` hint (same command as `Ctrl+X Ctrl+O`) | identical state: same sheet rect, same draft, `95 results` — the fallback path and the chord path share the client command |
+| 04 | `04-lane-hidden-palette-gone` | click `hide lane` (`Ctrl+X Ctrl+P`, `shell.toggleAgentLane`) with the palette open | lane **and** sheet gone (0 `Agent lane`/`Commands` nodes), veil gone (sidebar/pane/rail back to 40,40,40), hint flips to `lane Ctrl X P` — plan 125 defect D6 holds live |
+| 05 | `05-lane-restored-palette` | click `lane` | lane, sheet (same rect), and retained draft `/` return with the same `95 results` |
+
+Probe (not a state): clicking the no-provider model combo box does nothing (it
+is the disabled-dropdown state), while the agent-type combo box opens the
+lane's own client popover — see `accessibility.txt` ceilings.
+
+## Geometry, veil, halo, theme
+
+`python3 launch-check.py screenshots/01-rest.png
+screenshots/02-palette-titlebar.png 8,23` (full output in `geometry-halo.txt`):
+
+* sheet `44,531 1124x420`: height cap 420 px holds; width equals the lane's
+  inner width (1160 − 2×18 px form padding = 1124) and the composer field shell;
+  the sheet's bottom border row (950) and the field shell's top border row (957)
+  leave exactly **6 px** of lane background, as approved.
+* veil: sidebar −1.7, pane −4.7, rail −5.0 luminance (working area dimmed over
+  the rail's full height); lane foot strip, composer box and status bar **0.0**
+  (the lane stays above the veil and interactive — D8's fix holds live).
+* halo: across the sheet's top border the pixels rise `39 → 42 → 46 → 48 → 51`
+  over rows 525–530 against a *veiled* background of 38–39 and a rest canvas of
+  40, i.e. the glow is brighter than the un-veiled canvas at the edge; below the
+  bottom border rows 951–953 are 53/50/47 over a 40 lane background, so the
+  falloff is symmetric with **no offset** (a drop shadow would darken one side
+  and carry a y offset); the sheet interior (29,32,33) is darker than the veiled
+  canvas, so border+halo is what defines the edge. Recipe values
+  (`commandCentre.default.root.rest` halo, `packages/design-instrument`) are what
+  `tests/package_ui_conformance.rs` pins; this run shows they reach the pixels.
+* theme: rest canvas (40,40,40) equals the canonical theme's `shellBg`.
+
+## Ceilings of this host (recorded, not hidden)
+
+Keyboard and pointer synthesis are unavailable (`can_send_development_input:
+false`; no portal/wtype/xdotool/ydotoold), the composer exposes no
+`EditableText` over AT-SPI, and palette rows report no usable action, so the
+following were **not** driven live and are covered elsewhere:
+
+* the literal chords: pinned by `cargo test --test protocol
+  example_config_control_center_chord` (Global `Ctrl+X Ctrl+O` /
+  `Ctrl+X Ctrl+P` in the manifest the canonical config re-declares) and reached
+  live through the equivalent shell hints (states 03/04/05).
+* typing a query and opening a picker row: the fixture layer
+  (`design-artifacts/tools/capture-lane-palette.mjs`, 291 checks — catalogue,
+  path, providers, auth, secret, URL, OAuth, models, sessions) plus
+  `src/server/agent_picker.rs` and `src/server/command_execution.rs` tests; the
+  live run does show the picker rows themselves (`Configure Provider`, `Choose
+  Agent/Model/Provider`, `Resume Session`) inside the same sheet.
+* the `@` mentions menu and the shielded secret field in the live app: fixture
+  layer + component tests (same ceiling as plans 124/125).
+
+Evidence retained here: `launch-drive.sh` (the drive sequence),
+`launch-check.py` (the numeric checks), `screenshots/{01..05}*.png` with
+`screenshots/{01..05}*.ax.txt`, `geometry-halo.txt`, `accessibility.txt`.
+The hand-rolled AT-SPI/capture helpers the drive script calls
+(`/tmp/atspi_action.py`, `/tmp/atspi_dump.py`, `/tmp/capture-state.sh`,
+`/tmp/prepare-window.sh`, `/tmp/portal_capture.py`, `/tmp/crop_exact.py`,
+`/tmp/clay-window-check.py`) are host-side tools that were not kept in the
+repo and were removed by this host's `/tmp` cleanup; the dumps they produced
+are the raw evidence above.

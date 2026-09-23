@@ -1,0 +1,31 @@
+AT-SPI tree dump of the running clay-desktop (fresh relaunch, 2026-09-10)
+
+Captured with computer-use-linux get_app_state (max_depth 64, max_nodes 2000).
+Raw node count: 14 — the frame exposes ONLY native window chrome:
+
+  application "clay-desktop"
+  └─ frame "Clay" (active, enabled, resizable, sensitive, showing, visible)
+     ├─ button "Minimise"  (action: Click)
+     ├─ button "Maximise"  (action: Click)
+     ├─ button "Close"     (action: Click)
+     └─ label "Clay"  (text "Clay", 4 chars)
+
+FINDING (defect candidate, a11y): the WebKitGTK web content subtree is NOT
+bridged to AT-SPI in this build/session — the React tree (tab bar CLAY/
+Workspace, editor, status bar "Workspace · Connected", dialogs) is absent
+from the dump. Plan 109 (2026-09-06) recorded a full webview subtree with
+page-tab list, panes, and named actions on this same app — so this is a
+regression candidate, likely environmental (WebKitGTK a11y enablement for
+this launch context) rather than removed markup; the frontend suite still
+pins roles/labels at the jsdom level (294 tests).
+
+Impact on this review: AT-SPI do_action activation (the plan 109 attempt-3
+fallback for synthetic-input blockage) is unavailable — no node exposes
+actions to drive. Keyboard-only flow, focus order, and announcements could
+not be exercised live. Follow-up: restore the webview a11y bridge (verify
+GTK_ACCESSIBILITY / WebKitGTK settings on this host), then re-run the
+surface walk with AT-SPI activation + a human click-through.
+
+Reproduction: relaunch target/debug/clay-desktop against the scratch
+endpoint and dump get_app_state — the 14-node tree above is deterministic
+across two launches (different PIDs, same shape).

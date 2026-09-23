@@ -1,11 +1,14 @@
 use std::collections::HashSet;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::packages::permissions::{
     PackagePermission, PermissionValidationError, is_prohibited_authority, parse_permission,
 };
-use crate::perf::budgets::BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES;
+use crate::perf::budgets::{
+    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, ICON_PACK_PAYLOAD_BUDGET_BYTES,
+    UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClayPackageManifest {
@@ -17,6 +20,9 @@ pub struct ClayPackageManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClayPackageMetadata {
     pub api_prefix: String,
+    /// Declared `clay.preset`, if any. Permissions on this struct are the
+    /// expanded set after preset fill-in.
+    pub preset: Option<String>,
     pub permissions: Vec<PackagePermission>,
     pub modes: Vec<String>,
     /// Mode IDs declared under `clay.editorControl.modes`: the exact major
@@ -24,7 +30,7 @@ pub struct ClayPackageMetadata {
     /// (movement/selection/caret ops and the programmatic execution channel).
     /// May reference foreign modes (e.g. `core.code`); enforced per call.
     pub editor_control_modes: Vec<String>,
-    pub entry: String,
+    pub entry: Option<String>,
     pub load_entry: Option<String>,
     pub graph: PackageGraphRelations,
     /// Owner-declared versioned extension points (`clay-extension-point-v1`).
@@ -59,6 +65,253 @@ impl PackageGraphRelations {
     }
 }
 
+/// Known `clay.preset` names. Shorthand only — validation runs on the expanded set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackagePreset {
+    CodeMode,
+    ProseMode,
+    LspBridge,
+}
+
+impl PackagePreset {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "code-mode" => Some(Self::CodeMode),
+            "prose-mode" => Some(Self::ProseMode),
+            "lsp-bridge" => Some(Self::LspBridge),
+            _ => None,
+        }
+    }
+
+    fn permissions(self) -> &'static [&'static str] {
+        match self {
+            Self::CodeMode | Self::ProseMode => &[
+                "mode-registration",
+                "mode-activation",
+                "command-registration",
+                "completion-provider",
+                "parse-document",
+                "render-decorations",
+            ],
+            // `language-server` is never implied. Packages still declare it in
+            // `clay.capabilities` and it stays deny-by-default at grant time.
+            Self::LspBridge => &[
+                "parse-document",
+                "completion-provider",
+                "render-decorations",
+            ],
+        }
+    }
+
+    fn api_dependencies(self) -> &'static [&'static str] {
+        match self {
+            Self::CodeMode => &[
+                "syntax.serverRegisterSyntaxGrammar",
+                "modes.serverRegisterModePattern",
+                "behavior.buildCodeEditingManifest",
+                "commands.serverRegisterCommand",
+                "completion.serverRegisterCompletionProvider",
+                "completion.completionTriggerCharactersFromEditorRules",
+                "ui.serverRegisterComponentContribution",
+            ],
+            Self::ProseMode => &[
+                "syntax.serverRegisterSyntaxGrammar",
+                "modes.serverRegisterModePattern",
+                "modes.serverActivateMajorMode",
+                "behavior.buildCodeEditingManifest",
+                "commands.serverRegisterCommand",
+                "completion.serverRegisterCompletionProvider",
+                "completion.completionTriggerCharactersFromEditorRules",
+                "parse.serverRegisterParseHandler",
+                "decorations.serverPublishDecorations",
+                "ui.serverRegisterComponentContribution",
+            ],
+            Self::LspBridge => &[
+                "language.serverRegisterDocumentAnalyzer",
+                "decorations.serverPublishDecorations",
+                "diagnostics.serverPublishDiagnostics",
+            ],
+        }
+    }
+
+    fn extension_points(self, api_prefix: &str) -> Value {
+        match self {
+            Self::CodeMode => json!([
+                {
+                    "id": format!("{api_prefix}.completionProviders"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["completionProvider"],
+                    "summary": "Add or replace completion providers."
+                },
+                {
+                    "id": format!("{api_prefix}.languageLayers"),
+                    "version": 1,
+                    "operations": ["append"],
+                    "contributionKinds": ["analyzer", "diagnosticSource", "intelligenceProvider", "decorationLayer"],
+                    "summary": "Append package-owned language layers."
+                },
+                {
+                    "id": format!("{api_prefix}.commands"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["command"],
+                    "summary": "Add or replace commands."
+                },
+                {
+                    "id": format!("{api_prefix}.ui"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["componentContribution", "statusItem", "panelContribution"],
+                    "summary": "Add or replace status and panel contributions."
+                },
+                {
+                    "id": format!("{api_prefix}.grammar"),
+                    "version": 1,
+                    "operations": ["replace"],
+                    "contributionKinds": ["grammar"],
+                    "summary": "Replace the grammar, highlights query, and style map."
+                },
+                {
+                    "id": format!("{api_prefix}.modePattern"),
+                    "version": 1,
+                    "operations": ["append"],
+                    "contributionKinds": ["modePattern"],
+                    "summary": "Extend file and mode patterns."
+                }
+            ]),
+            Self::ProseMode => json!([
+                {
+                    "id": format!("{api_prefix}.completionProviders"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["completionProvider"],
+                    "summary": "Add or replace completion providers."
+                },
+                {
+                    "id": format!("{api_prefix}.languageLayers"),
+                    "version": 1,
+                    "operations": ["append"],
+                    "contributionKinds": ["decorationLayer", "diagnosticSource", "analyzer", "intelligenceProvider"],
+                    "summary": "Append package-owned parse and language layers."
+                },
+                {
+                    "id": format!("{api_prefix}.commands"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["command", "keyRoute", "textTransform"],
+                    "summary": "Add or replace commands, key routes, and text transforms."
+                },
+                {
+                    "id": format!("{api_prefix}.ui"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["panelContribution", "componentContribution", "sduiRegion", "statusItem"],
+                    "summary": "Add or replace preview and status UI contributions."
+                },
+                {
+                    "id": format!("{api_prefix}.grammar"),
+                    "version": 1,
+                    "operations": ["replace"],
+                    "contributionKinds": ["grammar"],
+                    "summary": "Replace the grammar, highlights query, and style map."
+                },
+                {
+                    "id": format!("{api_prefix}.modePattern"),
+                    "version": 1,
+                    "operations": ["append"],
+                    "contributionKinds": ["modePattern"],
+                    "summary": "Extend file and mode patterns."
+                }
+            ]),
+            Self::LspBridge => json!([
+                {
+                    "id": format!("{api_prefix}.providers"),
+                    "version": 1,
+                    "operations": ["append", "replace"],
+                    "contributionKinds": ["completionProvider", "intelligenceProvider", "analyzer"],
+                    "summary": "Add or replace language-server providers. The language-server descriptor and grant are not mutable."
+                }
+            ]),
+        }
+    }
+}
+
+fn union_string_array(clay: &mut serde_json::Map<String, Value>, key: &str, extras: &[&str]) {
+    match clay.get_mut(key) {
+        None => {
+            clay.insert(
+                key.to_string(),
+                Value::Array(
+                    extras
+                        .iter()
+                        .map(|value| Value::String((*value).to_string()))
+                        .collect(),
+                ),
+            );
+        }
+        Some(Value::Array(values)) => {
+            for extra in extras {
+                if !values.iter().any(|value| value.as_str() == Some(extra)) {
+                    values.push(Value::String((*extra).to_string()));
+                }
+            }
+        }
+        Some(_) => {}
+    }
+}
+
+/// Expand `clay.preset` into missing permission / apiDependency / extension-point
+/// keys. Explicit `permissions` replace the preset list. `apiDependencies` union
+/// with the preset. Explicit `extensionPoints` replace the generated set.
+/// `language-server` is never injected.
+pub(crate) fn expand_capability_preset(
+    value: &Value,
+    context: &DiagnosticContext,
+) -> Result<Value, PackageDiagnostic> {
+    let mut expanded = value.clone();
+    let Some(clay) = expanded.get_mut("clay").and_then(Value::as_object_mut) else {
+        return Ok(expanded);
+    };
+    let Some(preset_value) = clay.get("preset") else {
+        return Ok(expanded);
+    };
+    let Some(preset_name) = preset_value.as_str() else {
+        return Err(context.diagnostic(
+            PackageValidationRule::UnknownPreset,
+            "clay.preset must be a string",
+        ));
+    };
+    let Some(preset) = PackagePreset::parse(preset_name) else {
+        return Err(context.diagnostic(
+            PackageValidationRule::UnknownPreset,
+            format!("unknown clay.preset `{preset_name}`"),
+        ));
+    };
+    if !clay.contains_key("permissions") {
+        clay.insert(
+            "permissions".to_string(),
+            Value::Array(
+                preset
+                    .permissions()
+                    .iter()
+                    .map(|permission| Value::String((*permission).to_string()))
+                    .collect(),
+            ),
+        );
+    }
+    union_string_array(clay, "apiDependencies", preset.api_dependencies());
+    if !clay.contains_key("extensionPoints")
+        && let Some(api_prefix) = clay.get("apiPrefix").and_then(Value::as_str)
+    {
+        clay.insert(
+            "extensionPoints".to_string(),
+            preset.extension_points(api_prefix),
+        );
+    }
+    Ok(expanded)
+}
+
 pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, PackageDiagnostic> {
     let package_name = read_string(value, "name").unwrap_or_default();
     let package_version = read_string(value, "version").unwrap_or_default();
@@ -71,7 +324,27 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         api_prefix.clone(),
     );
 
-    if payload_size(value) > BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES {
+    let value = expand_capability_preset(value, &context)?;
+    let max_budget = if value
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("uiDesignSystem"))
+        .is_some()
+    {
+        UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES
+    } else if value
+        .get("clay")
+        .and_then(|c| c.get("contributions"))
+        .and_then(|c| c.get("iconPack"))
+        .is_some()
+    {
+        // Icon packs normalize well under this bound even at the full 21-key
+        // duotone set (Plan 112 task 3).
+        ICON_PACK_PAYLOAD_BUDGET_BYTES
+    } else {
+        BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES
+    };
+    if payload_size(&value) > max_budget {
         return Err(context.diagnostic(
             PackageValidationRule::PayloadTooLarge,
             "package metadata exceeds the primitive load-time payload budget",
@@ -107,7 +380,7 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
             )
         })?;
 
-    reject_forbidden_runtime_metadata(value, &context)?;
+    reject_forbidden_runtime_metadata(&value, &context)?;
 
     let api_prefix = api_prefix.ok_or_else(|| {
         context.diagnostic(
@@ -138,8 +411,19 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         ));
     }
 
-    let entry = required_string_field(clay.get("entry"), "clay.entry", &context)?;
-    validate_entry_path(&entry, "clay.entry", &context)?;
+    let entry = match clay.get("entry") {
+        Some(Value::String(entry)) => {
+            validate_entry_path(entry, "clay.entry", &context)?;
+            Some(entry.clone())
+        }
+        Some(_) => {
+            return Err(context.diagnostic(
+                PackageValidationRule::InvalidEntry,
+                "clay.entry must be a string when present",
+            ));
+        }
+        None => None,
+    };
     let load_entry = match clay.get("loadEntry") {
         Some(Value::String(load_entry)) => {
             validate_entry_path(load_entry, "clay.loadEntry", &context)?;
@@ -155,6 +439,12 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
     };
 
     let permissions = parse_requested_capabilities(clay, &context)?;
+    if entry.is_none() && !permissions.is_empty() {
+        return Err(context.diagnostic(
+            PackageValidationRule::InvalidEntry,
+            "clay.entry is required when permissions are requested",
+        ));
+    }
     let modes = parse_modes(clay.get("modes"), &api_prefix, &context)?;
     let editor_control_modes =
         parse_editor_control(clay.get("editorControl"), &permissions, &context)?;
@@ -170,6 +460,10 @@ pub fn validate_manifest_value(value: &Value) -> Result<ClayPackageManifest, Pac
         version: package_version,
         clay: ClayPackageMetadata {
             api_prefix,
+            preset: clay
+                .get("preset")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
             permissions,
             modes,
             editor_control_modes,
@@ -226,6 +520,7 @@ pub fn is_valid_api_prefix(value: &str) -> bool {
 /// provenance is pinned (e.g. `@clay/git` owns the `git` domain that the core
 /// git JS APIs also live under).
 pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
+    "agent",
     "application",
     "behavior",
     "clay",
@@ -242,6 +537,7 @@ pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
     "dialog",
     "documents",
     "editor",
+    "folding",
     "git",
     "graph",
     "keybindings",
@@ -251,6 +547,7 @@ pub const RESERVED_CORE_API_DOMAINS: &[&str] = &[
     "packages",
     "parse",
     "runtime",
+    "settings",
     "sdui",
     "shell",
     "syntax",
@@ -689,20 +986,6 @@ fn validate_entry_path(
     Ok(())
 }
 
-fn required_string_field(
-    value: Option<&Value>,
-    field: &str,
-    context: &DiagnosticContext,
-) -> Result<String, PackageDiagnostic> {
-    match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.clone()),
-        _ => Err(context.diagnostic(
-            PackageValidationRule::MissingField,
-            format!("{field} must be a non-empty string"),
-        )),
-    }
-}
-
 fn read_string(value: &Value, key: &str) -> Option<String> {
     value.get(key)?.as_str().map(ToOwned::to_owned)
 }
@@ -757,6 +1040,7 @@ pub enum PackageValidationRule {
     InvalidPackageGraph,
     RawDenoOpsExposure,
     ClientJavaScriptHook,
+    UnknownPreset,
 }
 
 pub(crate) struct DiagnosticContext {
@@ -790,5 +1074,143 @@ impl DiagnosticContext {
             rule,
             message: message.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx() -> DiagnosticContext {
+        DiagnosticContext::new(
+            Some("@clay/demo".to_string()),
+            Some("0.1.0".to_string()),
+            Some("demo".to_string()),
+        )
+    }
+
+    fn code_mode_package() -> Value {
+        json!({
+            "name": "@clay/demo",
+            "version": "0.1.0",
+            "clay": {
+                "apiPrefix": "demo",
+                "preset": "code-mode",
+                "entry": "./dist/index.js",
+                "modes": ["demo"]
+            }
+        })
+    }
+
+    #[test]
+    fn code_mode_preset_expands_permissions_and_extension_points() {
+        let manifest = validate_manifest_value(&code_mode_package()).unwrap();
+        assert_eq!(manifest.clay.preset.as_deref(), Some("code-mode"));
+        assert_eq!(
+            manifest
+                .clay
+                .permissions
+                .iter()
+                .map(|permission| permission.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "mode-registration",
+                "mode-activation",
+                "command-registration",
+                "completion-provider",
+                "parse-document",
+                "render-decorations",
+            ]
+        );
+        assert!(
+            manifest
+                .clay
+                .permissions
+                .iter()
+                .all(|permission| { *permission != PackagePermission::LanguageServer })
+        );
+        assert!(
+            manifest
+                .clay
+                .extension_points
+                .iter()
+                .any(|point| point.id == "demo.grammar")
+        );
+    }
+
+    #[test]
+    fn explicit_permissions_replace_preset_defaults() {
+        let mut value = code_mode_package();
+        value["clay"]["permissions"] = json!(["mode-registration", "package-configuration"]);
+        let manifest = validate_manifest_value(&value).unwrap();
+        assert_eq!(
+            manifest
+                .clay
+                .permissions
+                .iter()
+                .map(|permission| permission.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mode-registration", "package-configuration"]
+        );
+    }
+
+    #[test]
+    fn unknown_preset_fails_validation() {
+        let mut value = code_mode_package();
+        value["clay"]["preset"] = json!("theme-pack");
+        let err = validate_manifest_value(&value).unwrap_err();
+        assert_eq!(err.rule, PackageValidationRule::UnknownPreset);
+        assert!(err.message.contains("theme-pack"));
+    }
+
+    #[test]
+    fn lsp_bridge_preset_does_not_request_language_server() {
+        let value = json!({
+            "name": "@clay/lsp-demo",
+            "version": "0.1.0",
+            "clay": {
+                "apiPrefix": "lsp-demo",
+                "preset": "lsp-bridge",
+                "entry": "./dist/index.js",
+                "modes": []
+            }
+        });
+        let manifest = validate_manifest_value(&value).unwrap();
+        assert_eq!(manifest.clay.preset.as_deref(), Some("lsp-bridge"));
+        assert!(
+            !manifest
+                .clay
+                .permissions
+                .contains(&PackagePermission::LanguageServer)
+        );
+        assert_eq!(
+            manifest
+                .clay
+                .permissions
+                .iter()
+                .map(|permission| permission.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "parse-document",
+                "completion-provider",
+                "render-decorations"
+            ]
+        );
+    }
+
+    #[test]
+    fn preset_expansion_counts_toward_payload_budget() {
+        let value = code_mode_package();
+        let expanded = expand_capability_preset(&value, &ctx()).unwrap();
+        let unexpanded_len = payload_size(&value);
+        let expanded_len = payload_size(&expanded);
+        assert!(expanded_len > unexpanded_len);
+
+        let pad = BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES - expanded_len + 1;
+        let mut padded = value;
+        padded["padding"] = json!("x".repeat(pad));
+        assert!(payload_size(&padded) <= BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES);
+        let err = validate_manifest_value(&padded).unwrap_err();
+        assert_eq!(err.rule, PackageValidationRule::PayloadTooLarge);
     }
 }

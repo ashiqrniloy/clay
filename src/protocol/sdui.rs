@@ -13,29 +13,93 @@ pub type SduiVersion = u64;
     Eq,
     PartialOrd,
     Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiNodeId(pub u64);
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiTree {
     pub ui_version: SduiVersion,
     pub root_id: SduiNodeId,
     pub nodes: Vec<SduiNode>,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiNode {
     pub id: SduiNodeId,
     pub kind: SduiNodeKind,
+    /// Optional host-owned size token for a region node: the host sizes it from
+    /// the typed dimension token instead of an equal flex share (plan 118 task
+    /// E1 — the workspace sidebar is 244px, 224px at ≤1240px, and the SDUI row
+    /// cannot express that with flex alone). Inert data: the token must resolve
+    /// in the core catalog, so a tree cannot invent geometry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
 }
 
 impl SduiNode {
     pub const fn new(id: SduiNodeId, kind: SduiNodeKind) -> Self {
-        Self { id, kind }
+        Self {
+            id,
+            kind,
+            size: None,
+        }
+    }
+
+    /// A region node sized from a host-owned dimension token (`dimension.*`).
+    pub fn sized(id: SduiNodeId, kind: SduiNodeKind, token: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind,
+            size: Some(token.into()),
+        }
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiNodeKind {
     Panel {
         title: String,
@@ -43,13 +107,24 @@ pub enum SduiNodeKind {
     },
     Label {
         text: String,
+        /// Optional semantic icon reference (Plan 112).
+        icon: Option<String>,
     },
     Button {
         label: String,
+        /// Optional semantic icon reference (Plan 112).
+        icon: Option<String>,
         action: SduiActionIntent,
     },
     List {
         items: Vec<SduiListItem>,
+        /// Optional filter affordance (plan 118 task E1): the host renders the
+        /// approved tools row above the rows, filters the delivered rows
+        /// locally (keystroke-local over a bounded listing — never a server
+        /// round-trip per keystroke) and shows the live match count. Absent
+        /// means a plain list, which is what every other tree delivers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<SduiListFilter>,
     },
     EditorView {
         binding: SduiEditorBinding,
@@ -63,27 +138,106 @@ pub enum SduiNodeKind {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub struct SduiListFilter {
+    pub placeholder: String,
+    /// Single-key shortcut hint (`/`) that focuses the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+}
+
+/// One row of a list: what it says and what activating it means. Rows carry no
+/// authority — the action is the same inert intent a button carries.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiListItem {
     pub id: String,
     pub label: String,
     pub detail: Option<String>,
+    /// Optional semantic icon reference (core key or package-prefixed key).
+    /// Hosts resolve it against the active icon pack; absence renders text only.
+    #[serde(default)]
+    pub icon: Option<String>,
     pub action: Option<SduiActionIntent>,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiEditorBinding {
     pub document_id: DocumentId,
     pub expected_version: Option<DocumentVersion>,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiFlexDirection {
     Row,
     Column,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiActionIntent {
     pub command_id: String,
     pub source: SduiActionSource,
@@ -100,7 +254,20 @@ impl SduiActionIntent {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiActionSource {
     Button {
         node_id: SduiNodeId,
@@ -111,13 +278,39 @@ pub enum SduiActionSource {
     },
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct SduiActionArgument {
     pub name: String,
     pub value: SduiActionValue,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub enum SduiActionValue {
     String(String),
     Bool(bool),
@@ -125,14 +318,36 @@ pub enum SduiActionValue {
     U64(u64),
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SduiTreeUpdate {
     pub base_ui_version: SduiVersion,
     pub new_ui_version: SduiVersion,
     pub operations: Vec<SduiTreeOperation>,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SduiTreeOperation {
     ReplaceRoot { root_id: SduiNodeId },
     ReplaceNode { node: SduiNode },
@@ -177,12 +392,14 @@ pub(crate) fn representative_sdui_tree() -> SduiTree {
                 label_id,
                 SduiNodeKind::Label {
                     text: "Document 7 · version 3".to_string(),
+                    icon: None,
                 },
             ),
             SduiNode::new(
                 button_id,
                 SduiNodeKind::Button {
                     label: "Refresh".to_string(),
+                    icon: None,
                     action: SduiActionIntent::command(
                         "workspace.refresh",
                         SduiActionSource::Button { node_id: button_id },
@@ -192,10 +409,12 @@ pub(crate) fn representative_sdui_tree() -> SduiTree {
             SduiNode::new(
                 list_id,
                 SduiNodeKind::List {
+                    filter: None,
                     items: vec![SduiListItem {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),
                         detail: Some("Server-generated editor view".to_string()),
+                        icon: None,
                         action: Some(SduiActionIntent::command(
                             "document.open_recent",
                             SduiActionSource::ListItem {
@@ -229,6 +448,7 @@ pub(crate) fn representative_panel_update() -> SduiTreeUpdate {
                 SduiNodeId(4),
                 SduiNodeKind::Label {
                     text: "Document 7 · version 4".to_string(),
+                    icon: None,
                 },
             ),
         }],
@@ -238,6 +458,48 @@ pub(crate) fn representative_panel_update() -> SduiTreeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan 118 task E1: a node may be sized from a host dimension token and a
+    /// list may carry a filter affordance; both are optional, so a tree written
+    /// before them still parses (the fields are absent on the wire).
+    #[test]
+    fn list_filter_and_node_size_are_optional_and_round_trip() {
+        let legacy = serde_json::json!({
+            "uiVersion": 1,
+            "rootId": 1,
+            "nodes": [{ "id": 1, "kind": { "list": { "items": [] } } }],
+        });
+        let tree: SduiTree = serde_json::from_value(legacy).expect("legacy tree parses");
+        assert!(tree.nodes[0].size.is_none());
+        assert!(matches!(
+            &tree.nodes[0].kind,
+            SduiNodeKind::List { filter: None, .. }
+        ));
+
+        let sized = SduiNode::sized(
+            SduiNodeId(2),
+            SduiNodeKind::List {
+                items: Vec::new(),
+                filter: Some(SduiListFilter {
+                    placeholder: "Filter files".to_string(),
+                    shortcut: Some("/".to_string()),
+                }),
+            },
+            "dimension.sidebar.default",
+        );
+        let value = serde_json::to_value(&sized).expect("serialize");
+        assert_eq!(
+            value["size"],
+            serde_json::json!("dimension.sidebar.default")
+        );
+        assert_eq!(
+            value["kind"]["list"]["filter"]["placeholder"],
+            "Filter files"
+        );
+        assert_eq!(value["kind"]["list"]["filter"]["shortcut"], "/");
+        let back: SduiNode = serde_json::from_value(value).expect("round trip");
+        assert_eq!(back, sized);
+    }
 
     #[test]
     fn sdui_schema_represents_initial_widget_kinds() {
@@ -289,22 +551,26 @@ mod tests {
                     label_id,
                     SduiNodeKind::Label {
                         text: "Open files".to_string(),
+                        icon: None,
                     },
                 ),
                 SduiNode::new(
                     button_id,
                     SduiNodeKind::Button {
                         label: "Refresh".to_string(),
+                        icon: None,
                         action: button_action,
                     },
                 ),
                 SduiNode::new(
                     list_id,
                     SduiNodeKind::List {
+                        filter: None,
                         items: vec![SduiListItem {
                             id: "recent-main".to_string(),
                             label: "main.rs".to_string(),
                             detail: Some("src/main.rs".to_string()),
+                            icon: None,
                             action: Some(list_action),
                         }],
                     },
@@ -357,6 +623,7 @@ mod tests {
                         expected_version: None,
                     },
                 },
+                size: None,
             }
         );
     }
@@ -377,6 +644,7 @@ mod tests {
             node_id,
             SduiNodeKind::Button {
                 label: "Refresh".to_string(),
+                icon: None,
                 action: intent.clone(),
             },
         );
@@ -393,6 +661,7 @@ mod tests {
             SduiNodeId(3),
             SduiNodeKind::Label {
                 text: "Updated".to_string(),
+                icon: None,
             },
         );
 

@@ -6,12 +6,11 @@
 # upstream remediation reference, owner, expiry). `tests/primitives_docs.rs`
 # fails once any documented expiry passes, forcing renewal with fresh evidence
 # or removal. Never add a blanket ignore.
+#
+# Current state: zero ignored advisories — the lockfile has no known
+# vulnerabilities after the Plan 097 Phase 12 native-client dependency
+# removal (see docs/development/security.md for the classified warnings that
+# do not fail the gate).
 
 [advisories]
-ignore = [
-    # quick-xml 0.39.4 via wayland-scanner (build-time proc-macro) and
-    # zbus_xml 5.1.1 (runtime, D-Bus/AT-SPI accessibility chain). Both fixes
-    # are merged upstream but unreleased; see docs/development/security.md.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-]
+ignore = []

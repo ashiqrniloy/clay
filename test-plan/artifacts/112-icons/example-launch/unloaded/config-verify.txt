@@ -1,0 +1,7 @@
+73:import { setTheme, setTypography, setAppearance, setDesignSystem, setIconPack } from "clay:theme";
+73:import { setTheme, setTypography, setAppearance, setDesignSystem, setIconPack } from "clay:theme";
+108:// setIconPack selects the UI icon style — bounded, host-validated vector
+132://   setIconPack("@vendor/outline-icons");
+136:setIconPack("@vendor/unloaded-icons"); // recommended; same as zero-config default
+137:// setIconPack("@clay/icons-phosphor-duotone"); // bundled alternative style
+138:// setIconPack({ specifier: "@clay/icons-phosphor-duotone" }); // object form

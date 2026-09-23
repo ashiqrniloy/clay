@@ -1,0 +1,202 @@
+/* Catalog `tab` (item) + `tabBar` (root) — one strip for the shell's window
+ * tabs, the SDUI tab list, and the agent inspector's sections.
+ *
+ * The selection signal is the fill alone: the retired tab underline
+ * (DESIGN.md §14.13) is gone, and every visual property is a `--clay-ds-*`
+ * recipe value or a `--clay-*` theme role. Layout stays host-owned. */
+
+.container {
+  min-height: 0;
+}
+
+.withPanels {
+  display: grid;
+  /* The tab row scrolls and the actions stay put: five inspector sections in a
+   * 340px column would otherwise push the hide toggle out of the window. */
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border-width: var(--clay-ds-tab-bar-default-root-rest-border-width);
+  border-style: var(--clay-ds-tab-bar-default-root-rest-border-style);
+  border-color: var(--clay-ds-tab-bar-default-root-rest-border-color);
+  border-radius: var(--clay-ds-tab-bar-default-root-rest-border-radius);
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
+}
+
+.stripOnly,
+.stripWrapper,
+.emptyContainer {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
+}
+
+.stripWrapper {
+  border-bottom-width: var(--clay-ds-tab-bar-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-tab-bar-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-tab-bar-default-root-rest-border-color);
+}
+
+/* Panel actions stay fixed while only tab labels scroll. */
+.withPanels .stripWrapper {
+  overflow: hidden;
+}
+
+.actions {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-bottom-width: var(--clay-ds-tab-bar-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-tab-bar-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-tab-bar-default-root-rest-border-color);
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
+}
+
+/* Inside the titlebar the chrome owns the hairline and the strip centers its
+ * pills instead of stretching them to the row height. */
+.inline {
+  align-items: center;
+  border-bottom-width: 0;
+}
+
+.stripOnly::-webkit-scrollbar,
+.stripWrapper::-webkit-scrollbar,
+.emptyContainer::-webkit-scrollbar {
+  display: none;
+}
+
+.tabStrip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabStrip::-webkit-scrollbar {
+  display: none;
+}
+
+.overflowBack svg {
+  transform: rotate(180deg);
+}
+
+.tabPanel {
+  grid-column: 1 / -1;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-ds-tab-default-item-rest-gap);
+  padding: var(--clay-ds-tab-default-item-rest-padding);
+  min-width: fit-content;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--clay-text-detail-size);
+
+  border: 0;
+  border-radius: var(--clay-ds-tab-default-item-rest-border-radius);
+  --fill: var(--clay-ds-tab-default-item-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-tab-default-item-rest-text-color);
+  transition:
+    background-color var(--clay-ds-tab-default-item-rest-transition-duration)
+      var(--clay-ds-tab-default-item-rest-transition-timing),
+    color var(--clay-ds-tab-default-item-rest-transition-duration)
+      var(--clay-ds-tab-default-item-rest-transition-timing);
+}
+
+.tab[data-hovered]:not([data-selected]) {
+  --fill: var(--clay-ds-tab-default-item-hover-background-color);
+  color: var(--clay-ds-tab-default-item-hover-text-color);
+}
+
+.tab[data-selected] {
+  --fill: var(--clay-ds-tab-default-item-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-tab-default-item-selected-background-opacity,
+    1
+  );
+  color: var(--clay-ds-tab-default-item-selected-text-color);
+}
+
+.tab[data-focused],
+.tab:focus-visible {
+  outline: var(--clay-ds-tab-default-item-focus-outline-width)
+    var(--clay-ds-tab-default-item-focus-outline-style)
+    var(--clay-ds-tab-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-tab-default-item-focus-outline-offset);
+}
+
+.tab[data-disabled] {
+  --fill: var(--clay-ds-tab-default-item-disabled-background-color);
+  color: var(--clay-ds-tab-default-item-disabled-text-color);
+  opacity: var(--clay-ds-tab-default-item-disabled-opacity);
+  transform: var(--clay-ds-tab-default-item-disabled-transform-preset);
+  cursor: default;
+}
+
+.tabPanel {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--clay-spacing-md, 16px);
+  background: var(--clay-ds-tab-bar-default-root-rest-background-color);
+}
+
+.close {
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 0 var(--clay-spacing-xxs, 4px);
+  cursor: pointer;
+  font-size: var(--clay-text-caption-size);
+}
+
+.empty {
+  padding: 0 var(--clay-spacing-sm, 12px);
+  display: flex;
+  align-items: center;
+}
+
+.dirty {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: var(--clay-ds-tab-default-item-rest-border-radius);
+  background: var(--clay-accent-primary);
+}
+
+/* Agent marker (plan 118 task 33): the approved mono word inside the tab, not
+ * a second badge — the tab stays one signal (DESIGN.md §14.4). While the agent
+ * works the word pulses; reduced-motion hosts drop the animation via the
+ * design system's 0.01ms fallback. */
+.agent {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.02em;
+  color: var(--clay-ds-tab-default-item-rest-text-color);
+  opacity: 0.75;
+}
+
+/* Plan 124: the tab's marker carries its state in the accent colour only. The
+ * window shows exactly one looping pulse — the mark's dot while the tab in view
+ * works (DESIGN.md §7/§9/§14.15), because a second blinking dot makes the tab
+ * strip read as two independent runs. */
+.agent[data-busy="true"] {
+  color: var(--clay-accent-primary);
+}

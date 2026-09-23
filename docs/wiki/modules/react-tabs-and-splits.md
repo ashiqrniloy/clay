@@ -1,0 +1,118 @@
+# React Tabs, Splits, and Layout Persistence
+
+## Source
+
+- `frontend/src/shell/{split-tree,tab-store,persist,workspace-controller,layout-state}.ts`
+- `frontend/src/shell/{PaneTree,WorkspacePanes,AgentLane}.tsx`
+- `frontend/src/app/layout/{tab-bar,app-shell}.tsx`
+- `frontend/src/components/tab-strip.tsx` (unified strip primitive)
+- `src-tauri/src/bridge/{session,layout}.rs`
+- `src/shell/layout_persist.rs`
+- `frontend/src/shell/{tab-store,workspace-controller,WorkspacePanes}.test.ts*`
+- `src/shell/layout_persist.rs` tests
+
+## Overview
+
+Plan 097 Phase 6 ports the native window layout: each tab is an independent
+Clay client connection; each tab owns a bounded pane split tree; persistence
+reuses `layout.json` v2 through the existing Rust parser.
+
+## Responsibilities
+
+- Project the server `TabRegistry` into the shell tab strip.
+- Keep split/focus/resize/move/close client-local (`MAX_PANES_PER_TAB = 4`).
+- Host one CodeMirror view per visible pane of the active tab.
+- Persist/restore validated v2 window state. Hostile files degrade.
+
+Non-responsibility: decorations, completion, language intelligence (Phase 7),
+package SDUI slots (Phase 7), native Masonry chrome (delete after parity).
+
+## How It Works
+
+1. `session_bootstrap` still opens the first connection. Extra tabs call
+   `tab_open` → `connect_with_workspace_root` and live in `BridgeState`'s
+   session map. `session_request` stamps the target tab's `client_id`.
+2. Events leave the bridge as `Routed { clientId, tabId, event }` so a
+   document open in tab A cannot land on tab B's pane sessions.
+3. `split-tree.ts` mirrors `src/shell/layout/mod.rs`: equal split, close-merges
+   sibling, equal-area comb, reading-order move, 0.05–0.95 clamp.
+4. `react-resizable-panels` draws nested groups; keyboard chords in
+   `use-shell-chords.ts` call the same tree ops.
+5. Dirty tab close is a Clay modal (Save all / Discard / Cancel). Last tab
+   cannot close.
+6. `layout_save` / `layout_load` run `parse_window_state` on the Rust side.
+
+### Unified tab-strip primitive (Plan 108 G2 / Plan 110 task 5)
+
+`ClayTabStrip` (`frontend/src/components/tab-strip.tsx`) is the one React Aria
+`Tabs` implementation shared by three hosts: this shell window tab bar
+(`frontend/src/app/layout/tab-bar.tsx`), the SDUI `PackageTabList` registry
+entry (packages render tab UI through the `tabList` kind — never custom tab
+strips), and the agent view's inspector (`frontend/src/coding-agent/InspectorTabs.tsx`). It exposes closed recipe attributes
+(`tabList.root`/`strip`/`tab`/`panel`); visual styling flows through the
+`tab.default.item.*` and `tabBar.default.root.rest` design-system recipes, so
+all three hosts restyle together under a design-system switch with no remount.
+
+```ts
+workspace.split("horizontal"); // Ctrl+\
+workspace.openPath("notes.md"); // focuses the owner pane if already open
+```
+
+## Invariants and Constraints
+
+- Tabs are separate clients. Leases, roots, and queues do not cross.
+- Frontend cannot mint `client_id`; the bridge overwrites it.
+- Duplicate path in a tab focuses the existing pane.
+- Inactive tabs keep sessions; only the active tab mounts editor views.
+- Persistence never panics; corrupt input is `None`.
+
+## Tests
+
+```bash
+cd frontend && bun run test src/shell
+cargo test -p clay-desktop --all-targets
+```
+
+## Plan 124/125: tab-owned agent lane state
+
+The agent lane is not window-global. The `agentLane` store in `frontend/src/shell/layout-state.ts` is read by the active tab's `AgentLane`; its toggle is routed
+as `shell.toggleAgentLane` and `workspace-controller.ts` subscribes it to the
+same debounced persistence path as the workspace rail and agent inspector.
+
+`PersistedTab.laneVisible` is optional for compatibility with older `layout.json`
+v2 files and defaults to `true`. Restore collects rail, inspector, and lane
+visibility by client id while rebuilding each tab, then restores all three
+stores after mounts exist. A hidden lane is a visibility state, not a teardown:
+its composer draft and the tab's agent store remain alive. A palette open
+reveals the lane because the lane's composer is the palette's query owner.
+
+`WorkspacePanes` also owns one agent store per `TabRuntime`. It creates the
+store before either view is shown, adopts it into the runtime, and passes it to
+both `AgentLane` and `AgentView`; tab close disposes it. This prevents view
+switches from creating duplicate stores or losing a running transcript, while
+keeping tabs isolated.
+
+Plan 125 added the default-agent behaviour on top of that ownership: a tab with
+no agent adopts the server's default type (`coding-agent` first, then `coding`,
+else the first listed) once the agent listing arrives, provided the session has
+not already selected one — so a fresh tab is usable without a manual pick, and
+re-picking or a session agent is never overwritten. Because that adoption makes a
+folder-less tab look "committed", `tabUncommitted` in
+`frontend/src/shell/tab-store.ts` now depends only on the absence of
+`workspaceRoot`, which keeps the launcher landing on a folder-less tab instead of
+letting a default agent suppress it.
+
+Tests: `src/shell/layout_persist.rs::tab_visibility_round_trips_and_defaults_to_visible`,
+`frontend/src/shell/tab-store.test.ts`,
+`frontend/src/shell/workspace-controller.test.ts`,
+`frontend/src/shell/WorkspacePanes.test.tsx`, and
+`frontend/src/shell/AgentLane.test.tsx`. The manual live evidence is in
+`test-plan/artifacts/124-agent-lane/`; Plan 125's default-agent and folder-less
+landing checks are module 14 T83–T84 in `test-plan/index.md`.
+
+## Related
+
+- [Tabs and Independent Client Views](tabs-and-clients.md)
+- [Pane Document Views](../archive/pane-document-views.md)
+- [React CodeMirror Editor](react-codemirror-editor.md)
+- [React Shell](react-shell.md)

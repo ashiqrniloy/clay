@@ -1,0 +1,21 @@
+Fresh automated regression for the plan 130 manual pass (2026-09-20, crafted tree,
+same binaries as above; nothing else running).
+
+| Command | Result |
+|---|---|
+| `cargo test` | PASS — 0 failures. lib `1421 passed / 1 ignored`; `main` 9; presentation 62; **protocol 226**; runtime 75; **security 152**. Agent legs inside those suites: `agent_protocol::*` and `agent_session_isolation::*` — 25 tests, including `agent_session_isolation::real_daemon_serves_one_session_per_workspace` (the automated leg module 17 C43 cites, real daemon + two workspaces), `agent_protocol::initialize_handshake_carries_the_built_mcp_allow_list`, and `server::tests::two_servers_in_one_process_own_independent_agent_hosts` (plan 130 A1) |
+| `cd clay-agent && npm test` | PASS — 182 tests: 181 pass, 1 pre-existing skip, 0 fail. Includes the plan 130 A2 case `resumed session binds its tools to the recorded workspace root, not the daemon cwd` (graft tool **and** `mcp:live:` tool after resume) |
+| `cd frontend && npx vitest run src/agent src/shell` | PASS — 11 files / 125 tests (CodingAgentPanel, Composer, FilesTab, WorkspacePanes, palette stages) |
+| `node --check examples/config/init.js` + doc/inventory cross-check | PASS — see `config-legs.txt`: file parses, section 12 documents the six `clay:agent` exports with commented-only examples, inventory carries `compactAfterTokens:number=80000` and `default:boolean=false`, no uncommented credential option or secret-shaped string in `examples/` |
+
+Flake recorded (not a regression, not plan-130 related): with three suites
+running in parallel, `server::config_watch::tests::watcher_detects_new_and_deleted_watched_files`
+saw 2 of 3 inotify events. It passes standalone (`cargo test --lib config_watch`,
+4 passed) and in the serial rerun above. Also seen once today:
+`resume.test.ts` "resumable list is workspace-scoped, most-recent first, and
+bounded" (timestamp tie) — 0 failures across 13 later runs.
+
+NOTE (2026-09-20): the `default:boolean=false` grep quoted in the A3 row above is superseded — decision
+2026-09-20-2049 changed the inventory to `default:boolean=true` (autonomy opt-out) and the guard now pins the
+documented default together with the daemon expression. The recorded greps in `config-legs.txt` are the
+original transcript and are left as recorded.

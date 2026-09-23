@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:syntax"
 js_export: serverRegisterSyntaxGrammar
 js_facade: runtime/js/syntax.js::serverRegisterSyntaxGrammar
-backing_rust: src/server/syntax.rs::SyntaxGrammarRegistry::register_package
+backing_rust: src/server/syntax/mod.rs::SyntaxGrammarRegistry::register_package
 deno_op: op_clay_syntax_register_syntax_grammar
 deno_op_path: src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar
 name: serverRegisterSyntaxGrammar
@@ -73,7 +73,7 @@ async: false
 
 ## Summary
 
-Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party language packages such as `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`; ordinary users load those packages with `loadPackage(...)` from `~/.config/clay/init.js` rather than calling this registration API directly.
+Registers package-provided syntax grammar metadata with Clay's server-side syntax registry. The API is for first-party language packages such as `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown`; ordinary users load those packages with `loadPackage(...)` from `~/.clay/init.js` rather than calling this registration API directly.
 
 ## Description
 
@@ -83,7 +83,7 @@ The API is runtime-backed by a `deno_core` op wrapper, but callers never touch r
 
 ## When to use
 
-Use this API from a first-party grammar package load entry when the package declares `clay.contributions.syntaxGrammars` metadata and wants that metadata available for syntax provider selection. End-user configuration should use one-line package loading instead:
+Use this API from a package load entry when the package declares `clay.contributions.syntaxGrammars` and is **not** already owned by `FIRST_PARTY_NATIVE_GRAMMARS`. Native-owned prefixes (`rust`, `typescript`, `javascript`, `markdown`) return `syntax.owned_by_native_descriptor`; the live grammar stays the compiled descriptor. End-user configuration should use one-line package loading instead:
 
 ```js
 import { loadPackage } from "clay:packages";
@@ -149,6 +149,8 @@ export default function loadRustGrammar() {
 
 ## Options
 
+Grammar metadata is **not** read from this call's options object (plan 136 task 8): the op registers the grammar contributions declared by the host-enabled package record (`clay.contributions.syntaxGrammars` in `package.json`), so the descriptor keys below describe manifest metadata. Passing them as call options has no effect.
+
 - `packageManifest` (`object`, optional): Full package manifest containing `clay.contributions.syntaxGrammars`. If provided, Clay validates and registers that manifest's grammar contributions.
 - `packageName`, `packageVersion`, `packagePrefix`/`apiPrefix`, `permissions`: Package context fields used when a load entry passes one grammar descriptor instead of a full manifest. `packageName` must be first-party `@clay/*` in Phase 18.10.
 - `syntaxGrammar` / `contribution`: A syntax grammar contribution descriptor. Top-level `languageId`, `filePatterns`, `grammar`, `queries`, `styleMap`, and `budgets` are also accepted and normalized into a descriptor.
@@ -173,6 +175,9 @@ No default key binding is assigned.
 - `queries`: package-root-confined highlight query metadata.
 - `styleMap`: capture-to-`TokenType`/`Modifiers` vocabulary map with validated legacy compatibility.
 - `budgets`: load-time syntax parse budget metadata.
+- `packageManifest`: Full package.json-shaped manifest; when provided, Clay validates its syntaxGrammars metadata directly.
+- `packageName`: First-party package name such as @clay/rust.
+- `syntaxGrammar`: Inert syntax grammar contribution descriptor matching clay.contributions.syntaxGrammars.
 
 ## Return and async behavior
 
@@ -204,6 +209,6 @@ Prefer one-line `loadPackage("@clay/<language>")` for user setup. Package author
 - JS facade: `runtime/js/syntax.js::serverRegisterSyntaxGrammar`
 - Runtime facade: `src/server/facades.rs`
 - Op wrapper: `src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar`
-- Registry: `src/server/syntax.rs::SyntaxGrammarRegistry::register_package`
-- Package validation: `src/packages/record.rs::assemble_package_record`
-- Tests: `src/server/js_runtime.rs::syntax_facade_registers_grammar_metadata_without_raw_ops`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/syntax_grammar.rs`
+- Registry: `src/server/syntax/mod.rs::SyntaxGrammarRegistry::register_package`
+- Package validation: `src/packages/record/mod.rs::assemble_package_record`
+- Tests: `src/server/js_runtime/mod.rs::syntax_facade_registers_grammar_metadata_without_raw_ops`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_api_inventory.rs`, `tests/syntax_grammar.rs`

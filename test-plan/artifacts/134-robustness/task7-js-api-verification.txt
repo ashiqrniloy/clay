@@ -1,0 +1,42 @@
+Plan 134 task 7 — Clay JS API verification (verify-only)
+baseline: 40022f6 ("WIP 133", pre-plan-134 tree); plan 134 tasks 2-6 applied, no JS API target touched
+documentation reviewed: .agents/skills/clay-execution/references/js-api.md; decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md
+
+OK JS API artifacts byte-identical vs 40022f6: runtime/js, docs/reference/clay-js-api, docs/generated,
+   docs/index.md, frontend/src/bridge, src-tauri/bindings
+   ($ git diff --stat 40022f6 -- <paths>  ->  no output)
+OK op set unchanged: 103 op_clay_* identifiers before and after, `diff` of the sorted sets is empty
+OK no #[op]/op_clay_* addition or removal anywhere in the diff (the only op_clay_* diff lines are prose
+   in docs/wiki/modules/editor-theme-registry.md: an unrelated plan-133 path retarget
+   src/protocol/mod.rs::Appearance -> src/protocol/theme.rs::Appearance)
+OK src/server/ops diff is authority-internal only:
+   - src/server/ops/workspace.rs: two `.await`s added because add_explicit_user_grant /
+     discover_root_for_path became async (plan 134 P3); same op names, args, JSON payloads, errors
+   - src/server/ops/mod.rs and siblings: plan 134 D5 `.lock_or_recover()` swaps (poison policy) plus
+     plan 133's op/test reorganization; no exported name or payload changed
+OK doc registry regeneration is a byte-identical no-op:
+   $ cargo run --bin update-doc-registry
+   updated /home/arn/Projects/clay/docs/generated/clay-js-api-registry.json
+   $ git status --porcelain docs/generated docs/reference docs/index.md runtime/js frontend/src/bridge src-tauri/bindings
+   -> empty
+OK JS facade surface unchanged: runtime/js has 0 diff lines; 33 facade modules (17 pairs of .js/.d.ts
+   plus mod.ts, README.md, web-tree-sitter-host.ts); docs/reference/clay-js-api holds 145 pages
+
+Conclusion: **no JS API change**. No public programmatic surface (JS module specifier, JS export,
+stable registry ID, user_facing_name, op wrapper, generated registry, docs page) was added, removed,
+renamed, or reshaped by plan 134; only authorities/internal call sites behind existing ops changed.
+
+all JS API surface checks passed
+
+=== guard suites ===
+$ cargo test --test protocol clay_js_api
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 212 filtered out; finished in 0.02s
+$ cargo test --test protocol clay_js_doc_registry
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 172 filtered out; finished in 0.06s
+$ cargo test --test protocol
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 48.46s
+$ cargo test --test protocol clay_js
+test result: ok. 74 passed; 0 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.08s
+
+Covered by the task-5 gate (`scripts/check.sh full`, exit 0, 2006 passed / 0 failed / 1 ignored):
+the same protocol guards plus presentation 62, security 152, runtime 75, and the desktop/bindings stages.

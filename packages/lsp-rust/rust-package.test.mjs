@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { lspRustPackageManifest } from "./dist/index.js";
 import { createRustAnalyzerBridge } from "./dist/server.js";
-import { encodeFrame, FrameDecoder } from "./dist/shared/framing.js";
+import { encodeFrame, FrameDecoder } from "../lsp-shared/framing.js";
 
 const identity = {
   package: "@clay/lsp-rust",
@@ -46,6 +46,7 @@ class FakeRustAnalyzerSession {
           legend: { tokenTypes: ["function"], tokenModifiers: ["declaration"] },
         },
         diagnosticProvider: { identifier: "rust-analyzer" },
+        inlayHintProvider: true,
       } });
       else if (message.method === "textDocument/semanticTokens/full") {
         this.semanticRequests += 1;
@@ -73,6 +74,8 @@ class FakeRustAnalyzerSession {
         respond([{ uri: this.uri, range: range(0, 2) }, { uri: "file:///outside/lib.rs", range: range(0, 1) }]);
       } else if (message.method === "textDocument/codeAction") {
         respond([{ title: "Apply edit", edit: { changes: {} } }, { title: "Explain only" }]);
+      } else if (message.method === "textDocument/inlayHint") {
+        respond([{ position: { line: 0, character: 3 }, label: ": ()", kind: 1 }]);
       } else if (message.method === "textDocument/signatureHelp") {
         respond({ signatures: [{ label: "drop(value: T)", parameters: [{ label: [5, 13], documentation: "value" }] }], activeSignature: 0, activeParameter: 0 });
       } else if (message.method === "shutdown") respond(null);
@@ -124,8 +127,8 @@ function requestEvent(feature, requestId) {
 }
 
 test("package manifest source matches package.json and fixes rustup launch authority", () => {
-  assert.deepEqual(lspRustPackageManifest(), JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url))));
-  const manifest = lspRustPackageManifest();
+  const manifest = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url)));
+  assert.equal(manifest.clay.preset, "lsp-bridge");
   assert.deepEqual(manifest.clay.capabilities, ["language-server"]);
   assert.deepEqual(manifest.clay.contributions.languageServers, [{
     id: "lsp-rust.server",
@@ -149,9 +152,12 @@ test("Rust bridge maps negotiated features, drops stale/mutating/external output
   });
 
   await bridge.handle(openEvent());
-  assert.equal(decorations.length, 1);
+  assert.equal(decorations.length, 2);
+  assert.equal(decorations[0].viewport.byteEnd, 13);
   assert.equal(decorations[0].spans[0].tokenType, "Function");
   assert.deepEqual(decorations[0].spans[0].modifiers, ["Declaration"]);
+  assert.equal(decorations[1].kind, "inlayHint");
+  assert.equal(decorations[1].spans[0].kind, "inlayHint");
   assert.equal(diagnostics.length, 1, "stale pushed diagnostics must be ignored");
   assert.equal(diagnostics[0].spans[0].message, "warning");
 

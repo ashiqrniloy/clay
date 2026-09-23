@@ -1,0 +1,41 @@
+{
+  "note": "Plan 118 task E1: the workspace sidebar's approved filter field, count foot and slot width.",
+  "matrix": [
+    {
+      "width": 1500,
+      "field": true,
+      "fieldAriaLabel": null,
+      "shortcut": "/",
+      "rowsBefore": 3,
+      "firstRow": "alpha.mdsrc",
+      "regionWidth": 244,
+      "regionToken": "dimension.sidebar.default",
+      "countIdle": "",
+      "overflow": 0,
+      "rowsFiltered": 1,
+      "countFiltered": "1 match",
+      "filteredSubset": true,
+      "rowsEmpty": 0,
+      "rowsRestored": 3
+    },
+    {
+      "width": 1024,
+      "field": true,
+      "fieldAriaLabel": null,
+      "shortcut": "/",
+      "rowsBefore": 3,
+      "firstRow": "alpha.mdsrc",
+      "regionWidth": 224,
+      "regionToken": "dimension.sidebar.default",
+      "countIdle": "",
+      "overflow": 0,
+      "rowsFiltered": 1,
+      "countFiltered": "1 match",
+      "filteredSubset": true,
+      "rowsEmpty": 0,
+      "rowsRestored": 3
+    }
+  ],
+  "findings": [],
+  "pass": true
+}

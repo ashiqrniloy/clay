@@ -8,8 +8,8 @@ and reclaim, the isolation invariants, and the Phase 22.5 client-owned
 window-state persistence (restore of tabs, workspaces, split trees, and
 per-pane documents). The shell chrome (tab bar, inactive-tab retention,
 per-tab `TabChrome`) lives in
-[Masonry Shell Runtime](masonry-shell.md); per-pane document hosting in
-[Pane Document Views](pane-document-views.md); reconnect session restoration
+[Masonry Shell Runtime](../archive/masonry-shell.md); per-pane document hosting in
+[Pane Document Views](../archive/pane-document-views.md); reconnect session restoration
 in [Multi-Document Sessions](multi-document-sessions.md).
 
 ## Source
@@ -25,17 +25,17 @@ in [Multi-Document Sessions](multi-document-sessions.md).
   section below).
 - `src/server/mod.rs` — `IpcServer` owns the registry, broadcast sender,
   bootstrap `TabServerState`, and `TabServerState` map keyed by `TabId`.
-- `src/server/connection.rs` — handshake replay, `TabCommand` dispatch,
+- `src/server/connection/mod.rs` — handshake replay, `TabCommand` dispatch,
   close-terminates-connection, reconciliation snapshots.
 - `src/driver/mod.rs`, `src/driver/reconcile.rs`,
   `src/driver/restore.rs` — `Driver`/`TabState`, lifecycle, registry
   reconciliation, restore/reconnect state machine, per-tab event bridges,
   typed widget access helpers, and `NewTab`/close flows.
-- `src/main.rs` — event-loop integration and action dispatch into the driver.
+- `src/app_driver.rs` — event-loop integration and action dispatch into the driver.
 - `src/client/mod.rs` — handshake binding helpers,
   `ClientEditQueue::enqueue_tab_command` for post-bind lifecycle commands,
   and `ClientConnectionEvent::TabRegistry`.
-- `src/masonry_shell.rs` — per-tab chrome (`TabChrome`) and tab bar (see
+- `src/masonry_shell/window_tabs.rs` — per-tab chrome (`TabChrome`) and tab bar (see
   masonry-shell page).
 - `src/masonry_pane_document.rs`, `src/editor/document_session.rs` —
   reconnect: per-session `workspace_root_id`/`path` retention,
@@ -56,6 +56,89 @@ edit queues, leases, split trees, modes), but share one window and one
 server. The authority boundary from earlier phases is untouched — each
 connection still holds its own capability tokens, document leases, and
 workspace grants; the registry only binds already-authorized connections.
+
+**Product information architecture (plan 118).** The mechanism above is
+unchanged by what a tab *means*. The approved target IA is: a tab is one
+**workspace** (a folder) plus one **agent**, rendering exactly one of two views
+at a time — Workspace or Agent — with a switcher in tab chrome
+([`DESIGN.md`](../../../DESIGN.md) §12; approved set in
+`design-artifacts/approved/quiet-instrument-migration/`).
+
+Shipped: a fresh window and every *uncommitted* tab (nothing picked yet) open
+the **launcher** ([Launcher Landing Surface](launcher-landing-surface.md)), not
+`@clay/chat`, which plan 118 removed. Since the two-view task (plan 118 task 33)
+the tab *is* the two-view unit:
+
+- the tab record (owner: `frontend/src/shell/tab-store.ts`) carries the
+  **picked folder** (empty while uncommitted — the server session always has a
+  real root, so only an explicit pick commits the tab), the **agent identity**
+  (`{ type, configRoot }`, inert display data), the **view**
+  (`workspace | agent`), and the running flag behind the strip's pulsing marker;
+- `layout.json` v2 round-trips all three per tab (`src/shell/layout_persist.rs`:
+  `PersistedTabState { workspace_root, agent, view, … }`, `agent` optional, a
+  tab with **neither** half skipped rather than half-restored, an absent `view`
+  read as the workspace view);
+- the **workspace view** is the pane tree (editor + SDUI tree/sidebar) and the
+  **agent view** is the trusted `@clay/coding-agent` panel
+  (`frontend/src/coding-agent/AgentView.tsx`); `WorkspacePanes` keeps both
+  mounted and hides the inactive one, so a switch re-fetches nothing and loses
+  no state;
+- the switcher is tab chrome (`frontend/src/app/layout/view-switcher.tsx`, the
+  design system's `seg` family, `Ctrl+1`/`Ctrl+2`); it is inert with a reason
+  on an uncommitted tab, and the view that is up carries the only selection
+  signal;
+- an uncommitted tab's launcher row pick **rebinds that tab's workspace in
+  place** through the existing `TabCommand::OpenWorkspace` path (the server
+  rebinds the registry entry and rebroadcasts it, so the label, the tooltip and
+  `layout.json` follow, and the agent host rebinds to the new root); a tab that
+  already holds a workspace opens the picked folder as its own tab;
+- `⌘T` / the strip's `+` opens an uncommitted tab on the launcher, and the
+  launcher's agent pane attaches the agent half without touching the workspace.
+
+Shipped since the agent-type task (plan 118 task 35): the **agent types are a
+registry the server owns** and the agent view's title is the picker.
+
+- `TabCommand::SetAgent { tab_id, agent }` is the only way a tab's agent
+  changes, and it is tab chrome (the titlebar's picker sends it; the server
+  resolves the client's bound tab). The handler validates the name against the
+  Clay data root's `agents/` — `launcher::resolve_agent_type`, which rejects
+  separators/traversal/unknown names and requires the directory to exist — then
+  the registry's `RegistryEntry.agent_type` holds it. `TabEntry` still keeps its
+  four protocol-visible identity fields: the agent half stays server-local
+  (the client showed it optimistically and reconciles from the snapshot), and
+  no path ever crosses the wire.
+- Every later read starts from that stored name: the agent settings page
+  (`agent_settings::agent_config_root_for`, contained to
+  `<data root>/agents/<type>`), the tab's session (`AgentHost::ensure_tab_session`
+  passes `agent` + that agent's MCP allow-list to the daemon — the allow-list
+  merges the agent's `mcp.json` with the *session's* workspace `.mcp.json`,
+  plan 119 SC-6), and the switch
+  itself (`AgentHost::rebind_tab_agent` → the daemon's `session.setAgent`, which
+  re-reads only that agent's config over the same session branch). A refused
+  switch reverts the registry entry, so a tab never claims an agent its live
+  session is not running.
+- Session ownership is the workspace, not the tab (plan 119 SC-6, decision
+  2026-09-14-1705): the book keys the live session by
+  `(agent type, workspace root)`, so a tab's lookup adopts the session its
+  folder+agent already has instead of owning one — two tabs on one workspace
+  share one session and transcript, and a tab whose root or agent changed
+  simply resolves a different key (its previous session stays resumable).
+- The client learns which session a tab owns from that tab's own answer, not
+  from the relay: `TabState` and the run commands reply with
+  `session.bound { clientId, tabId, sessionId }` on the requesting connection,
+  and each tab's agent store keeps its own relay subscription, its own
+  transcript, and its own TauriClayAgent — disposed with the tab
+  (`TabRuntime.agent`, `frontend/src/shell/workspace-controller.ts`). A tab the
+  user only edits never asks and therefore never starts an agent session.
+- The picker reuses the launcher's enumeration (one `launcherEntries` fetch),
+  consumes the design system's `agentPicker.default.trigger.*` family, marks the
+  current type, and names where more come from (`~/.clay/agents/`).
+- Transcript rows carry the agent that produced them (`metadata.agent` on the
+  AG-UI message, `AgentTranscriptEntry.agent` in the snapshot), so a transcript
+  that spans a switch labels each turn and derives the boundary note client side
+  — it survives a reload because the stamps are server data.
+
+Shipped (Part D, plan 118 tasks 33–36): the launcher landing, the tab's two views with their switcher, the agent-type picker, and the agent view's Files tab as the session's file history (one row per path the session touched, newest first, opening in the workspace view).
 
 ## Server side: TabRegistry and protocol
 
@@ -209,7 +292,7 @@ and `tests/rust_visibility_api_mapping.rs::phase22_8_per_tab_state_has_no_new_pu
 ## Client side: the multi-connection Driver
 
 The driver lives in `src/driver/` (Phase 22.7 extraction — see the
-[driver module map](driver.md)); this section summarizes its shape.
+[driver module map](../archive/driver.md)); this section summarizes its shape.
 
 - The `Driver` owns `tabs: BTreeMap<ClientId, TabState>` — keyed by
   `ClientId`, **not** `TabId`, because the server-assigned `TabId` arrives
@@ -398,10 +481,18 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 `divider_drag_credits_only_the_active_tab`,
 `per_tab_routing_targets_are_isolated`,
 `tab_switch_round_trip_preserves_split_trees_and_active_panes` in
-`src/masonry_shell.rs`;
-`per_tab_edit_queues_are_isolated` in `src/main.rs`;
+`src/masonry_shell/mod.rs`;
+`per_tab_edit_queues_are_isolated` in `src/driver/mod.rs`;
 `move_ops_change_order_only_and_preserve_entry_contents` in
 `src/server/tab_registry.rs`).
+
+## Plan 088 tab-chrome verification
+
+Plan 088 leaves the server-authoritative tab model unchanged and modernizes only Clay-owned presentation. `ClayShellWidget` installs each tab's cached `ActiveTypography`; the active tab mirrors its UI metrics to the window-level bar, whose cards, close affordances, pinned `+`, hit rectangles, and labels stay inside logical bounds. Overflow stops shrinking below the documented minimum and uses the existing clamped wheel strip; no package owns this row.
+
+`tab_card_display_name` is the shell boundary for workspace roots: it keeps only a bounded sanitized final segment and falls back to `Workspace`, so tab/accessibility labels never expose an absolute host path. Active/inactive/hover/disabled/focus card states use typed state tokens and visible focus/selection semantics; dirty/recovery/connection state remains textual in pane/status chrome and the dirty-close menu rather than being color-only. Inactive tab hosts remain retained for reconnect continuity but are stashed from paint, hit-testing, and accessibility traversal.
+
+Verification lives in `src/masonry_shell/mod.rs` tab-bar/typography/accessibility tests, `src/driver/reconcile.rs::tab_card_display_name_never_falls_back_to_an_absolute_path`, `tests/editor_performance_invariants.rs::tab_switch_path_performs_no_document_reserialization` and `high_dpi_layout_uses_logical_window_bounds`. Live multi-tab/narrow-wide captures remain unresolved on hosts without safe window targeting; retained pre-task screenshots are comparison evidence only.
 
 ## Invariants and Constraints
 
@@ -443,7 +534,7 @@ tests: `pane_commands_only_mutate_the_active_tab`,
 
 - `src/server/tab_registry.rs`: registry unit tests (incl. 22.4 reorder:
   valid moves, boundary no-ops, bound-client validation, position bounds).
-- `src/server/mod.rs` + `src/server/connection.rs`: handshake replay order,
+- `src/server/mod.rs` + `src/server/connection/mod.rs`: handshake replay order,
   `TabCommand` dispatch (incl. move variants: reorder broadcast + rejection
   snapshots), rejected-command reconciliation snapshots,
   close-terminates-connection.
@@ -471,14 +562,14 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   bounds, legacy v1 detection, panic-free hostile input),
   `layout_from_persisted_tab_builds_validated_layout`. Command:
   `cargo test --lib layout_persist --quiet`.
-- `src/main.rs` (bin, 22.5): restore state machine — gate waits for
+- `src/driver/restore.rs` (bin, 22.5): restore state machine — gate waits for
   server-assigned `tab_id` before the next mount, missing-root tabs are
   skipped in order with diagnostics, deadline cancel drops the remaining
   queue, `reopen_restored_documents` attributes panes by `PaneId` and skips
   missing files, `tab_order_is_registry_order_with_entry_less_mounted_appended`.
   Command: `cargo test --bin clay --quiet`. (The machine itself moved to
   `src/driver/restore.rs` in 22.7; tests live in `driver::restore::tests`.)
-- `src/masonry_shell.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
+- `src/masonry_shell/mod.rs` (22.5): `layout_mutation_signals_persistence_with_multiple_tabs`,
   `keyboard_resize_signals_persistence`, `tab_layout_data_returns_every_mounted_tab_layout`,
   `restored_single_editor_mounts_persisted_split_tree`,
   `install_restored_tab_mounts_persisted_tree_without_switching`.
@@ -492,19 +583,19 @@ tests: `pane_commands_only_mutate_the_active_tab`,
   `real_server_restart_rebuilds_reconnect_from_persisted_workspace_root`
   proves a reset registry rebuilds from the persisted root. Command:
   `cargo test --lib real_server_restore --quiet`.
-- `src/masonry_shell.rs`: install/switch/retention/rekey/zero-size-layout
+- `src/masonry_shell/mod.rs`: install/switch/retention/rekey/zero-size-layout
   tests (see masonry-shell page). Command:
   `cargo test --lib masonry_shell --quiet`.
 
 ## Related
 
-- [Driver Module Map](driver.md) — the `src/driver/` tab subsystem
+- [Driver Module Map](../archive/driver.md) — the `src/driver/` tab subsystem
   (lifecycle, reconcile, restore).
-- [Masonry Shell Runtime](masonry-shell.md) — tab chrome, tab bar, stashed
+- [Masonry Shell Runtime](../archive/masonry-shell.md) — tab chrome, tab bar, stashed
   inactive retention, per-tab routing queries.
 - [Multi-Document Sessions](multi-document-sessions.md) — reconnect document
   identity retention and re-open.
-- [Pane Document Views](pane-document-views.md) — per-pane views and the
+- [Pane Document Views](../archive/pane-document-views.md) — per-pane views and the
   close guard reused for dirty tabs.
 - [Client Snapshot Bootstrap](client-snapshot-bootstrap.md) — connection
   bootstrap each tab reuses.
@@ -546,7 +637,7 @@ changed in tasks 6–7 — guards only.
     only_and_grants_nothing` (TabEntry literal compile-pin),
     `reclaim_rebinds_only_the_reclaiming_connection` (old client ops fail
     after reclaim; the reclaiming client cannot operate other tabs).
-  - `src/server/connection.rs`: `reconnected_tab_regains_only_its_own_
+  - `src/server/connection/mod.rs`: `reconnected_tab_regains_only_its_own_
     reopened_grants` (A opens 2 docs → disconnect releases both → fresh
     connection inherits nothing → reopens one, the other stays
     `UnknownDocument`).
@@ -610,7 +701,7 @@ rejected-close fix:
   `src/driver/` (`mod` / `reconcile` / `restore`), shrinking the root from
   6194 to 3603 lines with the `with_shell`/`with_editor`/`with_view` typed
   helpers replacing the `edit_widget` + `try_downcast` boilerplate — see
-  the [driver module map](driver.md). No logic changed; the bin test set is
+  the [driver module map](../archive/driver.md). No logic changed; the bin test set is
   identical to the pre-move baseline.
 - **Split aliases**: `shell.clientSplitPaneRight`/`Down` joined the
   bindable `client_ui` surface, resolving to the canonical split handlers
@@ -622,6 +713,36 @@ rejected-close fix:
   `sweep_skips_tabs_of_live_connected_clients` (end-to-end real-server
   liveness wiring, `src/server/mod.rs`);
   `rejected_close_keeps_connection_serving` /
-  `accepted_close_still_ends_connection` (`src/server/connection.rs`);
+  `accepted_close_still_ends_connection` (`src/server/connection/tests/`);
   alias allowlist + `validate_command_id` gate coverage
   (`src/server/ops/keybindings.rs`).
+
+## Plan 124: per-tab lane visibility and agent-store lifetime
+
+The persistent agent lane is tab state, not window state. The client-local
+`agentLane` store in `frontend/src/shell/layout-state.ts` is subscribed by the
+active tab's `AgentLane`; its `shell.toggleAgentLane` command flips visibility
+without advancing the server runtime generation. The same store subscription
+feeds the debounced `layout.json` writer alongside rail and inspector
+visibility.
+
+`PersistedTab.laneVisible` is optional for backward compatibility and defaults
+to `true`. Restore records rail, inspector, and lane visibility by client id
+while rebuilding tabs, then restores the values after all mounts exist. Hiding
+uses the HTML `hidden` state, so the lane leaves paint and accessibility while
+its composer draft and controls remain alive. Opening the `/` palette makes the
+lane visible again because its composer is the palette's query owner.
+
+`WorkspacePanes` creates/adopts one `AgentSessionModule` per `TabRuntime` before
+either workspace view is shown, runs the store bootstrap (`listSessions`,
+`requestBinding`, `setUiVersion`), and makes that store the shared owner for `AgentLane` and `AgentView`.
+Closing the tab disposes it. This preserves a streaming transcript
+across view switches without introducing a process-global agent store or
+cross-tab routing.
+
+Tests: `src/shell/layout_persist.rs::tab_visibility_round_trips_and_defaults_to_visible`,
+`frontend/src/shell/tab-store.test.ts`,
+`frontend/src/shell/workspace-controller.test.ts`,
+`frontend/src/shell/WorkspacePanes.test.tsx`, and
+`frontend/src/shell/AgentLane.test.tsx`. Live geometry and persistence evidence
+is recorded in `test-plan/artifacts/124-agent-lane/`.

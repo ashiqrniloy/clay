@@ -1,0 +1,4 @@
+Landing=PASS
+surface=@clay/launcher empty-tab contribution (host-rendered panel)
+panes=Workspaces,Agents
+core_fallback=Open file / Open folder only (absent here)

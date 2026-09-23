@@ -1,69 +1,65 @@
 # Rendering Customization Strategy
 
-Phase 16 defines rendering customization as **server-validated inert declarations**. Packages may describe what should be rendered, but the Rust client decides how to render it with Masonry, Parley, and Vello. No package JavaScript runs in client paint, layout, keypress, scroll, pointer, or text-event handlers.
-
-This document is architecture-only. It introduces no runtime code in Phase 16.
+Rendering customization is **server-validated inert declarations**. Packages may describe what should be rendered; the client decides how to render it (React + CodeMirror in the Tauri shell). No package JavaScript runs in client paint — no package code runs in render, layout, keypress, scroll, or pointer handlers. Plan 099 implements covered-range application through CodeMirror state fields and protocol v29 atomic viewport patches.
 
 ## Goals
 
 - Let mode and package authors provide syntax highlighting, semantic emphasis, diagnostics, layout hints, render intents, and package UI contributions.
-- Preserve the authority boundary from `.agents/skills/project-patterns/references/authority-boundaries.md`: the server validates package output; the client owns native rendering and local UI state.
-- Preserve `.agents/skills/project-patterns/references/protocol-and-performance.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted, no IPC work in Masonry paint or text-event handlers, and viewport-bounded updates.
+- Preserve the authority boundary from `.agents/skills/clay-execution/references/packages.md`: the server validates package output; the client owns native rendering and local UI state.
+- Preserve `.agents/skills/clay-execution/references/protocol-perf.md`: no full-document IPC for ordinary edits, no synchronous JavaScript/server round trip before normal typing is painted locally, no IPC work in render or input handlers, and viewport-bounded updates.
 
 ## Rendering Primitive Paths
 
 | Path | Primitive | Status | Existing/New | Payload budget | Owner and validation |
 | --- | --- | --- | --- | --- | --- |
-| Inline decorations | `DecorationSet` chunks carried by `IncrementalParseUpdate::decoration_updates` | Implemented Phase 18.16/Plan 056 | Existing protocol/client render hook | `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` | Package/native grammar code produces spans server-side; one parse/capture pass fans out complete captures into stable 128-byte sets, and the server validates every member's schema, byte ranges, document version, provenance, priority, and payload before streaming normal decoration messages. |
+| Inline decorations | `DecorationSet` members carried by `IncrementalParseUpdate` or `ViewportRenderPatch` | Implemented Phase 18.16/Plan 056 and Plan 099 | Existing protocol/client render hook plus atomic patch effect | `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES` | Package/native grammar code produces spans server-side; one parse/capture pass fans out complete captures into stable 128-byte sets, and the server validates every member before either normal edit-driven publication or one request-scoped atomic patch. |
 | Layout hints | `LayoutHintUpdate` or fields inside render-intent declarations | Planned/deferred until a concrete consumer needs it | New declaration shape | `DECORATION_PAYLOAD_BUDGET_BYTES` for editor-adjacent hints; `SDUI_*` budgets when represented as SDUI | Server validates bounded hint values; client maps them to known local layout affordances only. |
 | Block/inline render intents | `RenderIntent` records for known intents such as preview block, code block adornment, emphasis band, or inline badge | Planned/deferred | New declaration shape, may share `DecorationUpdate` envelope initially | `DECORATION_PAYLOAD_BUDGET_BYTES` | Server validates intent kind/version and strips unknown executable data. Client renders only Rust-known intent kinds. |
-| Panels/status/preview UI | `SduiTree` / `SduiTreeUpdate` | Exists/extend | Reuses `src/protocol/sdui.rs`, `src/masonry_sdui.rs`, `src/masonry_sdui_region.rs`, and `sdui.*` APIs | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | Server validates inert SDUI trees; client applies snapshots/updates via `SduiNativeState::apply_snapshot`/`apply_update`, which feed a retained reconciled Masonry subtree (`SduiRegionWidget`) hosted as a child of `EditorWidget`. |
+| Panels/status/preview UI | `SduiTree` / `SduiTreeUpdate` | Exists/extend | Reuses `src/protocol/sdui.rs` and the `sdui.*` APIs | `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` | Server validates inert SDUI trees and ships generation-stamped snapshots; the React renderer (`frontend/src/sdui`) reconciles stable node IDs in place. |
 | Behavior-driven local rendering setup | Behavior manifest install | Exists/extend | Reuses behavior manifest path for deterministic local editor behavior, not for arbitrary painting | `BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES` | Server publishes inert behavior manifests; client executes Rust-known behavior engines only. |
 
-## Decoration Span Shape
+## Decoration and atomic viewport patch shape
 
-A decoration update is the primary Phase 18 path for Markdown syntax highlighting, semantic spans, diagnostics, and inline emphasis.
+`DecorationSet` is the existing bounded inert publication shape for syntax,
+semantic, search, link, and inlay data. Its UTF-8 byte ranges, document/version
+metadata, package provenance, closed token vocabulary, and payload are validated
+before client delivery. Parse output remains split into stable 128-byte sets;
+that output fan-out never creates more parser work.
 
-```rust
-// Proposed documentation-only shape. Runtime code is deferred.
-pub struct DecorationSpan {
-    pub byte_start: u64,
-    pub byte_end: u64,
-    pub kind: DecorationKind,
-    pub style_token: String,
-    pub priority: u8,
+Plan 099 adds the internal protocol v29 envelope:
+
+```text
+ViewportRenderRequest {
+  client_id, document_id, document_version,
+  request_id, byte_start, byte_end, trace_id?
 }
-
-pub enum DecorationKind {
-    Syntax,
-    Semantic,
-    Diagnostic,
-    Emphasis,
-    InlineCode,
-    Link,
-}
-
-pub struct DecorationUpdate {
-    pub document_id: DocumentId,
-    pub document_version: u64,
-    pub behavior_version: u64,
-    pub render_intent_version: u64,
-    pub package_prefix: String,
-    pub viewport_byte_start: u64,
-    pub viewport_byte_end: u64,
-    pub spans: Vec<DecorationSpan>,
+ViewportRenderPatch {
+  request_id, document_id, document_version,
+  status: Complete | Empty | Rejected,
+  reason?, covered_ranges,
+  decorations[], diagnostics[], folds[], trace_id?
 }
 ```
 
-Validation requirements:
+The request is metadata-only and never carries document text. The server clamps
+and validates its range, schedules the selected syntax session, and answers
+exactly once. A complete patch's `covered_ranges` are derived from the output
+members and therefore do not falsely claim the wider parser context. Tauri may
+coalesce an obsolete whole patch per document, but sibling members remain
+strictly ordered and are applied together by one client transaction. Empty and
+rejected patches are terminal responses that free the request slot immediately.
 
-- `byte_start <= byte_end`; both must be valid for the target document version.
-- Spans must intersect the declared viewport range unless the update is explicitly marked as cached non-visible data.
-- `kind` must be a known enum value.
-- `style_token` is a token such as `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `markup.heading.1`, `diagnostic.error`, or `markup.inline-code`; it is not an arbitrary CSS string or draw callback. Phase 18 validation uses an explicit language-neutral allowlist so Markdown and non-Markdown packages can publish syntax spans without parser-specific Rust branches.
-- `priority` controls deterministic overlap resolution. Higher priority wins when ranges overlap; equal priority preserves package/load order after server conflict resolution.
-- The serialized update must be bounded by `DECORATION_PAYLOAD_BUDGET_BYTES`.
-- `document_version`, `behavior_version`, `render_intent_version`, and `package_prefix` provide stale-update rejection and provenance.
+Validation requirements remain:
+
+- byte ranges are valid UTF-8-safe ranges for the target document version;
+- kinds, token/modifier values, priorities, link targets, inlay labels, diagnostic
+  fields, and fold ranges are closed, inert, and bounded;
+- package provenance, document/version metadata, and publication permissions
+  match the active server contribution;
+- `DECORATION_PAYLOAD_BUDGET_BYTES`, the enclosing parse budget, and the
+  protocol frame ceiling are checked before publication;
+- no package callback, CSS string, renderer instruction, raw operation, or
+  client-side JavaScript crosses the server/Tauri boundary.
 
 ## Semantic Typography Roles
 
@@ -72,11 +68,11 @@ Typography is inert rendering data governed by [Semantic Typography Roles](typog
 - mode `defaultFontRole` selects `monospace` or `proportional` for document text;
 - syntax/semantic decoration `fontRole` may override an eligible byte range with `monospace` or `proportional`;
 - text-bearing component `style.fontRole` selects `ui`, `monospace`, or `proportional`, defaulting to `ui`;
-- packages never provide family names, stacks, font files/URLs/bytes/downloads, absolute sizes, raw Parley properties, CSS, or renderer callbacks.
+- packages never provide family names, stacks, font files/URLs/bytes/downloads, absolute sizes, raw renderer properties, CSS, or renderer callbacks.
 
 The server validates semantic names, range/layer authorization, component-kind support, provenance, versions, UTF-8 boundaries, and payload bounds before client installation. The client normalizes visible decoration boundaries outside paint, resolves user-owned stacks/sizes through `TypographyRegistry`, and includes typography/style revisions plus document role in layout cache keys. Named-family fallback resolution is client-local; unavailable names retain a generic fallback without server font inspection or package notification.
 
-Document line/scroll/caret geometry derives from resolved document profiles and shaped Parley metrics. Shell/SDUI/component paint, rows, hit regions, scrolling, status geometry, and accessibility bounds share resolved UI metrics. Paint, input, layout, pointer, scroll, and text-event paths perform no package JavaScript, blocking IPC, filesystem/network access, font download, or server-side installed-font discovery.
+Document line/scroll/caret geometry derives from resolved document profiles and the editor's shaped metrics. Shell/SDUI/component rendering, rows, hit regions, scrolling, status geometry, and accessibility bounds share resolved UI metrics (installed as `--clay-*` custom properties). Render, input, layout, pointer, and scroll paths perform no package JavaScript, blocking IPC, filesystem/network access, font download, or server-side installed-font discovery.
 
 ## Range Diagnostics
 
@@ -84,7 +80,7 @@ Range diagnostics are a distinct rendering path documented in [Range Diagnostics
 
 - `DiagnosticSet` publishes versioned, viewport-bounded, source-keyed `DiagnosticSpan` records with severity, code, message, and provenance;
 - explicit analyzer packages and future LSP bridges share the `serverPublishDiagnostics` validation/transport/paint contract; Tree-sitter recovery nodes do not publish diagnostics;
-- paint draws theme-owned squiggles from `StyleRegistry::diagnostic_style` and cached Parley line rectangles;
+- rendering draws theme-owned squiggles from the diagnostic style registry and cached line rectangles;
 - Syntax, Semantic, Diagnostic, and Search layers remain additive; diagnostics cannot choose font roles or erase syntax/semantic styling;
 - payload/count/cache limits use `DIAGNOSTIC_PAYLOAD_BUDGET_BYTES`, `DIAGNOSTIC_MAX_SPANS_PER_SET`, and `DIAGNOSTIC_CACHE_BUDGET_BYTES`.
 
@@ -95,7 +91,7 @@ Range diagnostics are a distinct rendering path documented in [Range Diagnostics
 Layout hints describe editor-adjacent presentation without granting native widget or GPU authority.
 
 ```rust
-// Proposed documentation-only shape.
+// Illustrative deferred shape; no package renderer callback is implied.
 pub struct LayoutHint {
     pub byte_start: u64,
     pub byte_end: u64,
@@ -120,24 +116,45 @@ Unknown intents are ignored or rejected by the server according to the render-in
 
 Package-owned panels, status views, preview panes, buttons, and lists reuse the existing SDUI path:
 
-- Protocol shapes live in `src/protocol/sdui.rs`.
-- Client native state lives in `src/masonry_sdui.rs` (`SduiNativeState`); snapshots/updates are applied via `SduiNativeState::apply_snapshot`/`apply_update` **outside paint handlers**.
-- Rendering is a retained reconciled Masonry subtree, not an immediate-mode paint pass: `SduiRegionWidget` (`src/masonry_sdui_region.rs`) diffs the SDUI tree by stable `SduiNodeId`, reuses surviving `WidgetPod`s in place, and maps each kind to a real Masonry widget — `SduiLabel`, `SduiButton`, `SduiListRow`, `EditorViewWidget` (a binding/slot component), under a Clay-owned `SduiScrollViewport`. It is hosted as a real child of `EditorWidget`, so Masonry routes layout, paint, pointer, focus, scroll, and a11y through the standard widget tree.
-- `src/masonry_editor.rs` receives `ClientConnectionEvent::SduiSnapshot`/`SduiUpdate` in `apply_connection_event` and syncs the region in place (stable identity preserved across updates); no package work runs in `paint`/`layout`/event handlers.
-- SDUI snapshots are bounded by `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`; updates are bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
+- Protocol shapes live in `src/protocol/sdui.rs`; server-side validation and
+  composition live in `src/server/ui.rs` and `src/protocol/runtime.rs`
+  (generation-stamped snapshots with host-stamped provenance/trust labels).
+- The React renderer (`frontend/src/sdui`) reconciles stable node IDs in place
+  — surviving DOM keeps state, and no package work runs inside render or event
+  handlers. Slots (top/left/right/bottom/status), overlays, and empty-tab
+  content are composed by shell-owned components
+  (`frontend/src/shell/PackageWorkspace.tsx`).
+- SDUI snapshots are bounded by `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`; updates
+  are bounded by `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES`.
 
-The earlier "temporary compatibility bridge" status (immediate-mode `SduiNativeState::paint`) is retired; the sidebar panel chrome is painted by `SduiRegionWidget` itself. SDUI remains the package UI contribution path for panels and preview/status regions. It is not the inline syntax-highlighting path; span-level editor decorations use `DecorationUpdate` so the editor can map ranges directly into its text layout/rendering pipeline.
+SDUI remains the package UI contribution path for panels, overlays, and
+preview/status regions. It is not the inline syntax-highlighting path;
+span-level editor decorations use `DecorationSet` and the atomic patch effect
+so CodeMirror can map ranges directly into its text-layout pipeline.
 
 ## Client Rendering Attachment Points
 
-Current client rendering is split between the editor surface and the retained SDUI/package-UI widget tree:
+Current client rendering splits between the CodeMirror editor host and the React
+SDUI/package projection:
 
-- `src/masonry_editor.rs::EditorWidget::apply_connection_event` applies server events before paint and syncs the hosted child widgets (`SduiRegionWidget`, `PackagePanelHost`, `PackageOverlayHost`) in place via `MutateCtx`. A future `DecorationUpdate` event should be handled here or in an editor-specific connection event path, then forwarded to `EditorSurface` as validated cached data.
-- `src/masonry_editor.rs::EditorWidget::paint` fills the background and paints the editor canvas (`self.editor.paint_in_rect`); the SDUI sidebar, fixed package panels, and transient overlays render through hosted Masonry child widgets (children pass, after `paint`); `post_paint` draws the status line. No package work belongs in this function.
-- `src/editor/surface.rs::EditorSurface::paint` computes visible lines and delegates text rendering to the layout layer. A future decoration hook should attach at the visible snapshot/layout-cache boundary so only visible spans are translated into Parley style ranges.
-- `src/masonry_sdui_region.rs::SduiRegionWidget` reconciles the SDUI tree into retained Masonry widgets (`SduiLabel`/`SduiButton`/`SduiListRow`/`EditorViewWidget` under `SduiScrollViewport`) which paint themselves with Parley text layout and Vello `Scene` fills/text draws; sidebar chrome is painted by the region widget. `SduiNativeState` (`src/masonry_sdui.rs`) holds inert validated state and drives reconciliation; it no longer has an immediate-mode paint path.
+- `frontend/src/shell/workspace-controller.ts` applies server events outside
+  render and routes document features to the owning pane session.
+- `frontend/src/editor/ClayEditor.tsx` hosts CodeMirror; the shared
+  `bytePositionField` converts UTF-8 protocol offsets, while
+  `frontend/src/editor/extensions/render-patch.ts` carries one atomic effect.
+- `decorations.ts`, `diagnostics.ts`, and `folding.ts` own CodeMirror state
+  fields. They map a patch's bounded members once, replace only the declared
+  authority/range, map retained items through local edits, and prune bounded
+  overscan. Diagnostic lint state is synchronized in the same transaction.
+- `frontend/src/sdui/SduiRenderer.tsx` reconciles the SDUI tree by stable node
+  ID; `frontend/src/shell/PackageWorkspace.tsx` composes slots, overlays, and
+  status items with visible provenance.
 
-New inline decoration rendering should map validated spans to known Parley style attributes and Vello scene primitives inside Rust. The hook should not allocate or parse unbounded package data during paint; all range validation, priority resolution, stale-version checks, and viewport filtering happen before the next paint.
+New inline decoration rendering maps validated spans to known CodeMirror mark,
+widget, and link objects before dispatch. The hook must not allocate or parse
+unbounded package data during render; all range validation, priority
+resolution, stale-version checks, and viewport filtering happen server-side or
+before the render commit.
 
 ## Server-Side Compilation and Validation
 
@@ -156,21 +173,33 @@ Validation failures produce server diagnostics or package load/runtime errors. T
 
 Rendering updates are incremental and viewport-prioritized:
 
-- The server tracks the client's visible byte range and prioritizes spans intersecting that range.
-- Ordinary edits do not trigger full-document decoration repaint or full-document IPC.
-- For large files, off-viewport declarations may be cached server-side and sent when scrolling brings them near the viewport.
-- If package parsing/render preparation lags behind local edits, the client keeps the last validated decorations for still-valid ranges and may clear stale ranges for the edited region after a server stale-version notice.
-- A newer document version cancels or supersedes older background rendering work; stale updates are discarded before client publication.
-- Scroll rendering must respect `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS`; update payloads must stay within `DECORATION_PAYLOAD_BUDGET_BYTES`, `SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES`, or `SDUI_UPDATE_PAYLOAD_BUDGET_BYTES` depending on path.
+- The client sends one metadata-only `ViewportRenderRequest` for the current
+  visible byte range; a monotonic request ID and version guard stale replies.
+- The server schedules one request-scoped job through the document's
+  `SyntaxSession` and returns exactly one complete, empty, or rejected
+  `ViewportRenderPatch`.
+- A complete patch replaces only its declared covered range and same-authority
+  items. Other package/layer state outside that range remains intact; an empty
+  patch clears only that range.
+- Ordinary edits do not trigger full-document decoration repaint or
+  full-document IPC. Existing edit/open/resync frames remain separate from
+  viewport completion.
+- For large files, validated server chunks/cache entries are retained only
+  within the syntax cache and near-viewport guard; client fields prune to the
+  visible range plus bounded overscan.
+- A newer document version, request, or runtime generation supersedes older
+  work; stale output is discarded before client publication. Scroll rendering
+  remains subject to `SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS` and the
+  decoration/diagnostic/fold/SDUI payload budgets.
 
 ## Security Rules
 
 Packages cannot:
 
 - Inject arbitrary GPU draw calls.
-- Mutate Masonry widgets directly.
-- Run synchronous JavaScript in client Masonry paint, layout, keypress, pointer, scroll, or text-event handlers.
-- Provide CSS, native widget callbacks, Vello scene callbacks, Parley builder callbacks, raw `Deno.core.ops`, or client-side JavaScript hooks.
+- Mutate client component internals or DOM directly.
+- Run synchronous JavaScript in client render, layout, keypress, pointer, or scroll handlers.
+- Provide CSS, native widget callbacks, renderer scene callbacks, raw `Deno.core.ops`, or client-side JavaScript hooks.
 - Bypass declared package prefix/provenance or payload budgets.
 - Gain filesystem, network, shell, AI, WASM, or native-widget authority through rendering declarations.
 
@@ -178,13 +207,13 @@ All package rendering flows through validated server-produced declarations. The 
 
 ## Phase 18.5 Large-File Decoration-Cache Primitive
 
-The Phase 18.5 [large-file Markdown primitive review](../../wiki/modules/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates bounded `DecorationSet` chunks, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code treats each validated `DecorationSet` as a versioned decoration chunk; Plan 056 emits stable 128-byte chunks from one parse/capture pass rather than scheduling parser work per chunk.
+The Phase 18.5 [large-file Markdown primitive review](../../wiki/archive/phase18-large-file-markdown-primitive-review.md) records that decoration publication validates bounded `DecorationSet` chunks, while large-file modes need reusable chunk/cache primitives for retained near-viewport state. Runtime code treats each validated `DecorationSet` as a versioned decoration chunk; Plan 056 emits stable 128-byte chunks from one parse/capture pass rather than scheduling parser work per chunk.
 
 Implemented reusable primitives:
 
 - `DecorationChunkKey`: a validated chunk key with document ID, document version, package prefix, and byte range.
 - `SyntaxChunkCache`: a bounded LRU-style server/runtime cache for syntax/decor chunks with stale-version separation, viewport/near-viewport pruning, and deterministic retained-byte accounting.
-- `EditorDecorationState`: a client-local chunk cache that stores validated chunks outside paint, clears stale chunks on document version changes, prunes chunks outside the near-viewport guard, and paints only spans intersecting the current visible snapshot.
+- Frontend CodeMirror state fields in `frontend/src/editor/extensions/{render-patch,decorations,diagnostics,folding}.ts`: store validated projected items outside paint, map them through local edits, replace exact covered authority, clear stale versions through reset/patch effects, and prune outside the bounded viewport guard.
 - `SyntaxCacheBudget`: `SYNTAX_CACHE_BUDGET_BYTES` is the generic retained-cache budget. Phase 18.5 targets a 30 MiB Markdown-specific overhead cap for large-file workflows, but the primitive remains reusable by Python, Org, AsciiDoc, log-file, and other modes.
 
 Security and performance rules:
@@ -209,22 +238,49 @@ Security and performance rules:
 
 The shared mapper converts the selected style token to the Phase 18.15 `TokenType` + `Modifiers` axes and preserves package scope/provenance. For a consecutive accepted edit, the matching stable-window tree is edited exactly once, parsed once, and queried over the full envelope covering a shared 128-byte UTF-8-safe replacement-chunk grid (`replacement_ranges` from Tree-sitter changed ranges plus explicit invalidations) — so query coverage and replacement coverage are identical. Complete intersecting captures survive the query and are clipped at exact chunk boundaries; grammar-owned token/comment/string/prose/code boundaries remain authoritative.
 
-One capture result is split into stable 128-byte `DecorationSet` outputs. Changed/visible-intersecting sets are ordered first; output chunk count does not increase parser/query invocation count. Each member is validated for package/layer identity, document/version/range/provenance, decoration payload, and enclosing incremental-update budget before any member publishes. Empty syntax sets clear their exact authoritative range. `EditorDecorationState` may interpolate validated inert spans while a current result is pending; current authoritative package/layer sets subtract their exact half-open viewport from overlapping provisional chunks, preserving left/right span fragments outside authority and locally coalescing compatible residual chunks/spans.
+One capture result is split into stable 128-byte `DecorationSet` outputs. Changed/visible-intersecting sets are ordered first; output chunk count does not increase parser/query invocation count. Each member is validated for package/layer identity, document/version/range/provenance, decoration payload, and enclosing incremental-update budget before any member publishes. Empty syntax sets clear their exact authoritative range. The frontend decoration, diagnostic, and folding state fields interpolate validated inert spans while a current result is pending; current authoritative package/layer sets subtract their exact half-open viewport from overlapping provisional items, preserving geometry outside authority and pruning only the bounded overscan guard.
 
 Validation runs outside paint/key/text hot paths and remains bounded by `DECORATION_PAYLOAD_BUDGET_BYTES`, `INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES`, and the shared `SYNTAX_CACHE_BUDGET_BYTES` syntax-chunk cache:
 
 1. Package metadata validation rejects raw CSS, raw color strings, unknown style tokens, native handles, raw ops, client JavaScript, and external/traversing grammar/query paths. Tier 2 assets must be package-root-confined `./grammars/*.wasm` and `./queries/*.scm` files.
 2. Native descriptor/query construction and the web-tree-sitter host adapter compile/cache query state outside hot paths. Package-JS fallback handlers remain behind the existing server-issued parse-handler token.
 3. The engine-neutral capture mapper rejects any capture without a `styleMap` entry, returning an actionable diagnostic such as an unmapped `@function` capture. It never contains language-name branches.
-4. `DecorationSet` validation and payload checks run before insertion into `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `parse.open_failed`.
+4. `DecorationSet` validation and payload checks run before insertion into the server `SyntaxChunkCache` or delivery to the existing decoration transport. Open itself returns before this work completes; failures become sanitized `RuntimeDiagnostic` values such as `parse.open_failed`. The frontend then applies projected items through one `applyRenderPatch` effect.
 
 Invalid or unsupported queries, artifacts, or captures fail closed for that package: Clay keeps the document editable through its active major mode and publishes no syntax decorations for the failed grammar. Runtime performs no network fetch, shell/package-manager build, native-library load, or client-side JavaScript execution.
 
-## Phase 17/18 Follow-Up
+## Phase 26 rendering axes (implemented; pre-cutover paths historical)
 
-- Extend chunk publication with explicit empty chunk-clearing metadata if package adapters need to clear an individual off-viewport package chunk without publishing replacement spans.
-- Define concrete protocol messages for `DecorationUpdate` and, if needed, `LayoutHintUpdate`.
-- Add client event handling outside paint handlers and store validated decorations in editor state.
-- Add a Parley/Vello style-range application hook in the editor text layout path.
-- Add payload-bound, stale-version, priority-overlap, and viewport-filtering tests.
-- Reuse SDUI for Markdown preview/status panels instead of extending inline decoration payloads for panel UI.
+Status: implemented in Phase 26.1–26.6 as theme/layout primitives — no new
+`DecorationKind`, no package pixels, no render-path JS. The axes below were
+first realized in the removed native editor and are carried by the current
+React/CodeMirror client through the same theme/`editorRules` data:
+
+| Axis | Primitive | Current carrier |
+| --- | --- | --- |
+| Opaque syntax colors | `StyleSpec.color` | `src/editor/theme.rs` → theme adapter → CodeMirror highlight style |
+| Background fill | `StyleSpec.background` → visible text run background | CodeMirror decoration mark class from `textStyles` |
+| Size ladder | `StyleSpec.scale` on Syntax/Semantic only | editor font-size classes from resolved typography |
+| Editor chrome | `EditorChrome` (gutter / active line / indent guides / bracket match) | CodeMirror gutter/active-line/indentmark extensions (`frontend/src/editor/extensions`) |
+| Wrap / insets | `WrapPolicy` + token-aligned insets | CodeMirror `EditorView.lineWrapping` + theme spacing variables |
+
+`DecorationSpan` is unchanged (no background/scale fields). Themes contribute
+`background` and `scale` through `textStyles`. Chrome and wrap are
+`editorRules` data, not SDUI.
+
+## Current Implementation References
+
+- `frontend/src/editor/position-index.ts` provides the shared incremental
+  UTF-16/UTF-8 index; `frontend/src/editor/extensions/render-patch.ts` provides
+  the renderer-neutral atomic effect.
+- `frontend/src/editor/extensions/{decorations,diagnostics,folding}.ts` own
+  projected marks/links/inlays, diagnostics/lint, and fold ranges. They replace
+  exact covered authority, map local edits, and retain only bounded overscan.
+- `src/protocol/parse.rs::ViewportRenderPatch` and
+  `src/server/connection/mod.rs` aggregate request-scoped members; the Tauri
+  forwarder coalesces only obsolete whole patches.
+- Package authors continue to publish validated inert data through documented
+  server APIs. No package-facing renderer, parser, CSS, callback, or patch
+  completion API is added by Plan 099.
+- Reuse SDUI for Markdown preview/status panels instead of extending inline
+  decoration payloads for panel UI.

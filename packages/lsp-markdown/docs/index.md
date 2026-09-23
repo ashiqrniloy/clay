@@ -68,7 +68,7 @@ Marksman is a trusted same-user subprocess, not a sandbox. Workspace-root approv
 ## Implementation and tests
 
 - Policy/load: `packages/lsp-markdown/dist/{index,load,server}.js`
-- Shared protocol modules: `packages/lsp-markdown/dist/shared/*.js` generated from `packages/lsp-shared/`
+- Shared protocol modules: inventory specifiers `lsp-shared/client.js` and `lsp-shared/mapping.js`
 - Deterministic package suite: `node --test packages/lsp-markdown/markdown-package.test.mjs`
 - Cargo ownership/freshness suite: `cargo test --test lsp_bridge`
 - Real workspace fixture: `tests/fixtures/lsp/markdown/`

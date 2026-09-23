@@ -5,11 +5,11 @@
 - `src/protocol/language_intelligence.rs`
 - `src/server/language_intelligence.rs`
 - `src/server/ops/language_intelligence.rs`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `runtime/js/language.js`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/behavior.rs`, `src/client/mod.rs`
-- `src/editor/surface.rs`, `src/masonry_editor.rs`
+- `src/editor/surface/mod.rs`, `src/masonry_editor.rs`
 - `src/shell/transient_menu.rs`
 - `tests/language_intelligence.rs`
 - `tests/editor_performance_invariants.rs`
@@ -20,7 +20,7 @@
 
 Phase 18.20 implements one analyzer-neutral path for hover, go-to-definition, code actions, and signature help. Clay owns UTF-8 byte-offset request/result envelopes, provider selection and cancellation, result validation, protocol delivery, and projection onto existing menus/navigation/commands. Providers may be Rust implementations or resolver-validated package JavaScript. LSP JSON-RPC, `Content-Length`, URI and position-encoding conversion, initialization, and server-specific policy remain package responsibilities for Phase 18.21.
 
-Semantic tokens, diagnostics, and completion do not use this four-feature result family. They reuse `DecorationSet`, `DiagnosticSet`, and `CompletionResultSet` respectively.
+Semantic tokens, diagnostics, completion, and inlay hints do not use this four-feature result family. They reuse `DecorationSet`, `DiagnosticSet`, and `CompletionResultSet` respectively; inlay hints are a refresh-time `DecorationKind::InlayHint` overlay negotiated by the LSP bridge, not a language-intelligence feature. A Link span's local `DecorationIntent::Hover` uses its inert target text directly; it does not implicitly register or invoke a `parse-document`/`language-server` provider. When no decorated target handles `language.hover` or `language.goToDefinition`, those built-in fallbacks remain cancellable `UiReactivePriority` provider requests.
 
 ## Responsibilities
 
@@ -46,7 +46,7 @@ A package declares `clay.contributions.languageIntelligenceProviders` and calls 
 language.hover | goToDefinition | codeActions | signatureHelp
   -> client captures document/version/behavior/cursor byte offset
   -> nonblocking ClientMessage::LanguageIntelligenceRequest
-  -> connection builds a UTF-8-safe <=64 KiB document window
+  -> connection builds a UTF-8-safe <=64 KiB rope window (O(window), floor-clamped end)
   -> LanguageIntelligenceCoordinator::schedule
   -> deterministic provider selection by feature, mode, priority, ID
   -> per-request oneshot result delivery
@@ -57,6 +57,8 @@ language.hover | goToDefinition | codeActions | signatureHelp
 The coordinator owns one in-flight task key per client/document/feature. A newer request aborts the old task. It caps global outstanding work at `LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS`, applies each provider timeout up to `LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS`, and returns immediately. Completion sends through a per-request oneshot, avoiding cross-client result theft from a shared receiver.
 
 `finish_task` checks provider generation and document version, validates the result, and overwrites result provenance with registered provider provenance. Timeout/provider failures become sanitized status envelopes; cancelled/stale work is dropped without flashing UI.
+
+Plan 126 (Document Access Path Hardening) removed the full-document copy from this path: the connection clones the behavior manifest before taking the document lock and builds the window with `DocumentState::window_around`, so a hover/definition/code-action/signature request on a multi-MiB document allocates O(window) instead of O(document). The window comes from the shared `cursor_window_bounds` helper (same one completion uses), whose end boundary is floor-clamped at or below `LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES` (64 KiB) and never splits a code point; both window budgets are listed in the performance guide's deterministic hard-guard table.
 
 ### Protocol and validation
 
@@ -84,13 +86,14 @@ The coordinator owns one in-flight task key per client/document/feature. A newer
 
 ### Document-analysis worker integration (Phase 18.21)
 
-LSP bridge packages register document analyzers through `serverRegisterDocumentAnalyzer`. The `DocumentAnalysisCoordinator` routes `LanguageIntelligenceEvent` kinds to registered bridge handlers, which convert the LSP response through `mapping.js` and return validated result JSON. The coordinator's `request_language_intelligence` method mirrors the existing `schedule` path: it acquires a request slot, pushes through the bounded worker mailbox, awaits the oneshot reply, validates provenance, and returns. Stale document versions, cancelled generations, and revoked grants fail with sanitized errors.
+LSP bridge packages register document analyzers through `serverRegisterDocumentAnalyzer`. The `DocumentAnalysisCoordinator` routes `LanguageIntelligenceEvent` kinds to registered bridge handlers, which convert the LSP response through `mapping.js` and return validated result JSON. The coordinator's `request_language_intelligence` method mirrors the existing `schedule` path: it acquires a request slot, pushes through the bounded worker mailbox, awaits the oneshot reply, validates provenance, and returns. Each analyzer worker retains the connection-owned tab workspace; the runtime command installs that workspace as `ClayOpState` context before package code starts a language-server session, so a root grant is checked against the current directory root rather than an empty default workspace. Stale document versions, cancelled generations, and revoked grants fail with sanitized errors.
 
 LSP-compatible outputs map onto existing primitives:
 
 - semantic tokens -> `DecorationSpan::from_vocabulary` with `DecorationKind::Semantic`, `TokenType`, and `Modifiers`;
 - diagnostics -> source-keyed `DiagnosticSet` publication;
-- completion -> existing completion provider/results, including inert snippet text format, priority, exclusive claim, and disable behavior.
+- completion -> existing completion provider/results, including inert snippet text format, priority, exclusive claim, and disable behavior;
+- inlay hints -> separate `DecorationKind::InlayHint` publications when the bridge factory opts into `features: ["inlayHint"]`.
 
 `language-server` grants none of these output permissions. Packages still need `render-decorations` or `completion-provider` where applicable.
 
@@ -131,6 +134,7 @@ See the authoritative API page for complete options and errors.
 - External URIs, absolute/traversing paths, callbacks, raw ops, client JavaScript, and executable fields are rejected.
 - Code-action edits are inert previews only.
 - No provider, JavaScript, process, or IPC wait occurs before local text paint.
+- The provider window is bounded and O(window): it never exceeds the 64 KiB budget, never ends mid-code-point, and is built without copying the document (`window_around` over the canonical rope).
 
 ## Phase 18.21 Handoff (Complete)
 
@@ -146,8 +150,12 @@ See the authoritative API page for complete options and errors.
 ## Tests
 
 - `tests/language_intelligence.rs`: protocol round trips, validation, provider ordering, cancellation, timeout, provenance, semantic composition, authority separation, and document-analysis worker intelligence routing.
+- `src/server/connection/tests/`: `language_intelligence_window_budget_honored` verifies the window budget on a large multibyte document; `src/server/document.rs`: `window_respects_multibyte_boundaries`, `window_at_document_edges_clamps_to_boundaries`, and `window_cost_is_independent_of_document_size` cover the shared helper.
+- `tests/editor_intelligence_protocol.rs::completion_recency_and_hover_intelligence_messages_round_trip`: shared-codec coverage for Phase 28.6 completion recency plus hover request/result envelopes.
+- `tests/decoration_intent_authority.rs::hover_intent_does_not_imply_parse_document_or_language_server`: Link hover publication stays on `render-decorations`; built-in language fallbacks retain `ServerIntent` + `UiReactivePriority` metadata.
+- `src/masonry_pane_document.rs::tests::decoration_hover_is_local_and_activation_queues_only_safe_open`: hover changes local chrome without queueing work; safe activation queues only the existing root-bound `OpenDocument` message.
 - `src/server/document_analysis.rs`: worker lifecycle intelligence integration (`request_language_intelligence` through bounded mailbox).
-- `src/server/js_runtime.rs`: JS facade registration/rejection and token-backed provider invocation.
+- `src/server/js_runtime/mod.rs`: JS facade registration/rejection and token-backed provider invocation.
 - `src/client/mod.rs`, `src/client/behavior.rs`, `src/masonry_editor.rs`, `src/shell/transient_menu.rs`: nonblocking request routing, stale result rejection, menu projection, navigation, and preview non-mutation.
 - `tests/editor_performance_invariants.rs`: no provider/process/JS work in editor hot paths.
 - `tests/performance_protocol.rs`: representative result payload ceiling.
@@ -160,7 +168,8 @@ cargo test --test protocol performance_protocol::
 
 ## Related
 
-- [Phase 18.20 Primitive Review](phase18.20-language-intelligence-primitive-review.md)
+- [Phase 18.20 Primitive Review](../archive/phase18.20-language-intelligence-primitive-review.md)
+- [Persistent Runtime Hardening](persistent-runtime-hardening.md) — plan 127 routes providers registered with a `moduleSpecifier` to the domain's latency lane, so a busy general lane cannot delay them.
 - [Language Server Process Service](language-server-process-service.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Command Registry](command-registry.md)

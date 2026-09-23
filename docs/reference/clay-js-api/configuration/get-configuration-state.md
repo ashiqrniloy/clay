@@ -9,7 +9,7 @@ deno_op: op_clay_configuration_get_state
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_get_state
 name: getConfigurationState
 user_facing_name: Get Configuration State
-summary: Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
+summary: Inspect Clay configuration metadata for the `~/.clay/init.js` entry point and local modules.
 owner: server
 phase: Phase 13
 visibility: public
@@ -18,7 +18,7 @@ key_bindings: []
 custom_properties:
   - name: entryPoint
     type: string
-    default: ~/.config/clay/init.js
+    default: ~/.clay/init.js
     description: User configuration entry point path reported by configuration state.
   - name: loadedModules
     type: string[]
@@ -37,13 +37,13 @@ async: false
 
 ## Summary
 
-Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.
+Inspect Clay configuration metadata for the `~/.clay/init.js` entry point and local modules.
 
 ## Description
 
 `getConfigurationState` is the runtime-backed public API for **Get Configuration State**. It provides a stable Clay JS lookup surface for app/help/agent discovery of the active configuration entry point and loaded local modules.
 
-Authority: `configuration-query-api`. Runtime path: `server-side-configuration-query-runtime`. The entry point is `~/.config/clay/init.js`, and any modules reported by this API are local configuration modules declared by that entry point. This query is background/help/configuration metadata and must not be part of ordinary input/rendering hot paths.
+Authority: `configuration-query-api`. Runtime path: `server-side-configuration-query-runtime`. The entry point is `~/.clay/init.js`, and any modules reported by this API are local configuration modules declared by that entry point. This query is background/help/configuration metadata and must not be part of ordinary input/rendering hot paths.
 
 ## When to use
 
@@ -55,7 +55,7 @@ Use this API when a future Clay UI, help surface, or agent needs to explain whic
 import { getConfigurationState } from "clay:configuration";
 
 const state = getConfigurationState();
-console.log(state.entryPoint); // "~/.config/clay/init.js"
+console.log(state.entryPoint); // "~/.clay/init.js"
 ```
 
 ## Example
@@ -72,11 +72,11 @@ No options are accepted.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `configuration.getConfigurationState` in `~/.config/clay/init.js` if a future command surface supports displaying configuration metadata.
+No default key binding is assigned. Users may bind a key to `configuration.getConfigurationState` in `~/.clay/init.js` if a future command surface supports displaying configuration metadata.
 
 ## Custom properties
 
-- `entryPoint` (`string`, default `~/.config/clay/init.js`): User configuration entry point path reported by configuration state.
+- `entryPoint` (`string`, default `~/.clay/init.js`): User configuration entry point path reported by configuration state.
 - `loadedModules` (`string[]`, default `[]`): Ordered local configuration module paths once runtime loading exists.
 
 ## Return and async behavior
@@ -85,7 +85,7 @@ Returns a `ConfigurationState` object:
 
 ```ts
 interface ConfigurationState {
-  entryPoint: "~/.config/clay/init.js";
+  entryPoint: "~/.clay/init.js";
   loadedModules: string[];
 }
 ```

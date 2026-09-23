@@ -2,11 +2,10 @@
 ; Captures map to Phase 18.15 vocabulary (TokenType + Modifiers) through the
 ; native descriptor style_map. Headings resolve to Heading1..6; **strong** and
 ; *emphasis* carry Bold/Italic modifiers; code spans/blocks use the monospace
-; document role. Only captures present in the style_map are emitted; unmatched
+; document role. Only captures present in the styleMap are emitted; unmatched
 ; nodes stay unstyled.
 
-; Headings: the inline text resolves to the per-level TokenType, the marker
-; stays punctuation.
+; Headings: the inline text resolves to the per-level TokenType.
 (atx_heading (atx_h1_marker) (inline) @heading-1)
 (atx_heading (atx_h2_marker) (inline) @heading-2)
 (atx_heading (atx_h3_marker) (inline) @heading-3)
@@ -16,6 +15,7 @@
 (setext_heading (paragraph) @heading-1 (setext_h1_underline))
 (setext_heading (paragraph) @heading-2 (setext_h2_underline))
 
+; Punctuation / markers
 [
   (atx_h1_marker)
   (atx_h2_marker)
@@ -26,8 +26,10 @@
   (setext_h1_underline)
   (setext_h2_underline)
   (fenced_code_block_delimiter)
+  (thematic_break)
 ] @punctuation
 
+; List markers
 [
   (list_marker_plus)
   (list_marker_minus)
@@ -36,15 +38,21 @@
   (list_marker_parenthesis)
 ] @list-marker
 
-(block_quote_marker) @quote
+; Block quote marker
+(block_quote_marker) @quote-marker
 
+; Code blocks (fenced and indented)
 [
   (indented_code_block)
   (fenced_code_block)
 ] @code
 
-; Inline forms (strong/emphasis/code-span/link) are styled by the
-; markdown_inline injection layer: `injections.scm` declares the ranges and
-; `inline-highlights.scm` captures them with the same styleMap keys. The block
-; grammar only owns block-level constructs here.
+; Fence info string language label
+(fenced_code_block
+  (info_string (language) @code-label))
+
+; Paragraph text baseline
 (paragraph) @text
+
+; Block quote container gets a higher-priority tint
+(block_quote) @quote

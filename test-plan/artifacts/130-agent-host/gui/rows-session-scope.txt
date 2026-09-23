@@ -1,0 +1,26 @@
+role|name|states|extents
+label|Clay|enabled,multi-line,sensitive,showing,visible|631,37,69x17
+label||enabled,multi-line,sensitive|-2147483648,-2147483648,1x1
+label||enabled,sensitive,visible|25,149,1x1
+entry|Filter files|editable,enabled,focusable,selectable-text,sensitive,showing,single-line,visible|26,150,219x36
+list box|Server-driven items|enabled,focusable,sensitive,showing,vertical,visible|26,194,243x919
+list item|notes.md|enabled,focusable,sensitive,showing,visible|26,194,243x35
+entry|Document editor|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible|270,160,696x760
+label||enabled,sensitive,showing,visible|297,1059,1x1
+entry|Message|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,visible|297,966,642x48
+list box|Commands|enabled,sensitive,showing,vertical,visible|289,586,658x306
+list item|/branch server-first — @clay/coding-agent@0.1.0|enabled,focusable,selected,sensitive,showing,visible|301,598,634x32
+list item|/clone server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,630,634x32
+list item|/compact server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,662,634x32
+list item|/discard server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,694,634x32
+list item|/fork server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,726,634x32
+list item|/n server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,758,634x32
+list item|/new server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,790,634x32
+list item|/open-session server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,822,634x32
+list item|/open-session-as-fork server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,854,634x32
+list item|/resume server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,886,634x32
+list item|/tree server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,918,634x32
+list item|Close Coding Agent server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,950,634x32
+list item|Coding Agent server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,982,634x32
+list item|Cycle Reasoning Effort server-first — @clay/coding-agent@0.1.0 Shift+Tab|enabled,focusable,sensitive,visible|301,1014,634x41
+list item||enabled,sensitive,showing,visible|975,287,323x30

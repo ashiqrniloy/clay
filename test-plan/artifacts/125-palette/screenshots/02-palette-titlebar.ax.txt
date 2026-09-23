@@ -1,0 +1,214 @@
+depth|role|selected|states|name|text|extents|app
+0|application|-||clay-desktop||-1,-1,-1x-1|CLAY-DESKTOP
+1|frame|-|visible|Clay||0,0,1552x1203|CLAY-DESKTOP
+2|panel|-|visible|||26,23,1500x47|CLAY-DESKTOP
+3|panel|-|visible|||26,23,1500x47|CLAY-DESKTOP
+4|filler|-|visible|||1406,23,114x46|CLAY-DESKTOP
+5|separator|-||||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+5|button|-|visible|Minimise||1406,31,34x30|CLAY-DESKTOP
+5|button|-|visible|Maximise||1446,31,34x30|CLAY-DESKTOP
+5|button|-|visible|Close||1486,31,34x30|CLAY-DESKTOP
+4|filler|-|visible|||741,37,69x17|CLAY-DESKTOP
+5|label|-|visible|Clay||741,37,69x17|CLAY-DESKTOP
+5|label|-||||-2147483648,-2147483648,1x1|CLAY-DESKTOP
+2|filler|-|visible|||26,70,1500x1104|CLAY-DESKTOP
+3|filler|-||||26,70,1500x1104|CLAY-DESKTOP
+4|filler|-||||26,70,1500x1104|CLAY-DESKTOP
+5|scroll pane|-|focused|||26,70,1500x1104|CLAY-DESKTOP
+6|document web|-|focused,visible|Clay||26,70,1500x1104|CLAY-DESKTOP
+7|landmark|-|visible|||26,70,1500x40|CLAY-DESKTOP
+8|section|-|visible|||46,86,7x7|CLAY-DESKTOP
+8|section|-|visible|||60,82,35x15|CLAY-DESKTOP
+8|page tab list|-|visible|Window tabs||111,74,114x31|CLAY-DESKTOP
+9|page tab|selected|visible|workspace agent||111,74,114x31|CLAY-DESKTOP
+8|button|-|visible|New tab||225,72,35x35|CLAY-DESKTOP
+8|landmark|-|visible|Application controls||1372,73,142x33|CLAY-DESKTOP
+9|button|-|visible|Control Center||1372,73,33x33|CLAY-DESKTOP
+9|page tab list|-|visible|Tab view||1408,75,106x29|CLAY-DESKTOP
+10|page tab|selected|visible|Workspace||1413,80,61x19|CLAY-DESKTOP
+10|page tab|-|visible|Agent||1473,80,36x19|CLAY-DESKTOP
+7|landmark|-|visible|Clay workspace||26,110,1500x1036|CLAY-DESKTOP
+8|section|-|visible|||26,110,1160x1036|CLAY-DESKTOP
+9|section|-|visible|||26,110,1160x1036|CLAY-DESKTOP
+10|landmark|-|visible|||26,110,1160x810|CLAY-DESKTOP
+11|button|-|visible|Hide file browser||238,110,32x32|CLAY-DESKTOP
+11|label|-|visible|||25,149,1x1|CLAY-DESKTOP
+11|entry|-|visible|Filter files||26,150,220x36|CLAY-DESKTOP
+11|section|-|visible|||254,155,17x26|CLAY-DESKTOP
+12|section|-|visible|||259,160,7x16|CLAY-DESKTOP
+11|list box|-|visible|Server-driven items||26,194,244x693|CLAY-DESKTOP
+12|list item|-|visible|notes.md||26,194,244x35|CLAY-DESKTOP
+11|panel|-|visible|||26,887,244x10|CLAY-DESKTOP
+11|section|-|visible|||154,895,23x25|CLAY-DESKTOP
+12|section|-|visible|||159,900,13x15|CLAY-DESKTOP
+11|section|-|visible|||180,900,32x15|CLAY-DESKTOP
+11|section|-|visible|||219,895,19x25|CLAY-DESKTOP
+12|section|-|visible|||224,900,9x15|CLAY-DESKTOP
+11|section|-|visible|||241,900,30x15|CLAY-DESKTOP
+11|landmark|-|visible|Pane 1||270,110,916x810|CLAY-DESKTOP
+12|panel|-|visible|Empty tab||270,110,916x810|CLAY-DESKTOP
+13|button|-|visible|Open file||641,515,75x34|CLAY-DESKTOP
+13|button|-|visible|Open folder||723,515,92x34|CLAY-DESKTOP
+10|footer|-|visible|Package status||26,920,1160x26|CLAY-DESKTOP
+11|status bar|-|visible|||26,920,1160x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,920,1160x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,920,1160x10|CLAY-DESKTOP
+11|status bar|-|visible|||26,920,1160x10|CLAY-DESKTOP
+10|footer|-|visible|Agent lane||26,946,1160x200|CLAY-DESKTOP
+11|form|-|visible|||26,947,1160x175|CLAY-DESKTOP
+12|label|-|visible|||53,1059,1x1|CLAY-DESKTOP
+12|entry|-|focused,visible|Message|/|53,966,1106x48|CLAY-DESKTOP
+12|combo box|-|visible|Coding Agent Agent type||53,1026,98x34|CLAY-DESKTOP
+12|combo box|-|visible|Configure a provider Model||154,1026,170x34|CLAY-DESKTOP
+12|dialog|-|visible|Commands||44,531,1124x420|CLAY-DESKTOP
+13|panel|-|visible|Scope||1020,544,136x29|CLAY-DESKTOP
+14|toggle button|-|visible|All||1025,549,21x19|CLAY-DESKTOP
+14|toggle button|-|visible|Session||1045,549,45x19|CLAY-DESKTOP
+14|toggle button|-|visible|Shell||1089,549,32x19|CLAY-DESKTOP
+14|toggle button|-|visible|Files||1120,549,31x19|CLAY-DESKTOP
+13|list box|-|visible|Commands||45,586,1122x306|CLAY-DESKTOP
+14|list item|selected|visible|/branch server-first — @clay/coding-agent@0.1.0||57,598,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/clone server-first — @clay/coding-agent@0.1.0||57,630,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/compact server-first — @clay/coding-agent@0.1.0||57,662,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/discard server-first — @clay/coding-agent@0.1.0||57,694,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/fork server-first — @clay/coding-agent@0.1.0||57,726,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/n server-first — @clay/coding-agent@0.1.0||57,758,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/new server-first — @clay/coding-agent@0.1.0||57,790,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/open-session server-first — @clay/coding-agent@0.1.0||57,822,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/open-session-as-fork server-first — @clay/coding-agent@0.1.0||57,854,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/resume server-first — @clay/coding-agent@0.1.0||57,886,1098x32|CLAY-DESKTOP
+14|list item|-|visible|/tree server-first — @clay/coding-agent@0.1.0||57,918,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 1 client — built-in Ctrl+1 Ctrl+Alt+1||57,950,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 2 client — built-in Ctrl+2 Ctrl+Alt+2||57,991,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 3 client — built-in Ctrl+3 Ctrl+Alt+3||57,1032,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 4 client — built-in Ctrl+4 Ctrl+Alt+4||57,1073,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 5 client — built-in Ctrl+5 Ctrl+Alt+5||57,1114,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 6 client — built-in Ctrl+6 Ctrl+Alt+6||57,1155,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 7 client — built-in Ctrl+7 Ctrl+Alt+7||57,1196,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 8 client — built-in Ctrl+8 Ctrl+Alt+8||57,1237,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Activate Tab 9 client — built-in Ctrl+9 Ctrl+Alt+9||57,1278,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Add Equal Pane client — built-in Ctrl+Shift+\||57,1319,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Browse Filesystem server-first — built-in Ctrl+X Ctrl+F||57,1360,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Choose Agent server-first — built-in||57,1401,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Choose Model server-first — built-in||57,1433,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Choose Provider server-first — built-in||57,1465,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Close Coding Agent server-first — @clay/coding-agent@0.1.0||57,1497,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Close Pane client — built-in Ctrl+Alt+W||57,1529,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Close Settings server-first — @clay/settings@0.1.0||57,1570,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Close Tab client — built-in Ctrl+Shift+W||57,1602,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Code Actions server-first — built-in||57,1643,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Coding Agent server-first — @clay/coding-agent@0.1.0||57,1675,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Configure Provider server-first — built-in||57,1707,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Cycle Reasoning Effort server-first — @clay/coding-agent@0.1.0 Shift+Tab||57,1739,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Dismiss Language Result server-first — built-in||57,1780,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Explain Active Mode server-first — built-in||57,1812,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Focus Active Document server-first — built-in||57,1844,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Focus Next Pane client — built-in Ctrl+Alt+→||57,1876,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Focus Previous Pane client — built-in Ctrl+Alt+←||57,1917,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Go to Definition server-first — built-in||57,1958,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Hover server-first — built-in||57,1990,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Insert Markdown Heading server-first — @clay/markdown@0.1.0 Ctrl+Alt+1||57,2022,1098x41|CLAY-DESKTOP
+14|list item|-|visible|List Active Modes server-first — built-in||57,2063,1098x32|CLAY-DESKTOP
+14|list item|-|visible|List Git Statuses server-first — built-in||57,2095,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Move Pane Next client — built-in Ctrl+Alt+]||57,2127,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Pane Previous client — built-in Ctrl+Alt+[||57,2168,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab Left client — built-in Ctrl+Shift+[||57,2209,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab Right client — built-in Ctrl+Shift+]||57,2250,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 1 client — built-in Ctrl+Shift+1||57,2291,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 2 client — built-in Ctrl+Shift+2||57,2332,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 3 client — built-in Ctrl+Shift+3||57,2373,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 4 client — built-in Ctrl+Shift+4||57,2414,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 5 client — built-in Ctrl+Shift+5||57,2455,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 6 client — built-in Ctrl+Shift+6||57,2496,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 7 client — built-in Ctrl+Shift+7||57,2537,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 8 client — built-in Ctrl+Shift+8||57,2578,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Move Tab to Position 9 client — built-in Ctrl+Shift+9||57,2619,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Navigate Definition server-first — built-in||57,2660,1098x32|CLAY-DESKTOP
+14|list item|-|visible|New Tab client — built-in Ctrl+T||57,2692,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Next Tab client — built-in Ctrl+Tab||57,2733,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Open Control Center server-first — built-in Ctrl+X Ctrl+O||57,2774,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Open Directory server-first — built-in||57,2815,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Open File server-first — built-in||57,2847,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Open File by Name server-first — built-in||57,2879,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Open Recent Document server-first — built-in||57,2911,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Open Settings server-first — @clay/settings@0.1.0||57,2943,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Preview Edit (Deferred) server-first — built-in||57,2975,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Previous Tab client — built-in Ctrl+Shift+Tab||57,3007,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Refresh Git Status server-first — built-in||57,3048,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Refresh Workspace server-first — built-in||57,3080,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Reload Configuration and Packages server-first-with-lock — built-in Ctrl+Shift+R||57,3112,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Reset Settings server-first — @clay/settings@0.1.0||57,3153,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Resize Pane Down client — built-in Ctrl+Alt+Shift+↓||57,3185,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Resize Pane Left client — built-in Ctrl+Alt+Shift+←||57,3226,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Resize Pane Right client — built-in Ctrl+Alt+Shift+→||57,3267,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Resize Pane Up client — built-in Ctrl+Alt+Shift+↑||57,3308,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Resume Session server-first — built-in||57,3349,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Reveal in File Tree server-first — built-in||57,3381,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Search Sessions server-first — built-in||57,3413,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Set Appearance server-first — @clay/settings@0.1.0||57,3445,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Set Design System server-first — @clay/settings@0.1.0||57,3477,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Set Theme server-first — @clay/settings@0.1.0||57,3509,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Set Typography server-first — @clay/settings@0.1.0||57,3541,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Signature Help server-first — built-in||57,3573,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Split Pane Down client — built-in||57,3605,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Split Pane Horizontal client — built-in Ctrl+-||57,3637,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Split Pane Right client — built-in||57,3678,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Split Pane Vertical client — built-in Ctrl+\||57,3710,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Toggle Agent Lane client — built-in Ctrl+X Ctrl+P||57,3751,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Toggle File Browser server-first — built-in Ctrl+B||57,3792,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Toggle JavaScript Line Comment server-first — @clay/javascript@0.1.0||57,3833,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Toggle Markdown Comment server-first — @clay/markdown@0.1.0||57,3865,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Toggle Markdown List server-first — @clay/markdown@0.1.0 Ctrl+Shift+8||57,3897,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Toggle Markdown Preview server-first — @clay/markdown@0.1.0 Ctrl+Shift+M||57,3938,1098x41|CLAY-DESKTOP
+14|list item|-|visible|Toggle Rust Line Comment server-first — @clay/rust@0.1.0||57,3979,1098x32|CLAY-DESKTOP
+14|list item|-|visible|Toggle TypeScript Line Comment server-first — @clay/typescript@0.1.0||57,4011,1098x32|CLAY-DESKTOP
+13|footer|-|visible|||45,892,1122x58|CLAY-DESKTOP
+14|status bar|-|visible|95 results|95 results|57,912,78x18|CLAY-DESKTOP
+14|section|-|visible|||926,909,22x25|CLAY-DESKTOP
+15|section|-|visible|||931,914,12x15|CLAY-DESKTOP
+14|section|-|visible|||951,913,53x16|CLAY-DESKTOP
+14|section|-|visible|||1023,909,19x25|CLAY-DESKTOP
+15|section|-|visible|||1028,914,9x15|CLAY-DESKTOP
+14|section|-|visible|||1046,913,21x16|CLAY-DESKTOP
+14|section|-|visible|||1086,909,29x25|CLAY-DESKTOP
+15|section|-|visible|||1091,914,19x15|CLAY-DESKTOP
+14|section|-|visible|||1117,913,34x16|CLAY-DESKTOP
+12|section|-|visible|||48,1081,16x25|CLAY-DESKTOP
+13|section|-|visible|||53,1086,6x15|CLAY-DESKTOP
+12|section|-|visible|||67,1086,52x15|CLAY-DESKTOP
+12|section|-|visible|||126,1081,17x25|CLAY-DESKTOP
+13|section|-|visible|||131,1086,7x15|CLAY-DESKTOP
+12|section|-|visible|||146,1086,88x15|CLAY-DESKTOP
+12|section|-|visible|||241,1081,19x25|CLAY-DESKTOP
+13|section|-|visible|||246,1086,9x15|CLAY-DESKTOP
+12|section|-|visible|||264,1086,24x15|CLAY-DESKTOP
+12|section|-|visible|||294,1081,19x25|CLAY-DESKTOP
+13|section|-|visible|||299,1086,9x15|CLAY-DESKTOP
+12|section|-|visible|||316,1081,19x25|CLAY-DESKTOP
+13|section|-|visible|||321,1086,9x15|CLAY-DESKTOP
+12|section|-|visible|||338,1086,37x15|CLAY-DESKTOP
+11|section|-|visible|Session environment||26,1122,1160x24|CLAY-DESKTOP
+8|landmark|-|visible|Document outline||1186,110,340x1036|CLAY-DESKTOP
+9|section|-|visible|||1266,132,7x16|CLAY-DESKTOP
+9|button|-|visible|Hide outline||1480,124,32x32|CLAY-DESKTOP
+9|description list|-|visible|||1187,166,339x114|CLAY-DESKTOP
+10|description term|-|visible|||1201,167,56x15|CLAY-DESKTOP
+10|description value|-|visible|||1269,166,244x15|CLAY-DESKTOP
+10|description term|-|visible|||1201,188,56x15|CLAY-DESKTOP
+10|description value|-|visible|||1269,187,244x15|CLAY-DESKTOP
+10|description term|-|visible|||1201,209,56x15|CLAY-DESKTOP
+10|description value|-|visible|||1269,208,244x15|CLAY-DESKTOP
+10|description term|-|visible|||1201,230,56x15|CLAY-DESKTOP
+10|description value|-|visible|||1269,229,244x15|CLAY-DESKTOP
+10|description term|-|visible|||1201,251,56x15|CLAY-DESKTOP
+10|description value|-|visible|||1269,250,244x15|CLAY-DESKTOP
+9|separator|-|visible|||1187,280,339x1|CLAY-DESKTOP
+9|paragraph|-|visible|||1187,281,339x833|CLAY-DESKTOP
+7|landmark|-|visible|||26,1146,1500x28|CLAY-DESKTOP
+8|section|-|visible|||38,1151,70x18|CLAY-DESKTOP
+8|status bar|-|visible|||105,1145,671x31|CLAY-DESKTOP
+8|button|-|visible|hide lane Ctrl X P||803,1144,162x33|CLAY-DESKTOP
+8|button|-|visible|palette Ctrl X O||978,1144,147x33|CLAY-DESKTOP
+8|button|-|visible|files Ctrl B||1138,1144,109x33|CLAY-DESKTOP
+8|button|-|visible|hide outline Ctrl I||1260,1144,164x33|CLAY-DESKTOP
+8|button|-|visible|filter /||1437,1144,78x33|CLAY-DESKTOP

@@ -1,3 +1,11 @@
+//! Plan 134 P3 async-filesystem ceiling: the sync `std::fs` sites here run on
+//! the embedded-JS runtime worker thread (module loading, preferences
+//! read/write, package-option state), not on the connection reactor. Reactor
+//! paths that need a configuration root or the persisted appearance wrap this
+//! API in `tokio::task::spawn_blocking`
+//! (`connection::runtime::persist_settings_change`,
+//! `runtime_reload::persisted_appearance`).
+
 use std::{
     collections::VecDeque,
     error::Error,
@@ -10,6 +18,7 @@ use deno_core::ModuleSpecifier;
 use deno_error::JsErrorBox;
 use serde_json::Value;
 
+use crate::lock_util::LockOrRecover;
 use crate::packages::manifest::is_valid_api_prefix;
 
 const PACKAGE_OPTION_PAYLOAD_BUDGET_BYTES: usize = 16 * 1024;
@@ -17,13 +26,19 @@ const MODULE_ERROR_CAPACITY: usize = 64;
 const MODULE_ERROR_MESSAGE_BUDGET_BYTES: usize = 1024;
 const PACKAGE_OPTION_SOURCES: &[&str] =
     &["init-js", "package-default", "clay-default", "ui-session"];
-/// Bounded persisted user preferences (`~/.config/clay/preferences.json`). The
+/// Bounded persisted user preferences (`~/.clay/preferences.json`). The
 /// file is a closed JSON object: only `theme`, `appearance`, and `typography`
 /// keys are recognized; unknown keys are dropped with a diagnostic. Values are
 /// validated at load and persist time so a corrupted/manually-edited file falls
 /// back safely without granting authority.
 const PREFERENCES_PAYLOAD_BUDGET_BYTES: usize = 8 * 1024;
-const PREFERENCES_KEYS: &[&str] = &["theme", "appearance", "typography"];
+const PREFERENCES_KEYS: &[&str] = &[
+    "theme",
+    "appearance",
+    "typography",
+    "designSystem",
+    "iconPack",
+];
 const PREFERENCES_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 const PANEL_VISIBILITY_VALUES: &[&str] = &["visible", "hidden", "collapsed"];
 const PANEL_SLOT_VALUES: &[&str] = &["left", "right", "top", "bottom"];
@@ -54,6 +69,45 @@ pub(crate) struct RegisteredPackageOption {
     pub(crate) estimated_payload_bytes: usize,
 }
 
+/// One-time migration to the `~/.clay` root (decision 2026-09-10-1526):
+/// renames a legacy `~/.clay` tree to `~/.clay`. When the new root
+/// already exists, only the legacy runtime data dir (`agent/` —
+/// sessions.sqlite, credentials.vault, book.json, vault.passphrase) is
+/// moved into the new root, because a rename would strand credentials.
+/// Best-effort: failures warn and keep the legacy data in place.
+fn migrate_legacy_config_root(home: &Path) {
+    let legacy = home.join(".config").join("clay");
+    let new_root = home.join(".clay");
+    if !legacy.is_dir() {
+        return;
+    }
+    if !new_root.exists() {
+        if let Some(parent) = new_root.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match fs::rename(&legacy, &new_root) {
+            Ok(()) => return,
+            Err(error) => eprintln!(
+                "[config] migrating {} -> {} failed ({error}); the legacy tree stays in place",
+                legacy.display(),
+                new_root.display()
+            ),
+        }
+    }
+    let legacy_agent = legacy.join("agent");
+    let new_agent = new_root.join("agent");
+    if legacy_agent.is_dir()
+        && !new_agent.exists()
+        && let Err(error) = fs::rename(&legacy_agent, &new_agent)
+    {
+        eprintln!(
+            "[config] migrating {} -> {} failed ({error}); agent data stays in the legacy root",
+            legacy_agent.display(),
+            new_agent.display()
+        );
+    }
+}
+
 impl ConfigurationRuntime {
     pub(crate) fn from_config_root(
         config_root: impl AsRef<Path>,
@@ -77,11 +131,24 @@ impl ConfigurationRuntime {
         })
     }
 
+    /// Default config root: `~/.clay` (decision 2026-09-10-1526 — Clay keeps
+    /// data, not just config, so it no longer lives under `.config`).
+    /// One-time migration: a legacy `~/.clay` tree is renamed into
+    /// place when `~/.clay` does not exist yet; if both exist (user created
+    /// the new root first) only the legacy runtime data dir is salvaged so
+    /// credentials never orphan. Idempotent: once migrated, later calls no-op.
     pub(crate) fn default_config_root() -> Option<PathBuf> {
-        std::env::var_os("HOME")
+        let home = std::env::var_os("HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-            .map(|home| home.join(".config").join("clay"))
+            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))?;
+        Some(Self::default_config_root_for_home(&home))
+    }
+
+    /// `default_config_root` for an explicit home — the testable seam
+    /// (no env-var access).
+    pub(crate) fn default_config_root_for_home(home: &Path) -> PathBuf {
+        migrate_legacy_config_root(home);
+        home.join(".clay")
     }
 
     pub(crate) fn entry_specifier(&self) -> Result<ModuleSpecifier, ConfigurationError> {
@@ -120,10 +187,7 @@ impl ConfigurationRuntime {
             path: display_relative_to(&self.config_root, &module_path),
             message: truncate_utf8(message, MODULE_ERROR_MESSAGE_BUDGET_BYTES),
         };
-        let mut errors = self
-            .module_errors
-            .lock()
-            .expect("configuration module error mutex poisoned");
+        let mut errors = self.module_errors.lock_or_recover();
         if errors.len() >= MODULE_ERROR_CAPACITY {
             errors.pop_front();
         }
@@ -132,11 +196,7 @@ impl ConfigurationRuntime {
     }
 
     pub(crate) fn take_module_errors(&self) -> Vec<ConfigurationModuleError> {
-        self.module_errors
-            .lock()
-            .expect("configuration module error mutex poisoned")
-            .drain(..)
-            .collect()
+        self.module_errors.lock_or_recover().drain(..).collect()
     }
 
     pub(crate) fn resolve_module(
@@ -203,16 +263,11 @@ impl ConfigurationRuntime {
     pub(crate) fn state_json(&self) -> String {
         let loaded_modules: Vec<String> = self
             .loaded_modules
-            .lock()
-            .expect("configuration module state mutex poisoned")
+            .lock_or_recover()
             .iter()
             .map(|path| display_relative_to(&self.config_root, path))
             .collect();
-        let package_options = self
-            .package_options
-            .lock()
-            .expect("configuration package option state mutex poisoned")
-            .clone();
+        let package_options = self.package_options.lock_or_recover().clone();
         serde_json::json!({
             "entryPoint": display_relative_to(&self.config_root, &self.entry_point),
             "loadedModules": loaded_modules,
@@ -277,17 +332,13 @@ impl ConfigurationRuntime {
             estimated_payload_bytes: size,
         };
         self.package_options
-            .lock()
-            .expect("configuration package option state mutex poisoned")
+            .lock_or_recover()
             .push(registered.clone());
         Ok(registered)
     }
 
     fn record_loaded_module(&self, module_path: PathBuf) {
-        let mut loaded_modules = self
-            .loaded_modules
-            .lock()
-            .expect("configuration module state mutex poisoned");
+        let mut loaded_modules = self.loaded_modules.lock_or_recover();
         if !loaded_modules.iter().any(|loaded| loaded == &module_path) {
             loaded_modules.push(module_path);
         }
@@ -376,6 +427,14 @@ impl ConfigurationRuntime {
                     Ok(()) => prefs.typography = Some(field.clone()),
                     Err(reason) => prefs.diagnostics.push(reason),
                 },
+                "designSystem" => match validate_preference_design_system(field) {
+                    Ok(specifier) => prefs.design_system = Some(specifier),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
+                "iconPack" => match validate_preference_icon_pack(field) {
+                    Ok(specifier) => prefs.icon_pack = Some(specifier),
+                    Err(reason) => prefs.diagnostics.push(reason),
+                },
                 _ => unreachable!("PREFERENCES_KEYS bounds the match"),
             }
         }
@@ -402,6 +461,12 @@ impl ConfigurationRuntime {
             "typography" => validate_preference_typography(&value)
                 .map(|_| prefs.typography = Some(value))
                 .map_err(ConfigurationError::InvalidPackageOption)?,
+            "designSystem" => validate_preference_design_system(&value)
+                .map(|specifier| prefs.design_system = Some(specifier))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
+            "iconPack" => validate_preference_icon_pack(&value)
+                .map(|specifier| prefs.icon_pack = Some(specifier))
+                .map_err(ConfigurationError::InvalidPackageOption)?,
             _ => {
                 return Err(ConfigurationError::InvalidPackageOption(format!(
                     "preferences key `{key}` is not recognized"
@@ -425,6 +490,8 @@ impl ConfigurationRuntime {
             "theme": prefs.theme,
             "appearance": prefs.appearance.map(crate::protocol::Appearance::as_str),
             "typography": prefs.typography,
+            "designSystem": prefs.design_system,
+            "iconPack": prefs.icon_pack,
         });
         let bytes = serde_json::to_vec(&object).map_err(|error| {
             ConfigurationError::InvalidPackageOption(format!(
@@ -791,7 +858,37 @@ pub(crate) struct PersistedPreferences {
     pub(crate) theme: Option<String>,
     pub(crate) appearance: Option<crate::protocol::Appearance>,
     pub(crate) typography: Option<Value>,
+    pub(crate) design_system: Option<String>,
+    pub(crate) icon_pack: Option<String>,
     pub(crate) diagnostics: Vec<String>,
+}
+
+/// Validate a persisted `iconPack` value: non-empty string specifier. Unlike
+/// the theme key, arbitrary specifiers are allowed: the selection is
+/// re-validated against enabled records at every commit, and a revoked/removed
+/// pack deterministically falls back to the bundled Regular subset (Plan 112
+/// task 5, state table row 7).
+fn validate_preference_icon_pack(value: &Value) -> Result<String, String> {
+    let specifier = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `iconPack` must be a string; dropping".to_string())?;
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err("preferences.json `iconPack` must not be empty; dropping".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Validate a persisted `design_system` value: non-empty string specifier.
+fn validate_preference_design_system(value: &Value) -> Result<String, String> {
+    let specifier = value
+        .as_str()
+        .ok_or_else(|| "preferences.json `designSystem` must be a string; dropping".to_string())?;
+    let trimmed = specifier.trim();
+    if trimmed.is_empty() {
+        return Err("preferences.json `designSystem` must not be empty; dropping".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 /// Validate a persisted `theme` value: must be a first-party bundled
@@ -863,6 +960,38 @@ mod tests {
     }
 
     #[test]
+    fn icon_pack_preference_persists_survives_reload_and_drops_garbage() {
+        let runtime = runtime();
+        let prefs = runtime
+            .persist_preference("iconPack", json!("@clay/icons-phosphor-duotone"))
+            .expect("valid specifier persists");
+        assert_eq!(
+            prefs.icon_pack.as_deref(),
+            Some("@clay/icons-phosphor-duotone")
+        );
+
+        // Reload merges the persisted key.
+        let reloaded = runtime.load_preferences();
+        assert_eq!(
+            reloaded.icon_pack.as_deref(),
+            Some("@clay/icons-phosphor-duotone")
+        );
+        assert!(reloaded.diagnostics.is_empty());
+
+        // Hostile/garbage values reject and never break startup or corrupt
+        // the persisted file.
+        let error = runtime
+            .persist_preference("iconPack", json!(42))
+            .expect_err("non-string rejected");
+        assert!(error.to_string().contains("iconPack"));
+
+        let error = runtime
+            .persist_preference("iconPack", json!("   "))
+            .expect_err("empty specifier rejected");
+        assert!(error.to_string().contains("iconPack"));
+    }
+
+    #[test]
     fn module_error_storage_is_relative_bounded_and_drained() {
         let runtime = runtime();
         runtime
@@ -906,6 +1035,35 @@ mod tests {
     }
 
     #[test]
+    fn phase28_editor_defaults_are_not_configuration_keys() {
+        let runtime = runtime();
+        for option in [
+            "editor.fold.enabled",
+            "editor.inlayHints.enabled",
+            "editor.headingPrefixes",
+            "editor.commentPrefix",
+            "editor.chrome",
+            "editor.wrapPolicy",
+        ] {
+            let error = runtime
+                .set_package_option(&json!({
+                    "packagePrefix": "editor",
+                    "option": option,
+                    "value": true
+                }))
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("unsupported package option"),
+                "Phase 28 hidden editor key {option} must fail closed: {error}"
+            );
+        }
+        assert_eq!(
+            runtime.state_json(),
+            r#"{"entryPoint":"./init.js","loadedModules":[],"packageOptions":[]}"#
+        );
+    }
+
+    #[test]
     fn package_option_configuration_rejects_hidden_ad_hoc_and_raw_authority_keys() {
         let runtime = runtime();
         let hidden = runtime
@@ -941,7 +1099,7 @@ mod tests {
         // Plan 080: the configuration-root watcher is fixed automatic server
         // behavior. Interval, debounce, and enable/disable stay compiled
         // constants; any `core.watch.*` style key a user tries from
-        // `~/.config/clay/init.js` is rejected by the closed package-option
+        // `~/.clay/init.js` is rejected by the closed package-option
         // allowlist — never a hidden configuration key.
         let runtime = runtime();
         for option in [
@@ -993,8 +1151,32 @@ mod tests {
             "protocol.archiveValidation",
             "protocol.codecValidation",
             "protocol.rkyvValidation",
+            // Plan 087 task 10: welcome entry state and completion
+            // projection geometry/dismissal are Clay-owned compiled
+            // surfaces; these remain rejected configuration keys.
+            "completion.maxVisibleRows",
+            "completion.maxWidthPx",
+            "completion.anchor",
+            "welcome.enabled",
+            "welcome.entryState",
+            "centered.overlayWidth",
             "build.debugProfile",
             "build.targetDirectory",
+            // Plan 099: parser, viewport, retention, and trace budgets are
+            // compiled host policy, never user/package configuration.
+            "syntax.executorMaxJobs",
+            "syntax.documentTreeCacheEntries",
+            "syntax.modeActivationCacheEntries",
+            "syntax.cacheBudgetBytes",
+            "syntax.parseWindowBytes",
+            "syntax.requestPacingMs",
+            "editor.viewportOverscan",
+            "editor.decorationCacheBytes",
+            "editor.positionIndex",
+            "performance.traceCapacity",
+            "performance.longTaskBudget",
+            "performance.deviceBudget",
+            "document.residentMemoryBudget",
         ] {
             let option = format!("audit.{suffix}");
             let error = runtime
@@ -1020,7 +1202,7 @@ mod tests {
     /// insertion and comment continuation) rather than runtime-configurable
     /// Clay JS configuration settings. This test pins that contract: any
     /// behavior-changing Phase 18.9 key a user might try to set from
-    /// `~/.config/clay/init.js` is rejected by the closed package-option
+    /// `~/.clay/init.js` is rejected by the closed package-option
     /// allowlist (Plan 037 Task 10 Test Case 1) rather than silently accepted
     /// as an undocumented setting, and built-in mode defaults therefore
     /// cannot be overridden through configuration (Security criterion).
@@ -1254,5 +1436,81 @@ mod tests {
             )
             .expect_err("authority-bearing typography must be rejected");
         assert!(err.to_string().contains("prohibited"));
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch_home(label: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!(
+            "clay-root-migration-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).expect("scratch home");
+        home
+    }
+
+    #[test]
+    fn legacy_config_root_renames_wholesale_into_the_new_root() {
+        let home = scratch_home("rename");
+        let legacy = home.join(".config").join("clay");
+        fs::create_dir_all(legacy.join("agent")).expect("legacy tree");
+        fs::write(legacy.join("init.js"), "// user config\n").expect("init.js");
+        fs::write(legacy.join("agent").join("book.json"), "{}").expect("book");
+
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        assert!(!legacy.exists(), "legacy tree moved");
+        assert!(home.join(".clay/init.js").is_file());
+        assert!(home.join(".clay/agent/book.json").is_file());
+        // Idempotent: second run with no legacy tree keeps the new root.
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pre_existing_new_root_salvages_only_the_legacy_agent_data() {
+        let home = scratch_home("salvage");
+        let legacy = home.join(".config").join("clay");
+        fs::create_dir_all(legacy.join("agent")).expect("legacy tree");
+        fs::write(legacy.join("agent").join("sessions.sqlite"), "db").expect("sessions");
+        fs::write(legacy.join("init.js"), "// user config\n").expect("legacy init");
+        fs::create_dir_all(home.join(".clay")).expect("pre-existing new root");
+        fs::write(home.join(".clay/init.js"), "// fresh\n").expect("fresh init");
+
+        ConfigurationRuntime::default_config_root_for_home(&home);
+        assert!(legacy.join("init.js").exists(), "config files stay put");
+        assert!(
+            !legacy.join("agent").exists(),
+            "legacy agent data dir moved out"
+        );
+        assert!(home.join(".clay/agent/sessions.sqlite").is_file());
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn absent_legacy_root_is_a_no_op() {
+        let home = scratch_home("noop");
+        assert_eq!(
+            ConfigurationRuntime::default_config_root_for_home(&home),
+            home.join(".clay")
+        );
+        assert!(
+            !home.join(".clay").exists(),
+            "no tree created by resolution"
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 }

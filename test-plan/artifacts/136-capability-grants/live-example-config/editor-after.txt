@@ -1,0 +1,1 @@
+role=entry name='Document editor' ifaces=Text,Action,Component chars=243 caret=-1 states=editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=60,157,763x14553

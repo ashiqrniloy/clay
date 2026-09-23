@@ -1,0 +1,9 @@
+{
+  "maxEntries": 10000,
+  "maxFiles": 10000,
+  "maxResults": 1000,
+  "maxMatches": 1000,
+  "maxDepth": 32,
+  "maxScanBytes": 67108864,
+  "exclude": [".git", "node_modules", "dist", "target"]
+}

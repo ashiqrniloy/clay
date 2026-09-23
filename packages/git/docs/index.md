@@ -11,7 +11,7 @@
 - Load entry: `./dist/load.js` (exports `loadGitPackage(clay, options)` and default `loadGit`; re-exported from `./dist/index.js`)
 - Status adapter: `./dist/status.js`
 - Documentation entry: `./docs/index.md`
-- SDUI region: `git.status` (read-only branch/dirty/refresh labels)
+- SDUI region: `git.status` (read-only branch/dirty/refresh labels; labels carry semantic icon references — `git.branch` on HEAD state, `status.success`/`status.warning` on dirty state, `status.success`/`status.error` on refresh state — resolved from the user's active icon pack, with the text always standing alone)
 - Configuration: none. Phase 18.13 uses fixed safe defaults (bounded discovery timeout, stale-poll interval). No `clay.contributions.configuration` entries and no `package-configuration` permission.
 
 ## Read-Only Scope
@@ -49,7 +49,7 @@ Loading `@clay/git` adds the read-only status panel on top of these always-avail
 ## Default Load Path
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 
 await loadPackage("@clay/git");

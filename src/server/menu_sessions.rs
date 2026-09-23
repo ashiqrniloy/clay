@@ -32,6 +32,8 @@ use crate::{
         TransientMenuOriginData, TransientMenuSnapshotData, TransientMenuStatusData,
     },
     server::{
+        agent::AgentPickerInventory,
+        agent_picker::{AgentPicker, AgentPickerActivate},
         command_execution::{
             CommandExecutionDiagnostic, CommandExecutionRule, CommandExecutionTarget,
         },
@@ -63,11 +65,11 @@ impl ServerMenuSessions {
         Self::default()
     }
 
-    /// Opens a new Control Center session (24.1's first kind) and returns its
-    /// initial snapshot plus the replaced session's id. One active session per
-    /// connection: the previous session (if any) is dropped and its id
-    /// returned, which the caller must report as `TransientMenuClosed` before
-    /// pushing the new snapshot.
+    /// Opens a new palette session (24.1's first kind — the composer's `/`
+    /// palette since plan 124 task 7) and returns its initial snapshot plus the
+    /// replaced session's id. One active session per connection: the previous
+    /// session (if any) is dropped and its id returned, which the caller must
+    /// report as `TransientMenuClosed` before pushing the new snapshot.
     pub(crate) fn open_control_center(
         &mut self,
         catalogue: &CommandCatalogue,
@@ -87,11 +89,30 @@ impl ServerMenuSessions {
         (snapshot, replaced_id)
     }
 
-    /// Opens a new Path Browser session (Phase 24.3's second kind) seeded
-    /// with a caller-resolved canonical starting directory and its initial
-    /// bounded listing already installed. Mirrors [`Self::open_control_center`]
-    /// exactly: one active session per connection, replaced id reported by
-    /// the caller as `TransientMenuClosed` before the new snapshot.
+    /// Opens a new Agent Picker session (the agent/provider/model/setup/session
+    /// flows) with the caller's inventory already installed. Mirrors
+    /// [`Self::open_control_center`] exactly: one active session per connection,
+    /// replaced id reported by the caller as `TransientMenuClosed` before the
+    /// new snapshot. The session is a `CommandPalette` composer-palette session
+    /// whose `mode` names its stage (plan 125).
+    pub(crate) fn open_agent_picker(
+        &mut self,
+        kind: crate::protocol::AgentPickerKind,
+        inventory: AgentPickerInventory,
+        package_profiles: Vec<(String, String)>,
+        generation_id: u64,
+    ) -> (TransientMenuSnapshotData, Option<u64>) {
+        self.next_session_id += 1;
+        let id = SERVER_MENU_SESSION_ID_HIGH_BIT | self.next_session_id;
+        let replaced_id = self.active.keys().next().copied();
+        self.active.clear();
+        let picker = AgentPicker::open(id, kind, inventory, package_profiles);
+        let session = ServerMenuSession::agent_picker(picker, id, generation_id);
+        let snapshot = snapshot_from_session(&session.session());
+        self.active.insert(id, session);
+        (snapshot, replaced_id)
+    }
+
     pub(crate) fn open_path_browser(
         &mut self,
         session: PathBrowserSession,
@@ -109,6 +130,10 @@ impl ServerMenuSessions {
 
     pub(crate) fn get_mut(&mut self, session_id: u64) -> Option<&mut ServerMenuSession> {
         self.active.get_mut(&session_id)
+    }
+
+    pub(crate) fn get(&self, session_id: u64) -> Option<&ServerMenuSession> {
+        self.active.get(&session_id)
     }
 
     /// Removes the session (activation and cancel both consume it).
@@ -141,16 +166,20 @@ pub(crate) enum ServerMenuActivateOutcome {
     Navigate(std::path::PathBuf),
     OpenFile(std::path::PathBuf),
     OpenWorkspace(std::path::PathBuf),
+    Agent(AgentPickerActivate),
 }
 
 /// Result of an edit intent: the projected snapshot plus an optional relist
 /// target. Only the Path Browser arm ever produces a relist (its directory
 /// prefix changed); the connection runs the bounded listing, installs the
-/// page, and re-projects.
+/// page, and re-projects. `close` reports that the intent finished the flow
+/// (plan 125: a picker's step back from its first stage), which the connection
+/// answers with the session-closed message the client already dismisses on.
 #[derive(Debug)]
 pub(crate) struct MenuEdit {
     pub(crate) snapshot: TransientMenuSession,
     pub(crate) relist: Option<std::path::PathBuf>,
+    pub(crate) close: bool,
 }
 
 /// One active server menu session. Kind dispatch is an enum (closed set):
@@ -168,6 +197,7 @@ pub(crate) struct ServerMenuSession {
 pub(crate) enum ServerMenuSessionKind {
     ControlCenter(ControlCenter),
     PathBrowser(PathBrowserSession),
+    AgentPicker(AgentPicker),
 }
 
 impl ServerMenuSession {
@@ -187,6 +217,28 @@ impl ServerMenuSession {
         }
     }
 
+    fn agent_picker(picker: AgentPicker, session_id: u64, generation_id: u64) -> Self {
+        Self {
+            session_id,
+            generation_id,
+            kind: ServerMenuSessionKind::AgentPicker(picker),
+        }
+    }
+
+    pub(crate) fn agent_picker_mut(&mut self) -> Option<&mut AgentPicker> {
+        match &mut self.kind {
+            ServerMenuSessionKind::AgentPicker(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn agent_picker_ref(&self) -> Option<&AgentPicker> {
+        match &self.kind {
+            ServerMenuSessionKind::AgentPicker(picker) => Some(picker),
+            _ => None,
+        }
+    }
+
     /// Replaces the filter query (clamped at the shared query budget before
     /// reaching session state) and returns the projected snapshot plus an
     /// optional relist target (path mode only, when the directory prefix
@@ -200,6 +252,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::ControlCenter(center) => MenuEdit {
                 snapshot: center.set_query(query),
                 relist: None,
+                close: false,
             },
             // Phase 24.3: full-value path input replacement. A `FilterOnly`
             // transition scores the installed entries locally with no
@@ -214,8 +267,37 @@ impl ServerMenuSession {
                 MenuEdit {
                     snapshot: session.menu_session(TransientMenuSessionId(self.session_id)),
                     relist,
+                    close: false,
                 }
             }
+            ServerMenuSessionKind::AgentPicker(picker) => MenuEdit {
+                snapshot: picker.set_query(query),
+                relist: None,
+                close: false,
+            },
+        }
+    }
+
+    /// Plan 124: the palette's scope chip selection (`All` = `None`). Only the
+    /// command catalogue has scopes — its items carry them, and the palette's
+    /// chips must filter what the server selects over, so the client sends the
+    /// chip with its query instead of hiding rows locally (the client stays a
+    /// renderer, and the session's selection never points at a hidden row).
+    /// Sessions whose items carry no scope (path browser, pickers) ignore it:
+    /// `None` means "no snapshot from this call", and the caller keeps the one
+    /// it already had.
+    pub(crate) fn set_scope(&mut self, scope: Option<&str>) -> Option<TransientMenuSession> {
+        let scope: Option<String> = scope.map(|scope| {
+            scope
+                .chars()
+                .take(crate::perf::budgets::TRANSIENT_MENU_MAX_SCOPE_CHARS)
+                .collect()
+        });
+        match &mut self.kind {
+            ServerMenuSessionKind::ControlCenter(center) => {
+                Some(center.set_scope(scope.as_deref()))
+            }
+            ServerMenuSessionKind::PathBrowser(_) | ServerMenuSessionKind::AgentPicker(_) => None,
         }
     }
 
@@ -228,6 +310,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::ControlCenter(center) => MenuEdit {
                 snapshot: center.backspace(),
                 relist: None,
+                close: false,
             },
             ServerMenuSessionKind::PathBrowser(session) => {
                 let transition = session.backspace();
@@ -238,6 +321,23 @@ impl ServerMenuSession {
                 MenuEdit {
                     snapshot: session.menu_session(TransientMenuSessionId(self.session_id)),
                     relist,
+                    close: false,
+                }
+            }
+            // Plan 125: the picker's backspace is stage-back, and the flow's
+            // own entry has nothing behind it — that is where the sheet closes
+            // instead (the approved `Esc` at the first stage).
+            ServerMenuSessionKind::AgentPicker(picker) => {
+                let close = picker.at_flow_entry();
+                let snapshot = if close {
+                    picker.session()
+                } else {
+                    picker.backspace()
+                };
+                MenuEdit {
+                    snapshot,
+                    relist: None,
+                    close,
                 }
             }
         }
@@ -249,7 +349,7 @@ impl ServerMenuSession {
     /// cannot fire on a Control Center session.
     pub(crate) fn install_path_browser(&mut self, page: UserBrowsePage) -> TransientMenuSession {
         match &mut self.kind {
-            ServerMenuSessionKind::ControlCenter(_) => {}
+            ServerMenuSessionKind::ControlCenter(_) | ServerMenuSessionKind::AgentPicker(_) => {}
             ServerMenuSessionKind::PathBrowser(session) => session.install(page),
         }
         self.session()
@@ -259,7 +359,7 @@ impl ServerMenuSession {
     /// (items suppressed, activation fails closed, input stays recoverable).
     pub(crate) fn set_path_browser_error(&mut self, message: String) -> TransientMenuSession {
         match &mut self.kind {
-            ServerMenuSessionKind::ControlCenter(_) => {}
+            ServerMenuSessionKind::ControlCenter(_) | ServerMenuSessionKind::AgentPicker(_) => {}
             ServerMenuSessionKind::PathBrowser(session) => session.set_error(message),
         }
         self.session()
@@ -274,6 +374,7 @@ impl ServerMenuSession {
                 session.move_selection(delta);
                 session.menu_session(TransientMenuSessionId(self.session_id))
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker.move_selection(delta),
         }
     }
 
@@ -284,6 +385,7 @@ impl ServerMenuSession {
             ServerMenuSessionKind::PathBrowser(session) => {
                 session.menu_session(TransientMenuSessionId(self.session_id))
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker.session(),
         }
     }
 
@@ -297,7 +399,7 @@ impl ServerMenuSession {
     /// (the Control Center activates the same selection for primary and
     /// secondary; path mode descends on primary directory activation).
     pub(crate) fn activate(
-        &self,
+        &mut self,
         target: CommandExecutionTarget,
         kind: TransientMenuActivationData,
         current_generation_id: u64,
@@ -309,7 +411,7 @@ impl ServerMenuSession {
                 message: "menu session belongs to a replaced runtime generation".to_string(),
             });
         }
-        match &self.kind {
+        match &mut self.kind {
             ServerMenuSessionKind::ControlCenter(center) => {
                 let _ = kind; // Control Center: both kinds activate the selection
                 center
@@ -347,6 +449,14 @@ impl ServerMenuSession {
                     }),
                 }
             }
+            ServerMenuSessionKind::AgentPicker(picker) => picker
+                .activate(matches!(kind, TransientMenuActivationData::Secondary))
+                .map(ServerMenuActivateOutcome::Agent)
+                .map_err(|message| CommandExecutionDiagnostic {
+                    command_id: String::new(),
+                    rule: CommandExecutionRule::UnknownCommand,
+                    message,
+                }),
         }
     }
 }
@@ -355,7 +465,7 @@ impl ServerMenuSession {
 /// Inert display data only: no actions, paths, or authority fields cross the
 /// wire; activation is by opaque session id.
 pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> TransientMenuSnapshotData {
-    TransientMenuSnapshotData::new(
+    let snapshot = TransientMenuSnapshotData::new(
         session.session_id().0,
         session.prompt(),
         session.query(),
@@ -363,12 +473,21 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
             .items()
             .iter()
             .map(|item| {
-                TransientMenuItemData::new(
+                let projected = TransientMenuItemData::new(
                     item.id.clone(),
                     item.label.clone(),
                     item.detail.clone(),
                     item.accessibility_label.clone(),
-                )
+                );
+                // Plan 124: the row's scope tag and chords ride the item, so
+                // the palette draws its chips from server data (the scope
+                // vocabulary is closed and server-owned; a row without one is
+                // `All`-only).
+                let projected = match &item.scope {
+                    Some(scope) => projected.with_scope(scope.clone()),
+                    None => projected,
+                };
+                projected.with_bindings(item.bindings.clone())
             })
             .collect(),
         session.selected_index() as u32,
@@ -387,12 +506,23 @@ pub(crate) fn snapshot_from_session(session: &TransientMenuSession) -> Transient
             TransientMenuFocusPolicy::Modeless => TransientMenuFocusPolicyData::Modeless,
         },
         match session.origin() {
-            TransientMenuOrigin::CommandPalette => TransientMenuOriginData::CommandPalette,
+            // Completion sessions are client-local and never serialize through
+            // the server-owned menu snapshot protocol.
+            TransientMenuOrigin::CommandPalette | TransientMenuOrigin::Completion => {
+                TransientMenuOriginData::CommandPalette
+            }
             TransientMenuOrigin::ContextMenu => TransientMenuOriginData::ContextMenu,
             TransientMenuOrigin::MenuBar => TransientMenuOriginData::MenuBar,
             TransientMenuOrigin::Centered => TransientMenuOriginData::Centered,
         },
-    )
+    );
+    // Plan 125: the session's presentation mode rides the snapshot so one
+    // `CommandPalette` sheet can render every stage (catalogue, path, picker,
+    // secret, url, oauth). Absent (no mode set) decodes as the catalogue.
+    match session.mode() {
+        Some(mode) => snapshot.with_mode(mode.to_string()),
+        None => snapshot,
+    }
 }
 
 #[cfg(test)]
@@ -474,6 +604,45 @@ mod tests {
         let catalogue = catalogue_for_registry(registry);
         let (snapshot, _) = store.open_control_center(&catalogue, 1);
         snapshot.session_id
+    }
+
+    struct MenuIntentLcg(u64);
+
+    impl MenuIntentLcg {
+        fn new(seed: u64) -> Self {
+            Self(seed)
+        }
+
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0 ^ (self.0 >> 29)
+        }
+    }
+
+    fn assert_menu_invariants(store: &mut ServerMenuSessions, active_id: Option<u64>) {
+        assert_eq!(
+            store.active.len(),
+            if active_id.is_some() { 1 } else { 0 },
+            "one-active-session invariant"
+        );
+        if let Some(id) = active_id {
+            assert!(id & SERVER_MENU_SESSION_ID_HIGH_BIT != 0);
+            let session = store.get_mut(id).expect("tracked menu session is live");
+            let snapshot = session.session();
+            if snapshot.items().is_empty() {
+                assert_eq!(snapshot.selected_index(), 0);
+                assert!(matches!(
+                    snapshot.status(),
+                    TransientMenuStatus::Empty { .. }
+                ));
+            } else {
+                assert!(snapshot.selected_index() < snapshot.items().len());
+                assert_eq!(snapshot.status(), &TransientMenuStatus::Active);
+            }
+        }
     }
 
     #[test]
@@ -818,6 +987,92 @@ mod tests {
     }
 
     #[test]
+    fn picker_backspace_walks_the_flow_and_closes_at_its_entry() {
+        // Plan 125: a picker stage's `back()` is stage-back, and the *entry* is
+        // what closes the sheet — the connection answers `close` with the
+        // session-closed message, so `Esc` never has to guess how deep the
+        // flow is.
+        let mut store = ServerMenuSessions::new();
+        let inventory = crate::server::agent::AgentPickerInventory::default();
+        let (snapshot, _) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::Provider,
+            inventory.clone(),
+            Vec::new(),
+            1,
+        );
+        let id = snapshot.session_id;
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(edit.close, "the provider list is the flow's entry");
+        assert_eq!(edit.snapshot.mode(), Some("picker"));
+
+        // A `ProviderSetup` list is one step in: it walks back to the flow's
+        // entry instead of closing, and only *that* stage closes.
+        let mut inventory = inventory;
+        inventory
+            .providers
+            .push(crate::server::agent::AgentPickerProvider {
+                id: "anthropic".to_string(),
+                configured: true,
+                auth: vec![crate::server::agent::AgentPickerAuth {
+                    kind: "api_key".to_string(),
+                    name: "API key".to_string(),
+                    credential_name: "apiKey".to_string(),
+                }],
+            });
+        let (snapshot, replaced) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::ProviderSetup,
+            inventory,
+            Vec::new(),
+            1,
+        );
+        assert_eq!(replaced, Some(id), "one session per connection");
+        let id = snapshot.session_id;
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(
+            !edit.close,
+            "the setup list has the provider list behind it"
+        );
+        let edit = store.get_mut(id).unwrap().backspace();
+        assert!(
+            edit.close,
+            "unwound to the provider list, which is the entry"
+        );
+        assert_eq!(edit.snapshot.mode(), Some("picker"));
+    }
+
+    #[test]
+    fn no_session_constructor_produces_the_retired_centered_origin() {
+        // Plan 125: the window sheet is gone, so the store that owns every live
+        // session must never hand the client a `Centered` origin again — the
+        // wire variant stays decodable for older peers, nothing produces it.
+        let mut store = ServerMenuSessions::new();
+        let registry = registry_with_commands();
+        let (snapshot, _) = store.open_control_center(&catalogue_for_registry(&registry), 1);
+        assert_eq!(
+            snapshot.origin,
+            crate::protocol::TransientMenuOriginData::CommandPalette
+        );
+        let mut inventory = crate::server::agent::AgentPickerInventory::default();
+        inventory
+            .providers
+            .push(crate::server::agent::AgentPickerProvider {
+                id: "anthropic".to_string(),
+                configured: false,
+                auth: Vec::new(),
+            });
+        let (snapshot, _) = store.open_agent_picker(
+            crate::protocol::AgentPickerKind::ProviderSetup,
+            inventory,
+            Vec::new(),
+            1,
+        );
+        assert_eq!(
+            snapshot.origin,
+            crate::protocol::TransientMenuOriginData::CommandPalette
+        );
+    }
+
+    #[test]
     fn query_update_filters_and_resets_selection() {
         let mut store = ServerMenuSessions::new();
         let registry = registry_with_commands();
@@ -881,16 +1136,13 @@ mod tests {
                 1,
             )
             .expect("activate selected");
-        let ServerMenuActivateOutcome::Dispatch(ServerMenuActivation::Command(request)) =
-            activation
+        let ServerMenuActivateOutcome::Dispatch(ServerMenuActivation::ShellClientCommand(
+            command_id,
+        )) = activation
         else {
-            panic!("expected command activation")
+            panic!("expected client command activation")
         };
-        assert_eq!(request.command_id, "markdown.toggleList");
-        assert_eq!(
-            request.target,
-            CommandExecutionTarget::ActiveDocument { document_id: 1 }
-        );
+        assert_eq!(command_id, "markdown.toggleList");
 
         // Activation does not consume; the handler removes the session and
         // pushes TransientMenuClosed (asserted at the connection level).
@@ -941,14 +1193,16 @@ mod tests {
 
         let snapshot = snapshot_from_session(&store.get_mut(id).unwrap().session());
         assert_eq!(snapshot.session_id, id);
-        assert_eq!(snapshot.prompt, "Control Center");
+        assert_eq!(snapshot.prompt, "Commands");
         assert_eq!(snapshot.query, "markdown");
         assert_eq!(snapshot.items.len(), 3);
         // Items are label-sorted; the three package commands match.
         assert_eq!(snapshot.items[0].id, "markdown.refreshPreview");
         assert_eq!(snapshot.items[0].label, "Refresh Preview");
         assert_eq!(snapshot.focus_policy, TransientMenuFocusPolicyData::Modal);
-        assert_eq!(snapshot.origin, TransientMenuOriginData::Centered);
+        // Plan 124 task 7: the catalogue is the composer's palette, so the
+        // snapshot declares the bottom anchor the client draws in the lane.
+        assert_eq!(snapshot.origin, TransientMenuOriginData::CommandPalette);
     }
 
     #[test]
@@ -962,6 +1216,142 @@ mod tests {
         assert_eq!(store.cancel_active(), Some(id));
         assert!(store.get_mut(id).is_none());
         assert_eq!(store.cancel_active(), None, "nothing active");
+    }
+
+    #[test]
+    fn generated_menu_intent_ordering_preserves_lifecycle_and_authority() {
+        let mut store = ServerMenuSessions::new();
+        let registry = registry_with_commands();
+        let catalogue = catalogue_for_registry(&registry);
+        let mut generation = 1_u64;
+        let mut active_id = None;
+        let mut last_id = SERVER_MENU_SESSION_ID_HIGH_BIT | 7;
+
+        // Fixed seeds and a short action cap cover every operation ordering
+        // without introducing a property-testing dependency or unbounded
+        // corpus. Reload first probes stale-generation rejection, then
+        // performs the same cancel sweep as the live connection loop.
+        for seed in 0..64_u64 {
+            let mut rng = MenuIntentLcg::new(0x0890_cafe_2026_0816_u64 ^ seed);
+            for step in 0..18_u64 {
+                match (seed + step) % 6 {
+                    0 => {
+                        let previous = active_id;
+                        let (snapshot, replaced) =
+                            store.open_control_center(&catalogue, generation);
+                        assert_eq!(replaced, previous);
+                        if let Some(previous) = previous {
+                            assert!(store.get_mut(previous).is_none());
+                        }
+                        assert!(snapshot.session_id & SERVER_MENU_SESSION_ID_HIGH_BIT != 0);
+                        last_id = snapshot.session_id;
+                        active_id = Some(snapshot.session_id);
+                    }
+                    1 => {
+                        let id = active_id.unwrap_or(last_id);
+                        let query = match rng.next() % 5 {
+                            0 => String::new(),
+                            1 => "markdown".to_string(),
+                            2 => "toggle".to_string(),
+                            3 => "zzz-no-match".to_string(),
+                            _ => "control".to_string(),
+                        };
+                        if let Some(session) = store.get_mut(id) {
+                            let edit = session.set_query(&query);
+                            assert_eq!(edit.snapshot.query(), query);
+                        }
+                    }
+                    2 => {
+                        let delta = match rng.next() % 7 {
+                            0 => i64::MIN,
+                            1 => -3,
+                            2 => -1,
+                            3 => 0,
+                            4 => 1,
+                            5 => 3,
+                            _ => i64::MAX,
+                        };
+                        if let Some(id) = active_id {
+                            let _ = store.get_mut(id).unwrap().move_selection(delta);
+                        }
+                    }
+                    3 => {
+                        if let Some(id) = active_id {
+                            let result = store.get_mut(id).unwrap().activate(
+                                CommandExecutionTarget::Global,
+                                TransientMenuActivationData::Primary,
+                                generation,
+                            );
+                            match result {
+                                Err(CommandExecutionDiagnostic {
+                                    rule: CommandExecutionRule::UnknownCommand,
+                                    ..
+                                }) => {}
+                                Ok(ServerMenuActivateOutcome::Dispatch(
+                                    ServerMenuActivation::Command(request),
+                                )) => {
+                                    assert!(catalogue
+                                        .commands()
+                                        .iter()
+                                        .any(|command| command.command_id == request.command_id));
+                                    assert!(request.provenance.is_none());
+                                    assert!(request.expected_permissions.is_empty());
+                                    assert!(store.cancel(id).is_some());
+                                    active_id = None;
+                                }
+                                Ok(ServerMenuActivateOutcome::Dispatch(
+                                    ServerMenuActivation::ShellClientCommand(command_id),
+                                )) => {
+                                    assert!(
+                                        catalogue
+                                            .commands()
+                                            .iter()
+                                            .any(|command| command.command_id == command_id)
+                                    );
+                                    assert!(store.cancel(id).is_some());
+                                    active_id = None;
+                                }
+                                other => panic!("unexpected generated activation: {other:?}"),
+                            }
+                        } else {
+                            assert!(store.get_mut(last_id).is_none());
+                        }
+                    }
+                    4 => {
+                        let id = active_id.unwrap_or(last_id);
+                        let removed = store.cancel(id);
+                        if active_id == Some(id) {
+                            assert!(removed.is_some());
+                            active_id = None;
+                        } else {
+                            assert!(removed.is_none());
+                        }
+                    }
+                    5 => {
+                        let next_generation = generation + 1;
+                        if let Some(id) = active_id {
+                            let stale = store.get_mut(id).unwrap().activate(
+                                CommandExecutionTarget::Global,
+                                TransientMenuActivationData::Primary,
+                                next_generation,
+                            );
+                            assert!(matches!(
+                                stale,
+                                Err(CommandExecutionDiagnostic {
+                                    rule: CommandExecutionRule::StaleRuntimeGeneration,
+                                    ..
+                                })
+                            ));
+                            assert_eq!(store.cancel_active(), Some(id));
+                            active_id = None;
+                        }
+                        generation = next_generation;
+                    }
+                    _ => unreachable!(),
+                }
+                assert_menu_invariants(&mut store, active_id);
+            }
+        }
     }
 
     #[test]

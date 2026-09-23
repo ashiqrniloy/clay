@@ -9,7 +9,7 @@ For detailed platform matrices, capability tokens, conflict recovery menus, and 
 From the repository root:
 
 ```bash
-# Start or reuse the default local server, then open the GUI client.
+# Stop leftover default-endpoint servers, then open the GUI.
 cargo run
 
 # App-managed GUI smoke run with an isolated endpoint and managed child server.
@@ -30,16 +30,13 @@ cargo run -- smoke-gui --config-fixture windows-markdown-open
 # open-documents switcher commands.
 cargo run -- smoke-gui --config-fixture file-browser-workflow
 
-# Stop and replace the default Linux server, wait for readiness, then exit.
+# Stop leftover servers, start a fresh background server, wait, then exit (no GUI).
 cargo run -- restart
 
 # Foreground default server, useful for watching server diagnostics.
 cargo run -- server
 
-# First default client: should receive the editable lease when available.
-cargo run -- client
-
-# Second default client: should attach as a read-only observer.
+# Extra GUI against a running server. Does not kill servers.
 cargo run -- client
 ```
 
@@ -69,16 +66,59 @@ What it verifies against the real desktop accessibility stack:
 - The AT-SPI tree exposes the shell, the `Workspace tabs` TabList with both
   restored cards (one selected), the active pane, the connected status
   line, and the attached server-driven region.
+- The active editor Entry advertises the real `EditableText` interface in
+  addition to `Text`; this is checked separately from its editable state flag.
 - Node identities stay stable across a second query (no per-pass virtual
   node churn).
 - Every run uses a mode-700 temporary IPC/config home — never the ambient
-  `~/.config/clay`, `~/.local/share/clay`, or default socket — and kills
+  `~/.clay`, `~/.local/share/clay`, or default socket — and kills
   both child processes and removes the temp directory on every exit path.
 
-The deterministic `accesskit_consumer` unit tests (plan 086 task 3)
-remain the blocking coverage for input-driven tab/menu/status updates;
-this check (implemented in `tests/live_atspi_smoke.rs`) proves the real
-desktop adapter path stays alive.
+The pre-cutover native accessibility unit tests (plan 086 task 3,
+`tests/live_atspi_smoke.rs`) were removed with the native client; the
+retained structural coverage for input-driven tab/menu/status updates lives in
+the frontend component suites, and live desktop structure is proven by the
+AT-SPI probe inside this harness.
+
+## Plan 089 Linux multi-window, DPI, font-scale, and Wayland smoke
+
+Run the environment-gated platform check on a real Wayland desktop:
+
+```bash
+CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security \
+  live_atspi_smoke::live_multi_window_scale_smoke \
+  -- --ignored --exact --test-threads=1
+```
+
+The check starts one isolated server and two real Clay clients, applies a
+complete user-owned `theme.setTypography` profile (`ui: 24`, document roles
+20/21), and verifies through AT-SPI that both windows expose distinct frames,
+positive physical bounds within a bounded envelope derived from Clay's
+900×600 logical window, and large bounded status bars. A compositor may
+resize a mapped window's axes independently; logical/physical conversion and
+typography-driven geometry are covered by the retained responsive-layout
+guards (`responsive_layout_work_preserves_sidebar_and_editor_bounds`) plus the
+UI-review harness wide/narrow captures. (The historical headless check sent `Rescale(2.0)` plus a physical 1800×1200 resize and asserted logical 900×600; it was removed with the native client at Plan 097 Phase 12.) Together these
+checks cover scale change, typography-driven geometry, multi-window startup,
+and Wayland delivery without blind input.
+
+Prerequisites: Linux, `WAYLAND_DISPLAY`, a reachable `org.a11y.Bus`, Python
+GI AT-SPI (`python3-gi` and `gir1.2-atspi-2.0`), and built Clay binaries.
+Missing prerequisites return a skip reason; they never count as a pass. The
+smoke uses mode-700 HOME/XDG/socket/workspace roots and synthetic documents
+only.
+
+Interactive Plan 088 completion, Command Centre, settings, file-browser,
+multi-tab/multi-pane, narrow/wide, DPI, and native-dialog states additionally
+require safe window targeting. Run `computer-use-linux doctor`; when
+`can_query_windows` or `can_focus_windows` is false, run
+`computer-use-linux setup-window-targeting` and log out/in if GNOME requests a
+shell reload, then verify both readiness flags before targeted input. The
+current host's unavailable-backend report is
+`org.freedesktop.DBus.Error.ServiceUnknown` for the GNOME Shell window-control
+API, so portal coordinates and unscoped chords must not be used as a
+substitute; retain those states as `UNRESOLVED` until targeting or a semantic
+no-focus harness action is available.
 
 ## Repeatable UI review harness (Plan 087 task 2)
 
@@ -94,8 +134,9 @@ scripts/capture-ui-review.sh --fixture ui-review-completion \
 ```
 
 `--fixture` accepts `ui-review-default`, `ui-review-loading`,
-`ui-review-error`, `ui-review-recovery`, `ui-review-completion`, and
-`ui-review-command-centre`. The fixtures live under
+`ui-review-error`, `ui-review-recovery`, `ui-review-large-typography`,
+`ui-review-completion`, `ui-review-large-document`, `ui-review-command-centre`,
+and `ui-review-rust`. The fixtures live under
 `tests/fixtures/configuration/ui-review-*/`:
 
 | Fixture | State and capture step |
@@ -104,11 +145,34 @@ scripts/capture-ui-review.sh --fixture ui-review-completion \
 | `ui-review-loading` | Runtime SDUI loading-state fixture with label `Loading workspace…`; no timer or production-only hook is added. |
 | `ui-review-error` | Invalid theme specifier; Clay stays alive and exposes a sanitized `Runtime packages.not_installed` diagnostic. |
 | `ui-review-recovery` | Connects normally, stops only its private server, then captures `Disconnected`/recovery status. |
+| `ui-review-large-typography` | Applies `theme.setTypography` with UI 24/document 20–21 before the client handshake; captures the bounded large-type shell. |
 | `ui-review-completion` | Loads `@clay/rust` and binds `Ctrl+Space`; focus editor, trigger completion, then press Enter in the terminal to capture. |
-| `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; open the centered Command Centre, then press Enter in the terminal to capture. |
+| `ui-review-large-document` | Same init.js as `ui-review-completion`, but the harness writes a ≥4 MiB `review.rs` and restores it through `layout.json`; used by the plan 126 access-path steps (bounded accessible text on a large document). |
+| `ui-review-command-centre` | Binds global `Ctrl+Alt+P`; opens `controlCenter.open` — since plan 124/125 the composer palette (catalogue mode) rather than the retired centered sheet — then press Enter in the terminal to capture. |
+| `ui-review-rust` | Authorizes `@clay/lsp-rust`; make a no-op edit, capture visible inlays, toggle them off, and capture again. |
+
+`--example-config` boots the review against a copy of the canonical
+`examples/config/` tree instead of the fixture's own `init.js`: the whole tree
+(init.js plus `packages/`) is copied into the isolated config root, exactly as
+`cp -r examples/config/. ~/.clay/` would, and `metadata.txt` records
+`config_source=examples/config`. It is accepted only with
+`--fixture ui-review-launcher` (the landing the canonical config renders) and
+refused with exit 2 for fixtures whose checks assert their own panel content, so
+a mismatched pair is never captured as a pass. This is the leg used by the
+canonical-example launch test:
+`test-plan/artifacts/118-quiet-instrument-migration/launch-test/`.
+
+`--theme <specifier>` / `--appearance light|dark|system` seed
+`~/.clay/preferences.json` in that same isolated root, so a prefs-seeded theme
+intentionally overrides the example's own `setTheme` call (documented
+precedence) and one canonical config can be captured under all four shipped
+themes. A passing capture also writes a bounded, root-redacted
+`server.diagnostics.txt` (diagnostic/configuration/generation lines plus
+`configuration_failed_lines` and `agent_registration_lines` counters); a failed
+`--drive` step keeps its full probe transcript in `drive.failed.txt`.
 
 Each run copies its named `init.js` into a mode-700 temporary
-`HOME/.config/clay`, uses a mode-700 temporary XDG config/data/socket root,
+`HOME/.clay`, uses a mode-700 temporary XDG config/data/socket root,
 creates only bounded fixture documents, and removes the launch root and raw
 process logs on exit. The script writes `instructions.md`, `metadata.txt`,
 `screenshot.png`, `accessibility.txt`, and `review.status` under the caller's
@@ -122,13 +186,24 @@ private socket, process cleanup, and an interaction checkpoint while the
 window remains open. Both paths use the existing `WINDOW_WIDTH`/`WINDOW_HEIGHT`
 logical-size constants (`900×600`).
 
+Plan 098's document-transfer review adds dev-only Vite fixture routes in
+`frontend/src/routes/fixture.tsx`: `/fixture/document-loading`,
+`/fixture/document-budget-error`, `/fixture/document-binary-error`, and the
+ready `/fixture/editor` comparison. These routes are captured at wide and
+narrow viewport sizes through the browser fixture/CDP workflow because they
+exercise deterministic React state without opening ambient files. They are
+supplemental to real Tauri AT-SPI evidence; a browser capture is not recorded
+as a real WebKitGTK accessibility pass when that application state cannot be
+attached. Captures use synthetic text only and must not be retained if a
+full-desktop screenshot includes unrelated user content.
+
 These PNGs are review artifacts, not GPU goldens or CI pixel assertions.
 Structural SDUI/accessibility tests remain the blocking automated layer; inspect
 both the image and the AT-SPI dump before recording a visual result.
 
 ## Default End-User Configuration
 
-The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.config/clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:
+The commands above launch the app or run dev-only smoke fixtures. The actual end-user product setup is a small `~/.clay/init.js` that loads Markdown defaults through the runtime-backed generic package loader and binds the Windows open-file command:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -140,7 +215,7 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 
 This is the Markdown product baseline. It is deliberately distinct from the smoke fixtures under `tests/fixtures/configuration/`:
 
-- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, and `serverPublishDecorations`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported and is not the documented setup.
+- **Smoke-only (dev validation, never the product path):** the `markdown-mode` and `windows-markdown-open` fixtures inline a full `markdownPackage` manifest object and manually call `serverLoadPackage`, `serverRegisterModePattern`, `serverActivateMajorMode`, `serverRegisterCommand`, `serverRegisterParseHandler`, and `serverPublishDecorations`. That plumbing exists only to validate each facade deterministically. Pasting the smoke fixture manifest block into `~/.clay/init.js` is not supported and is not the documented setup.
 - **End-user (product baseline):** the one-line `loadPackage("@clay/markdown")` plus the explicit `Ctrl+O` `bindKey`. No inline manifest object, no per-facade registration imports, no `publishTree` panel publication.
 
 Markdown end-user baseline invariants:
@@ -178,11 +253,15 @@ SDUI payload costs are validated by unit tests rather than default GUI smoke out
 
 ### Bare `cargo run`
 
-Bare `cargo run` tries the platform default local endpoint. If no server is reachable, Clay starts the current executable directly as a background `clay server <endpoint>` process, retries the client handshake for a bounded readiness window, and opens the GUI when connected. The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
+Bare `cargo run` is the development launch: it stops leftover Clay servers on the default local endpoint (`clay-server` and `clay server`, including stale protocol versions), then launches the Tauri desktop. The desktop supervisor adopts a compatible listener or spawns `clay-server`. Rebuild `clay-desktop` after frontend changes (`cargo build -p clay -p clay-desktop`). The Markdown package still publishes no default preview/status panel; Clay-owned Workspace file-browser chrome is controlled by workspace state and documented workspace commands, not by Markdown package loading.
 
 ### `cargo run -- restart`
 
-On Linux, `restart` finds only server processes running the current Clay executable against the default endpoint, sends `SIGTERM`, escalates to `SIGKILL` after a two-second bound, starts a fresh background server through the existing shell-free child command, waits for the normal client handshake, then exits without opening another GUI. It does not stop Clay clients or isolated `smoke-gui` servers. Other platforms currently return an unsupported-command error.
+On Linux, `restart` finds every `clay-server` / `clay server` process on the selected endpoint (not only the current executable — a stale protocol version must die), sends `SIGTERM`, escalates to `SIGKILL` after a two-second bound, unlinks the leftover socket, starts a fresh background `clay server`, waits for the client handshake, then exits without opening another GUI. It does not stop Clay clients or isolated `smoke-gui` servers (those use different endpoints). Other platforms currently return an unsupported-command error.
+
+### `cargo run -- client`
+
+Opens another Tauri desktop against the selected endpoint without killing servers. Use this to attach a second window after `cargo run -- restart` or `cargo run -- server`.
 
 ### `cargo run -- smoke-gui`
 
@@ -215,7 +294,7 @@ Phase 18.8 adds the server-owned `CommandExecutor` validation boundary, the gene
 
 Manual Control Center smoke:
 
-1. Create or extend `~/.config/clay/init.js` to bind a key to the built-in command:
+1. Create or extend `~/.clay/init.js` to bind a key to the built-in command:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -238,15 +317,15 @@ What the manual smoke adds on top of automated tests: the rendered bottom-pane o
 
 ### Phase 18.9 built-in fallback mode smoke (no `init.js`)
 
-Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `core.code` (registered at server startup through `ModeRegistry::new()`), so any file opens into a predictable, editable mode even when no language package is installed, disabled, or invalid — and first open needs no JavaScript round trip for fallback editing because the built-in modes are registered before any configuration/package evaluation runs. No `~/.config/clay/init.js` line and no `loadPackage` step are required for fallback editing.
+Phase 18.9 ships always-on built-in Clay-owned fallback modes `core.text` and `core.code` (registered at server startup through `ModeRegistry::new()`), so any file opens into a predictable, editable mode even when no language package is installed, disabled, or invalid — and first open needs no JavaScript round trip for fallback editing because the built-in modes are registered before any configuration/package evaluation runs. No `~/.clay/init.js` line and no `loadPackage` step are required for fallback editing.
 
 Manual fallback smoke:
 
-1. Launch Clay with **no `~/.config/clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
+1. Launch Clay with **no `~/.clay/init.js`** (or an empty one) using the normal command-first GUI path (`cargo run` or `cargo run -- smoke-gui`). No language package is loaded.
 2. Open a plain-text file such as a `README.txt` (or any file whose extension no package claims). Confirm the document opens editable with generic Tab/Enter/backspace behavior — its active major mode is the built-in `core.text` universal fallback (`modes.explainActiveMode` reports `fallbackUsed: true`).
 3. Open a code-like file such as `main.rs` (or any file with one of the curated built-in `core.code` extensions). Confirm the document opens editable with code-oriented behavior — its active major mode is the built-in `core.code` fallback, and closing braces/brackets/parens reflow via electric outdent rules shipped by the `core_code_editing` manifest.
 4. Confirm ordinary typing stays local and optimistic and that no synchronous JavaScript round trip occurs before local paint (built-in mode manifests are inert `ClientFirstPredictable` data executed by Rust-known engines).
-5. (Optional) Add the one-line default loader to `~/.config/clay/init.js` and relaunch:
+5. (Optional) Add the one-line default loader to `~/.clay/init.js` and relaunch:
    ```js
    import { loadPackage } from "clay:packages";
    await loadPackage("@clay/markdown");
@@ -272,7 +351,7 @@ await loadPackage("@clay/markdown");
 
 Manual syntax smoke:
 
-1. Put the four `loadPackage` lines above in `~/.config/clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
+1. Put the four `loadPackage` lines above in `~/.clay/init.js`, or use the equivalent checked-in fixture with `cargo run -- smoke-gui --config-fixture syntax-grammars`.
 2. Launch Clay with `cargo run`, `cargo run -- smoke-gui`, or the fixture command above.
 3. Open small `.rs`, `.ts`, `.tsx`, `.js`, and `.md` files similar to `tests/fixtures/syntax/rust.rs`, `tests/fixtures/syntax/typescript.ts`, `tests/fixtures/syntax/typescript.tsx`, `tests/fixtures/syntax/javascript.js`, and `tests/fixtures/syntax/markdown.md`.
 4. Confirm each file renders text immediately and remains editable under its active `core.code`/`core.text` fallback behavior while syntax decorations arrive asynchronously from the background parse/decor path.
@@ -294,7 +373,7 @@ await loadPackage("@clay/javascript");
 await loadPackage("@clay/markdown");
 ```
 
-To exercise explicit engine selection from `~/.config/clay/init.js`, set the preference before loading the package:
+To exercise explicit engine selection from `~/.clay/init.js`, set the preference before loading the package:
 
 ```js
 import { setSyntaxEnginePreference } from "clay:syntax";
@@ -329,7 +408,7 @@ Automated coverage: `first_party_language_fixtures_produce_themed_vocabulary_dec
 
 ### Phase 18.16.5 typography smoke
 
-Use one complete `setTypography` call in `~/.config/clay/init.js`, then launch with `cargo run`. Repeat with Gruvbox Material dark and light themes and UI/document sizes 6 px, defaults, and 40 px.
+Use one complete `setTypography` call in `~/.clay/init.js`, then launch with `cargo run`. Repeat with Gruvbox Material dark and light themes and UI/document sizes 6 px, defaults, and 40 px.
 
 Manual matrix:
 
@@ -348,7 +427,7 @@ Phase 18.17 adds viewport-bounded `DiagnosticSet` transport for explicit analyze
 
 Manual matrix:
 
-1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.config/clay/init.js`).
+1. Run `cargo run -- smoke-gui --config-fixture syntax-grammars` (or load `@clay/rust`, `@clay/typescript`, `@clay/javascript`, and `@clay/markdown` in `~/.clay/init.js`).
 2. Open valid and incomplete `.rs`, `.ts`, `.tsx`, `.js`, and `.md` snippets. Confirm syntax highlighting appears without red squiggles from Tree-sitter.
 3. Type and scroll while a slow reparse is outstanding. Local typing/scroll remain responsive and no parser-recovery diagnostics appear.
 4. If testing an explicit analyzer package, confirm only its validated `DiagnosticSet` produces themed squiggles and that a status-level runtime diagnostic does not become an inline mark.
@@ -385,7 +464,7 @@ Manual matrix:
 
 Fixtures contain only short synthetic source text—no secrets, real paths, or executable authority.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::phase18_18_manual_smoke_documents_first_party_language_matrix` and `first_party_syntax_fixtures_exist_per_language` lock this matrix and fixture set. `src/server/js_runtime/mod.rs::language_packages_config_fixture_loads_and_registers_all_contributions`, `first_party_language_packages_are_not_silent_defaults`, `rust_package_expansion_registers_mode_command_completion_and_status`, `typescript_package_expansion_registers_mode_command_completion_and_status`, `javascript_package_expansion_registers_mode_command_completion_and_status`, `language_packages_classify_with_core_fallbacks_and_no_conflicts`, and `language_package_classification_is_deterministic_across_load_orders` cover registration, package classification, and fallback deterministically. `tests/syntax_grammar.rs`, `tests/range_diagnostics.rs`, and `tests/editor_performance_invariants.rs` cover full-window vocabulary decoration chunks, analyzer-only range diagnostics, and no-hot-path behavior.
 
 ### Plan 056 low-latency syntax Linux smoke (2026-07-19)
 
@@ -409,7 +488,7 @@ Run the first-party package fixture with profiling enabled:
 cargo run -- smoke-gui --config-fixture language-packages --profile-perf
 ```
 
-The Linux verification launched the native Wayland window successfully. A second X11-backed run (`WAYLAND_DISPLAY='' WINIT_UNIX_BACKEND=x11`) provided agent-observable framebuffer checkpoints while exercising the same managed server, workspace, package loading, editor, parse, transport, and paint paths. Both runs used the checked-in `language-packages` fixture and left package authority unchanged.
+The Linux verification launched the native Wayland window successfully. A second X11-backend run (`WAYLAND_DISPLAY=''`, forcing the toolkit's X11 path) provided agent-observable framebuffer checkpoints while exercising the same managed server, workspace, package loading, editor, parse, transport, and paint paths. Both runs used the checked-in `language-packages` fixture and left package authority unchanged.
 
 Manual visual checkpoints used actual workspace files under the synthetic `tmp/src` smoke corpus. Rust opened with visible keyword/function/type/string/number/operator layers. In TypeScript, appending `x` to the already classified `greet` declaration kept the complete `greetx` run in the function color; pressing Enter after that declaration retained the earlier interface/type decorations and the later return/template-string/const decorations. The reported per-letter base-color flash and all-white newline regression were not observed. Screenshots were temporary local verification artifacts and were not committed.
 
@@ -433,7 +512,7 @@ Run the same first-party fixture with profiling enabled:
 cargo run -- smoke-gui --config-fixture language-packages --profile-perf
 ```
 
-The Linux verification used the X11 backend (`WAYLAND_DISPLAY='' WINIT_UNIX_BACKEND=x11`) so real editor keyboard/pointer events and framebuffer checkpoints could be observed. From the synthetic `tmp/src` workspace it opened `main.rs` containing a 150-byte Rust line comment before decorated functions/types/strings/numbers. Eight letters were typed one at a time inside that comment across the 128-byte replacement boundary. Screenshots after one, four, and eight letters retained decoration on the complete comment suffix and every downstream code block; no one-byte-per-keypress white gap or downstream color peeling appeared. The client log recorded edit acknowledgements and current `[0,128)` Rust syntax authority through document version 10.
+The Linux verification used the X11 backend (`WAYLAND_DISPLAY=''` plus the then-native toolkit's X11 backend variable) so real editor keyboard/pointer events and framebuffer checkpoints could be observed. From the synthetic `tmp/src` workspace it opened `main.rs` containing a 150-byte Rust line comment before decorated functions/types/strings/numbers. Eight letters were typed one at a time inside that comment across the 128-byte replacement boundary. Screenshots after one, four, and eight letters retained decoration on the complete comment suffix and every downstream code block; no one-byte-per-keypress white gap or downstream color peeling appeared. The client log recorded edit acknowledgements and current `[0,128)` Rust syntax authority through document version 10.
 
 The same session then sent Backspace and Enter at the comment caret. Both produced acknowledgements (versions 11 and 12). Backspace retained downstream decoration; Enter correctly ended the line-comment capture at the newline while all later Rust keyword/function/type/string/number/operator decoration stayed visible. Temporary fixture text was restored after shutdown, screenshots/logs stayed under `/tmp`, managed smoke cleanup removed the isolated server, and package/protocol authority was unchanged.
 
@@ -447,7 +526,7 @@ This smoke validates the six-step app workflow on Linux, Clay's primary developm
 
 
 1. Open the Clay app.
-2. See the Clay-owned Workspace file browser. It starts hidden; press `Ctrl+B` to show it, confirm the header contains the workspace folder name and full location, then press `Ctrl+B` again to hide it.
+2. See the Clay-owned Workspace file browser. It starts hidden; press `Ctrl+B` to show it, confirm the header contains the workspace folder name and current relative directory (never the absolute host location), then press `Ctrl+B` again to hide it.
 3. Select a folder from the system.
 4. Navigate different folders and files.
 5. See file contents when the selected file is Rust, TypeScript, or JavaScript.
@@ -488,11 +567,11 @@ bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 
 #### Product `cargo run` configuration path
 
-The smoke fixture above is the checked-in equivalent of the real end-user configuration path. To exercise the actual product workflow without a fixture, place the same shape in `~/.config/clay/init.js` and run a bare `cargo run`:
+The smoke fixture above is the checked-in equivalent of the real end-user configuration path. To exercise the actual product workflow without a fixture, place the same shape in `~/.clay/init.js` and run a bare `cargo run`:
 
 ```bash
 cargo run
-# with ~/.config/clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
+# with ~/.clay/init.js binding Ctrl+Shift+O to clientOpenFolderDialog(),
 # Ctrl+B to workspace.toggleFileBrowser, and native Ctrl+C / Ctrl+Shift+C to copy
 ```
 
@@ -528,7 +607,7 @@ Manual Linux verification:
 
 Security and authority contract: folder selection grants only the selected directory after server validation; file opens remain root-relative or selected-file validated; packages cannot scan arbitrary paths, add root markers, override ignore/listing budgets, call raw `Deno.core.ops`, run shell commands, fetch network/package-manager resources, access AI/WASM/native widgets, execute client-side JavaScript, or invent package clipboard-contents APIs. Copy selection is write-only and limited to the current native editor selection; cut/paste are separate Clay-owned user-mediated client commands.
 
-Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/cut/paste/file-browser/open-documents bindings; `src/server/connection.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
+Automated coverage (no manual execution needed): `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` verifies this docs/fixture contract; `src/server/js_runtime/mod.rs::file_browser_workflow_config_fixture_loads_packages_and_bindings` loads the fixture and confirms package contributions plus folder/copy/cut/paste/file-browser/open-documents bindings; `src/server/connection/mod.rs::connection_add_selected_workspace_root_sends_file_browser_snapshot`, `connection_add_selected_workspace_root_rejects_stale_capability`, `workspace_directory_action_sends_refreshed_file_browser_snapshot`, and `file_browser_open_uses_generic_open_document_followups` cover selected-folder grants, directory navigation, SDUI refresh, and generic language activation; `copy_selection_writes_selected_text_without_edit_event`, `copy_selection_is_noop_when_selection_is_collapsed`, `copy_selection_failure_reports_runtime_diagnostic`, plus cut/paste unit tests cover clipboard behavior.
 
 ### Phase 20 daily-editing platform matrix and Linux verification
 
@@ -538,11 +617,11 @@ Phase 20 daily-editing verification is Linux-primary (CI and agent-run). Windows
 
 | Capability | Linux | Windows | macOS | Other |
 |---|---|---|---|---|
-| Native file-open dialog | xdg-desktop-portal `OpenFile` | COM `IFileOpenDialog` | `NSOpenPanel` | `Unsupported` diagnostic |
-| Native folder dialog | xdg-desktop-portal (`directory=true`) | COM `IFileOpenDialog` | `NSOpenPanel` directory mode | `Unsupported` diagnostic |
-| Clipboard copy/cut/paste | persistent text-only `arboard` + native `Ctrl+C`/`X`/`V` | persistent text-only `arboard` + native `Ctrl+C`/`X`/`V` | persistent text-only `arboard` + native `Cmd+C`/`X`/`V` | same explicit-command sink; no dialog dependency |
+| Native file-open dialog | Tauri dialog command (`ashpd` XDG portal on Linux; working today) | planned at the same Tauri command seam (long-term Windows target) | planned at the same Tauri command seam (long-term target) | selected paths return to the existing server grant paths; platforms without a native picker report a sanitized diagnostic |
+| Native folder dialog | same Tauri command, `directory=true` (Linux portal) | planned at the same command seam | planned at the same command seam | selected paths return to the existing server grant paths |
+| Clipboard copy/cut/paste | webview/CodeMirror clipboard via explicit commands (`Ctrl+C`/`X`/`V`) | same (`Ctrl`) | same (`Cmd`) | no polling or hot-path reads; no clipboard plugin granted to the webview |
 | Undo / redo | native `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same as Linux | native `Cmd+Z` / `Cmd+Shift+Z` | client inverse-edit stack |
-| IME preedit / commit | Masonry `Ime::{Preedit,Commit}` (ibus/fcitx when available) | OS IME via winit/Masonry | OS IME via winit/Masonry | preedit paint-only until commit |
+| IME preedit / commit | WebKitGTK IME (ibus/fcitx when available) → CodeMirror composition | WebView2 IME → CodeMirror | macOS IME → CodeMirror | composition renders locally; commits sync through the ordinary edit path |
 | Save / reload / conflict menus | server-first; bind `Ctrl+S` in `init.js` | same | same (`Cmd` bindings via `init.js` if desired) | no client filesystem write |
 | Multi-document retain/switch | `DocumentSessionStore` + `clientShowOpenDocuments` | same | same | bound to 64 sessions |
 | Pending-edit / disconnect / resync recovery | status + recovery menus | same | same | no stderr-only recovery |
@@ -563,7 +642,7 @@ Phase 20 daily-editing verification is Linux-primary (CI and agent-run). Windows
 | Show open documents | none hardcoded | none hardcoded | `Ctrl+Shift+E` → `clientShowOpenDocuments` |
 | Request resync / dismiss recovery | none hardcoded | none hardcoded | `clientRequestResync` / `clientDismissRecovery` |
 
-Native copy/cut/paste/undo/redo use the primary modifier (`Ctrl` on Linux/Windows, `Cmd` on macOS) through `is_primary_character_shortcut` in `src/masonry_editor.rs`. Save, open dialogs, open-documents switcher, and recovery actions require explicit `bindKey` configuration (see the file-browser-workflow fixture).
+Copy/cut/paste/undo/redo use the primary modifier (`Ctrl` on Linux/Windows, `Cmd` on macOS) through the CodeMirror default keymap projected from behavior manifests (`frontend/src/editor/extensions/keymaps.ts`). Save, open dialogs, open-documents switcher, and recovery actions require explicit `bindKey` configuration (see the file-browser-workflow fixture).
 
 #### Linux verification evidence (Plan 055 Task 17)
 
@@ -579,11 +658,15 @@ cargo test --all-targets
 
 Recorded result for this task: all three commands pass on Linux. Automated coverage includes clipboard cut/paste, undo/redo inverse edits, IME preedit unit paths, multi-document retain/switch, dirty/save/conflict recovery menus, pending-edit/disconnect/resync recovery, capability-token/workspace authorization, and hot-path guards that keep clipboard/save/JS work off ordinary paint.
 
-#### Plan 060 dialog and clipboard backend validation (2026-07-22)
+#### Plan 060 dialog and clipboard backend validation (2026-07-22) — historical native-client record
 
-Native portal dialogs now reserve independent file/folder generations in `Driver`. Repeated file commands while a file picker is open and repeated folder commands while a folder picker is open are ignored; file and folder pickers do not block each other. Every selected/cancelled/unsupported/failed completion clears only its matching generation, stale completions are ignored, spawn failure clears immediately, and exit/window close clears both. Event-proxy send failure occurs only after loop shutdown, when `Driver` and its state are dropped. No dialog manager, custom component, animation, polling, or extra thread pool was added.
+The pre-cutover native client reserved independent file/folder dialog
+generations in its driver; that machinery was replaced at Plan 097 Phase 12 by
+narrow Tauri dialog commands feeding the existing server grant paths
+(`docs/wiki/modules/react-command-centre-desktop-workflows.md`). The dated
+record below describes the removed implementation.
 
-Clipboard backend simplification was tested but not forced. Masonry 0.4 keeps copypasta in private event-loop state: widgets can emit writes and native `Ctrl/Cmd+V` is intercepted, but `DriverCtx` has no clipboard read API for the bindable `clientPasteClipboard` fallback. Copypasta 0.10's Linux `ClipboardContext` is X11-only; its Wayland path needs a raw display pointer owned by Masonry. Consequently `arboard` remains the direct fallback on Linux/Windows/macOS. Its unused default image feature is disabled, removing 11 image-codec packages from the lock graph (582 to 571 resolved packages), and `SystemClipboard` now keeps one GUI-thread-lifetime text backend so X11 ownership survives between commands without relying on a clipboard manager; dropping the UI thread still runs backend shutdown/handoff. Clipboard access remains synchronous only during explicit copy/cut/paste commands—no polling or hot-path reads.
+Clipboard handling in the removed native client used `arboard` because the toolkit kept copypasta private; that entire backend was deleted at cutover. The current client performs copy/paste through CodeMirror/webview clipboard APIs inside explicit user commands only — no polling or hot-path reads.
 
 This Linux host was GNOME Wayland with XWayland (`WAYLAND_DISPLAY=wayland-0`, `DISPLAY=:0`). The ignored live round-trip passed both with the normal Wayland-session environment and with `WAYLAND_DISPLAY` removed (explicit X11 path):
 
@@ -592,7 +675,7 @@ cargo test --lib client::clipboard::tests::live_system_clipboard_round_trip -- -
 env -u WAYLAND_DISPLAY cargo test --lib client::clipboard::tests::live_system_clipboard_round_trip -- --ignored --exact --test-threads=1
 ```
 
-Pure Wayland without XWayland is not claimed: Masonry 0.4 itself constructs the X11 copypasta alias, so replacing arboard cannot improve that boundary without an upstream event-loop API. macOS and Windows source/API parity was reviewed (`NSPasteboard`/Win32 text support in both libraries), but those hosts were not executed; use their checklist below before any future backend deletion.
+macOS and Windows parity was reviewed historically but those hosts were not executed; re-run their checklist before claiming cross-platform clipboard behavior for the Tauri shell.
 
 Live boot check: `cargo run -- smoke-gui --config-fixture file-browser-workflow` opens the GUI on Linux and observes `Ime::Enabled` / empty `Ime::Preedit` / `Ime::Disabled` plus ordinary `EditAck` sync while typing. Interactive portal file-open, save-conflict, multi-document switcher, and full CJK composition remain on the manual checklist below (not fully automatable from this agent session).
 
@@ -614,12 +697,12 @@ The Phase 19 Windows Markdown open-dialog smoke still documents the Windows nati
 
 Phase 19 starts from this baseline:
 
-- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `documents.clientOpenFileDialog` client UI command, native file-open backends on Windows (Shell COM), Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`) that filter for `.md`, `.markdown`, and `.mdown` plus an all-files fallback, explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
+- Working today: command-first launch, `smoke-gui`, foreground server/client validation, local optimistic typing, server-owned workspace/file opens for configured roots, the `markdown-mode` fixture that loads `@clay/markdown`, activates `sample.md`/document `1`, publishes representative Markdown decorations, shows inert Markdown status SDUI, the bindable `documents.clientOpenFileDialog` client UI command, the portal-backed Tauri dialog command on Linux (XDG file-chooser portal via `ashpd`) with fixed `.md`/`.markdown`/`.mdown` filters plus an all-files fallback — Windows and macOS native pickers remain long-term targets at the same command seam — explicit selected-file IPC, server single-file grants for files outside configured workspace roots, buffer replacement from the selected-file open response, and live selected-file Markdown activation/decorations/status when `@clay/markdown` is loaded.
 - Save exists for Phase 9 workspace documents. Phase 20 selected-file save/conflict UX (dirty chrome, `Ctrl+S` → `documents.serverSaveDocument`, recovery menus) is covered in the end-to-end file-browser workflow smoke above; this Phase 19 Windows matrix remains focused on dialog open + edit.
 
 The in-scope manual Windows 11 smoke scenario is edit-only:
 
-1. Load the first-party Markdown package and configure the key binding through `~/.config/clay/init.js`, or use the repository fixture with `cargo run -- smoke-gui --config-fixture windows-markdown-open`:
+1. Load the first-party Markdown package and configure the key binding through `~/.clay/init.js`, or use the repository fixture with `cargo run -- smoke-gui --config-fixture windows-markdown-open`:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -638,7 +721,7 @@ Out of scope for the Phase 19 Windows Markdown open-dialog smoke only: saving th
 
 Performance and security contract: the explicit open-dialog command may perform modal native UI and server file-open work. Ordinary typing, paint, scroll, layout, and text-event paths must remain client-local/non-blocking and must not wait on JavaScript, IPC, file IO, parser work, or full-document serialization. A selected path is an explicit user-mediated open request only; it is not unrestricted client filesystem authority and must not broaden workspace access beyond the selected regular UTF-8 file.
 
-The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix. On Linux and macOS, `documents.clientOpenFileDialog` opens the native file picker (xdg-desktop-portal / `NSOpenPanel`) and still routes through selected-file capability grants; unsupported platforms report a diagnostic/status without panics. Linux native folder selection remains validated by the `workspace.clientOpenFolderDialog` workflow smoke; macOS folder selection uses the same `NSOpenPanel` backend in directory mode.
+The Phase 19 Windows Markdown file-dialog smoke remains the Windows matrix; its file-picking backend is the desktop bridge's dialog command, which is portal-backed on Linux today and pending native Windows/macOS pickers at the same command seam. `documents.clientOpenFileDialog` still routes through selected-file capability grants; platforms without a responsive picker report a sanitized diagnostic without panics. Linux native folder selection remains validated by the `workspace.clientOpenFolderDialog` workflow smoke, delivered by the same Tauri command in directory mode.
 
 ### Phase 18.11 completion provider smoke
 
@@ -646,7 +729,7 @@ Phase 18.11 adds the `CompletionTriggerAndResult` primitive, the server-side com
 
 Manual completion smoke:
 
-1. Configure the manual completion trigger key binding through `~/.config/clay/init.js`:
+1. Configure the manual completion trigger key binding through `~/.clay/init.js`:
 
    ```js
    import { bindKey } from "clay:keybindings";
@@ -682,7 +765,7 @@ Phase 18.20 discoverable commands (empty default key bindings):
 
 Manual Phase 18.20 smoke (fake analyzer / no language-server required):
 
-1. Bind one command in `~/.config/clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings accept single strokes and space-separated multi-stroke chords (for example `bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" })`); function keys remain unsupported.
+1. Bind one command in `~/.clay/init.js`, for example `bindKey("Alt+H", "language.hover", { scope: "editor" })`. Runtime keybindings accept single strokes and space-separated multi-stroke chords (for example `bindKey("Ctrl+X Ctrl+P", "controlCenter.open", { scope: "global" })`); function keys remain unsupported.
 2. Launch Clay and place the caret in an editable document.
 3. Invoke the binding. A bottom `TransientMenuSession` should show bounded plain-text hover/signature content or a selectable definitions/code-actions list. Raw HTML must not render as native markup.
 4. For multiple definitions, select a current-document target and confirm caret navigation. Workspace-file targets open through `workspace.openFile` after root/relative-path revalidation; external/traversing targets are not navigable.
@@ -694,7 +777,7 @@ Phase 18.21 compatibility markers: `authorizeLanguageServer`, `@clay/lsp-rust`, 
 Manual Phase 18.21 bridge smoke (host tools required):
 
 1. Install the host language servers you want to exercise (`rust-analyzer` via `rustup`, `typescript-language-server` + compatible `typescript@5.9.x`, and/or `marksman`).
-2. For bare `cargo run`, create the directory root before authorization in `~/.config/clay/init.js`; `workspaceRootIds` must identify roots that already exist when configuration evaluates:
+2. For bare `cargo run`, create the directory root before authorization in `~/.clay/init.js`; `workspaceRootIds` must identify roots that already exist when configuration evaluates:
    ```js
    import { serverAddWorkspaceRoot } from "clay:workspace";
    import { authorizeLanguageServer } from "clay:language-server";
@@ -753,7 +836,7 @@ The first client should show `Connected — Editable`; the second should show `C
 
 ## Runtime Diagnostic Smoke Expectations
 
-To manually validate runtime diagnostics, temporarily use an invalid local configuration such as a syntax error in `~/.config/clay/init.js` or an unauthorized import. Start the foreground server and GUI client:
+To manually validate runtime diagnostics, temporarily use an invalid local configuration such as a syntax error in `~/.clay/init.js` or an unauthorized import. Start the foreground server and GUI client:
 
 ```bash
 cargo run -- server
@@ -773,7 +856,7 @@ Phase 20.1 expanded the typed token catalog, typography hierarchy, and token-bac
 
 Manual matrix (no pixel goldens):
 
-1. Launch with no `~/.config/clay/init.js` (empty defaults). Confirm editor renders with core fallback tokens (sidebar 240px, spacing scale 1.0). Open a file and type; status/shared-ui chrome must render without re-resolution artifacts.
+1. Launch with no `~/.clay/init.js` (empty defaults). Confirm editor renders with core fallback tokens (sidebar 240px, spacing scale 1.0). Open a file and type; status/shared-ui chrome must render without re-resolution artifacts.
 2. Set Gruvbox Material dark theme plus default typography:
    ```js
    import { setTheme, setTypography } from "clay:theme";
@@ -819,4 +902,4 @@ Advanced endpoint arguments are optional debugging aids only, for example when r
 
 ## Implementation Details
 
-For code-level behavior, see the [Client/Server Edit Acknowledgement Flow](../wiki/flows/client-server-edit-ack.md), [Client Snapshot Bootstrap](../wiki/modules/client-snapshot-bootstrap.md), and [Server IPC Skeleton](../wiki/modules/server-ipc-skeleton.md).
+For code-level behavior, see the [Client/Server Edit Acknowledgement Flow](../wiki/archive/client-server-edit-ack.md), [Client Snapshot Bootstrap](../wiki/modules/client-snapshot-bootstrap.md), and [Server IPC Skeleton](../wiki/modules/server-ipc-skeleton.md).

@@ -1,0 +1,6 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+scripts/check.sh: line 20: cargo: command not found
+FAILED at stage: audit
+EXIT=127

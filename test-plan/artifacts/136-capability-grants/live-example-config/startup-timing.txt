@@ -1,0 +1,4 @@
+server.socket_ready_ms=429
+config.first_effect_ms=478  ([agent-reg] line: config JavaScript ran)
+client.editor_visible_ms=1301
+live root=/tmp/clay-plan136-example mode=example-config document=notes.md server=1832097 client=1832183

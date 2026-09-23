@@ -80,7 +80,7 @@ The current first-party load path auto-authorizes all declared bundled-package p
 - `src/packages/authorization.rs::PackageAuthorizationRecord` already binds package name, requested specifier/source, resolved version, API prefix, approved capabilities, runtime profile, and approver. The language-server grant needs a narrower companion identity for contribution, executable, environment names, and roots rather than weakening the package-level record.
 - `src/packages/service.rs::authorize_package` and `ensure_capability_grants` already separate install from authorization/enable and reject ungranted requested capabilities. Disable/revocation already records a package generation and withdrawal counts.
 - `src/server/ops/packages.rs::ensure_first_party_record_locked` currently seeds bundled packages with all manifest permissions under `NativeTrust`; implementation must filter `language-server` from this automatic path.
-- `src/server/workspace.rs::WorkspaceState` canonicalizes directory roots and assigns `WorkspaceRootId`; grants should reference those known directory roots rather than package-provided paths or single-file parent directories.
+- `src/server/workspace/mod.rs::WorkspaceState` canonicalizes directory roots and assigns `WorkspaceRootId`; grants should reference those known directory roots rather than package-provided paths or single-file parent directories.
 - `src/server/runtime_sandbox.rs::RuntimeSandboxSupervisor` demonstrates persistent piped stdio, bounded frames, handshake, timeout, kill/wait, and `kill_on_drop`. Despite its type name, this decision does not treat its child-process pattern as OS sandboxing.
 - `src/server/git.rs::GitDiscoveryService` demonstrates direct `tokio::process::Command`, a closed argument table, canonical workspace cwd, controlled environment, capped stdout/stderr, timeout, and sanitized diagnostics.
 - Context7's current Tokio process documentation confirms that `tokio::process::Command` is the asynchronous process builder, `Stdio::piped()` supports async stream handling, `kill_on_drop(true)` requests cleanup when the child handle is dropped, and cancellation can select between `Child::wait` and `Child::kill`.
@@ -93,7 +93,7 @@ The current first-party load path auto-authorizes all declared bundled-package p
 - `plans/052-Phase18.20-Language-Intelligence-Primitives-and-LSP-Authority.md` — Phase 18.20 authority and implementation sequence.
 - `src/packages/permissions.rs`, `authorization.rs`, and `service.rs` — current capability, grant, enable, and revocation model.
 - `src/server/ops/packages.rs` — current bundled-package auto-authorization path.
-- `src/server/workspace.rs` — canonical directory-root authority and IDs.
+- `src/server/workspace/mod.rs` — canonical directory-root authority and IDs.
 - `src/server/runtime_sandbox.rs` and `src/server/git.rs` — existing bounded process precedents.
 - `docs/wiki/modules/phase18.20-language-intelligence-primitive-review.md` — engine-neutral provider/session inventory and authority split.
 - `.agents/skills/project-patterns/references/authority-boundaries.md` and `language-capability-sequencing.md` — reusable architecture guidance updated from this decision.

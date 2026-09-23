@@ -1,0 +1,34 @@
+warning: the `Err`-variant returned from this function is very large
+    --> src/server/connection/documents.rs:270:6
+     |
+ 270 |   ) -> Result<BehaviorVersionDecision, ServerMessage> {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+    ::: src/protocol/mod.rs:3144:5
+     |
+3144 |       DiagnosticSet(DiagnosticSet),
+     |       ---------------------------- the variant `DiagnosticSet` contains at least 152 bytes
+...
+3148 |       ViewportRenderPatch(ViewportRenderPatch),
+     |       ---------------------------------------- the variant `ViewportRenderPatch` contains at least 168 bytes
+...
+3227 | /     CompletionResult {
+3228 | |         result: CompletionResultSet,
+3229 | |     },
+     | |_____- the variant `CompletionResult` contains at least 168 bytes
+...
+3242 | /     LanguageIntelligenceResult {
+3243 | |         result: LanguageIntelligenceResult,
+3244 | |     },
+     | |_____- the largest variant contains at least 176 bytes
+...
+3289 |       ActiveTypography(ActiveTypography),
+     |       ---------------------------------- the variant `ActiveTypography` contains at least 160 bytes
+     |
+     = help: try reducing the size of `protocol::ServerMessage`, for example by boxing large elements or replacing it with `Box<protocol::ServerMessage>`
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#result_large_err
+     = note: `#[warn(clippy::result_large_err)]` on by default
+
+warning: `clay` (lib) generated 1 warning
+warning: `clay` (lib test) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s

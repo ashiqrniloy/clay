@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientSetViewport
 js_facade: runtime/js/editor.js::clientSetViewport
-backing_rust: src/editor/surface.rs::EditorSurface::update_visible_line_count_for_height
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_set_viewport
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_set_viewport
 name: clientSetViewport
@@ -24,6 +24,10 @@ custom_properties:
     type: number
     default: 4
     description: Behavior-changing setting `overscanLines` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target editor/document surface.
 security: Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.
 agent_guidance: Use `editor.clientSetViewport` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, resizeviewport]
@@ -43,7 +47,7 @@ Set Editor Viewport through the planned `clay:editor` Clay JavaScript facade.
 
 `clientSetViewport` is the planned public API for **Set Editor Viewport**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols or future raw op wrappers.
 
-Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC. This entry is retained as a planned client-local viewport API, not as user configuration loaded from `~/.config/clay/init.js`.
+Authority: `client-local-ui-state`. Runtime path: `client-local-layout-paint`. Resize recomputes visible line count and bounded visible extraction locally in layout/paint, never with full-document IPC. This entry is retained as a planned client-local viewport API, not as user configuration loaded from `~/.clay/init.js`.
 
 ## When to use
 
@@ -71,12 +75,13 @@ clientSetViewport({ documentId: "current", visibleLineCount: 40, overscanLines: 
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `editor.clientSetViewport` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `editor.clientSetViewport` in `~/.clay/init.js`.
 
 ## Custom properties
 
 - `visibleLineCount` (`number`, default `none`): Behavior-changing setting `visibleLineCount` for this API.
 - `overscanLines` (`number`, default `4`): Behavior-changing setting `overscanLines` for this API.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 
@@ -104,8 +109,8 @@ Use `editor.clientSetViewport` when the user asks for set editor viewport throug
 
 - JS facade: `runtime/js/editor.js::clientSetViewport`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_set_viewport` (`op_clay_editor_set_viewport`)
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::update_visible_line_count_for_height`
-- Current implementation audit path: `src/editor/viewport.rs::Viewport; src/editor/buffer.rs::EditorBuffer::visible_snapshot`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Current implementation audit path: `src/client_commands.rs::EditorClientCommand (client-local viewport state)`
 
 ## Lookup metadata
 

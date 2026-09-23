@@ -10,7 +10,7 @@ export interface ConfigurationState {
     loadedModules: string[];
     packageOptions?: PackageOptionResult[];
 }
-export type PackageOptionSource = "init-js" | "package-default" | "clay-default";
+export type PackageOptionSource = "init-js" | "package-default" | "clay-default" | "ui-session";
 export interface PackageOptionDefinition {
     packagePrefix: string;
     option: string;

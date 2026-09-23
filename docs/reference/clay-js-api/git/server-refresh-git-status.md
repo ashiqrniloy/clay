@@ -39,7 +39,7 @@ Explicitly refresh read-only Git status for one authorized workspace root.
 
 `serverRefreshGitStatus` is the Phase 18.13 runtime-backed Clay JS API for **Refresh Git Status**. It is exposed through the curated `clay:git` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-It refreshes one workspace root through `GitStatusCache`. The server resolves the root id to a known workspace directory and runs only the closed Git discovery command set behind timeout/output caps. This API is background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+It refreshes one workspace root through `GitStatusCache`. The server resolves the root id to a known workspace directory and runs only the closed Git discovery command set behind timeout/output caps. This API is background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 

@@ -1,0 +1,23 @@
+/* Agent view (plan 118 task 33): the tab's other half, shown inside the
+ * working area in place of the pane tree. Layout is host-owned; the panel
+ * inside brings its own composition (DESIGN.md §12). */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--clay-spacing-sm);
+  height: 100%;
+  padding: var(--clay-spacing-lg);
+  text-align: center;
+}

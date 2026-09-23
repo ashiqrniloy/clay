@@ -181,6 +181,181 @@ fn primitive_registry_matrix_has_one_complete_row_per_primitive() {
 }
 
 #[test]
+fn document_chunk_transfer_primitive_is_bounded_and_documented() {
+    let registry = read("docs/reference/primitives/registry.md");
+    let index = read("docs/reference/primitives/index.md");
+    let protocol_wiki = read("docs/wiki/modules/protocol-codec.md");
+    let bridge_wiki = read("docs/wiki/modules/desktop-typed-bridge.md");
+    let flow = read("docs/wiki/flows/document-chunked-loading.md");
+    let budgets = read("src/perf/budgets.rs");
+
+    for marker in [
+        "DocumentChunkTransfer",
+        "MAX_CHUNK_BYTES",
+        "DEFAULT_MAX_FRAME_SIZE",
+        "UTF-8",
+    ] {
+        assert!(
+            registry.contains(marker),
+            "primitive registry missing {marker}"
+        );
+    }
+    assert!(index.contains("DocumentChunkTransfer"));
+    assert!(protocol_wiki.contains("DocumentChunkRejected"));
+    assert!(bridge_wiki.contains("DocumentChunkRequest"));
+    assert!(
+        flow.contains("DocumentTextHead"),
+        "flow page missing DocumentTextHead"
+    );
+    assert!(
+        flow.contains("MAX_CHUNK_BYTES"),
+        "flow page missing MAX_CHUNK_BYTES"
+    );
+    assert!(
+        flow.contains("one outstanding"),
+        "flow page missing in-flight window"
+    );
+    assert!(budgets.contains("pub const MAX_CHUNK_BYTES: usize = 256 * 1024;"));
+}
+
+#[test]
+fn plan099_editor_documentation_matches_current_implementation() {
+    let checks: &[(&str, &[&str])] = &[
+        (
+            "docs/reference/primitives/index.md",
+            &[
+                "## Plan 099 editor performance primitives",
+                "BytePositionIndex",
+                "ViewportRenderPatch",
+                "SyntaxSession",
+            ],
+        ),
+        (
+            "docs/reference/primitives/registry.md",
+            &[
+                "| BytePositionIndex |",
+                "| ViewportRenderPatch |",
+                "| SyntaxSession |",
+                "server-session",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+            ],
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            &[
+                "src/server/syntax_session.rs",
+                "ViewportRenderPatch",
+                "exactly one",
+                "spawn_blocking",
+            ],
+        ),
+        (
+            "docs/reference/primitives/rendering-strategy.md",
+            &[
+                "applyRenderPatch",
+                "ViewportRenderPatch",
+                "declared covered range",
+                "exact authoritative",
+            ],
+        ),
+        (
+            "docs/development/performance.md",
+            &[
+                "bytePositionField",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+                "PERF_SNAPSHOT_CAPACITY",
+                "ViewportRenderPatch",
+                "target/perf/",
+            ],
+        ),
+        (
+            "docs/development/architecture-ownership.md",
+            &[
+                "## Plan 099 editor performance ownership",
+                "BytePositionIndex",
+                "SYNTAX_EXECUTOR_MAX_JOBS",
+                "No package-facing API exposes these owners",
+            ],
+        ),
+        (
+            "docs/development/build-and-test.md",
+            &[
+                "### Plan 099 editor performance verification",
+                "editor_performance_small_cells_hold_invariants",
+                "editor_performance_medium_cells_hold_invariants",
+                "editor_performance_large_cells_hold_invariants",
+                "target/perf/editor-performance/<label>/",
+            ],
+        ),
+        (
+            "docs/development/file-open-save-reload-workflow.md",
+            &[
+                "one current CodeMirror `Text`",
+                "DocumentChunkRequest",
+                "detached snapshot only while no view exists",
+                "no app-wide document-session singleton",
+            ],
+        ),
+        (
+            "docs/reference/packages/creating-packages.md",
+            &[
+                "## Plan 099 editor-performance authoring contract",
+                "BytePositionIndex",
+                "ViewportRenderPatch",
+                "SyntaxSession",
+                "Current host bounds are compiled safety policy",
+            ],
+        ),
+        (
+            "docs/development/tauri-react-parity-ledger.json",
+            &["BytePositionIndex", "SyntaxSession", "ViewportRenderPatch"],
+        ),
+    ];
+    for (path, markers) in checks {
+        let text = read(path);
+        for marker in *markers {
+            assert!(
+                text.contains(marker),
+                "{path} is missing Plan 099 documentation marker {marker:?}"
+            );
+        }
+    }
+
+    for (path, stale) in [
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "This document is architecture-only",
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "A future `src/server/parse_coordinator.rs`",
+        ),
+        (
+            "docs/reference/primitives/parse-update-strategy.md",
+            "no-decoration-update",
+        ),
+        (
+            "docs/reference/primitives/rendering-strategy.md",
+            "This document is architecture-only",
+        ),
+        (
+            "docs/development/performance.md",
+            "memoized per-document line",
+        ),
+        ("docs/development/performance.md", "`textIndex`"),
+        (
+            "docs/reference/primitives/registry.md",
+            "Budget Constants Proposed by This Registry",
+        ),
+    ] {
+        assert!(
+            !read(path).contains(stale),
+            "{path} retains stale Plan 099 documentation claim {stale:?}"
+        );
+    }
+}
+
+#[test]
 fn narrow_security_markers_are_present_with_actionable_paths() {
     let contracts = documentation_contracts();
     for entry in contract_entries(&contracts, "security_contracts") {
@@ -240,7 +415,8 @@ fn wiki_index_links_every_wiki_page() {
     let mut files = Vec::new();
     collect(&wiki_root, &mut files);
     for path in files {
-        if path == wiki_root.join("index.md") {
+        if path == wiki_root.join("index.md") || path.starts_with(wiki_root.join("archive")) {
+            // Archive pages are pull-only history: intentionally not indexed.
             continue;
         }
         let relative = path
@@ -257,7 +433,7 @@ fn wiki_index_links_every_wiki_page() {
 
 #[test]
 fn phase20_1_ui_design_language_primitive_review_is_linked_and_complete() {
-    let path = "docs/wiki/modules/phase20.1-ui-design-language-primitive-review.md";
+    let path = "docs/wiki/modules/ui-design-language-primitive-review.md";
     let review = read(path);
 
     assert!(
@@ -344,14 +520,16 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
             }
         }
     }
-    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 82);
+    // 98 at the Plan 061 baseline, +`op_clay_packages_authorize` (plan 136
+    // task 3: trusted-only capability-grant op).
+    assert_exact_inventory(marked_section(&plan, "op-inventory"), &ops, 99);
 
     let facades = read("src/server/facades.rs")
         .lines()
         .filter_map(|line| line.split_once("\"clay:").map(|(_, rest)| rest))
         .filter_map(|rest| rest.split_once('"').map(|(name, _)| format!("clay:{name}")))
         .collect::<BTreeSet<_>>();
-    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 22);
+    assert_exact_inventory(marked_section(&plan, "facade-inventory"), &facades, 24);
 
     let mut packages = BTreeSet::new();
     for entry in fs::read_dir(root().join("packages")).expect("read packages directory") {
@@ -372,7 +550,11 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
         }
     }
     let package_section = marked_section(&plan, "package-inventory");
-    assert_exact_inventory(package_section, &packages, 14);
+    // 20 at the Plan 061 baseline, +@clay/design-instrument (plan 118 task 8),
+    // -@clay/design-neobrutal/-@clay/design-glass (plan 118 task 9),
+    // -@clay/chat (plan 118's chat-removal task),
+    // +@clay/launcher (plan 118's launcher task).
+    assert_exact_inventory(package_section, &packages, 19);
     assert_eq!(package_section.matches("`packages/lsp-shared`").count(), 1);
 }
 
@@ -380,21 +562,31 @@ fn plan061_runtime_package_authority_rebaseline_matches_source_inventory() {
 /// unexpired owner-reviewed expiry. CI invokes this test by name.
 #[test]
 fn phase20_1_token_catalog_is_complete_and_matches_core_registry() {
-    let theme_source = read("src/shell/theme.rs");
-    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+    // Plan 133 task 7 moved the catalog to `src/shell/theme/parse.rs`.
+    let theme_source = read("src/shell/theme/parse.rs");
+    let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // Extract every implemented core token name from `core_theme_value`.
+    // Aliased tokens share one arm (`"accent.primary" | "border.focus" =>`),
+    // so every quoted name on an arm line counts.
     let mut core_tokens = BTreeSet::new();
     for line in theme_source.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix('"')
-            && let Some((name, after)) = rest.split_once('"')
-            && after.trim_start().starts_with("=> CoreThemeValue")
-            && name
+        if !trimmed.contains("=> CoreThemeValue") {
+            continue;
+        }
+        let mut rest = trimmed;
+        while let Some(start) = rest.find('"') {
+            let after = &rest[start + 1..];
+            let Some(end) = after.find('"') else { break };
+            let name = &after[..end];
+            if name
                 .chars()
                 .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '.')
-        {
-            core_tokens.insert(name.to_string());
+            {
+                core_tokens.insert(name.to_string());
+            }
+            rest = &after[end + 1..];
         }
     }
     assert!(
@@ -509,8 +701,8 @@ fn component_catalog_status_partition_is_current() {
     // truth; this guard fails if an implemented kind is demoted, a reserved/
     // planned kind is prematurely promoted, or the token consumption markers
     // drift.
-    let components = read(".agents/skills/clay-ui/references/components.md");
-    let tokens = read(".agents/skills/clay-ui/references/tokens.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
+    let tokens = read(".agents/skills/clay-execution/references/tokens.md");
 
     // `table` is the only reserved package-facing kind.
     assert!(
@@ -528,13 +720,8 @@ fn component_catalog_status_partition_is_current() {
     }
 
     // Composition-only planned surfaces stay planned (no premature promotion).
-    for component in [
-        "Tooltip",
-        "Badge / tag",
-        "Toast / notification",
-        "`kbd` hint",
-        "Icon slot",
-    ] {
+    // Plan 112 promoted Tooltip and Icon slot to implemented.
+    for component in ["Badge / tag", "Toast / notification", "`kbd` hint"] {
         let row_marker = format!("| {component} | planned |");
         assert!(
             components.contains(&row_marker),
@@ -547,6 +734,20 @@ fn component_catalog_status_partition_is_current() {
         components.contains("| Tabs | implemented |"),
         "Tabs must be marked implemented after Phase 22.3"
     );
+
+    // Plan 112 promoted Tooltip and Icon slot from planned to implemented
+    // (shared ClayIcon renderer + ClayTooltip composition).
+    for component in ["Tooltip", "Icon slot"] {
+        let row_marker = format!("| {component} | implemented |");
+        assert!(
+            components.contains(&row_marker),
+            "Plan 112-promoted surface {component} must be cataloged implemented"
+        );
+        assert!(
+            !components.contains(&format!("| {component} | planned |")),
+            "Plan 112-promoted surface {component} must no longer be planned"
+        );
+    }
 
     // Phase 20.3 Split divider and Phase 20.5 promoted composition surfaces are implemented.
     assert!(
@@ -622,7 +823,7 @@ fn package_guide_documents_phase20_4_uplift() {
 fn clay_ui_catalog_notes_state_completeness() {
     // Plan 065 task 8: components.md notes all five interaction states and the
     // spacing rhythm for each implemented kind.
-    let components = read(".agents/skills/clay-ui/references/components.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
     assert!(
         components.contains("Phase 20.4 interaction-state and spacing rhythm notes"),
         "components.md must have a Phase 20.4 interaction-state/spacing section"
@@ -706,10 +907,8 @@ fn audit_exceptions_are_documented_and_unexpired() {
         })
         .filter(|id| id.starts_with("RUSTSEC-"))
         .collect();
-    assert!(
-        !ignored.is_empty(),
-        "audit.toml must list ignored advisories explicitly"
-    );
+    // An empty ignore list is the ideal state (zero vulnerability exceptions);
+    // any entry that IS listed must be documented with exactly one expiry.
     for id in &ignored {
         assert!(
             security_doc.contains(id),
@@ -765,7 +964,9 @@ fn classified_dependency_warnings_and_remediated_ids_are_documented() {
     for id in [
         "RUSTSEC-2025-0141",
         "RUSTSEC-2024-0436",
-        "RUSTSEC-2026-0192",
+        "RUSTSEC-2024-0370",
+        "RUSTSEC-2024-0429",
+        "RUSTSEC-2025-0098",
     ] {
         let row = security_doc
             .lines()
@@ -896,7 +1097,7 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
     );
 
     // Verify components.md lists all eight primitives plus the Phase 24.4 scrim.
-    let components = read(".agents/skills/clay-ui/references/components.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
     assert!(
         components.contains("## Clay-Native Chrome Primitives (internal)"),
         "components.md must have a Clay-Native Chrome Primitives section"
@@ -922,17 +1123,12 @@ fn phase20_2_primitive_documentation_exists_and_is_linked() {
 
 #[test]
 fn phase20_4_core_component_uplift_primitive_review_is_linked_and_complete() {
-    // Plan 065 (Phase 20.4) task 12: verify the Phase 20.4 primitive-review
-    // wiki page exists, is linked from the wiki index, and records the restyle-
-    // only uplift inventory, state helpers, compatibility contract, and phase
-    // boundary.
-    let path = "docs/wiki/modules/phase20.4-core-component-uplift-primitive-review.md";
+    // Plan 065 (Phase 20.4) task 12: the Phase 20.4 primitive-review record
+    // exists in the pull-only wiki archive with its uplift inventory, state
+    // helpers, compatibility contract, and phase boundary intact.
+    let path = "docs/wiki/archive/phase20.4-core-component-uplift-primitive-review.md";
     let review = read(path);
 
-    assert!(
-        index_links("docs/wiki/index.md", path),
-        "Phase 20.4 primitive review must be linked from the wiki index"
-    );
     for section in [
         "## Reusable Capability Before New Code",
         "## Locked Generic Phase 20.4 Gaps (closed)",
@@ -985,9 +1181,10 @@ fn no_component_kind_or_token_renamed() {
     // also enforced by `tests/package_ui_conformance.rs::catalog_is_drift_free_across_doc_enum_and_paint_path`;
     // this test additionally pins specific kind names and the Phase 20.1 tokens.
     let components_src = read("src/shell/components.rs");
-    let components_doc = read(".agents/skills/clay-ui/references/components.md");
-    let tokens_src = read("src/shell/theme.rs");
-    let tokens_doc = read(".agents/skills/clay-ui/references/tokens.md");
+    let components_doc = read(".agents/skills/clay-execution/references/components.md");
+    // Plan 133 task 7 moved the token catalog to `src/shell/theme/parse.rs`.
+    let tokens_src = read("src/shell/theme/parse.rs");
+    let tokens_doc = read(".agents/skills/clay-execution/references/tokens.md");
 
     // 15 implemented ComponentKind entries still parse and are cataloged implemented.
     for kind in [
@@ -1007,7 +1204,9 @@ fn no_component_kind_or_token_renamed() {
         "modal",
         "textInput",
     ] {
-        let marker = format!("\"{kind}\" => Some(Self::");
+        // The kind table is a `string_enum_impl!` invocation now: the string is
+        // the RHS of `Variant => "kind"` (plan 133 task 6).
+        let marker = format!("=> \"{kind}\",");
         assert!(
             components_src.contains(&marker),
             "ComponentKind {kind} must still parse in components.rs (not renamed/removed)"
@@ -1043,7 +1242,9 @@ fn no_component_kind_or_token_renamed() {
         "border.focus",
         "opacity.disabled",
     ] {
-        let core_marker = format!("\"{token}\" => CoreThemeValue");
+        // Aliased tokens share an arm, so presence of the quoted name is the
+        // rename/removal signal (the doc check below pins the catalog).
+        let core_marker = format!("\"{token}\"");
         assert!(
             tokens_src.contains(&core_marker),
             "core token {token} must still exist in theme.rs (not renamed/removed)"
@@ -1217,11 +1418,11 @@ fn ui_components_page_links_catalog_and_token_tables() {
 #[test]
 fn creating_packages_status_markers_match_clay_ui_catalog() {
     // Phase 20.8 task 4/6: the `creating-packages.md` Components table status
-    // markers agree with the `clay-ui` component catalog partition. A kind
+    // markers agree with the `clay-execution` component catalog partition. A kind
     // marked implemented/reserved in the catalog must be marked implemented/
     // reserved in the guide (not planned/deferred), and vice versa.
     let guide = read("docs/reference/packages/creating-packages.md");
-    let catalog = read(".agents/skills/clay-ui/references/components.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
 
     let guide_rows = parse_component_table(&guide, "## Components");
     let catalog_rows = parse_component_table(&catalog, "## Package-Facing Component Kinds");
@@ -1263,7 +1464,7 @@ fn creating_packages_status_markers_match_clay_ui_catalog() {
     for kind in guide_status.keys() {
         assert!(
             catalog_status.contains_key(kind),
-            "creating-packages.md lists kind `{kind}` absent from the clay-ui catalog"
+            "creating-packages.md lists kind `{kind}` absent from the clay-execution catalog"
         );
     }
     // Sanity: the partition is non-trivial (implemented and reserved both present).
@@ -1279,6 +1480,397 @@ fn creating_packages_status_markers_match_clay_ui_catalog() {
 }
 
 #[test]
+fn plan087_ui_authoring_contract_is_consistent_across_catalog_and_guides() {
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+
+    for (path, text) in [
+        ("components.md", catalog.as_str()),
+        ("creating-packages.md", guide.as_str()),
+        ("ui-components.md", navigation.as_str()),
+        ("shell-layout-strategy.md", strategy.as_str()),
+    ] {
+        for marker in [
+            "Plan 087",
+            "Clay-owned",
+            "no package-facing",
+            "no package JavaScript",
+        ] {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 087 package boundary marker {marker:?}"
+            );
+        }
+    }
+
+    for marker in [
+        "Welcome entry surface",
+        "TransientMenuOrigin::Completion",
+        "8 visible rows",
+        "480 logical",
+        "sanitized",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Plan 087 catalog marker {marker:?}"
+        );
+    }
+    for marker in [
+        "WelcomeWidget",
+        "COMPLETION_MAX_VISIBLE_ROWS",
+        "COMPLETION_MAX_WIDTH_PX",
+        "completion.provider_timeout",
+        "compose_menu_item_accessibility_label",
+        "P1-087-UI-1",
+        "dialog authority",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Plan 087 authoring marker {marker:?}"
+        );
+    }
+
+    for anchor in ["working-area", "active-pane", "main", "pointer"] {
+        assert!(
+            guide.contains(anchor),
+            "creating-packages.md must retain package overlay anchor {anchor:?}"
+        );
+    }
+    assert!(
+        guide.contains("`centered` is not part of")
+            && guide.contains("the package `OverlayAnchor`")
+            && guide.contains("Completion anchor is Clay-internal"),
+        "creating-packages.md must reject centered and caret-native package anchors"
+    );
+    assert!(
+        guide.contains("There is no new `ComponentKind`")
+            && guide.contains("token, manifest field, or JS API")
+            && navigation.contains("There is no new package-facing component kind")
+            && navigation.contains("there is no package-facing anchor"),
+        "Plan 087 must state that the package contract is unchanged"
+    );
+    assert!(
+        !guide.contains("SduiNativeState` active-menu rendering")
+            && !guide
+                .contains("Completion reuses the Phase 18.8 `TransientMenuSession` bottom overlay"),
+        "creating-packages.md must not retain the pre-Plan-087 completion renderer contract"
+    );
+}
+
+#[test]
+fn plan088_ui_catalog_and_package_authoring_contract_are_consistent() {
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    let tokens = read(".agents/skills/clay-execution/references/tokens.md");
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    let docs_index = read("docs/index.md");
+
+    for (path, text) in [
+        ("components.md", catalog.as_str()),
+        ("tokens.md", tokens.as_str()),
+        ("creating-packages.md", guide.as_str()),
+        ("ui-components.md", navigation.as_str()),
+        ("shell-layout-strategy.md", strategy.as_str()),
+    ] {
+        for marker in [
+            "Plan 088",
+            "no package-facing",
+            "no package JavaScript",
+            "ResolvedUiTheme",
+        ] {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 088 package-boundary marker {marker:?}"
+            );
+        }
+    }
+
+    for marker in [
+        "PackageModalDismiss",
+        "clipped-child semantics",
+        "active UI typography",
+        "table` remains the only reserved",
+        "completion` and `centered` are Clay-internal",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Plan 088 catalog marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "## Plan 088 token consumption (no additions)",
+        "no core token or package token domain was added",
+        "typography.*",
+        "no visual alias is added",
+    ] {
+        assert!(
+            tokens.contains(marker),
+            "tokens.md missing Plan 088 token marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "### Plan 088 UI modernization authoring contract",
+        "panel` + `scroll`",
+        "PackageModalDismiss",
+        "Role::Status",
+        "logical window bounds",
+        "raw CSS/colors",
+        "The authoritative catalog and token consumption note",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Plan 088 authoring marker {marker:?}"
+        );
+    }
+
+    for marker in [
+        "## Plan 088 UI modernization package contract",
+        "PackageModalDismiss",
+        "clipped-child accessibility semantics",
+        "completion` and",
+        "Creating Clay Packages — Plan 088 UI modernization authoring contract",
+    ] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Plan 088 navigation marker {marker:?}"
+        );
+    }
+
+    for anchor in ["working-area", "active-pane", "main", "pointer"] {
+        assert!(
+            guide.contains(anchor),
+            "creating-packages.md must retain package overlay anchor {anchor:?}"
+        );
+    }
+    assert!(
+        guide.contains("`completion` and `centered`")
+            && guide.contains("are internal origins")
+            && guide.contains("`table` remains reserved"),
+        "creating-packages.md must reject Clay-internal anchors and reserved kinds"
+    );
+    assert!(
+        docs_index.contains("[UI Components, Tokens, and Conformance](reference/ui-components.md)")
+            && docs_index
+                .contains("[Creating Clay Packages](reference/packages/creating-packages.md)"),
+        "docs/index.md must keep the UI catalog and package guide discoverable"
+    );
+    assert!(
+        !strategy.contains("tracks retained\nscroll-child clipping separately as `P1-087-UI-1`"),
+        "shell-layout-strategy.md must not retain the pre-Task-5 host-only wording"
+    );
+}
+
+#[test]
+fn phase28_package_authoring_contract_is_consistent() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    let navigation = read("docs/reference/ui-components.md");
+    let chrome = read("docs/reference/primitives/ui-chrome-primitives.md");
+    let registry = read("docs/reference/primitives/registry.md");
+    let decorations = read("docs/reference/clay-js-api/decorations/server-publish-decorations.md");
+
+    for marker in [
+        "## Phase 28 authoring contract",
+        "parse_key_sequence",
+        "comments[].linePrefix",
+        "render-folding",
+        "DecorationKind::Link",
+        "DecorationKind::InlayHint",
+        "DecorationIntent::{Hover,",
+        "features: [",
+        "inlayHint",
+        "paint_tooltip_shell",
+        "HTTP/HTTPS",
+        "no package JavaScript",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Phase 28 authoring marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Phase 28 editor-intelligence chrome",
+        "paint_gutter",
+        "paint_tooltip_shell",
+        "aria-hidden",
+        "No new package-facing `ComponentKind`",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Phase 28 catalog marker {marker:?}"
+        );
+    }
+    for marker in [
+        "## Phase 28 editor-intelligence chrome",
+        "typed decoration intent",
+        "HTTP/absolute/traversal",
+        "No new `ComponentKind`",
+    ] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Phase 28 navigation marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Editor-intelligence chrome (Phase 28)",
+        "DecorationKind::Link",
+        "DecorationKind::InlayHint",
+        "paint_gutter",
+        "render-folding",
+    ] {
+        assert!(
+            chrome.contains(marker),
+            "ui-chrome-primitives.md missing Phase 28 marker {marker:?}"
+        );
+    }
+    for marker in [
+        "Link targets and inlay labels",
+        "DecorationIntent::{Hover, Activate}",
+        "createLspBridge({ features: [\"inlayHint\"] })",
+    ] {
+        assert!(
+            registry.contains(marker),
+            "registry.md missing Phase 28 marker {marker:?}"
+        );
+    }
+    for marker in [
+        "### Link and inlay spans",
+        "kind: \"link\"",
+        "kind: \"inlayHint\"",
+        "Link activation never mints",
+    ] {
+        assert!(
+            decorations.contains(marker),
+            "server-publish-decorations.md missing Phase 28 marker {marker:?}"
+        );
+    }
+}
+
+#[test]
+fn phase25_package_authoring_contract_is_consistent() {
+    let guide = read("docs/reference/packages/creating-packages.md");
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    let navigation = read("docs/reference/ui-components.md");
+    for marker in [
+        "## Phase 25 authoring contract",
+        "serverRegisterPaneContentContribution",
+        "loadPackage(\"@clay/coding-agent\")",
+        "coding-agent.chromeActions",
+        "clay.replaces",
+        "clay-agent",
+        "WelcomeWidget",
+        "Command Centre",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md missing Phase 25 authoring marker {marker:?}"
+        );
+    }
+    for marker in [
+        "loaded empty-tab landing is package pane-content",
+        "WelcomeWidget",
+        "no package-facing replacement",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "components.md missing Phase 25 catalog marker {marker:?}"
+        );
+    }
+    for marker in ["launcher", "empty-tab", "WelcomeWidget"] {
+        assert!(
+            navigation.contains(marker),
+            "ui-components.md missing Phase 25 navigation marker {marker:?}"
+        );
+    }
+}
+
+#[test]
+fn plan088_code_wiki_documents_modernization_contract() {
+    let index = read("docs/wiki/index.md");
+    let archive_dir = root().join("docs/wiki/archive");
+    for page in [
+        "modules/editor-theme-registry.md",
+        "modules/typography-registry-and-font-roles.md",
+        "modules/slot-aware-package-ui.md",
+        "modules/workspace-file-browser.md",
+        "modules/performance-fixtures.md",
+        "modules/ui-review-harness.md",
+    ] {
+        assert!(
+            index.contains(&format!("]({page})")),
+            "docs/wiki/index.md must link Plan 088 implementation page {page}"
+        );
+    }
+    // Masonry-era Plan 088 pages are pull-only archive records now.
+    for page in [
+        "masonry-shell.md",
+        "masonry-sdui-region.md",
+        "pane-document-views.md",
+    ] {
+        assert!(
+            archive_dir.join(page).is_file(),
+            "docs/wiki/archive/ must retain Plan 088 record {page}"
+        );
+    }
+    assert!(
+        index.contains("## Plan 088 UI modernization map"),
+        "wiki index must explain the Plan 088 implementation map"
+    );
+
+    for (path, markers) in [
+        (
+            "docs/wiki/modules/editor-theme-registry.md",
+            [
+                "## Plan 088 theme/token modernization",
+                "TEXT_CONTRAST_MIN = 4.5",
+            ],
+        ),
+        (
+            "docs/wiki/archive/masonry-shell.md",
+            [
+                "## Plan 088 shell verification and boundaries",
+                "tab_card_display_name",
+            ],
+        ),
+        (
+            "docs/wiki/archive/masonry-sdui-region.md",
+            [
+                "set_clips_children()",
+                "### Plan 088 Task 6 responsive layout",
+            ],
+        ),
+        (
+            "docs/wiki/modules/workspace-file-browser.md",
+            ["sanitize_browser_label", "root_display_path"],
+        ),
+        (
+            "docs/wiki/modules/performance-fixtures.md",
+            [
+                "## Plan 088 window and responsive baselines",
+                "responsive_layout_work",
+            ],
+        ),
+        (
+            "docs/wiki/modules/ui-review-harness.md",
+            ["plan088-modernization", "UNRESOLVED"],
+        ),
+    ] {
+        let text = read(path);
+        for marker in markers {
+            assert!(
+                text.contains(marker),
+                "{path} must document Plan 088 wiki marker {marker:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn create_plan_ui_requirements_name_existing_catalog_files() {
     // Phase 20.8 task 5/6: the create-plan UI requirements reference the catalog
     // files and the UI components navigation page that actually exist.
@@ -1288,7 +1880,7 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
         "tokens.md",
         "creating-packages.md",
         "ui-components.md",
-        ".agents/skills/clay-ui",
+        ".agents/skills/clay-execution",
     ] {
         assert!(
             requirements.contains(reference),
@@ -1296,8 +1888,8 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
         );
         // Each referenced path that is a concrete file must exist.
         if let Some(path) = match reference {
-            "components.md" => Some(".agents/skills/clay-ui/references/components.md"),
-            "tokens.md" => Some(".agents/skills/clay-ui/references/tokens.md"),
+            "components.md" => Some(".agents/skills/clay-execution/references/components.md"),
+            "tokens.md" => Some(".agents/skills/clay-execution/references/tokens.md"),
             "creating-packages.md" => Some("docs/reference/packages/creating-packages.md"),
             "ui-components.md" => Some("docs/reference/ui-components.md"),
             _ => None,
@@ -1308,4 +1900,273 @@ fn create_plan_ui_requirements_name_existing_catalog_files() {
             );
         }
     }
+}
+
+#[test]
+fn plan101_recipe_matrix_covers_every_component_kind_and_internal_surface() {
+    let matrix = read("docs/development/ui-design-system-recipe-matrix.md");
+    let components = read(".agents/skills/clay-execution/references/components.md");
+
+    // All 15 implemented kinds plus reserved table
+    let kinds = [
+        "editorView",
+        "panel",
+        "label",
+        "button",
+        "list",
+        "flex",
+        "stack",
+        "overlay",
+        "scroll",
+        "portal",
+        "statusItem",
+        "dropdown",
+        "collapse",
+        "modal",
+        "textInput",
+        "table",
+    ];
+    for kind in kinds {
+        assert!(
+            matrix.contains(&format!("`{kind}`")),
+            "ui-design-system-recipe-matrix.md must cover component kind `{kind}`"
+        );
+    }
+
+    // All internal surfaces
+    let surfaces = [
+        "tabBar",
+        "paneSplitTree",
+        "statusBar",
+        "commandCentre",
+        "fileBrowser",
+        "settingsPanel",
+        "chatPanel",
+        "welcome",
+        "transientMenu",
+        "completion",
+        "editorChrome",
+    ];
+    for surface in surfaces {
+        assert!(
+            matrix.contains(&format!("`{surface}`")),
+            "ui-design-system-recipe-matrix.md must cover surface `{surface}`"
+        );
+    }
+
+    // Chrome primitives
+    let primitives = [
+        "badge",
+        "kbd",
+        "divider",
+        "tooltip",
+        "scrim",
+        "focusRing",
+        "scrollChrome",
+        "iconSlot",
+    ];
+    for primitive in primitives {
+        assert!(
+            matrix.contains(&format!("`{primitive}`")),
+            "ui-design-system-recipe-matrix.md must cover chrome primitive `{primitive}`"
+        );
+    }
+
+    // Check components.md links to the matrix
+    assert!(
+        components.contains("ui-design-system-recipe-matrix.md"),
+        "components.md must link to ui-design-system-recipe-matrix.md"
+    );
+}
+
+#[test]
+fn plan101_recipe_matrix_enforces_color_authority_and_prohibited_authorities() {
+    let matrix = read("docs/development/ui-design-system-recipe-matrix.md");
+
+    for required in [
+        "Content Themes as Sole Color Authority",
+        "Forced-Colors Accessibility Exception",
+        "Prohibited Authorities Deny List",
+        "Deterministic Fallback",
+        "Fallback Resolution and Inheritance Algorithm",
+        "Layout-Neutral",
+        "Layout-Affecting",
+    ] {
+        assert!(
+            matrix.contains(required),
+            "ui-design-system-recipe-matrix.md must document `{required}`"
+        );
+    }
+}
+
+#[test]
+fn plan101_documentation_cross_links_and_token_synchronization() {
+    let ui_components = read("docs/reference/ui-components.md");
+    let react_mapping = read("docs/development/react-ui-catalog-mapping.md");
+    let creating_packages = read("docs/reference/packages/creating-packages.md");
+    let tokens_md = read(".agents/skills/clay-execution/references/tokens.md");
+    let product_md = read("PRODUCT.md");
+
+    assert!(
+        ui_components.contains("ui-design-system-recipe-matrix.md"),
+        "docs/reference/ui-components.md must link to ui-design-system-recipe-matrix.md"
+    );
+    assert!(
+        react_mapping.contains("ui-design-system-recipe-matrix.md"),
+        "docs/development/react-ui-catalog-mapping.md must link to ui-design-system-recipe-matrix.md"
+    );
+    assert!(
+        creating_packages.contains("clay.contributions.uiDesignSystem"),
+        "docs/reference/packages/creating-packages.md must document clay.contributions.uiDesignSystem"
+    );
+    assert!(
+        tokens_md.contains("UI Design-System Value Domains (Plan 101)"),
+        "tokens.md must document UI Design-System Value Domains"
+    );
+    assert!(
+        product_md.contains("Design-System Recipe Separation"),
+        "PRODUCT.md must record design-system recipe commitments"
+    );
+}
+
+#[test]
+fn plan124_agent_lane_and_composer_palette_authoring_contracts_are_pinned() {
+    // Plan 124 task 10: the persistent agent lane and the composer's `/` palette
+    // are Clay-owned shell chrome, not package extension points. The authoring
+    // contract, the UI navigation page, the catalog, and the master index must
+    // keep saying so, and the boundary must not lose the two facts package
+    // authors act on: a package reaches the palette by registering a command,
+    // and listing is routing-policy-filtered with no authority granted.
+    //
+    // Plan 125 task 11 extends the same pin (per that plan's chosen approach:
+    // one contract test for these surfaces, not a parallel one): the palette is
+    // the only transient selection surface, every picker stage rides it behind a
+    // bounded mode, the shielded secret stage is Clay-owned, the halo replaces
+    // the drop shadow on the palette and mentions menus, and no package-facing
+    // or Clay-internal anchor vocabulary keeps a centered option.
+    let guide = read("docs/reference/packages/creating-packages.md");
+    for marker in [
+        "### Plan 124 authoring contract: the persistent agent lane and the composer's `/` palette",
+        "The lane is Clay-owned shell chrome, not a package extension point",
+        "There is no lane `PanelContribution` slot",
+        "A package reaches the palette one way: by registering a command",
+        "routing-policy-filtered",
+        "no package API exposes sessions or the connection-scoped",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md must keep the Plan 124 authoring-contract marker {marker:?}"
+        );
+    }
+
+    let ui_components = read("docs/reference/ui-components.md");
+    for marker in [
+        "## Plan 124 agent lane and composer `/` palette",
+        "`frontend/src/shell/AgentLane.tsx`",
+        "`TransientMenuOrigin::CommandPalette`",
+        "packages/creating-packages.md#plan-124-authoring-contract-the-persistent-agent-lane-and-the-composers--palette",
+    ] {
+        assert!(
+            ui_components.contains(marker),
+            "docs/reference/ui-components.md must record the Plan 124 boundary {marker:?}"
+        );
+    }
+
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    assert!(
+        catalog.contains("| Agent lane | internal | `frontend/src/shell/AgentLane.tsx` |"),
+        "the component catalog must list the agent lane as a Clay-native internal surface"
+    );
+    assert!(
+        catalog.contains("the persistent agent lane, the composer's `/` palette"),
+        "the catalog's package UI/layout contract must exclude the lane and the palette from package ownership"
+    );
+
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    for marker in [
+        "the persistent **agent lane** (plan 124)",
+        "It is shell chrome, not a `PaneSlotLayout` slot, package contribution",
+        "Plan 124 re-anchored the command and\npath sessions onto the agent lane's composer (`CommandPalette`)",
+    ] {
+        assert!(
+            strategy.contains(marker),
+            "shell-layout-strategy.md must keep the Plan 124 shell-vocabulary marker {marker:?}"
+        );
+    }
+
+    // Plan 125: the guide states that the palette is the single transient
+    // selection surface, that packages cannot open or drive it, and that the
+    // shielded stage is Clay-owned; the retired centered projection must stay
+    // retired (the anchor vocabulary offers no centered option, and the wire
+    // value is decode-only).
+    for marker in [
+        "### Plan 125 authoring contract: one palette for every picker, and the halo",
+        "**The composer palette is the only transient selection surface.**",
+        "packages cannot open or drive the palette",
+        "The shielded stage is Clay-owned, and only Clay-owned.",
+        "PackageOverlayAnchor` in `src/shell/package_ui.rs`",
+        "retired by Plan 125",
+    ] {
+        assert!(
+            guide.contains(marker),
+            "creating-packages.md must keep the Plan 125 authoring-contract marker {marker:?}"
+        );
+    }
+
+    let ui_components = read("docs/reference/ui-components.md");
+    for marker in [
+        "### Plan 125 continuation: one sheet for every picker, and the halo",
+        "composer-anchored palette is the only transient selection surface",
+        "typed into a `type=\"password\"` field inside the sheet",
+        "cannot claim the shielded stage",
+    ] {
+        assert!(
+            ui_components.contains(marker),
+            "docs/reference/ui-components.md must record the Plan 125 boundary {marker:?}"
+        );
+    }
+
+    let catalog = read(".agents/skills/clay-execution/references/components.md");
+    for marker in [
+        "the composer's `/` palette (the only transient selection surface since plan 125",
+        "the shielded `secret` field",
+        "the halo instead of a drop shadow",
+    ] {
+        assert!(
+            catalog.contains(marker),
+            "the component catalog must keep the Plan 125 palette/stage contract {marker:?}"
+        );
+    }
+
+    let tokens_md = read(".agents/skills/clay-execution/references/tokens.md");
+    for marker in [
+        "the **halo** (two zero-offset layers from `text.primary`",
+        "the palette sheet is exactly as wide as the composer box it answers to and reads no width token",
+    ] {
+        assert!(
+            tokens_md.contains(marker),
+            "tokens.md must keep the Plan 125 halo/geometry value domain {marker:?}"
+        );
+    }
+
+    let strategy = read("docs/reference/primitives/shell-layout-strategy.md");
+    for marker in [
+        "Plan 125 completes it:",
+        "the palette is the *only* transient selection surface",
+    ] {
+        assert!(
+            strategy.contains(marker),
+            "shell-layout-strategy.md must keep the Plan 125 shell-vocabulary marker {marker:?}"
+        );
+    }
+
+    let index = read("docs/index.md");
+    assert!(
+        index.contains("plan 124 agent-lane and composer `/` palette boundary")
+            && index.contains("Plan 124 agent-lane and composer `/` palette contract")
+            && index.contains(
+                "the composer palette is the only transient selection surface since plan 125"
+            ),
+        "docs/index.md must index the Plan 124/125 lane/palette authoring contract"
+    );
 }

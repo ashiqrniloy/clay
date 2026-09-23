@@ -75,7 +75,7 @@ const classification = serverClassifyDocument({ documentId: 5, path: "README.md"
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `modes.serverClassifyDocument` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverClassifyDocument` in `~/.clay/init.js`.
 
 ## Custom properties
 

@@ -1,0 +1,2 @@
+clay server listening on /tmp/clay-ui-review.y6sZ4t/review.sock
+clay: package discovery failed (package manager error: failed to spawn `npm`: No such file or directory (os error 2)); store packages stay unloaded

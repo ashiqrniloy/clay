@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCreateListingCancelToken
 js_facade: runtime/js/workspace.js::serverCreateListingCancelToken
-backing_rust: src/server/workspace.rs::create_listing_cancel_token
+backing_rust: src/server/workspace/mod.rs::create_listing_cancel_token
 deno_op: op_clay_workspace_create_listing_cancel_token
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_create_listing_cancel_token
 name: serverCreateListingCancelToken
@@ -35,7 +35,7 @@ Create a server-side cancellation token for bounded directory listing work.
 
 `serverCreateListingCancelToken` is the Phase 18.12 runtime-backed Clay JS API for **Create Listing Cancel Token**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 
@@ -91,7 +91,7 @@ Use `workspace.serverCreateListingCancelToken` only through the documented Clay 
 
 - JS facade: `runtime/js/workspace.js::serverCreateListingCancelToken`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_create_listing_cancel_token` (`op_clay_workspace_create_listing_cancel_token`)
-- Backing Rust/current owner: `src/server/workspace.rs::create_listing_cancel_token`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::create_listing_cancel_token`
 
 ## Lookup metadata
 

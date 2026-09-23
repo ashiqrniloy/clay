@@ -22,6 +22,18 @@ impl RuntimeProfile {
             Self::Restricted => "restricted",
         }
     }
+
+    /// Parse the profile name used by grants and durable records. Unknown
+    /// names fail closed (`None`), so a corrupted or newer store value can
+    /// never widen authority (Plan 136 task 4).
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "native-trust" => Some(Self::NativeTrust),
+            "sandboxed" => Some(Self::Sandboxed),
+            "restricted" => Some(Self::Restricted),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

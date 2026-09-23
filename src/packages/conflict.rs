@@ -36,6 +36,7 @@ pub enum PackageConflictKind {
     LayoutOverrideCollision,
     PackageOptionCollision,
     BehaviorManifestEntryCollision,
+    UiDesignSystemCollision,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +198,7 @@ pub fn check_enabled_packages<'a>(
     let mut layout_overrides = BTreeMap::new();
     let mut package_options = BTreeMap::new();
     let mut behavior_entries = BTreeMap::new();
+    let mut ui_design_systems = BTreeMap::new();
 
     for record in records {
         let prov = PackageConflictProvenance::from_record(record);
@@ -363,6 +365,15 @@ pub fn check_enabled_packages<'a>(
                 prov.clone(),
                 PackageConflictKind::BehaviorManifestEntryCollision,
                 "duplicate behavior manifest text transform entry",
+            )?;
+        }
+        if let Some(ref ds) = record.contributions.ui_design_system {
+            insert_unique(
+                &mut ui_design_systems,
+                ds.id.clone(),
+                prov.clone(),
+                PackageConflictKind::UiDesignSystemCollision,
+                "package UI design system ID collision",
             )?;
         }
         insert_unique(

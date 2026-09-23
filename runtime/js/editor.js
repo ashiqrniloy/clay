@@ -38,6 +38,11 @@ export async function serverInsertNewline(options) {
 export function clientSetCursorStyle(options) {
     return parseResult(requireEditorOps().op_clay_editor_set_cursor_style(JSON.stringify(options ?? {})));
 }
+// Phase 26: user-owned editor wrap-policy override. Trusted-domain init.js
+// only (packages cannot forge it); beats the per-mode manifest wrap policy.
+export function clientSetEditorLayout(options) {
+    return parseResult(requireEditorOps().op_clay_editor_set_editor_layout(JSON.stringify(options ?? {})));
+}
 // Plan 071 task 9 multi-cursor APIs. Direction-bearing commands validate via
 // Clay deno ops and return a direction-specific commandId; argless commands
 // return their stable registry ID for key binding.
@@ -76,6 +81,21 @@ export function clientRemoveSelection() {
 }
 export function clientUndoCursorMove() {
     return "editor.clientUndoCursorMove";
+}
+export function toggleComment() {
+    return "editor.toggleComment";
+}
+export function toggleListMarker() {
+    return "editor.toggleListMarker";
+}
+export function rotateHeading() {
+    return "editor.rotateHeading";
+}
+export function clientToggleFold() {
+    return "editor.clientToggleFold";
+}
+export function toggleInlayHints() {
+    return "editor.toggleInlayHints";
 }
 export function clientSetViewport(options) {
     void options;

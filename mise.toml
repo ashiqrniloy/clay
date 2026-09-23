@@ -1,0 +1,6 @@
+# mise.toml — one-command dev setup: `mise install` provisions the JS
+# runtimes at the same exact versions locally and in CI (plan 137).
+# Rust stays on rustup (plan 148 owns the rust-toolchain pin policy).
+[tools]
+bun = "1.4.2"
+node = "24.21.0" # transitional: removed once plan 139 makes the daemon run on Bun

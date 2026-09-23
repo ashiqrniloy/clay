@@ -1,0 +1,24 @@
+Plan 132 baseline gates — 2026-09-20/21, HEAD 36eabd2, clean tree
+
+Phase 1 — before Rust toolchain was installed:
+  scripts/check.sh full                  -> 127  (`cargo: command not found` at stage `audit`)
+  npm ci --prefix frontend               -> 0
+  npm run typecheck --prefix frontend    -> 0
+  npm test --prefix frontend             -> 0    (51 files / 497 tests)
+
+Phase 2 — toolchain installed (rustc/cargo 1.98.1, rustup 1.29.1, cargo-audit 0.22.2):
+
+  scripts/check.sh full                  -> 101  (FAILED at stage: clippy; audit/fmt/check passed, 83s)
+    cargo test --all-targets --quiet     -> 0    (1935 passed, 1 ignored)
+    cargo bench --no-run --quiet         -> 0
+    scripts/check-bindings.sh            -> 101  (only because frontend/dist missing; see below)
+    npm run build --prefix frontend      -> 0
+    scripts/check-bindings.sh (retry)    -> 0    ("webview bindings up to date")
+    cargo clippy --all-targets           -> 0    (exactly 1 warning in workspace: result_large_err)
+
+  scripts/check.sh full  (toolchain 1.96.1 via `cargo +1.96.1` shim)
+                                         -> 0    full check PASSED, 389s (all stages incl. bindings)
+
+Only failure on 1.98.1: clippy `result_large_err` at src/server/connection/documents.rs:270
+(`Result<BehaviorVersionDecision, ServerMessage>`; largest ServerMessage variant >=176 bytes).
+Same tree passes clippy under 1.96.1 -> new-stable lint, not a code regression.

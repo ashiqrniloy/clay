@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListDirectory
 js_facade: runtime/js/workspace.js::serverListDirectory
-backing_rust: src/server/workspace.rs::WorkspaceState::list_directory
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::list_directory
 deno_op: op_clay_workspace_list_directory
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_list_directory
 name: serverListDirectory
@@ -16,6 +16,14 @@ visibility: public
 permissions: ["workspace-read"]
 key_bindings: []
 custom_properties:
+  - name: rootId
+    type: WorkspaceRootId
+    default: required
+    description: Workspace root returned by the root-listing API; the listing is confined to it.
+  - name: relativePath
+    type: string
+    default: package-relative-path
+    description: Package-root-relative path inside the workspace root; defaults to the root itself.
   - name: maxDepth
     type: number
     default: 8
@@ -47,7 +55,7 @@ List a bounded page of workspace-root-relative file entries with server ignore r
 
 `serverListDirectory` is the Phase 18.12 runtime-backed Clay JS API for **List Directory**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It snapshots root authority under the workspace lock, then traverses through a bounded blocking worker without holding that lock. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It snapshots root authority under the workspace lock, then traverses through a bounded blocking worker without holding that lock. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 
@@ -82,6 +90,8 @@ No default key binding is assigned. Users may bind a key to `workspace.serverLis
 - `maxDepth` (`number`, default `8`): maximum listing depth.
 - `maxEntries` (`number`, default `1000`): maximum returned entries.
 - `cancelTokenId` (`string`, optional): cancellation token id.
+- `rootId`: Workspace root returned by the root-listing API; the listing is confined to it.
+- `relativePath`: Package-root-relative path inside the workspace root; defaults to the root itself.
 
 ## Return and async behavior
 
@@ -107,7 +117,7 @@ Use `workspace.serverListDirectory` only through the documented Clay JS facade. 
 
 - JS facade: `runtime/js/workspace.js::serverListDirectory`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_directory` (`op_clay_workspace_list_directory`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::list_directory`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::list_directory`
 
 ## Lookup metadata
 

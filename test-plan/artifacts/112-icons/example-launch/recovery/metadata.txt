@@ -1,0 +1,8 @@
+variant=recovery
+socket_ready_seconds=.108611348
+connected_seconds=1.362131005
+server_log_lines_after_settle=26
+config_source=examples/config (copy)
+ipc=private-unix-socket
+config=private-mode-700
+input_synthesis=unavailable-on-host

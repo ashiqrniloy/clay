@@ -1,0 +1,37 @@
+run1 rc=0 wall=13s
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.30s
+run2 rc=0 wall=14s
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.29s
+run3 rc=0 wall=13s
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.22s
+run4 rc=0 wall=14s
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.53s
+run5 rc=101 wall=14s
+test result: FAILED. 1424 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.45s
+failures:
+
+---- packages::manager::tests::npm_backend_list_parses_npm_json_shape stdout ----
+
+thread 'packages::manager::tests::npm_backend_list_parses_npm_json_shape' (499888) panicked at src/packages/manager.rs:1185:14:
+npm list discovery works against the npm JSON shape: BackendError { kind: ProcessSpawnFailed, message: "failed to spawn `/tmp/clay-manager-resolver-499761-fake-npm-list/npm`: Text file busy (os error 26)" }
+
+
+failures:
+    packages::manager::tests::npm_backend_list_parses_npm_json_shape
+
+test result: FAILED. 1424 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.45s
+
+error: test failed, to rerun pass `--lib`
+    packages::manager::tests::npm_backend_list_parses_npm_json_shape
+DONE
+run6 rc=0
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.60s
+run7 rc=0
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.18s
+run8 rc=0
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 14.11s
+run9 rc=0
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.96s
+run10 rc=0
+test result: ok. 1425 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.88s
+DONE-B

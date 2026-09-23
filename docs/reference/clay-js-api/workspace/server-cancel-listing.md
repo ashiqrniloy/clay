@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverCancelListing
 js_facade: runtime/js/workspace.js::serverCancelListing
-backing_rust: src/server/workspace.rs::cancel_listing
+backing_rust: src/server/workspace/mod.rs::cancel_listing
 deno_op: op_clay_workspace_cancel_listing
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_cancel_listing
 name: serverCancelListing
@@ -35,7 +35,7 @@ Cancel a bounded server directory listing by opaque token id.
 
 `serverCancelListing` is the Phase 18.12 runtime-backed Clay JS API for **Cancel Listing**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 
@@ -91,7 +91,7 @@ Use `workspace.serverCancelListing` only through the documented Clay JS facade. 
 
 - JS facade: `runtime/js/workspace.js::serverCancelListing`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_cancel_listing` (`op_clay_workspace_cancel_listing`)
-- Backing Rust/current owner: `src/server/workspace.rs::cancel_listing`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::cancel_listing`
 
 ## Lookup metadata
 

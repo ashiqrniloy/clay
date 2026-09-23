@@ -248,7 +248,7 @@ fn reject_when_clause(value: Option<&Value>, code: &str) -> Result<(), JsErrorBo
     Ok(())
 }
 
-fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
+pub(crate) fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
     let trimmed = chord.trim();
     if trimmed.is_empty() {
         return Err(JsErrorBox::generic(
@@ -304,7 +304,7 @@ fn parse_key_chord(chord: &str) -> Result<KeyStroke, JsErrorBox> {
 /// chord parses as a one-element vec. Leading/trailing/multiple whitespace
 /// collapses via `split_ascii_whitespace`. An empty sequence and any
 /// empty/malformed stroke reject the whole sequence.
-fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {
+pub(crate) fn parse_key_sequence(chord: &str) -> Result<Vec<KeyStroke>, JsErrorBox> {
     let strokes: Vec<KeyStroke> = chord
         .split_ascii_whitespace()
         .map(parse_key_chord)
@@ -339,6 +339,9 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
     // Plan 071 task 10: the text-object/smart-select command-ID surface is
     // generated (kind x scope x direction), so parse instead of enumerating.
     if crate::protocol::SelectionQuery::from_command_id(command_id).is_some() {
+        return true;
+    }
+    if crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some() {
         return true;
     }
     // Phase 22.4: the numbered tab families parse the same way (1..=9 only).
@@ -424,6 +427,16 @@ fn is_runtime_bindable_command(command_id: &str) -> bool {
             | "shell.clientTabClose"
             | "shell.clientTabMoveLeft"
             | "shell.clientTabMoveRight"
+            // Plan 109 I4: reasoning-effort cycle on the coding-agent
+            // surface — the panel consumes it client-side (composer chord
+            // + dropdown), like the editor's client commands.
+            | "coding-agent.clientCycleEffort"
+            // Plan 124: the agent lane's visibility toggle — client-local
+            // per-tab layout state like the rails, but routed ServerFirst so
+            // the shell matcher resolves its `Ctrl+X Ctrl+P` chord outside
+            // editor focus (its declaration is ClientUi, so the server
+            // answers the intent with a ShellClientCommandRequest).
+            | "shell.toggleAgentLane"
     )
 }
 
@@ -490,6 +503,8 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "editor.clientKeepSelection"
             | "editor.clientRemoveSelection"
             | "editor.clientUndoCursorMove"
+            | "editor.clientToggleFold"
+            | "editor.toggleInlayHints"
             | "shell.clientSplitPaneVertical"
             | "shell.clientSplitPaneHorizontal"
             // Phase 22.7 (F3): aliases route ClientUiCommand like the canonical IDs.
@@ -511,8 +526,11 @@ fn command_routing_policy(command_id: &str) -> Result<crate::protocol::RoutingPo
             | "shell.clientTabClose"
             | "shell.clientTabMoveLeft"
             | "shell.clientTabMoveRight"
+            | "coding-agent.clientCycleEffort"
     ) {
         Ok(crate::protocol::RoutingPolicy::ClientUiCommand)
+    } else if crate::client_commands::EditorClientCommand::from_command_id(command_id).is_some() {
+        Ok(crate::protocol::RoutingPolicy::ClientFirstPredictable)
     } else {
         Ok(crate::protocol::RoutingPolicy::ServerFirst)
     }
@@ -706,6 +724,32 @@ mod tests {
     }
 
     #[test]
+    fn phase28_editor_configuration_commands_are_bindable_and_routed() {
+        for command in [
+            "editor.toggleComment",
+            "editor.toggleListMarker",
+            "editor.rotateHeading",
+        ] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientFirstPredictable,
+                "{command} must remain on the client-first text-transform lane"
+            );
+            assert_eq!(validate_command_id(command).unwrap(), command);
+        }
+        for command in ["editor.clientToggleFold", "editor.toggleInlayHints"] {
+            assert!(is_runtime_bindable_command(command));
+            assert_eq!(
+                command_routing_policy(command).unwrap(),
+                RoutingPolicy::ClientUiCommand,
+                "{command} must remain a client UI command"
+            );
+            assert_eq!(validate_command_id(command).unwrap(), command);
+        }
+    }
+
+    #[test]
     fn textobject_and_smart_select_commands_are_bindable_ui_reactive() {
         // Plan 071 task 10: the generated command-ID surface is bindable and
         // routes UI-reactive; unknown kinds/scopes/directions stay unbindable
@@ -763,6 +807,22 @@ mod tests {
         assert!(!is_runtime_bindable_command("controlCenter.close"));
         assert!(!is_runtime_bindable_command("controlCenter.openX"));
         assert!(!is_runtime_bindable_command("controlCenter.openPathExtra"));
+    }
+
+    #[test]
+    fn agent_lane_toggle_is_bindable_and_server_routed() {
+        // Plan 124: the lane toggle executes client-side (its declaration is
+        // ClientUi) but its default keymap is Global + ServerFirst, so a
+        // `bindKey` rebind must compile to the same ServerFirst route the
+        // shell matcher resolves — the ClientUiCommand route would leave the
+        // chord dead outside editor focus.
+        let command = "shell.toggleAgentLane";
+        assert!(is_runtime_bindable_command(command));
+        assert_eq!(
+            command_routing_policy(command).unwrap(),
+            RoutingPolicy::ServerFirst
+        );
+        assert_eq!(validate_command_id(command).unwrap(), command);
     }
 
     #[test]
@@ -887,6 +947,20 @@ mod tests {
                 "{command} must pass the bindKey validation gate"
             );
         }
+    }
+
+    #[test]
+    fn coding_agent_effort_cycle_is_bindable_and_client_ui_routed() {
+        // Plan 109 I4: `coding-agent.clientCycleEffort` binds via bindKey
+        // (default package keyRouting Shift+Tab) and executes client-side
+        // on the coding-agent surface like the editor client commands.
+        assert!(is_runtime_bindable_command(
+            "coding-agent.clientCycleEffort"
+        ));
+        assert_eq!(
+            command_routing_policy("coding-agent.clientCycleEffort").unwrap(),
+            RoutingPolicy::ClientUiCommand
+        );
     }
 
     #[test]

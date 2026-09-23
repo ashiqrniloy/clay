@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "approvals": [
+    {
+      "package": "@fixture/lane",
+      "resolved_version": "0.1.0",
+      "source": "@fixture/lane",
+      "integrity": null,
+      "package_root": "/home/arn/Projects/clay/test-plan/artifacts/127-lane-scheduling/fixture-package",
+      "api_prefix": "lane",
+      "capabilities": [
+        "completion-provider",
+        "mode-registration",
+        "parse-document"
+      ],
+      "grant": null,
+      "processes": [],
+      "relations": [],
+      "replacements": [],
+      "approved_by": "cli",
+      "approved_at": "2026-09-23T14:30:45Z",
+      "revoked": true
+    }
+  ]
+}

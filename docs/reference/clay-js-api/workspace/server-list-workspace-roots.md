@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverListWorkspaceRoots
 js_facade: runtime/js/workspace.js::serverListWorkspaceRoots
-backing_rust: src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root
+backing_rust: src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace/mod.rs::WorkspaceState::add_root
 deno_op: op_clay_workspace_list_roots
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_list_roots
 name: serverListWorkspaceRoots
@@ -35,7 +35,7 @@ List server-configured workspace root metadata without exposing unrestricted hos
 
 `serverListWorkspaceRoots` is the runtime-backed public API for **List Workspace Roots**. It is documented now so generated help, registry, configuration, and agent lookup work can target a stable Clay JS name instead of raw Rust symbols, protocol messages, or future raw op wrappers.
 
-Authority: `server-authoritative-workspace-query`. Runtime path: `server-first-query`. Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, Masonry paint/layout, or ordinary edit acknowledgement hot paths. Phase 22.8 keeps tab selection out of this API: connection messages enumerate only the caller's bound tab workspace, and the facade exposes no arbitrary `TabId` selector.
+Authority: `server-authoritative-workspace-query`. Runtime path: `server-first-query`. Workspace root metadata lookup is a background/help/programmatic query and never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths. Phase 22.8 keeps tab selection out of this API: connection messages enumerate only the caller's bound tab workspace, and the facade exposes no arbitrary `TabId` selector.
 
 ## When to use
 
@@ -62,7 +62,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `workspace.serverListWorkspaceRoots` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `workspace.serverListWorkspaceRoots` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -96,8 +96,8 @@ Use `workspace.serverListWorkspaceRoots` only through the documented Clay JS fac
 
 - JS facade: `runtime/js/workspace.js::serverListWorkspaceRoots`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_list_roots` (`op_clay_workspace_list_roots`)
-- Backing Rust/current owner: `src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Backing Rust/current owner: `src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace/mod.rs::WorkspaceState::add_root`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace/mod.rs`
 
 ## Lookup metadata
 

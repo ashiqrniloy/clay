@@ -6,9 +6,10 @@ sibling of the Control Center. It browses user-authorized paths with an
 editable path bar, a derived fuzzy filter, descend/ascend/direct-jump
 navigation, and primary/secondary activation (`Enter`/`Alt+Enter`). It is a
 pure wiring phase over existing primitives: the Phase 18.8
-`TransientMenuSession` state/projection, the Phase 24.1 server-owned session
-store and menu round trip, and the Phase 24.2 shared fuzzy scorer and
-generation-stamped command routing (`plans/083`).
+`TransientMenuSession` state model, the Phase 24.1 server-owned session store
+and menu round trip, the Phase 24.2 shared fuzzy scorer, and Plan 124's
+composer-owned `CommandPalette` projection and generation-stamped command
+routing (`plans/083`, `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`).
 
 ## What it is
 
@@ -44,7 +45,7 @@ command id never changed).
   `PathBrowserTransition` (`FilterOnly` / `Relist { target }`),
   `PathBrowserActivation` (`Descend` / `OpenFile` / `OpenWorkspace`),
   `PathBrowserEntry`.
-- `src/server/workspace.rs` — the built-in user-browse listing primitive:
+- `src/server/workspace/mod.rs` — the built-in user-browse listing primitive:
   `UserBrowseListingPlan`, `UserBrowsePage`/`UserBrowseEntry`/
   `UserBrowseEntryKind`, `UserBrowseError`, `traverse_user_browse_directory`
   (sync, bounded), `execute_user_browse_listing` (`spawn_blocking` wrapper),
@@ -54,15 +55,15 @@ command id never changed).
   `install_path_browser` / `set_path_browser_error`, `MenuEdit`,
   `ServerMenuActivateOutcome` (`Navigate` / `OpenFile` / `OpenWorkspace` /
   `Dispatch`), kind-dispatching `set_query`/`backspace`/`activate`.
-- `src/server/connection.rs` — `open_command_centre_session` (shared
+- `src/server/connection/mod.rs` — `open_command_centre_session` (shared
   open helper for `controlCenter.open` and `controlCenter.openPath`),
   `path_browser_relist` (bounded relist on the blocking pool),
   `open_workspace_for_bound_tab` (shared with `TabCommand::OpenWorkspace`),
   and the `MenuQueryUpdate`/`MenuBackspace`/`MenuActivate` handler arms.
 - `src/protocol/menu.rs`, `src/protocol/mod.rs` — `MenuBackspace` intent,
   `MenuActivate` activation `kind` (`Primary`/`Secondary`),
-  `PROTOCOL_VERSION` 16, `controlCenter.openPath` declaration and default
-  keymap.
+  protocol v31 palette row fields/scope filter, `controlCenter.openPath`
+  declaration and default keymap.
 - `src/client/mod.rs`, `src/masonry_pane_document.rs` — client intent
   enqueuers (`enqueue_menu_backspace`, activation kind) and
   `dispatch_server_menu_key` routing (Enter/Tab primary, Alt+Enter
@@ -126,12 +127,18 @@ installed entries, a persisted `selected_index`, and a sticky
 - **Projection** — prompt `Browse · {canonical_dir}`, query = input, inert
   `TransientMenuAction::new("")` items, empty states “Empty directory” /
   “No matches for {filter}”, same overlay composition and tokens as the
-  Control Center (bottom anchor, `z.overlay`, Modal focus, hosted
-  `MenuA11y`).
+  Control Center (the same `CommandPalette` bottom sheet, full composer-field
+  width, 6px above the field, with the working-area veil and lane above it).
+  Plan 125 makes the path session an explicit palette **mode**: the server
+  stamps `mode = "path"` on the snapshot, the sheet keeps the `/` sigil visible
+  while it is open, its foot verb is `open`, and `Esc`/`Alt+←` cancel the session
+  (`Esc` walks a *stage* back instead — path mode is not a stage). A backspace
+  against an empty filter is not a dismissal at all: the session ascends to the
+  parent directory (`MenuBackspace` → `PathBrowserTransition::Relist`).
 
 ## Built-in user-browse listing primitive
 
-`traverse_user_browse_directory` (in `src/server/workspace.rs`, `pub(crate)`,
+`traverse_user_browse_directory` (in `src/server/workspace/mod.rs`, `pub(crate)`,
 reachable only from the built-in session):
 
 - Canonicalizes the requested directory, verifies it is a directory, and
@@ -161,11 +168,14 @@ reachable only from the built-in session):
 - `MenuBackspace` is a new semantic intent beside `MenuQueryUpdate`
   (dedicated backspace rather than a full query update); `MenuActivate`
   carries a bounded `Primary`/`Secondary` activation kind (Enter/Tab vs
-  Alt+Enter). `PROTOCOL_VERSION` bumped once (15 → 16). No path-specific
-  wire variants and no filesystem paths/actions cross the wire; activation
-  resolves server-side from installed entries, failing closed on unknown/
-  stale session ids and unknown enum data. Control Center behavior is
-  byte-for-byte equivalent.
+  Alt+Enter). The current protocol pin is 32; Plan 124 adds palette row
+  `group`/`bindings` metadata and query `scope`, and plan 125 the optional
+  bounded session `mode` (`catalogue`/`path`/`picker`/`secret`/`url`/`oauth`)
+  — none of them path-specific wire variants. No filesystem paths/actions cross
+  the wire; activation resolves server-side from installed entries, failing
+  closed on unknown/stale session ids and unknown enum data. Command and path
+  sessions share the `CommandPalette` shell surface and the same session store,
+  but retain separate server-owned item sets.
 - Client: `dispatch_server_menu_key` pops the mirrored
   `server_query_buffer` and sends `MenuBackspace`; Enter/Tab enqueue
   `MenuActivate Primary`, Alt+Enter `MenuActivate Secondary`; every other
@@ -266,22 +276,23 @@ reachable only from the built-in session):
   canonicalization, directory-first order, fuzzy ranking, selection clamp/
   wrap, oversize clamps, sticky error suppression, activation resolution,
   descend target, no-Symlink conversion, projection).
-- `src/server/workspace.rs` — 8 `user_browse` tests (bounded windows,
+- `src/server/workspace/mod.rs` — 8 `user_browse` tests (bounded windows,
   deterministic order, non-directory/error paths, seed resolution).
 - `src/server/menu_sessions.rs` — 11 tests (navigate relists, activation
   dispatch incl. `OpenFile`/`OpenWorkspace` outcomes, no-op helpers on
   Control Center, cancel clears store + fresh id, frame-ceiling snapshot).
-- `src/server/connection.rs` — 10 e2e tests (open from keybinding +
+- `src/server/connection/mod.rs` — 10 e2e tests (open from keybinding +
   catalogue, sticky-error unlistable seed, descend/ascend/direct jump,
   file open converts browse → `SingleFile` grant, workspace open rebinds
   only the bound tab + vanished-directory denial, navigation-only creates
   no grants, cross-client denial, tab-switch + disconnect survival,
   reload dismissal).
-- `src/server/js_runtime.rs` — default/unbind/rebind of `Ctrl+X Ctrl+F`
+- `src/server/js_runtime/mod.rs` — default/unbind/rebind of `Ctrl+X Ctrl+F`
   through `clay:keybindings`.
 - `src/protocol/mod.rs` — default keymap contains the path-browser binding.
 - Manual plan: `test-plan/03-files-and-workspace.md` F17–F29,
-  `test-plan/10-keybindings-and-commands.md` K48–K54.
+  `test-plan/10-keybindings-and-commands.md` K93–K97 and
+  `test-plan/13-window-splits.md` S48.
 
 Run with:
 
@@ -297,6 +308,7 @@ cargo test --lib server::connection::tests --quiet
 - [Transient Menu Session](transient-menu-session.md) — the shared state model
 - [Transient Menu Round Trip](transient-menu-round-trip.md) — wire DTOs, intents, store, client routing
 - [Control Center](control-center.md) — the sibling server-owned session kind
+- [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md) — current composer-owned projection
 - [Fuzzy Matching](fuzzy-matching.md) — the shared scorer used for filter derivation
 - [Workspace File Browser](workspace-file-browser.md) — the workspace-root-bound listing and SDUI tree
 - [Client File Dialog](client-file-dialog.md) — the native-dialog fallback capability issuer
@@ -304,5 +316,5 @@ cargo test --lib server::connection::tests --quiet
 - `docs/reference/primitives/registry.md` — BuiltInUserBrowseListing row
 - `docs/reference/clay-js-api/configuration.md` — Phase 24.3 configuration review
 - `docs/development/file-open-save-reload-workflow.md` — browse → grant conversion
-- `.agents/skills/project-patterns/references/authority-boundaries.md` — built-in browse grant
+- `.agents/skills/clay-execution/references/packages.md` — built-in browse grant
 - `plans/083-Phase24.3-Path-Mode-Dired-Style-Filesystem-Browsing.md`

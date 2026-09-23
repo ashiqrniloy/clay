@@ -1,0 +1,9 @@
+Plan 136 task 6 automated lane measurement (2026-09-23)
+command: cargo test --lib lanes_and_queues -- --nocapture
+plan 127 task 3 envelope (recorded in the plan 136 task 1 baseline):
+  PLAN127_LANE busy_ms=500 idle_median_us=1567 busy_completion_us=2594 workers_started=4
+
+PLAN136_GRANTED_LANE busy_ms=500 idle_median_us=2281 busy_completion_us=3572 workers_started=4
+test server::js_runtime::tests::lanes_and_queues::granted_third_party_provider_serves_from_latency_lane_when_general_lane_busy ... ok
+test server::js_runtime::tests::lanes_and_queues::ungranted_third_party_provider_still_fails_closed ... ok
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 1419 filtered out; finished in 2.74s

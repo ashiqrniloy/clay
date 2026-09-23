@@ -1,0 +1,40 @@
+src/ rust files with blocking std::fs site: 84
+total site lines: 1278
+non-test-path site lines: 506
+
+top files by count (non-test-path only):
+  78  src/server/agent.rs
+  48  src/server/agent_settings.rs
+  35  src/server/workspace/mod.rs
+  31  src/shell/file_browser.rs
+  29  src/server/configuration.rs
+  26  src/server/agent_mcp_config.rs
+  24  src/server/git.rs
+  21  src/server/config_watch.rs
+  21  src/server/launcher.rs
+  16  src/packages/approvals.rs
+  16  src/packages/self_update.rs
+  15  src/packages/manager.rs
+  14  src/packages/init_lines.rs
+  14  src/packages/ledger.rs
+  14  src/server/ops/packages.rs
+  12  src/packages/bundled.rs
+  12  src/server/ops/theme.rs
+  11  src/packages/binaries.rs
+   9  src/server/document_analysis.rs
+   9  src/server/mod.rs
+   7  src/server/command_execution.rs
+   5  src/docs/registry.rs
+   5  src/perf/metrics.rs
+   5  src/server/agent/book.rs
+   4  src/launch.rs
+   4  src/server/language_server.rs
+   4  src/server/ops/workspace.rs
+   4  src/server/ops/completion.rs
+   4  src/shell/layout_persist.rs
+   2  src/packages/service.rs
+   2  src/perf/fixtures.rs
+   2  src/server/js_runtime/source.rs
+   1  src/ipc.rs
+   1  src/packages/authorization.rs
+   1  src/server/agent_documents.rs

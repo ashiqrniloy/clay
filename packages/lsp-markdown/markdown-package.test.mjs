@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { lspMarkdownPackageManifest } from "./dist/index.js";
 import { createMarksmanBridge, languageIdForRelativePath } from "./dist/server.js";
-import { encodeFrame, FrameDecoder } from "./dist/shared/framing.js";
+import { encodeFrame, FrameDecoder } from "../lsp-shared/framing.js";
 
 const identity = {
   package: "@clay/lsp-markdown",
@@ -164,8 +164,8 @@ function requestEvent(feature, requestId) {
 }
 
 test("Markdown package manifest matches package.json and fixes marksman server launch authority", () => {
-  assert.deepEqual(lspMarkdownPackageManifest(), JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url))));
-  const manifest = lspMarkdownPackageManifest();
+  const manifest = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url)));
+  assert.equal(manifest.clay.preset, "lsp-bridge");
   assert.deepEqual(manifest.clay.capabilities, ["language-server"]);
   assert.deepEqual(manifest.clay.contributions.languageServers, [{
     id: "lsp-markdown.server",

@@ -1,16 +1,20 @@
+#[path = "../agent_session_isolation.rs"]
+mod agent_session_isolation;
+#[path = "../decoration_intent_authority.rs"]
+mod decoration_intent_authority;
 #[path = "../language_server_authority.rs"]
 mod language_server_authority;
-#[path = "../live_atspi_smoke.rs"]
-mod live_atspi_smoke;
+#[path = "../package_cli.rs"]
+mod package_cli;
 #[path = "../package_conflicts.rs"]
 mod package_conflicts;
+#[path = "../package_exit_gate.rs"]
+mod package_exit_gate;
 #[path = "../package_graph.rs"]
 mod package_graph;
 #[path = "../package_loading.rs"]
 mod package_loading;
 #[path = "../package_primitive_gate.rs"]
 mod package_primitive_gate;
-#[path = "../runtime_sandbox_harness.rs"]
-mod runtime_sandbox_harness;
 #[path = "../rust_visibility_api_mapping.rs"]
 mod rust_visibility_api_mapping;

@@ -1,7 +1,19 @@
 use crate::protocol::{BehaviorVersion, DecorationSet, DiagnosticSet, DocumentId, DocumentVersion};
 
 /// Byte range metadata used by incremental parse notifications and results.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseByteRange {
     pub start: u64,
     pub end: u64,
@@ -41,7 +53,10 @@ impl ParseByteRange {
     Eq,
     PartialOrd,
     Ord,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct ParsePoint {
     pub row: u64,
     pub column: u64,
@@ -64,7 +79,19 @@ impl ParsePoint {
 }
 
 /// Exact server-accepted edit coordinates between consecutive document versions.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseInputEdit {
     pub base_document_version: DocumentVersion,
     pub document_version: DocumentVersion,
@@ -100,7 +127,18 @@ impl ParseInputEdit {
 }
 
 /// Server-prepared, bounded document text supplied to package parsers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseWindowSnapshot {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -133,7 +171,19 @@ impl ParseWindowSnapshot {
 }
 
 /// Bounded parse-input policy used by generic large-file schedulers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParsePolicy {
     pub max_window_bytes: u64,
     pub guard_bytes: u64,
@@ -158,7 +208,18 @@ impl ParsePolicy {
 }
 
 /// A package/mode parse-window request before text has been materialized.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseWindowRequest {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -171,7 +232,19 @@ pub struct ParseWindowRequest {
 }
 
 /// Retained syntax/cache memory budget metadata.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxMemoryBudget {
     pub budget_bytes: u64,
     pub retained_bytes: u64,
@@ -195,7 +268,19 @@ impl SyntaxMemoryBudget {
 }
 
 /// Coarsest unit a package parser can update incrementally.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ParseUnit {
     File,
     Region,
@@ -203,7 +288,18 @@ pub enum ParseUnit {
 }
 
 /// Compact, versioned server-side notification sent to a package parse handler.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct ParseEditNotification {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -217,24 +313,65 @@ pub struct ParseEditNotification {
     pub accepted_edit: Option<ParseInputEdit>,
     pub parse_windows: Vec<ParseWindowSnapshot>,
     pub memory_budget: Option<SyntaxMemoryBudget>,
+    /// Content-free correlation id carried from editor input/viewport request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
+    /// Atomic viewport-render request identity, when scheduled by one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<crate::protocol::ViewportRequestId>,
 }
 
 /// Engine-neutral parser recovery capture before document-range translation.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct SyntaxDiagnosticCapture {
     pub byte_start: u64,
     pub byte_end: u64,
     pub kind: SyntaxDiagnosticKind,
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SyntaxDiagnosticKind {
     Error,
     Missing,
 }
 
 /// Inert incremental parse update produced by a server-side package parser.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct IncrementalParseUpdate {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -251,6 +388,113 @@ pub struct IncrementalParseUpdate {
     pub decoration_updates: Vec<DecorationSet>,
     /// Optional source-associated diagnostics validated atomically with this update.
     pub diagnostic_update: Option<DiagnosticSet>,
+    /// Optional folding ranges produced with this accepted syntax tree or
+    /// package publish harvested during the same parse invocation.
+    /// Payload-capped by `FOLDING_RANGE_PAYLOAD_BUDGET_BYTES` before publish.
+    pub folding_update: Option<crate::protocol::FoldingRangeSet>,
+    /// Content-free correlation id for the request that produced this update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
+    /// Atomic viewport-render request this update belongs to. `None` for
+    /// edit/open/resync-driven parses, which keep the per-update frames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<crate::protocol::ViewportRequestId>,
+    /// Owning client for request-scoped updates, so only the requesting
+    /// connection aggregates the members into its pending patch. `None` for
+    /// edit-driven updates, which remain document-broadcast.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<crate::protocol::ClientId>,
+}
+
+/// Terminal status of one atomic viewport render patch.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum ViewportRenderStatus {
+    /// All scheduled parse windows completed; members are authoritative for
+    /// the covered ranges.
+    Complete,
+    /// The request was valid but produced no output (e.g. no registered
+    /// handler, empty viewport after clamping). Frees the client request slot.
+    Empty,
+    /// The request failed validation (unknown document, stale version,
+    /// invalid range, activation failure). Frees the client request slot.
+    Rejected,
+}
+
+/// One complete answer to one `ViewportRenderRequest` (protocol v29).
+///
+/// Renderer-neutral and generic across syntax, semantic, diagnostic, and fold
+/// output: members are the already-validated protocol sets, in viewport-key
+/// order; `covered_ranges` states what the output authoritatively covers
+/// (distinct from the parse context range that produced it). Oversized dense
+/// output arrives as ordered members inside this one patch identity instead
+/// of dozens of independent frames the frontend must heuristically join.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewportRenderPatch {
+    pub request_id: crate::protocol::ViewportRequestId,
+    pub document_id: DocumentId,
+    pub document_version: DocumentVersion,
+    pub status: ViewportRenderStatus,
+    /// Bounded rejection reason; empty for complete/empty patches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Byte ranges the members authoritatively cover. The parse context range
+    /// (the requested viewport, possibly wider) is intentionally not copied —
+    /// only authoritative output coverage is claimed.
+    pub covered_ranges: Vec<crate::protocol::TextByteRange>,
+    /// Ordered, independently validated decoration members (all kinds).
+    pub decorations: Vec<DecorationSet>,
+    /// Source-associated diagnostic members from the same parse windows.
+    pub diagnostics: Vec<DiagnosticSet>,
+    /// Fold members from the same parse windows.
+    pub folds: Vec<crate::protocol::FoldingRangeSet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
+}
+
+impl ViewportRenderPatch {
+    /// Bounded rejection patch answering one request id.
+    pub fn rejected(
+        request_id: crate::protocol::ViewportRequestId,
+        document_id: DocumentId,
+        document_version: DocumentVersion,
+        reason: &str,
+    ) -> Self {
+        Self {
+            request_id,
+            document_id,
+            document_version,
+            status: ViewportRenderStatus::Rejected,
+            reason: Some(reason.chars().take(128).collect()),
+            covered_ranges: Vec::new(),
+            decorations: Vec::new(),
+            diagnostics: Vec::new(),
+            folds: Vec::new(),
+            trace_id: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -291,6 +535,8 @@ mod tests {
                 text: "aZb\néx".to_string(),
             }],
             memory_budget: None,
+            trace_id: Some(41),
+            request_id: None,
         };
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&notification).unwrap();

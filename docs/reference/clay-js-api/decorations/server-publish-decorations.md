@@ -24,10 +24,22 @@ custom_properties:
     type: number
     default: required
     description: Server document version the spans were produced for.
-  - name: viewportByteRange
-    type: byte-range
+  - name: currentDocumentVersion
+    type: number
+    default: documentVersion
+    description: Validation override used by tests/server integration; defaults to `documentVersion`.
+  - name: viewport
+    type: object
     default: required
-    description: Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+    description: Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+  - name: viewport.byteStart
+    type: number
+    default: required
+    description: First byte of the visible range.
+  - name: viewport.byteEnd
+    type: number
+    default: required
+    description: Last byte of the visible range.
   - name: spans
     type: DecorationSpan[]
     default: []
@@ -59,7 +71,7 @@ For Phase 18.5 large-file workflows, publication remains the same public facade:
 
 ## When to use
 
-Use this API when a package parse/render provider has produced syntax, semantic, diagnostic, search, or Markdown decoration spans for the current document viewport. Do not use it for preview panels; use `clay:sdui` for package UI.
+Use this API when a package parse/render provider has produced syntax, semantic, diagnostic, search, link, inlay-hint, or Markdown decoration spans for the current document viewport. Link targets and inlay labels are inert data; Clay owns activation and overlay paint. Do not use it for preview panels; use `clay:sdui` for package UI.
 
 ## JavaScript usage
 
@@ -118,16 +130,56 @@ serverPublishDecorations({
 });
 ```
 
+### Link and inlay spans
+
+Link spans use `kind: "link"`, the closed `Link` vocabulary token, and an
+optional bounded target. Inlay spans use `kind: "inlayHint"` with an inert
+label and `before`/`after` placement:
+
+```ts
+serverPublishDecorations({
+  documentId: 1,
+  documentVersion: 4,
+  viewport: { byteStart: 0, byteEnd: 80 },
+  spans: [
+    {
+      byteStart: 10,
+      byteEnd: 18,
+      kind: "link",
+      tokenType: "Link",
+      modifiers: ["Underline"],
+      target: { kind: "workspacePath", relativePath: "guide.md", byteStart: 0, byteEnd: 8 },
+    },
+    {
+      byteStart: 24,
+      byteEnd: 25,
+      kind: "inlayHint",
+      tokenType: "Type",
+      modifiers: [],
+      inlay: { label: ": i32", placement: "after" },
+    },
+  ],
+});
+```
+
+Target kinds are `workspacePath` (safe relative path with optional byte
+range), `documentRange` (same-document jump), and `displayOnly` (sanitized
+text). Clay resolves typed decoration intent; packages do not receive pointer
+callbacks or open targets directly. Link activation is not a browse/filesystem
+grant. Absolute, URL, fragment, and traversal targets do not open; HTTP is
+display-only. Inlay labels are bounded and decorative, with no command or URL
+semantics.
+
 ## Options
 
 - `packageManifest` or package context fields: package identity and declared `render-decorations` permission.
 - `documentId` (`number`, required): Target document.
 - `documentVersion` (`number`, required): Version used by the parser.
 - `currentDocumentVersion` (`number`, optional): Validation override used by tests/server integration; defaults to `documentVersion`.
-- `viewportByteRange` / `viewport` (`{ byteStart: number; byteEnd: number }`, required): Viewport byte range.
+- `viewport` (`{ byteStart: number; byteEnd: number }`, required): Viewport byte range.
 - `spans` (`DecorationSpan[]`, required): Known inert span records.
 
-Known span kinds are `syntax`, `semantic`, `diagnostic`, and `search-match`. Each span must provide either direct two-axis vocabulary (`tokenType` such as `Function`/`Variable`/`Keyword` plus optional `modifiers` such as `Declaration`/`Readonly`/`Bold`) or a legacy `styleToken` compatibility string such as `markup.heading.1`, `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `diagnostic.error`, and `search.match`. `language-server` permission does not grant decoration publication; packages still need `render-decorations`.
+Known span kinds are `syntax`, `semantic`, `diagnostic`, `search-match`, `link`, and `inlayHint`. Each span must provide either direct two-axis vocabulary (`tokenType` such as `Function`/`Variable`/`Keyword` plus optional `modifiers` such as `Declaration`/`Readonly`/`Bold`) or a legacy `styleToken` compatibility string such as `markup.heading.1`, `keyword.control`, `string.quoted`, `comment.line`, `punctuation.definition`, `diagnostic.error`, and `search.match`. Link targets use `target.kind` `workspacePath`, `documentRange`, or `displayOnly`; inlay hints use `inlay.label` plus `inlay.placement` `before` or `after`. `language-server` permission does not grant decoration publication; packages still need `render-decorations`.
 
 ## Key bindings
 
@@ -137,9 +189,13 @@ No default key binding is assigned.
 
 - `documentId`: target open document.
 - `documentVersion`: stale-version guard.
-- `viewportByteRange`: publication range and IPC bound.
+- `viewport`: publication range and IPC bound.
 - `spans`: bounded inert decorations.
 - `packagePrefix`: provenance and conflict identity.
+- `currentDocumentVersion`: Validation override used by tests/server integration; defaults to `documentVersion`.
+- `viewport`: Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded.
+- `viewport.byteStart`: First byte of the visible range.
+- `viewport.byteEnd`: Last byte of the visible range.
 
 ## Return and async behavior
 
@@ -155,7 +211,7 @@ Fails with Clay error codes when permissions are missing, options are malformed,
 
 Requires: `render-decorations`.
 
-The API accepts inert data only. It rejects arbitrary CSS, callbacks, draw functions, raw `Deno.core.ops`, client-side JavaScript hooks, and unknown native rendering authority.
+The API accepts inert data only. It rejects arbitrary CSS, callbacks, draw functions, raw `Deno.core.ops`, client-side JavaScript hooks, and unknown native rendering authority. Link activation never mints a browse/filesystem grant or opens a network URL; inlay labels are bounded decorative text.
 
 ## Agent guidance
 

@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-pub use crate::server::workspace::OpenDocumentSnapshot;
+pub use crate::server::workspace::OpenDocumentHead;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandExecutionRequest {
@@ -80,7 +80,7 @@ pub enum GitCommandResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceActionResult {
     /// A file was opened under a known root or via a selected-file grant.
-    Opened(OpenDocumentSnapshot),
+    Opened(OpenDocumentHead),
     /// A directory navigation request was accepted; the connection handler
     /// will publish a refreshed file-browser SDUI snapshot.
     Navigated {
@@ -164,6 +164,15 @@ impl CommandExecutor {
             ));
         }
         validate(command, &request)?;
+        if crate::client_commands::EditorClientCommand::from_command_id(&command.command_id)
+            .is_some()
+        {
+            return Err(diagnostic(
+                &request.command_id,
+                CommandExecutionRule::UnknownCommand,
+                "command is client-mapped and not server-executed",
+            ));
+        }
 
         Ok(CommandExecutionResult {
             command_id: command.command_id.clone(),
@@ -274,17 +283,30 @@ impl CommandExecutor {
             OPEN_DIRECTORY_COMMAND_ID => {
                 let (root_id, relative_path) =
                     navigate_directory_arguments(&request.arguments, &request.command_id)?;
-                workspace
-                    .list_directory(
-                        crate::server::workspace::FileListRequest {
-                            root_id,
-                            relative_path: relative_path.clone(),
-                            max_depth: 1,
-                            max_entries: 1,
-                        },
-                        None,
-                    )
+                // Plan under the caller's workspace guard, then walk on Tokio's
+                // bounded blocking pool: the sync `list_directory` compatibility
+                // path would run a recursive std::fs walk on the reactor
+                // (plan 134 P3).
+                let plan = workspace
+                    .prepare_directory_listing(crate::server::workspace::FileListRequest {
+                        root_id,
+                        relative_path: relative_path.clone(),
+                        max_depth: 1,
+                        max_entries: 1,
+                    })
                     .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
+                tokio::task::spawn_blocking(move || {
+                    crate::server::workspace::traverse_directory(plan, None)
+                })
+                .await
+                .map_err(|_| {
+                    diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "directory listing task failed",
+                    )
+                })?
+                .map_err(|error| workspace_diagnostic(&request.command_id, error))?;
                 CommandExecutionStatus::Workspace(WorkspaceActionResult::Navigated {
                     root_id,
                     relative_path,
@@ -398,6 +420,36 @@ pub(crate) fn is_settings_command(command_id: &str) -> bool {
     command_id.starts_with("settings.")
 }
 
+/// Coding Agent surface launch/close intents (plan 108 task 8) and the
+/// agent settings page toggle (plan 117): validated package commands whose
+/// effect is the client-side presentation toggle. The dispatcher answers
+/// with one `ShellClientCommandRequest` the client re-parses deny-by-default;
+/// no server state changes.
+pub(crate) fn is_agent_surface_command(command_id: &str) -> bool {
+    matches!(
+        command_id,
+        "coding-agent.profile"
+            | "coding-agent.close"
+            | "coding-agent.agentSettings.open"
+            | "coding-agent.agentSettings.close"
+    )
+}
+
+/// The daemon profile the coding surface selects — registered by the
+/// `@clay/coding-agent` package at load, and applied by the surface's launch
+/// command *and* by the pane's mount STATE: a pane shown without a launch (a
+/// restored layout, the view switcher, the empty-tab landing) must still run
+/// the coding profile, or its session falls back to the daemon-level `Chat`
+/// default with no coding tools and no MCP servers.
+pub(crate) const CODING_SURFACE_PROFILE_ID: &str = "agent:coding";
+
+/// The daemon-side profile name behind [`CODING_SURFACE_PROFILE_ID`] (picker
+/// ids are `agent:<profile>`). Checked against the daemon's own profile list
+/// before the surface adopts it: a profile no package registered (a profile
+/// whose store never loaded the package, a hostless runtime) would otherwise
+/// fail `session.new` and leave the pane with no session at all.
+pub(crate) const CODING_SURFACE_PROFILE_NAME: &str = "coding";
+
 /// Bounded appearance values accepted by `settings.setAppearance`.
 const SETTINGS_APPEARANCE_VALUES: &[&str] = &["light", "dark", "system"];
 
@@ -436,6 +488,33 @@ impl CommandExecutor {
                     ));
                 }
             }
+            "settings.setDesignSystem" => {
+                let Some(specifier) = argument_string(&request.arguments, "item_id")
+                    .or_else(|| argument_string(&request.arguments, "specifier"))
+                else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setDesignSystem requires an item_id/specifier argument",
+                    ));
+                };
+                // `@clay/core` is the built-in baseline; anything else must be a
+                // bundled first-party design-system package. Enabled-record +
+                // declaration resolution stay enforced at apply time by the
+                // `setDesignSystem` op, which fails closed with diagnostics.
+                let resolves = specifier == "@clay/core"
+                    || (specifier.starts_with("@clay/design-")
+                        && crate::packages::bundled::bundled_entry(&specifier).is_some());
+                if !resolves {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        format!(
+                            "settings.setDesignSystem requires an enabled uiDesignSystem contribution, got `{specifier}`"
+                        ),
+                    ));
+                }
+            }
             "settings.setAppearance" => {
                 let Some(value) = argument_string(&request.arguments, "item_id")
                     .or_else(|| argument_string(&request.arguments, "appearance"))
@@ -455,10 +534,29 @@ impl CommandExecutor {
                 }
             }
             "settings.setTypography" => {
-                // Value bounds (sizes 6–96, families ≤128 bytes, 7-field
-                // hierarchy) are enforced by the `setTypography` op at apply
-                // time; catalog textInput fields render a `validationState`
-                // style for out-of-bound feedback.
+                let Some(raw) = argument_string(&request.arguments, "typography") else {
+                    return Err(diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setTypography requires a complete typography argument",
+                    ));
+                };
+                let value = serde_json::from_str(&raw).map_err(|_| {
+                    diagnostic(
+                        &request.command_id,
+                        CommandExecutionRule::InvalidArguments,
+                        "settings.setTypography typography argument is not valid JSON",
+                    )
+                })?;
+                crate::server::ops::typography::validate_typography_request(&value).map_err(
+                    |message| {
+                        diagnostic(
+                            &request.command_id,
+                            CommandExecutionRule::InvalidArguments,
+                            message,
+                        )
+                    },
+                )?;
             }
             "settings.open" | "settings.close" | "settings.reset" => {}
             _ => {
@@ -694,6 +792,12 @@ macro_rules! builtin_commands {
 builtin_commands! {
     CONTROL_CENTER_COMMAND_ID => ("controlCenter.open", "Open Control Center", General),
     OPEN_PATH_BROWSER_COMMAND_ID => ("controlCenter.openPath", "Browse Filesystem", General),
+    OPEN_AGENT_PICKER_COMMAND_ID => ("agent.clientOpenAgentPicker", "Choose Agent", General),
+    OPEN_PROVIDER_PICKER_COMMAND_ID => ("agent.clientOpenProviderPicker", "Choose Provider", General),
+    OPEN_MODEL_PICKER_COMMAND_ID => ("agent.clientOpenModelPicker", "Choose Model", General),
+    OPEN_PROVIDER_SETUP_COMMAND_ID => ("agent.clientOpenProviderSetup", "Configure Provider", General),
+    OPEN_SESSION_PICKER_COMMAND_ID => ("agent.clientOpenSessionPicker", "Resume Session", General),
+    OPEN_SESSION_SEARCH_PICKER_COMMAND_ID => ("agent.clientOpenSessionSearchPicker", "Search Sessions", General),
     RELOAD_CONFIGURATION_COMMAND_ID => ("runtime.reloadConfiguration", "Reload Configuration and Packages", Reload),
     REFRESH_WORKSPACE_COMMAND_ID => ("workspace.refresh", "Refresh Workspace", General),
     FOCUS_ACTIVE_DOCUMENT_COMMAND_ID => ("document.focus_active", "Focus Active Document", General),
@@ -991,6 +1095,44 @@ mod tests {
     }
 
     #[test]
+    fn builtin_picker_commands_stay_inert_command_ids() {
+        // Plan 125 task 13: the six picker command IDs are built-in server-first
+        // intents that open a Clay-owned palette session through the user-intent
+        // lane. Executing one through the command boundary resolves the built-in
+        // and accepts it, but opens nothing by itself: no session, no rows, no
+        // credential stage, and the same ServerFirst policy as the palette open
+        // command.
+        let registry = CommandRegistry::new();
+        let executor = CommandExecutor::new();
+        for command_id in [
+            OPEN_AGENT_PICKER_COMMAND_ID,
+            OPEN_PROVIDER_PICKER_COMMAND_ID,
+            OPEN_MODEL_PICKER_COMMAND_ID,
+            OPEN_PROVIDER_SETUP_COMMAND_ID,
+            OPEN_SESSION_PICKER_COMMAND_ID,
+            OPEN_SESSION_SEARCH_PICKER_COMMAND_ID,
+        ] {
+            let result = executor
+                .execute(
+                    &registry,
+                    CommandExecutionRequest {
+                        command_id: command_id.to_string(),
+                        arguments: Value::Null,
+                        target: CommandExecutionTarget::Global,
+                        provenance: None,
+                        expected_permissions: Vec::new(),
+                    },
+                )
+                .unwrap_or_else(|error| {
+                    panic!("picker command {command_id} must stay executable: {error:?}")
+                });
+            assert_eq!(result.command_id, command_id);
+            assert_eq!(result.routing_policy, RoutingPolicy::ServerFirst);
+            assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        }
+    }
+
+    #[test]
     fn registered_server_command_executes_with_typed_result() {
         let manifest = package_manifest();
         let mut registry = CommandRegistry::new();
@@ -1013,6 +1155,19 @@ mod tests {
             .execute(&CommandRegistry::new(), request("markdown.missing"))
             .unwrap_err();
 
+        assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
+    }
+
+    #[test]
+    fn unbacked_package_command_is_not_accepted() {
+        let manifest = package_manifest();
+        let mut registry = CommandRegistry::new();
+        registry
+            .register_command(&manifest, declaration("markdown.toggleComment"))
+            .expect("register command");
+        let error = CommandExecutor::new()
+            .execute(&registry, request("markdown.toggleComment"))
+            .unwrap_err();
         assert_eq!(error.rule, CommandExecutionRule::UnknownCommand);
     }
 
@@ -1176,7 +1331,7 @@ mod tests {
                 snapshot.metadata.access,
                 crate::protocol::DocumentAccess::Editable { lease_id: 1 }
             );
-            assert_eq!(snapshot.text, "fn main() {}");
+            assert_eq!(snapshot.head.first_chunk, "fn main() {}");
 
             let _ = fs::remove_dir_all(root);
         }
@@ -1209,7 +1364,7 @@ mod tests {
                 panic!("expected Opened workspace result, got {:?}", result.status);
             };
             assert!(snapshot.metadata.path.contains("external.txt"));
-            assert_eq!(snapshot.text, "external content");
+            assert_eq!(snapshot.head.first_chunk, "external content");
 
             let _ = fs::remove_dir_all(outside);
         }
@@ -1369,6 +1524,54 @@ mod tests {
     }
 
     #[test]
+    fn settings_set_design_system_accepts_core_and_bundled_contributors() {
+        let executor = CommandExecutor::new();
+        // The bundled design package is built from its suffix so the plan-118
+        // source-independence guard sees no package-name literal. Plan 118 task 9:
+        // @clay/design-instrument is the only shipped design system.
+        let specifier = format!("@clay/design-{}", "instrument");
+        let result = executor
+            .execute_settings(settings_request(
+                "settings.setDesignSystem",
+                json!({ "item_id": specifier }),
+            ))
+            .expect("bundled design-system specifier must validate");
+        assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        let core = executor
+            .execute_settings(settings_request(
+                "settings.setDesignSystem",
+                json!({ "item_id": "@clay/core" }),
+            ))
+            .expect("core baseline specifier must validate");
+        assert_eq!(core.status, CommandExecutionStatus::Accepted);
+    }
+
+    #[test]
+    fn settings_set_design_system_rejects_unknown_and_non_design_specifiers() {
+        let executor = CommandExecutor::new();
+        for specifier in [
+            "@clay/theme-modus-vivendi",
+            "@clay/markdown",
+            "@vendor/never-installed-ds",
+            "@clay/design-unknown",
+            "",
+        ] {
+            let err = executor
+                .execute_settings(settings_request(
+                    "settings.setDesignSystem",
+                    json!({ "item_id": specifier }),
+                ))
+                .expect_err("non-contributing specifier must be rejected");
+            assert_eq!(err.rule, CommandExecutionRule::InvalidArguments);
+            assert!(err.message.len() < 200, "bounded error string");
+        }
+        let missing = executor
+            .execute_settings(settings_request("settings.setDesignSystem", json!({})))
+            .expect_err("missing specifier must be rejected");
+        assert_eq!(missing.rule, CommandExecutionRule::InvalidArguments);
+    }
+
+    #[test]
     fn settings_set_appearance_accepts_bounded_enum() {
         let executor = CommandExecutor::new();
         for value in ["light", "dark", "system"] {
@@ -1397,21 +1600,39 @@ mod tests {
     #[test]
     fn settings_set_typography_and_lifecycle_commands_accept() {
         let executor = CommandExecutor::new();
-        for command_id in [
-            "settings.setTypography",
-            "settings.open",
-            "settings.close",
-            "settings.reset",
-        ] {
+        let typography = json!({
+            "monospace": { "families": ["monospace"], "size": 16 },
+            "proportional": { "families": ["sans-serif"], "size": 16 },
+            "ui": { "families": ["system-ui"], "size": 12 },
+            "hierarchy": {
+                "display": 1.5, "title": 1.16, "section": 1.08,
+                "body": 1.0, "status": 1.0, "detail": 0.83, "caption": 0.75
+            }
+        });
+        let result = executor
+            .execute_settings(settings_request(
+                "settings.setTypography",
+                json!({ "typography": typography.to_string() }),
+            ))
+            .expect("complete typography accepts");
+        assert_eq!(result.status, CommandExecutionStatus::Accepted);
+        for command_id in ["settings.open", "settings.close", "settings.reset"] {
             let result = executor
                 .execute_settings(settings_request(command_id, json!({})))
-                .expect("lifecycle/typography settings commands accept");
+                .expect("lifecycle settings commands accept");
             assert_eq!(
                 result.status,
                 CommandExecutionStatus::Accepted,
                 "{command_id}"
             );
         }
+        let rejected = executor
+            .execute_settings(settings_request(
+                "settings.setTypography",
+                json!({ "typography": "{}" }),
+            ))
+            .expect_err("partial typography fails closed");
+        assert_eq!(rejected.rule, CommandExecutionRule::InvalidArguments);
     }
 
     #[test]
@@ -1420,5 +1641,21 @@ mod tests {
         assert!(is_settings_command("settings.open"));
         assert!(!is_settings_command("controlCenter.open"));
         assert!(!is_settings_command("markdown.togglePreview"));
+    }
+
+    #[test]
+    fn retired_chat_commands_are_unknown() {
+        // Plan 118: the `@clay/chat` landing and its inert acknowledgement
+        // executor are gone. Nothing owns the `chat.*` namespace any more, so
+        // an intent on it is an unknown command — never a silently authorized
+        // action.
+        let executor = CommandExecutor::new();
+        let rejected = executor
+            .execute(
+                &CommandRegistry::new(),
+                settings_request("chat.submit", json!({ "value": "hi" })),
+            )
+            .expect_err("retired chat command must not execute");
+        assert_eq!(rejected.rule, CommandExecutionRule::UnknownCommand);
     }
 }

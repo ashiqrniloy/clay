@@ -61,7 +61,7 @@ const lease = await serverGetDocumentLease("current");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentLease` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `documents.serverGetDocumentLease` in `~/.clay/init.js`.
 
 ## Custom properties
 

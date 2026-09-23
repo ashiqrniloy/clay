@@ -7,11 +7,29 @@ use serde_json::{Value, json};
 use crate::server::ui::{
     RegisteredComponentContribution, RegisteredLayoutIntent, RegisteredPackageInputContribution,
     RegisteredPackageLayoutOverride, RegisteredPackageThemeTokenDeclaration,
-    RegisteredPackageUiStateScope, RegisteredPanelContribution,
+    RegisteredPackageUiStateScope, RegisteredPaneContentContribution, RegisteredPanelContribution,
     RegisteredTransientOverlayContribution, UiContributionDiagnostic,
 };
 
 use super::ClayOpState;
+
+#[op2]
+#[string]
+pub(super) fn op_clay_ui_register_pane_content_contribution(
+    state: &mut OpState,
+    #[string] declaration_json: String,
+) -> Result<String, JsErrorBox> {
+    let package = state
+        .borrow::<Arc<ClayOpState>>()
+        .current_package_record()?;
+    let declaration = parse_json(&declaration_json, "ui.invalid_pane_content_contribution")?;
+    let op_state = state.borrow::<Arc<ClayOpState>>();
+    let registered = op_state
+        .register_pane_content_contribution(&package.manifest, &declaration)
+        .map_err(ui_error("ui.registration_failed"))?;
+    serde_json::to_string(&pane_content_result(&registered))
+        .map_err(serialize_error("ui.registration_failed"))
+}
 
 #[op2]
 #[string]
@@ -181,6 +199,18 @@ fn provenance_json(provenance: &crate::server::ui::UiContributionProvenance) -> 
         "packageName": provenance.package_name,
         "packageVersion": provenance.package_version,
         "apiPrefix": provenance.api_prefix,
+    })
+}
+
+fn pane_content_result(registered: &RegisteredPaneContentContribution) -> serde_json::Value {
+    json!({
+        "registered": true,
+        "id": registered.id,
+        "activation": registered.activation,
+        "componentId": registered.component_id,
+        "actionTargets": registered.action_targets,
+        "estimatedPayloadBytes": registered.estimated_payload_bytes,
+        "provenance": provenance_json(&registered.provenance),
     })
 }
 

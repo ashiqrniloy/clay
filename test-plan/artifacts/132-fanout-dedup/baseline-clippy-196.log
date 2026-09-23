@@ -1,0 +1,30 @@
+  1.96.1-x86_64-unknown-linux-gnu installed - rustc 1.96.1 (31fca3adb 2026-06-26)
+
+info: checking for self-update (current version: 1.29.1)
+--- clippy 1.96.1:
+   Compiling zvariant v5.11.0
+    Checking icu_calendar v2.2.1
+    Checking idna_adapter v1.2.2
+    Checking idna v1.1.0
+    Checking deno_unsync v0.4.4
+    Checking rkyv v0.8.17
+    Checking url v2.5.8
+   Compiling diplomat v0.15.0
+   Compiling v8 v147.4.0
+    Checking deno_error v0.7.1
+    Checking sourcemap v9.3.2
+    Checking wasm_dep_analyzer v0.4.0
+    Checking deno_path_util v0.6.4
+    Checking temporal_rs v0.2.3
+    Checking zbus_names v4.3.2
+    Checking temporal_capi v0.2.3
+    Checking half v2.7.1
+    Checking ciborium-ll v0.2.2
+    Checking ciborium v0.2.2
+   Compiling zbus_macros v5.15.0
+    Checking criterion v0.7.0
+    Checking zbus v5.15.0
+    Checking serde_v8 v0.309.0
+    Checking deno_core v0.400.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 52.43s
+CLIPPY_196_EXIT=0

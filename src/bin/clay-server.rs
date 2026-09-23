@@ -13,9 +13,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(default_endpoint);
 
     eprintln!("clay server listening on {endpoint}");
-    IpcServer::try_new(ServerConfig::new(endpoint))?
-        .run()
-        .await?;
+    // Plan 129 P4: boxed so `main`'s frame does not add to the server future.
+    Box::pin(IpcServer::try_new(ServerConfig::new(endpoint))?.run()).await?;
     Ok(())
 }
 

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: clientTabMoveRight
 js_facade: runtime/js/shell.js::clientTabMoveRight
-backing_rust: src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientTabMoveRight
@@ -37,11 +37,11 @@ Return the stable bindable command ID for moving the active tab one position rig
 
 Move Tab Right Move Tab Right moves the active tab one card position later in the user-visible order via the server-validated `TabCommand::MoveRight`; the server's `TabRegistry` reorder preserves the active-tab status by `TabId` and every mutation broadcasts a fresh snapshot (including rejections). At the last position it is a silent no-op — moves never wrap around.
 
-Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Tab switching happens later only after an explicit user key/command route reaches the driver's tab-command dispatcher.
+Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-client-ui-command`. The helper is synchronous and side-effect free. Tab switching happens later only after an explicit user key/command route reaches the React workspace controller's tab-command handler `frontend/src/shell/workspace-controller.ts` (React workspace controller).
 
 ## When to use
 
-Use this API when a user wants to bind an alternate next-tab chord in `~/.config/clay/init.js`.
+Use this API when a user wants to bind an alternate next-tab chord in `~/.clay/init.js`.
 
 ## JavaScript usage
 
@@ -61,7 +61,7 @@ bindKey("Ctrl+Shift+]", "shell.clientTabMoveRight", { scope: "global" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientTabMoveRight } from "clay:shell";
 import { bindKey } from "clay:keybindings";
 
@@ -104,7 +104,7 @@ Use `shell.clientTabMoveRight` only as a documented command ID for `bindKey` to 
 
 - JS facade: `runtime/js/shell.js::clientTabMoveRight`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/main.rs::Driver::apply_tab_command` (tab-order policy resolvers + execution); `src/masonry_shell.rs::ShellClientCommand` (command mapping)
+- Backing Rust/current owner: `src/client_commands.rs::ShellClientCommand (client-local; React tab bar, frontend/src/app/layout/tab-bar.tsx)` (tab-order policy resolvers + execution); `src/client_commands.rs::ShellClientCommand` (command mapping)
 
 ## Lookup metadata
 

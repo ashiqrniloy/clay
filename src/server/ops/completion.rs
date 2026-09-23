@@ -144,6 +144,26 @@ pub(super) fn op_clay_completion_register_completion_provider(
         ));
     }
 
+    // Plan 127 P1: an optional validated module specifier lets the latency
+    // lane materialize the handler in its own isolate (document-analyzer
+    // precedent). It must resolve to a loaded module owned by this package.
+    let module_specifier = options
+        .get("moduleSpecifier")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+        .map(str::to_string);
+    if let Some(specifier) = &module_specifier {
+        let clay = state.borrow::<Arc<ClayOpState>>();
+        if !clay
+            .load_entry_allowlist()
+            .is_package_module(specifier, &package.manifest.name)
+        {
+            return Err(clay_error(
+                "completion.invalid_provider: moduleSpecifier must resolve to a loaded module owned by the package",
+            ));
+        }
+    }
+
     let metas = completion_provider_metas(&package);
     let clay = state.borrow::<Arc<ClayOpState>>();
     let registered = clay
@@ -162,6 +182,7 @@ pub(super) fn op_clay_completion_register_completion_provider(
                     index,
                 ),
                 export_name: export_name.clone(),
+                module_specifier: module_specifier.clone(),
             })
             .collect::<Vec<_>>()
     } else {
@@ -186,18 +207,6 @@ pub(super) fn op_clay_completion_register_completion_provider(
             "completion.registration_failed: failed to serialize result ({error})"
         ))
     })
-}
-
-fn trigger_characters(options: &Map<String, Value>) -> Value {
-    if let Some(value) = options.get("triggerCharacters") {
-        return value.clone();
-    }
-    options
-        .get("triggers")
-        .and_then(Value::as_object)
-        .and_then(|triggers| triggers.get("characters"))
-        .cloned()
-        .unwrap_or(Value::Null)
 }
 
 pub(crate) fn completion_provider_metas(package: &PackageRecord) -> Vec<CompletionProviderMeta> {

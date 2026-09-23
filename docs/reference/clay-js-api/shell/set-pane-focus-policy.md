@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:shell"
 js_export: setPaneFocusPolicy
 js_facade: runtime/js/shell.js::setPaneFocusPolicy
-backing_rust: src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy; src/masonry_shell.rs::ClayShellWidget::set_pane_focus_policy
+backing_rust: src/client_commands.rs::EditorClientCommand; src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy
 deno_op: op_clay_shell_set_pane_focus_policy
 deno_op_path: src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy
 name: setPaneFocusPolicy
@@ -33,7 +33,7 @@ async: false
 
 ## Summary
 
-Set the pane-focus policy (`click` | `cursor`) that controls how split panes are activated by the pointer. The default is `click`. The setting applies live (no restart) whenever `~/.config/clay/init.js` is evaluated or reloaded.
+Set the pane-focus policy (`click` | `cursor`) that controls how split panes are activated by the pointer. The default is `click`. The setting applies live (no restart) whenever `~/.clay/init.js` is evaluated or reloaded.
 
 ## Description
 
@@ -50,7 +50,7 @@ Phase 22.3 (tabs as independent client views): the policy is **per active tab** 
 
 ## When to use
 
-Use from `~/.config/clay/init.js` to switch pane activation between click-to-focus and focus-follows-cursor. Most users keep the default (`click`); `cursor` suits users who work with several panes and prefer tiling-window-manager focus behavior.
+Use from `~/.clay/init.js` to switch pane activation between click-to-focus and focus-follows-cursor. Most users keep the default (`click`); `cursor` suits users who work with several panes and prefer tiling-window-manager focus behavior.
 
 ## JavaScript usage
 
@@ -65,7 +65,7 @@ setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { setPaneFocusPolicy } from "clay:shell";
 
 // Focus follows the pointer across split panes.
@@ -75,6 +75,7 @@ setPaneFocusPolicy({ paneFocusPolicy: "cursor" });
 ## Options
 
 Pass `{ paneFocusPolicy }` where `paneFocusPolicy` is a string.
+- `paneFocusPolicy` (`enum`, default `click`): One of `click` (default) or `cursor`. `click` activates a pane on pointer-down inside it. `cursor` activates a pane when the pointer moves over it (focus follows cursor); focus changes are skipped while dragging a divider or panel resize handle.
 
 ## Return and async behavior
 
@@ -97,7 +98,7 @@ Use `setPaneFocusPolicy({ paneFocusPolicy: "cursor" })` only when the user expli
 
 ## Backing implementation
 
-`runtime/js/shell.js::setPaneFocusPolicy` calls `op_clay_shell_set_pane_focus_policy` (`src/server/ops/shell.rs`), which validates the bounded enum and calls `ClayOpState::publish_shell_preferences`. The value is broadcast to connected clients as `ServerMessage::ShellPreferences` (protocol version 10), delivered as `ClientConnectionEvent::ShellPreferences`, and applied by `ClayShellWidget::set_pane_focus_policy` (`src/masonry_shell.rs::PaneFocusPolicy::from_config_str` maps `"cursor"` → `FollowsCursor`, anything else → `ClickToFocus`).
+`runtime/js/shell.js::setPaneFocusPolicy` calls `op_clay_shell_set_pane_focus_policy` (`src/server/ops/shell.rs`), which validates the bounded enum and calls `ClayOpState::publish_shell_preferences`. The value is broadcast to connected clients as `ServerMessage::ShellPreferences` (protocol version 10), delivered as `ClientConnectionEvent::ShellPreferences`, and applied by the React PaneTree pane-focus policy (`src/client_commands.rs::ShellClientCommand` maps `"cursor"` → `FollowsCursor`, anything else → `ClickToFocus`).
 
 ## Lookup metadata
 

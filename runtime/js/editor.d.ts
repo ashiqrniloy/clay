@@ -7,6 +7,11 @@ export type ClientRedoCommandId = "editor.clientRedo";
 export type ClientShowOpenDocumentsCommandId = "editor.clientShowOpenDocuments";
 export type ClientRequestResyncCommandId = "editor.clientRequestResync";
 export type ClientDismissRecoveryCommandId = "editor.clientDismissRecovery";
+export type ToggleCommentCommandId = "editor.toggleComment";
+export type ToggleListMarkerCommandId = "editor.toggleListMarker";
+export type RotateHeadingCommandId = "editor.rotateHeading";
+export type ClientToggleFoldCommandId = "editor.clientToggleFold";
+export type ToggleInlayHintsCommandId = "editor.toggleInlayHints";
 export type ClientMoveCursorWordStartForwardCommandId = "editor.clientMoveCursor.nextWordStart";
 export type ClientMoveCursorWordStartBackwardCommandId = "editor.clientMoveCursor.prevWordStart";
 export type ClientMoveCursorParagraphForwardCommandId = "editor.clientMoveCursor.nextParagraph";
@@ -147,6 +152,17 @@ export interface CursorStyleResult {
     hollow: boolean;
     stopBlinkOnTyping: boolean;
 }
+export interface ClientSetEditorLayoutOptions {
+    /** Wrap policy. `"none"` disables wrapping (horizontal scroll); `"viewport"` wraps to the pane width; `"column"` wraps to `columnCap` average character widths. */
+    wrapPolicy: "none" | "viewport" | "column";
+    /** Column cap for `"column"` (clamped to 16–240). Defaults to 72. */
+    columnCap?: number;
+}
+export interface EditorLayoutResult {
+    commandId: "editor.clientSetEditorLayout";
+    wrapPolicy: "none" | "viewport" | "column";
+    columnCap?: number;
+}
 export interface AddCursorResult {
     commandId: ClientAddCursorBelowCommandId | ClientAddCursorAboveCommandId;
     direction: "below" | "above";
@@ -166,6 +182,7 @@ export declare function clientSetSelection(options: ClientSetSelectionOptions): 
 export declare function clientScrollTo(options: ClientScrollToOptions): ScrollResult;
 export declare function serverInsertNewline(options: ServerInsertNewlineOptions): Promise<EditResult>;
 export declare function clientSetCursorStyle(options: ClientSetCursorStyleOptions): CursorStyleResult;
+export declare function clientSetEditorLayout(options: ClientSetEditorLayoutOptions): EditorLayoutResult;
 export declare function clientSetViewport(options: ClientSetViewportOptions): {
     documentId: DocumentId;
     visibleLineCount: number;
@@ -178,6 +195,11 @@ export declare function clientRedo(): ClientRedoCommandId;
 export declare function clientShowOpenDocuments(): ClientShowOpenDocumentsCommandId;
 export declare function clientRequestResync(): ClientRequestResyncCommandId;
 export declare function clientDismissRecovery(): ClientDismissRecoveryCommandId;
+export declare function toggleComment(): ToggleCommentCommandId;
+export declare function toggleListMarker(): ToggleListMarkerCommandId;
+export declare function rotateHeading(): RotateHeadingCommandId;
+export declare function clientToggleFold(): ClientToggleFoldCommandId;
+export declare function toggleInlayHints(): ToggleInlayHintsCommandId;
 export declare function clientAddCursor(options: ClientAddCursorOptions): AddCursorResult;
 export declare function clientColumnSelect(options: ClientColumnSelectOptions): ColumnSelectResult;
 export interface SelectTextobjectResult {

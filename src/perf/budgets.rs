@@ -42,6 +42,12 @@ pub const DOCUMENT_ANALYSIS_HANDLER_TIMEOUT_MS: u64 = 5_000;
 pub const DOCUMENT_ANALYSIS_GRACEFUL_SHUTDOWN_MS: u64 = 2_000;
 pub const DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS: u64 = 5_000;
 
+/// Largest document a package-facing `documents.open`/`documents.reload` op may
+/// hand to JavaScript as one JSON string. The trusted runtime's chunked editor
+/// path is unaffected; this bounds what a package can pull into the V8 heap in
+/// a single op call (Plan 126 D2) at the same cap the analysis route uses.
+pub const DOCUMENTS_OP_MAX_DOCUMENT_BYTES: usize = 256 * 1024;
+
 pub const CLIENT_EDIT_PAYLOAD_BUDGET_BYTES: usize = 512;
 // Per-document client undo/redo depth (Phase 20). Aligned with pending-edit /
 // previous-behavior-grace transaction ceilings.
@@ -103,10 +109,17 @@ pub const SDUI_UPDATE_PAYLOAD_BUDGET_BYTES: usize = 1024;
 /// One validated three-profile typography snapshot. Family/profile limits are
 /// checked before publication; this bounds its serialized protocol envelope.
 pub const TYPOGRAPHY_PAYLOAD_BUDGET_BYTES: usize = 1024;
-/// One cross-domain extension request or result payload (inert JSON bytes).
-/// Rust-mediated only; checked before allocation-heavy parsing so a hostile
-/// sibling package cannot force unbounded buffering across the trust boundary.
-pub const CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES: usize = 8192;
+/// Maximum payload budget for one inert UI design-system contribution declaration (Plan 101).
+pub const UI_DESIGN_SYSTEM_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
+
+/// One bounded, normalized icon glyph's path payload (Plan 112 task 3). Checked
+/// against the raw path-data length before any command expansion so a hostile
+/// contribution cannot force unbounded allocation.
+pub const ICON_GEOMETRY_PAYLOAD_BUDGET_BYTES: usize = 2048;
+/// Maximum payload budget for one inert icon-pack contribution declaration
+/// (Plan 112 task 3). Mirrors the UI design-system budget precedent; the full
+/// 21-key Phosphor duotone set normalizes well under this bound.
+pub const ICON_PACK_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 
 // Runtime SDUI `publishTree` budgets. A package- or config-published tree is
 // untrusted input parsed into a `serde_json::Value` and then converted into a
@@ -139,6 +152,19 @@ pub const INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES: usize = 4096;
 // 18.5 uses this as the 30 MiB Markdown-specific overhead target while keeping
 // the primitive language-neutral for future modes.
 pub const SYNTAX_CACHE_BUDGET_BYTES: usize = 30 * 1024 * 1024;
+// Plan 099: maximum concurrent blocking Tree-sitter jobs across all
+// per-document syntax sessions. Each job owns its document's parser and tree,
+// so the bound also caps worst-case concurrent syntax memory amplification.
+pub const SYNTAX_EXECUTOR_MAX_JOBS: usize = 4;
+// Plan 099: maximum per-document syntax states (tree + parser) a grammar
+// handler retains. Eviction is arbitrary beyond the bound; the working set of
+// open documents per server is MAX_SERVER_DOCUMENTS, but cold grammars from
+// closed documents must not accumulate unbounded.
+pub const SYNTAX_DOCUMENT_TREE_CACHE_ENTRIES: usize = 64;
+// Plan 099: maximum cached per-generation document mode activations. A repeat
+// open with the same classification inputs republishes the cached behavior
+// manifest from Rust instead of evaluating a generated module in V8.
+pub const MODE_ACTIVATION_CACHE_ENTRIES: usize = 64;
 // Phase 18.11 completion result payload budget. A completion result reuses the
 // `TransientMenuSession` picker, which caps display at `TRANSIENT_MENU_MAX_ITEMS`
 // (256), so the wire budget must accommodate a full 256-item result with short
@@ -162,7 +188,22 @@ pub const COMPLETION_RESULT_MAX_ITEM_LABEL_CHARS: usize = 128;
 pub const COMPLETION_RESULT_MAX_ITEM_INSERT_TEXT_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_DETAIL_CHARS: usize = 256;
 pub const COMPLETION_RESULT_MAX_ITEM_COMMIT_CHARS: usize = 32;
+/// Recent accepted insert texts sent with completion requests. Kept small so
+/// recency cannot consume the existing 512-byte request payload budget.
+pub const COMPLETION_RECENCY_MAX_ITEMS: usize = 4;
+pub const COMPLETION_RECENCY_MAX_ITEM_CHARS: usize = 64;
+/// Maximum completion rows visible before the shared scroll viewport takes
+/// over. The result list remains capped by `COMPLETION_RESULT_MAX_ITEMS`.
+pub const COMPLETION_MAX_VISIBLE_ROWS: usize = 8;
+/// Maximum logical width of the Clay-owned caret-adjacent completion surface.
+pub const COMPLETION_MAX_WIDTH_PX: f64 = 480.0;
 pub const FOLDING_RANGE_PAYLOAD_BUDGET_BYTES: usize = 2048;
+/// Combined parse envelope when an optional folding set is attached. The
+/// ordinary parse envelope and folding publication retain separate caps; this
+/// additive ceiling accounts for both validated components without enlarging
+/// the ordinary parse-window budget.
+pub const INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES: usize =
+    INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES + FOLDING_RANGE_PAYLOAD_BUDGET_BYTES;
 
 // Phase 18.20 engine-neutral language-intelligence budgets. Canonical
 // positions are UTF-8 byte offsets against Clay documents or known
@@ -189,6 +230,11 @@ pub const LANGUAGE_INTELLIGENCE_MAX_OUTSTANDING_REQUESTS: usize = 16;
 pub const LANGUAGE_INTELLIGENCE_DEFAULT_TIMEOUT_MS: u64 = 500;
 /// Hard ceiling on per-provider timeout. Matches the completion lane.
 pub const LANGUAGE_INTELLIGENCE_MAX_TIMEOUT_MS: u64 = 5_000;
+/// Bounded open-document text slice handed to completion providers, and the
+/// cap the completion coordinator enforces when validating a window.
+/// Deliberately the same size as the language-intelligence window below so
+/// analyzers and completion providers see equivalently bounded context.
+pub const COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
 /// Bounded open-document text slice handed to a provider. Same size as the
 /// completion window so analyzers never see an unbounded document.
 pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
@@ -202,6 +248,9 @@ pub const LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
 pub const RUNTIME_STATE_BROADCAST_CAPACITY: usize = 16;
 pub const RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS: usize = 64;
 pub const RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS: usize = 32;
+/// Plan 110 task 10: per-list cap on installable theme/design-system choices
+/// so the Settings selection snapshot stays bounded.
+pub const RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES: usize = 64;
 pub const RUNTIME_STATE_SNAPSHOT_DIFF_REVIEW_PAYLOAD_BYTES: usize = 768 * 1024;
 pub const RUNTIME_STATE_INSTALL_DIFF_REVIEW_P95_MS: u64 = 16;
 /// Fixed stale-edit grace after a successful runtime-generation commit.
@@ -221,9 +270,33 @@ pub const TRANSIENT_MENU_MAX_QUERY_CHARS: usize = 256;
 pub const TRANSIENT_MENU_MAX_LABEL_CHARS: usize = 128;
 pub const TRANSIENT_MENU_MAX_DETAIL_CHARS: usize = 256;
 pub const TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS: usize = 256;
+/// Plan 124: one item's scope tag (the palette's `All · Session · Shell ·
+/// Files` chips) — a short, closed, server-owned word, never free text.
+pub const TRANSIENT_MENU_MAX_SCOPE_CHARS: usize = 16;
+/// Plan 124: how many of a command's chords one item states
+/// (`TRANSIENT_MENU_MAX_BINDINGS` × `TRANSIENT_MENU_MAX_BINDING_CHARS` is the
+/// per-item chip budget; the catalogue's own detail line already lists them
+/// all up to `_DETAIL_CHARS`).
+pub const TRANSIENT_MENU_MAX_BINDINGS: usize = 4;
+/// `Ctrl+Shift+Alt+ArrowUp` is 22; 32 leaves room for a future modifier key.
+pub const TRANSIENT_MENU_MAX_BINDING_CHARS: usize = 32;
+/// Plan 125: a palette session's presentation mode — one of `catalogue`,
+/// `path`, `picker`, `secret`, `url`, `oauth`. A short, closed, server-owned
+/// word like the scope tag: the client picks a stage layout from it and never
+/// infers one from the origin or the prompt text.
+pub const TRANSIENT_MENU_MAX_MODE_CHARS: usize = 16;
 pub const PRIMITIVES_REGISTRY_VERSION: &str = "phase16-primitives-v1";
 
 pub const KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS: u64 = 16;
+
+// Phase 26.7 advisory chrome/decoration paint envelopes. Each path is
+// O(visible lines) and must remain inside the keypress-to-local-paint
+// budget. Hard CI latency stays advisory until a stable runner exists;
+// the compile-time sum below is the deterministic gate.
+pub const GUTTER_PAINT_P95_BUDGET_MS: u64 = 2;
+pub const ACTIVE_LINE_PAINT_P95_BUDGET_MS: u64 = 1;
+pub const BRACKET_MATCH_PAINT_P95_BUDGET_MS: u64 = 1;
+pub const DECORATION_BACKGROUND_FILL_P95_BUDGET_MS: u64 = 2;
 
 // Phase 24.5 Command Centre budgets. Advisory per the Phase 21 promotion
 // rule (hard CI thresholds only after stable-runner evidence; Plan 084
@@ -255,6 +328,16 @@ pub const COMMAND_CENTRE_LISTING_PAYLOAD_BUDGET_BYTES: usize = 64 * 1024;
 /// wall-clock constant matched against real typing latency once sequence
 /// defaults ship; not yet CI-guarded.
 pub const KEY_CHORD_PENDING_TIMEOUT_MS: u64 = 1500;
+
+// Phase 25 agent-host budgets. Size caps live next to the wire types in
+// `src/protocol/agent.rs` and are hard. These wall-clock numbers are advisory
+// (Phase 21 stable-runner rule). Deterministic CI gates: mock spawn/first-delta
+// timeouts, slow-daemon dispatch < keypress budget, and paint/keypress source
+// scans. Agent pickers reuse Command Centre open/filter budgets.
+pub const AGENT_DAEMON_SPAWN_P95_BUDGET_MS: u64 = 2_000;
+pub const AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS: u64 = 2_000;
+/// Local apply of one already-received delta. Not model generation time.
+pub const AGENT_DELTA_IPC_P95_BUDGET_MS: u64 = 4;
 
 // Phase 22.6 (plan 077 task 5) window-model performance budgets. The two
 // wall-clock budgets are advisory, pinned from `cargo bench --bench
@@ -292,30 +375,44 @@ pub const JS_RUNTIME_EVALUATION_TIMEOUT_MS: u64 = 5000;
 // Server-owned security budget, not user configuration. Near-limit callback
 // terminates execution and surfaces `runtime.heap_limit`.
 pub const JS_RUNTIME_HEAP_LIMIT_BYTES: usize = 128 * 1024 * 1024;
+// Plan 127 P1: worker lanes per trust domain. Each lane owns an isolate and a
+// command thread: `general` serves configuration/package evaluation, parse
+// handlers, and document analysis; `latency` serves completion and
+// language-intelligence provider invocations so a general command busy to its
+// timeout cannot head-of-line-block them. `RuntimeLane::ALL` must match this
+// count; lane count is a server-owned budget, not user configuration.
+pub const JS_RUNTIME_LANES_PER_DOMAIN: usize = 2;
+/// V8 heap ceiling for one latency-lane isolate. Provider invocations carry
+/// only bounded request/window payloads, so the latency lane gets a smaller
+/// ceiling than the general lane; aggregate per-domain authority stays
+/// bounded by `JS_RUNTIME_HEAP_LIMIT_BYTES` + this constant.
+pub const JS_RUNTIME_LATENCY_LANE_HEAP_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+// Plan 127 P2: undelivered supersedable commands (completion and
+// language-intelligence requests) one lane may hold. A typing burst for one
+// document collapses onto its own queue slot, so the cap only trips when many
+// distinct requests flood one lane; past it the oldest supersedable command is
+// dropped for the newest. Evaluation, parse, and analysis commands are
+// host-gated by their coordinators and are never superseded or dropped.
+pub const JS_RUNTIME_SUPERSEDABLE_QUEUE_CAPACITY: usize = 64;
 pub const RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS: u64 = 25;
 pub const MODE_ACTIVATION_P95_BUDGET_MS: u64 = 100;
 pub const LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB: u64 = 256;
-
-// Hard size gate for opening a file from disk into a server document.
-//
-// Full-text protocol messages (`InitialDocument`, `ResyncSnapshot`,
-// `DocumentOpened`, `DocumentReloaded`) carry the entire document `String` in a
-// single rkyv frame, and the IPC codec caps a frame at
-// `DEFAULT_MAX_FRAME_SIZE` (1 MiB). A file at or near that limit would open
-// successfully only to fail at frame encode, and reading it into memory first
-// is a memory-exhaustion vector. Open/reload read through one opened handle
-// (`read_file_bounded` in the workspace): handle metadata is checked against
-// this gate before allocation and the read itself is capped at this value
-// plus one byte, so oversized files are rejected with a typed `FileTooLarge`
-// error even if the file grows between validation and read.
-//
-// The value sits below the 1 MiB frame limit to leave headroom for the message
-// envelope (variant tag + `DocumentMetadata` + rkyv overhead) so any file that
-// passes this gate also fits in a single full-text frame. Larger files require
-// the chunked/viewport-first loading path, which remains a documented follow-up
-// (see plan 030). `LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB` is the future
-// resident-memory budget for that chunked path and is intentionally much larger.
-pub const MAX_OPENABLE_FILE_BYTES: usize = 768 * 1024;
+/// Server-owned resident-memory budget for open document ropes. This is a
+/// security budget, not a user configuration option.
+pub const DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES: u64 =
+    LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB * 1024 * 1024;
+/// Number of leading file bytes inspected for NUL characters before a file is
+/// accepted as text. Bytes after this boundary are intentionally not used for
+/// binary classification.
+pub const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+/// Maximum UTF-8 text bytes returned by one document chunk response.
+/// Leaves ample room below the 1 MiB codec ceiling for archived message
+/// metadata and framing. Server request handling clamps untrusted values.
+pub const MAX_CHUNK_BYTES: usize = 256 * 1024;
+/// Maximum data-only native grammar context. This parse budget is independent
+/// from file-open capacity; large documents remain openable and parse through
+/// bounded windows.
+pub const NATIVE_GRAMMAR_MAX_WINDOW_BYTES: usize = 3 * MAX_CHUNK_BYTES;
 
 /// Hard size gate for small trusted-local auxiliary reads (e.g. a workspace
 /// root `.gitignore`). These files are read in full into memory, so a

@@ -10,6 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
+use self::UiContributionRule as Rule;
+
 use crate::{
     packages::manifest::{ClayPackageManifest, is_valid_api_prefix},
     perf::budgets::{SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES},
@@ -67,6 +69,84 @@ const VALID_LAYOUT_OVERRIDE_SOURCES: &[&str] = &[
     "package-default",
 ];
 const VALID_FALLBACK_BEHAVIORS: &[&str] = &["package-default", "hide", "ignore"];
+
+/// One row of [`CHOICE_FIELDS`]: `(key, allowed, rule, label)`.
+///
+/// `key` is the name [`validate_choice`] looks the row up by (`<family>.<field>`
+/// for nested fields, `<layoutOverride>.<property>` for override values);
+/// `label` is the diagnostic prefix that [`choice_message`] completes with the
+/// allowed list, so a message can never drift from the values actually accepted.
+type ChoiceRow = (
+    &'static str,
+    &'static [&'static str],
+    UiContributionRule,
+    &'static str,
+);
+
+/// Every closed string-choice field validated by [`validate_choice`]. Adding an
+/// allowed value is one edit in the `VALID_*` slice the row points at: the
+/// diagnostic text follows that slice.
+// A data table: one closed-choice field per line.
+#[rustfmt::skip]
+const CHOICE_FIELDS: &[ChoiceRow] = &[
+    ("slot", VALID_SLOTS, Rule::InvalidSlot, "panel slot must be one of"),
+    ("defaultVisibility", VALID_VISIBILITY, Rule::InvalidPolicy, "panel defaultVisibility must be"),
+    ("anchor", VALID_OVERLAY_ANCHORS, Rule::InvalidPolicy, "overlay anchor must be one of"),
+    ("focusPolicy", VALID_FOCUS_POLICIES, Rule::InvalidPolicy, "overlay focusPolicy must be"),
+    ("dismissalPolicy", VALID_DISMISSAL_POLICIES, Rule::InvalidPolicy, "overlay dismissalPolicy must be"),
+    ("input.scope", VALID_INPUT_SCOPES, Rule::InvalidInputScope, "input scope must be"),
+    ("pointer.click", VALID_POINTER_CLICK_POLICIES, Rule::InvalidPolicy, "pointer.click must be"),
+    ("pointer.drag", VALID_POINTER_DRAG_POLICIES, Rule::InvalidPolicy, "pointer.drag must be"),
+    ("focus.policy", VALID_COMPONENT_FOCUS_POLICIES, Rule::InvalidFocusPolicy, "focus.policy must be"),
+    ("selectionPolicy", VALID_SELECTION_POLICIES, Rule::InvalidPolicy, "selectionPolicy must be"),
+    ("state.scope", VALID_UI_STATE_SCOPES, Rule::InvalidStateScope, "UI state scope must be"),
+    ("state.owner", VALID_UI_STATE_OWNERS, Rule::InvalidLifecycle, "UI state owner must be"),
+    ("state.lifetime", VALID_UI_STATE_LIFETIMES, Rule::InvalidLifecycle, "UI state lifetime must be"),
+    ("state.persistence", VALID_UI_STATE_PERSISTENCE, Rule::InvalidLifecycle, "UI state persistence must be"),
+    ("implementationStatus", VALID_UI_STATE_STATUSES, Rule::InvalidLifecycle, "implementationStatus must be"),
+    ("valueSchema.kind", VALID_UI_STATE_SCHEMA_KINDS, Rule::InvalidStateSchema, "valueSchema.kind must be"),
+    ("layoutOverride.property", VALID_LAYOUT_OVERRIDE_PROPERTIES, Rule::InvalidLayoutOverride, "layout override property must be"),
+    ("layoutOverride.source", VALID_LAYOUT_OVERRIDE_SOURCES, Rule::InvalidLayoutOverride, "layout override source must be"),
+    ("layoutOverride.slot", VALID_SLOTS, Rule::InvalidSlot, "slot override value must be"),
+    ("layoutOverride.visibility", VALID_VISIBILITY, Rule::InvalidPolicy, "visibility override value must be"),
+    ("layoutOverride.fallback", VALID_FALLBACK_BEHAVIORS, Rule::InvalidLayoutOverride, "fallback override value must be"),
+];
+
+fn choice_field(key: &str) -> &'static ChoiceRow {
+    CHOICE_FIELDS
+        .iter()
+        .find(|(row_key, ..)| *row_key == key)
+        .unwrap_or_else(|| panic!("choice field `{key}` is not declared in CHOICE_FIELDS"))
+}
+
+/// Builds an out-of-set diagnostic: the row's label plus the allowed values
+/// (`a, b, or c`).
+fn choice_message(allowed: &[&str], label: &str) -> String {
+    let Some((last, head)) = allowed.split_last() else {
+        return label.to_owned();
+    };
+    match head {
+        [] => format!("{label} {last}"),
+        [only] => format!("{label} {only} or {last}"),
+        _ => format!("{label} {}, or {last}", head.join(", ")),
+    }
+}
+
+/// The one validator behind every closed-choice field: allowed values,
+/// diagnostic rule, and message all come from the [`CHOICE_FIELDS`] row.
+fn validate_choice(
+    key: &str,
+    value: &str,
+    id: &str,
+    context: &UiDiagnosticContext,
+) -> Result<(), UiContributionDiagnostic> {
+    let (_, allowed, rule, label) = choice_field(key);
+    if allowed.contains(&value) {
+        return Ok(());
+    }
+    Err(context.error(rule.clone(), Some(id), choice_message(allowed, label)))
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PackageUiRegistry {
     panels: BTreeMap<String, RegisteredPanelContribution>,
@@ -77,6 +157,7 @@ pub(crate) struct PackageUiRegistry {
     ui_state_scopes: BTreeMap<String, RegisteredPackageUiStateScope>,
     layout_overrides: BTreeMap<String, RegisteredPackageLayoutOverride>,
     layout_intents: BTreeMap<String, RegisteredLayoutIntent>,
+    pane_contents: BTreeMap<String, RegisteredPaneContentContribution>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -89,6 +170,7 @@ pub(crate) struct PackageUiRegistrySnapshot {
     pub(crate) ui_state_scopes: Vec<RegisteredPackageUiStateScope>,
     pub(crate) layout_overrides: Vec<RegisteredPackageLayoutOverride>,
     pub(crate) layout_intents: Vec<RegisteredLayoutIntent>,
+    pub(crate) pane_contents: Vec<RegisteredPaneContentContribution>,
 }
 
 impl PackageUiRegistrySnapshot {
@@ -152,6 +234,82 @@ impl PackageUiRegistrySnapshot {
                 .collect(),
         }
     }
+
+    /// One empty-tab winner, or `Err` of sorted contribution IDs on conflict.
+    #[cfg(test)]
+    pub(crate) fn empty_tab(
+        &self,
+    ) -> Result<Option<crate::protocol::EmptyTabContent>, Vec<String>> {
+        let mut candidates: Vec<&RegisteredPaneContentContribution> = self
+            .pane_contents
+            .iter()
+            .filter(|entry| entry.activation == "empty-tab")
+            .collect();
+        candidates.sort_by(|left, right| left.id.cmp(&right.id));
+        match candidates.as_slice() {
+            [] => Ok(None),
+            [winner] => Ok(Some(
+                winner.to_wire(crate::protocol::PackageUiTrustDomain::ThirdParty),
+            )),
+            many => Err(many.iter().map(|entry| entry.id.clone()).collect()),
+        }
+    }
+
+    pub(crate) fn wire_snapshot(
+        &self,
+        version: u64,
+        trust_domain: impl Fn(&UiContributionProvenance) -> crate::protocol::PackageUiTrustDomain,
+    ) -> Result<crate::protocol::PackageUiSnapshot, Vec<String>> {
+        let empty_tab = {
+            let mut candidates: Vec<_> = self
+                .pane_contents
+                .iter()
+                .filter(|entry| entry.activation == "empty-tab")
+                .collect();
+            candidates.sort_by(|left, right| left.id.cmp(&right.id));
+            match candidates.as_slice() {
+                [] => None,
+                [winner] => Some(winner.to_wire(trust_domain(&winner.provenance))),
+                many => return Err(many.iter().map(|entry| entry.id.clone()).collect()),
+            }
+        };
+        Ok(crate::protocol::PackageUiSnapshot {
+            version,
+            empty_tab,
+            surfaces: {
+                let mut surfaces: Vec<_> = self
+                    .pane_contents
+                    .iter()
+                    .filter(|entry| entry.activation == "pane")
+                    .collect();
+                surfaces.sort_by(|left, right| left.id.cmp(&right.id));
+                surfaces
+                    .into_iter()
+                    .map(|entry| entry.to_wire(trust_domain(&entry.provenance)))
+                    .collect()
+            },
+            panels: self
+                .panels
+                .iter()
+                .map(|panel| panel.to_wire(trust_domain(&panel.provenance)))
+                .collect(),
+            overlays: self
+                .overlays
+                .iter()
+                .map(|overlay| overlay.to_wire(trust_domain(&overlay.provenance)))
+                .collect(),
+            components: self
+                .components
+                .iter()
+                .map(|component| component.to_wire(trust_domain(&component.provenance)))
+                .collect(),
+            input_routes: self
+                .input_contributions
+                .iter()
+                .map(|input| input.to_wire(trust_domain(&input.provenance)))
+                .collect(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,6 +325,7 @@ pub(crate) struct RegisteredPanelContribution {
     pub(crate) slot: String,
     pub(crate) default_visibility: String,
     pub(crate) component_id: String,
+    pub(crate) component_json: String,
     pub(crate) component_tree: PackageUiComponentTree,
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
@@ -174,8 +333,66 @@ pub(crate) struct RegisteredPanelContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegisteredPaneContentContribution {
+    pub(crate) id: String,
+    pub(crate) activation: String,
+    pub(crate) component_id: String,
+    pub(crate) component_tree: PackageUiComponentTree,
+    pub(crate) component_json: String,
+    pub(crate) action_targets: Vec<String>,
+    pub(crate) provenance: UiContributionProvenance,
+    pub(crate) estimated_payload_bytes: usize,
+}
+
+impl UiContributionProvenance {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageUiProvenance {
+        crate::protocol::PackageUiProvenance {
+            package_name: self.package_name.clone(),
+            package_version: self.package_version.clone(),
+            api_prefix: self.api_prefix.clone(),
+            trust_domain,
+        }
+    }
+}
+
+impl RegisteredPanelContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackagePanelContent {
+        crate::protocol::PackagePanelContent {
+            id: self.id.clone(),
+            slot: self.slot.clone(),
+            visibility: self.default_visibility.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
+}
+
+impl RegisteredPaneContentContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::EmptyTabContent {
+        crate::protocol::EmptyTabContent {
+            id: self.id.clone(),
+            package_name: self.provenance.package_name.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RegisteredComponentContribution {
     pub(crate) id: String,
+    pub(crate) component_json: String,
     pub(crate) root_kind: String,
     pub(crate) component_count: usize,
     pub(crate) style_variable_count: usize,
@@ -191,10 +408,42 @@ pub(crate) struct RegisteredTransientOverlayContribution {
     pub(crate) focus_policy: String,
     pub(crate) dismissal_policy: String,
     pub(crate) component_id: String,
+    pub(crate) component_json: String,
     pub(crate) component_tree: PackageUiComponentTree,
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
     pub(crate) estimated_payload_bytes: usize,
+}
+
+impl RegisteredComponentContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageComponentContent {
+        crate::protocol::PackageComponentContent {
+            id: self.id.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
+}
+
+impl RegisteredTransientOverlayContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageOverlayContent {
+        crate::protocol::PackageOverlayContent {
+            id: self.id.clone(),
+            anchor: self.anchor.clone(),
+            focus_policy: self.focus_policy.clone(),
+            dismissal_policy: self.dismissal_policy.clone(),
+            component_json: self.component_json.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +471,27 @@ pub(crate) struct RegisteredPackageInputContribution {
     pub(crate) action_targets: Vec<String>,
     pub(crate) provenance: UiContributionProvenance,
     pub(crate) estimated_payload_bytes: usize,
+}
+
+impl RegisteredPackageInputContribution {
+    fn to_wire(
+        &self,
+        trust_domain: crate::protocol::PackageUiTrustDomain,
+    ) -> crate::protocol::PackageInputRouteContent {
+        crate::protocol::PackageInputRouteContent {
+            id: self.id.clone(),
+            scope: self.scope.clone(),
+            component_id: self.component_id.clone(),
+            pointer_click: self.pointer_click.clone(),
+            pointer_action: self.pointer_action.clone(),
+            pointer_drag: self.pointer_drag.clone(),
+            focus_policy: self.focus_policy.clone(),
+            selection_policy: self.selection_policy.clone(),
+            context_modes: self.context_modes.clone(),
+            action_targets: self.action_targets.clone(),
+            provenance: self.provenance.to_wire(trust_domain),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,6 +582,7 @@ impl PackageUiRegistry {
             ui_state_scopes: self.ui_state_scopes.values().cloned().collect(),
             layout_overrides: self.layout_overrides.values().cloned().collect(),
             layout_intents: self.layout_intents.values().cloned().collect(),
+            pane_contents: self.pane_contents.values().cloned().collect(),
         }
     }
 
@@ -375,21 +646,9 @@ impl PackageUiRegistry {
             ));
         }
         let slot = required_str(object, "slot", UiContributionRule::InvalidSlot, &context)?;
-        if !VALID_SLOTS.contains(&slot) {
-            return Err(context.error(
-                UiContributionRule::InvalidSlot,
-                Some(&id),
-                "panel slot must be one of left, right, top, or bottom",
-            ));
-        }
+        validate_choice("slot", slot, &id, &context)?;
         let default_visibility = optional_str(object, "defaultVisibility").unwrap_or("hidden");
-        if !VALID_VISIBILITY.contains(&default_visibility) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "panel defaultVisibility must be visible, hidden, or collapsed",
-            ));
-        }
+        validate_choice("defaultVisibility", default_visibility, &id, &context)?;
         let theme_resolver = self.theme_resolver();
         let mut component_context =
             ComponentValidationContext::new(package, registered_command_ids, &theme_resolver);
@@ -417,12 +676,101 @@ impl PackageUiRegistry {
             slot: slot.to_string(),
             default_visibility: default_visibility.to_string(),
             component_id,
+            component_json: component_value.to_string(),
             component_tree,
             action_targets,
             provenance: UiContributionProvenance::from(package),
             estimated_payload_bytes: size,
         };
         self.panels.insert(id, registered.clone());
+        Ok(registered)
+    }
+
+    pub(crate) fn register_pane_content(
+        &mut self,
+        package: &ClayPackageManifest,
+        declaration: &Value,
+        registered_command_ids: &[String],
+    ) -> Result<RegisteredPaneContentContribution, UiContributionDiagnostic> {
+        let context = UiDiagnosticContext::from_package(package, None);
+        validate_provenance(package, &context)?;
+        let size = payload_size(declaration);
+        if size > SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES {
+            return Err(context.error(
+                UiContributionRule::PayloadTooLarge,
+                None,
+                format!(
+                    "pane-content contribution payload ({size} bytes) exceeds SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES ({SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES} bytes)"
+                ),
+            ));
+        }
+        reject_prohibited_authority(declaration, &context)?;
+        let object = declaration.as_object().ok_or_else(|| {
+            context.error(
+                UiContributionRule::InvalidComponent,
+                None,
+                "pane-content contribution declaration must be an object",
+            )
+        })?;
+        let id = package_owned_string(object, "id", package, UiContributionRule::InvalidId)?;
+        let context = UiDiagnosticContext::from_package(package, Some(id.clone()));
+        if self.pane_contents.contains_key(&id) {
+            return Err(context.error(
+                UiContributionRule::DuplicateId,
+                Some(&id),
+                "pane-content contribution IDs must be unique",
+            ));
+        }
+        let activation = required_str(
+            object,
+            "activation",
+            UiContributionRule::InvalidPolicy,
+            &context,
+        )?;
+        // Phase 2 (plan 108 task 8): generic activations. `empty-tab` keeps the
+        // single-winner landing election; `pane` is a named pane surface any
+        // app-like package may present in a working-area pane. The vocabulary
+        // is closed so clients can stay deny-by-default.
+        if activation != "empty-tab" && activation != "pane" {
+            return Err(context.error(
+                UiContributionRule::InvalidPolicy,
+                Some(&id),
+                "pane-content activation must be empty-tab or pane",
+            ));
+        }
+        let theme_resolver = self.theme_resolver();
+        let mut component_context =
+            ComponentValidationContext::new(package, registered_command_ids, &theme_resolver);
+        let component = required_object(
+            object,
+            "component",
+            UiContributionRule::InvalidComponent,
+            &context,
+        )?;
+        let component_value = object.get("component").expect("required component exists");
+        let component_id = component_context.validate_component_object(component)?;
+        let component_tree =
+            PackageUiComponentTree::from_declaration(component_value).map_err(|message| {
+                context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+            })?;
+        let mut action_targets =
+            string_array(object.get("actionTargets"), "actionTargets", &context)?;
+        validate_registered_actions(&action_targets, registered_command_ids, &context)?;
+        action_targets.extend(component_context.action_targets);
+        action_targets.sort();
+        action_targets.dedup();
+
+        let registered = RegisteredPaneContentContribution {
+            id: id.clone(),
+            activation: activation.to_string(),
+            component_id,
+            component_json: component_value.to_string(),
+            component_tree,
+            action_targets,
+            provenance: UiContributionProvenance::from(package),
+            estimated_payload_bytes: size,
+        };
+        self.pane_contents.insert(id, registered.clone());
         Ok(registered)
     }
 
@@ -476,6 +824,7 @@ impl PackageUiRegistry {
         action_targets.dedup();
         let registered = RegisteredComponentContribution {
             id: id.clone(),
+            component_json: declaration.to_string(),
             root_kind,
             component_count: component_context.component_count,
             style_variable_count: component_context.style_variable_count,
@@ -523,29 +872,11 @@ impl PackageUiRegistry {
             ));
         }
         let anchor = optional_str(object, "anchor").unwrap_or("working-area");
-        if !VALID_OVERLAY_ANCHORS.contains(&anchor) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "overlay anchor must be one of working-area, active-pane, main, or pointer",
-            ));
-        }
+        validate_choice("anchor", anchor, &id, &context)?;
         let focus_policy = optional_str(object, "focusPolicy").unwrap_or("restore");
-        if !VALID_FOCUS_POLICIES.contains(&focus_policy) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "overlay focusPolicy must be none, restore, or trap",
-            ));
-        }
+        validate_choice("focusPolicy", focus_policy, &id, &context)?;
         let dismissal_policy = optional_str(object, "dismissalPolicy").unwrap_or("escape");
-        if !VALID_DISMISSAL_POLICIES.contains(&dismissal_policy) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "overlay dismissalPolicy must be manual, escape, outside, or escape-or-outside",
-            ));
-        }
+        validate_choice("dismissalPolicy", dismissal_policy, &id, &context)?;
         let theme_resolver = self.theme_resolver();
         let mut component_context =
             ComponentValidationContext::new(package, registered_command_ids, &theme_resolver);
@@ -573,6 +904,7 @@ impl PackageUiRegistry {
             focus_policy: focus_policy.to_string(),
             dismissal_policy: dismissal_policy.to_string(),
             component_id,
+            component_json: component_value.to_string(),
             component_tree,
             action_targets,
             provenance: UiContributionProvenance::from(package),
@@ -633,13 +965,7 @@ impl PackageUiRegistry {
             UiContributionRule::InvalidInputScope,
             &context,
         )?;
-        if !VALID_INPUT_SCOPES.contains(&scope) {
-            return Err(context.error(
-                UiContributionRule::InvalidInputScope,
-                Some(&id),
-                "input scope must be component, panel, or overlay",
-            ));
-        }
+        validate_choice("input.scope", scope, &id, &context)?;
         let component_id = package_owned_string(
             object,
             "componentId",
@@ -655,23 +981,11 @@ impl PackageUiRegistry {
         let pointer_click = pointer
             .and_then(|pointer| optional_str(pointer, "click"))
             .unwrap_or("none");
-        if !VALID_POINTER_CLICK_POLICIES.contains(&pointer_click) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "pointer.click must be none, focus, action, or select",
-            ));
-        }
+        validate_choice("pointer.click", pointer_click, &id, &context)?;
         let pointer_drag = pointer
             .and_then(|pointer| optional_str(pointer, "drag"))
             .unwrap_or("none");
-        if !VALID_POINTER_DRAG_POLICIES.contains(&pointer_drag) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "pointer.drag must be none, select, or pan",
-            ));
-        }
+        validate_choice("pointer.drag", pointer_drag, &id, &context)?;
         let pointer_action = pointer
             .and_then(|pointer| optional_str(pointer, "action"))
             .map(ToOwned::to_owned);
@@ -698,21 +1012,9 @@ impl PackageUiRegistry {
         let focus_policy = focus
             .and_then(|focus| optional_str(focus, "policy"))
             .unwrap_or("restore-editor");
-        if !VALID_COMPONENT_FOCUS_POLICIES.contains(&focus_policy) {
-            return Err(context.error(
-                UiContributionRule::InvalidFocusPolicy,
-                Some(&id),
-                "focus.policy must be none, restore-editor, focus-component, or trap",
-            ));
-        }
+        validate_choice("focus.policy", focus_policy, &id, &context)?;
         let selection_policy = optional_str(object, "selectionPolicy").unwrap_or("preserve-editor");
-        if !VALID_SELECTION_POLICIES.contains(&selection_policy) {
-            return Err(context.error(
-                UiContributionRule::InvalidPolicy,
-                Some(&id),
-                "selectionPolicy must be preserve-editor, component-local, or disabled",
-            ));
-        }
+        validate_choice("selectionPolicy", selection_policy, &id, &context)?;
         let context_modes = match optional_object(
             object,
             "context",
@@ -810,61 +1112,31 @@ impl PackageUiRegistry {
             UiContributionRule::InvalidStateScope,
             &context,
         )?;
-        if !VALID_UI_STATE_SCOPES.contains(&scope) {
-            return Err(context.error(
-                UiContributionRule::InvalidStateScope,
-                Some(&id),
-                "UI state scope must be package-global, user-config, workspace, document, pane, component, or transient-overlay",
-            ));
-        }
+        validate_choice("state.scope", scope, &id, &context)?;
         let owner = required_str(
             object,
             "owner",
             UiContributionRule::InvalidLifecycle,
             &context,
         )?;
-        if !VALID_UI_STATE_OWNERS.contains(&owner) {
-            return Err(context.error(
-                UiContributionRule::InvalidLifecycle,
-                Some(&id),
-                "UI state owner must be package, shell, or server",
-            ));
-        }
+        validate_choice("state.owner", owner, &id, &context)?;
         let lifetime = required_str(
             object,
             "lifetime",
             UiContributionRule::InvalidLifecycle,
             &context,
         )?;
-        if !VALID_UI_STATE_LIFETIMES.contains(&lifetime) {
-            return Err(context.error(
-                UiContributionRule::InvalidLifecycle,
-                Some(&id),
-                "UI state lifetime must be session, workspace, document, or transient",
-            ));
-        }
+        validate_choice("state.lifetime", lifetime, &id, &context)?;
         let persistence = required_str(
             object,
             "persistence",
             UiContributionRule::InvalidLifecycle,
             &context,
         )?;
-        if !VALID_UI_STATE_PERSISTENCE.contains(&persistence) {
-            return Err(context.error(
-                UiContributionRule::InvalidLifecycle,
-                Some(&id),
-                "UI state persistence must be none, client-local, server-canonical, or deferred",
-            ));
-        }
+        validate_choice("state.persistence", persistence, &id, &context)?;
         let implementation_status =
             optional_str(object, "implementationStatus").unwrap_or("deferred");
-        if !VALID_UI_STATE_STATUSES.contains(&implementation_status) {
-            return Err(context.error(
-                UiContributionRule::InvalidLifecycle,
-                Some(&id),
-                "implementationStatus must be implemented or deferred",
-            ));
-        }
+        validate_choice("implementationStatus", implementation_status, &id, &context)?;
         let target_id = optional_str(object, "targetId").map(ToOwned::to_owned);
         if matches!(scope, "pane" | "component" | "transient-overlay") && target_id.is_none() {
             return Err(context.error(
@@ -923,13 +1195,7 @@ impl PackageUiRegistry {
             UiContributionRule::InvalidStateSchema,
             &context,
         )?;
-        if !VALID_UI_STATE_SCHEMA_KINDS.contains(&value_schema_kind) {
-            return Err(context.error(
-                UiContributionRule::InvalidStateSchema,
-                Some(&id),
-                "valueSchema.kind must be boolean, number, string, enum, or object",
-            ));
-        }
+        validate_choice("valueSchema.kind", value_schema_kind, &id, &context)?;
         if value_schema_kind == "enum" {
             let values = string_array(schema_object.get("values"), "valueSchema.values", &context)?;
             if values.is_empty() || values.len() > 32 {
@@ -994,21 +1260,9 @@ impl PackageUiRegistry {
             UiContributionRule::InvalidLayoutOverride,
             &context,
         )?;
-        if !VALID_LAYOUT_OVERRIDE_PROPERTIES.contains(&property) {
-            return Err(context.error(
-                UiContributionRule::InvalidLayoutOverride,
-                Some(property),
-                "layout override property must be slot, visibility, splitRatio, themeToken, inputDefault, actionDefault, or fallback",
-            ));
-        }
+        validate_choice("layoutOverride.property", property, property, &context)?;
         let source = optional_str(object, "source").unwrap_or("user-config");
-        if !VALID_LAYOUT_OVERRIDE_SOURCES.contains(&source) {
-            return Err(context.error(
-                UiContributionRule::InvalidLayoutOverride,
-                Some(source),
-                "layout override source must be user-config, active-major-mode, compatible-minor-mode, global-package, or package-default",
-            ));
-        }
+        validate_choice("layoutOverride.source", source, source, &context)?;
         let value = object.get("value").ok_or_else(|| {
             context.error(
                 UiContributionRule::InvalidLayoutOverride,
@@ -1229,12 +1483,49 @@ impl From<&ClayPackageManifest> for UiContributionProvenance {
     }
 }
 
+/// Validate an optional semantic icon reference on a package component or
+/// component list item (Plan 112 task 3). Only button, label, list, and
+/// statusItem kinds accept icons; references must be core keys or the
+/// declaring package's apiPrefix namespace.
+fn validate_component_icon(
+    value: Option<&Value>,
+    kind: crate::shell::components::ComponentKind,
+    api_prefix: &str,
+) -> Result<Option<String>, String> {
+    let Some(reference) = value else {
+        return Ok(None);
+    };
+    if reference.is_null() {
+        return Ok(None);
+    }
+    let Value::String(reference) = reference else {
+        return Err("component icon references must be strings".to_string());
+    };
+    let icon_kind_allowed = matches!(
+        kind,
+        crate::shell::components::ComponentKind::Button
+            | crate::shell::components::ComponentKind::Label
+            | crate::shell::components::ComponentKind::List
+            | crate::shell::components::ComponentKind::StatusItem
+    );
+    if !icon_kind_allowed {
+        return Err(format!(
+            "semantic icons are only supported by button, label, list, and statusItem components (got kind `{}`)",
+            kind.as_str()
+        ));
+    }
+    crate::shell::icons::validate_icon_reference(reference, api_prefix)
+        .map_err(|error| error.message)?;
+    Ok(Some(reference.clone()))
+}
+
 struct ComponentValidationContext<'a> {
     package: &'a ClayPackageManifest,
     registered_command_ids: &'a [String],
     theme_resolver: &'a ThemeTokenResolver,
     seen_ids: BTreeSet<String>,
     action_targets: Vec<String>,
+    icon_references: Vec<String>,
     component_count: usize,
     style_variable_count: usize,
 }
@@ -1251,6 +1542,7 @@ impl<'a> ComponentValidationContext<'a> {
             theme_resolver,
             seen_ids: BTreeSet::new(),
             action_targets: Vec::new(),
+            icon_references: Vec::new(),
             component_count: 0,
             style_variable_count: 0,
         }
@@ -1284,6 +1576,18 @@ impl<'a> ComponentValidationContext<'a> {
         })?;
         let id = package_owned_string(object, "id", self.package, UiContributionRule::InvalidId)?;
         let context = UiDiagnosticContext::from_package(self.package, Some(id.clone()));
+        if let Some(icon) = validate_component_icon(
+            object.get("icon"),
+            component_kind,
+            self.package.clay.api_prefix.as_str(),
+        )
+        .map_err(|message| {
+            context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+        })? {
+            // Record validated references so conflicts/diagnostics can identify
+            // icon consumers without re-parsing declarations.
+            self.icon_references.push(icon);
+        }
         if !self.seen_ids.insert(id.clone()) {
             return Err(context.error(
                 UiContributionRule::DuplicateId,
@@ -1349,6 +1653,16 @@ impl<'a> ComponentValidationContext<'a> {
                         "component list items must be objects",
                     )
                 })?;
+                if let Some(icon) = validate_component_icon(
+                    item_object.get("icon"),
+                    component_kind,
+                    self.package.clay.api_prefix.as_str(),
+                )
+                .map_err(|message| {
+                    context.error(UiContributionRule::InvalidComponent, Some(&id), message)
+                })? {
+                    self.icon_references.push(icon);
+                }
                 if let Some(action) = item_object.get("action").and_then(Value::as_object) {
                     let command_id = required_str(
                         action,
@@ -1496,12 +1810,26 @@ fn validate_prefixed_public_id(
     Ok(())
 }
 
+const CLIENT_DIALOG_ACTIONS: &[&str] = &[
+    "documents.clientOpenFileDialog",
+    "workspace.clientOpenFolderDialog",
+    "agent.clientOpenAgentPicker",
+    "agent.clientOpenProviderPicker",
+    "agent.clientOpenModelPicker",
+    "agent.clientOpenProviderSetup",
+    "agent.clientOpenSessionPicker",
+    "agent.clientOpenSessionSearchPicker",
+];
+
 fn validate_registered_actions(
     action_targets: &[String],
     registered_command_ids: &[String],
     context: &UiDiagnosticContext,
 ) -> Result<(), UiContributionDiagnostic> {
     for command_id in action_targets {
+        if CLIENT_DIALOG_ACTIONS.contains(&command_id.as_str()) {
+            continue;
+        }
         if !registered_command_ids
             .iter()
             .any(|registered| registered == command_id)
@@ -1532,13 +1860,7 @@ fn validate_layout_override_value(
                     "slot override value must be a string",
                 )
             })?;
-            if !VALID_SLOTS.contains(&slot) {
-                return Err(context.error(
-                    UiContributionRule::InvalidSlot,
-                    Some(slot),
-                    "slot override value must be left, right, top, or bottom",
-                ));
-            }
+            validate_choice("layoutOverride.slot", slot, slot, context)?;
         }
         "visibility" => {
             let visibility = value.as_str().ok_or_else(|| {
@@ -1548,13 +1870,7 @@ fn validate_layout_override_value(
                     "visibility override value must be a string",
                 )
             })?;
-            if !VALID_VISIBILITY.contains(&visibility) {
-                return Err(context.error(
-                    UiContributionRule::InvalidPolicy,
-                    Some(visibility),
-                    "visibility override value must be visible, hidden, or collapsed",
-                ));
-            }
+            validate_choice("layoutOverride.visibility", visibility, visibility, context)?;
         }
         "splitRatio" => {
             let ratio = value.as_f64().ok_or_else(|| {
@@ -1682,13 +1998,7 @@ fn validate_layout_override_value(
                     "fallback override value must be a string",
                 )
             })?;
-            if !VALID_FALLBACK_BEHAVIORS.contains(&fallback) {
-                return Err(context.error(
-                    UiContributionRule::InvalidLayoutOverride,
-                    Some(fallback),
-                    "fallback override value must be package-default, hide, or ignore",
-                ));
-            }
+            validate_choice("layoutOverride.fallback", fallback, fallback, context)?;
         }
         _ => unreachable!("layout override property validated before value validation"),
     }
@@ -1851,824 +2161,4 @@ fn fixed_slot_id(slot: &str) -> FixedSlotId {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-    use crate::packages::{manifest::validate_manifest_value, permissions::PackagePermission};
-
-    fn package() -> ClayPackageManifest {
-        validate_manifest_value(&json!({
-            "name": "@clay/markdown",
-            "version": "0.1.0",
-            "clay": {
-                "apiPrefix": "markdown",
-                "entry": "./dist/index.js",
-                "permissions": ["command-registration"],
-                "modes": ["markdown"]
-            }
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn ui_registry_accepts_valid_panel_component_overlay_and_theme_token() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.togglePreview".to_string()];
-
-        let panel = registry
-            .register_panel(
-                &package,
-                &json!({
-                    "id": "markdown.preview",
-                    "slot": "right",
-                    "kind": "fixed",
-                    "defaultVisibility": "hidden",
-                    "actionTargets": ["markdown.togglePreview"],
-                    "component": {
-                        "kind": "panel",
-                        "id": "markdown.preview.root",
-                        "title": "Preview",
-                        "children": [{
-                            "kind": "button",
-                            "id": "markdown.preview.toggle",
-                            "label": "Toggle",
-                            "action": { "commandId": "markdown.togglePreview" }
-                        }]
-                    }
-                }),
-                &commands,
-            )
-            .unwrap();
-        assert_eq!(panel.slot, "right");
-        assert_eq!(panel.provenance.api_prefix, "markdown");
-
-        let component = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "label",
-                    "id": "markdown.preview.empty",
-                    "text": "Preview unavailable"
-                }),
-                &commands,
-            )
-            .unwrap();
-        assert_eq!(component.root_kind, "label");
-
-        let overlay = registry
-            .register_overlay(
-                &package,
-                &json!({
-                    "id": "markdown.preview.quickOpen",
-                    "anchor": "working-area",
-                    "focusPolicy": "restore",
-                    "dismissalPolicy": "escape",
-                    "component": {
-                        "kind": "panel",
-                        "id": "markdown.preview.quickOpen.root",
-                        "title": "Quick Open",
-                        "children": []
-                    }
-                }),
-                &commands,
-            )
-            .unwrap();
-        assert_eq!(overlay.focus_policy, "restore");
-
-        let token = registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.background",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Markdown preview background"
-                }),
-            )
-            .unwrap();
-        assert_eq!(token.token_type, "color-role");
-        assert_eq!(token.resolved_core_token, "surface.panel");
-
-        let styled_component = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "panel",
-                    "id": "markdown.preview.styled",
-                    "style": {
-                        "background": "markdown.preview.background",
-                        "padding": "spacing.panel",
-                        "typography": "typography.body"
-                    },
-                    "children": []
-                }),
-                &commands,
-            )
-            .unwrap();
-        assert_eq!(styled_component.style_variable_count, 3);
-        let snapshot = registry.snapshot();
-        assert_eq!(snapshot.panels.len(), 1);
-        let mut runtime = crate::shell::PackageUiRuntimeState::new();
-        runtime
-            .apply_update(snapshot.runtime_update(0))
-            .expect("registered package UI contributions should compose into runtime state");
-        assert!(runtime.has_fixed_panels());
-        assert!(runtime.fixed_panel_for_slot(FixedSlotId::Right).is_some());
-        assert_eq!(runtime.transient_overlay_count(), 1);
-        assert!(
-            package
-                .clay
-                .permissions
-                .contains(&PackagePermission::CommandRegistration)
-        );
-    }
-
-    #[test]
-    fn package_component_font_role_is_semantic_and_text_only() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = Vec::new();
-
-        let accepted = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "label",
-                    "id": "markdown.preview.code",
-                    "text": "cargo test",
-                    "style": { "fontRole": "monospace" }
-                }),
-                &commands,
-            )
-            .unwrap();
-        assert_eq!(accepted.style_variable_count, 1);
-
-        for style in [
-            json!({ "fontRole": "serif" }),
-            json!({ "fontFamily": "JetBrains Mono" }),
-            json!({ "fontSize": 18 }),
-        ] {
-            assert!(
-                registry
-                    .register_component(
-                        &package,
-                        &json!({
-                            "kind": "label",
-                            "id": format!("markdown.preview.invalid{}", registry.components.len()),
-                            "text": "bad",
-                            "style": style
-                        }),
-                        &commands,
-                    )
-                    .is_err()
-            );
-        }
-        assert!(
-            registry
-                .register_component(
-                    &package,
-                    &json!({
-                        "kind": "stack",
-                        "id": "markdown.preview.stack",
-                        "style": { "fontRole": "monospace" }
-                    }),
-                    &commands,
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn ui_registry_rejects_invalid_prefix_unregistered_actions_raw_css_and_duplicate_ids() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.togglePreview".to_string()];
-
-        let invalid_prefix = registry
-            .register_component(
-                &package,
-                &json!({ "kind": "label", "id": "other.preview", "text": "bad" }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(invalid_prefix.rule, UiContributionRule::InvalidId);
-
-        let invalid_action = registry
-            .register_panel(
-                &package,
-                &json!({
-                    "id": "markdown.preview",
-                    "slot": "right",
-                    "component": { "kind": "button", "id": "markdown.preview.button", "label": "Run", "action": { "commandId": "markdown.missing" } }
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(invalid_action.rule, UiContributionRule::InvalidActionTarget);
-
-        let raw_css = registry
-            .register_component(
-                &package,
-                &json!({ "kind": "label", "id": "markdown.preview.raw", "text": "bad", "style": "color: red" }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(raw_css.rule, UiContributionRule::ProhibitedAuthority);
-
-        registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.background",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Markdown preview background"
-                }),
-            )
-            .unwrap();
-        let duplicate = registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.background",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Duplicate"
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(duplicate.rule, UiContributionRule::DuplicateId);
-    }
-
-    #[test]
-    fn component_catalog_rejects_unknown_kinds_duplicate_ids_and_unregistered_actions() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.togglePreview".to_string()];
-
-        let unknown_kind = registry
-            .register_component(
-                &package,
-                &json!({ "kind": "table", "id": "markdown.preview.table" }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(unknown_kind.rule, UiContributionRule::InvalidComponent);
-        assert!(unknown_kind.message.contains("reserved for a later"));
-
-        let duplicate_ids = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "panel",
-                    "id": "markdown.preview.root",
-                    "children": [
-                        { "kind": "label", "id": "markdown.preview.duplicate", "text": "First" },
-                        { "kind": "label", "id": "markdown.preview.duplicate", "text": "Second" }
-                    ]
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(duplicate_ids.rule, UiContributionRule::DuplicateId);
-
-        let unregistered_action = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "button",
-                    "id": "markdown.preview.run",
-                    "label": "Run",
-                    "action": { "commandId": "markdown.missing" }
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(
-            unregistered_action.rule,
-            UiContributionRule::InvalidActionTarget
-        );
-    }
-
-    #[test]
-    fn input_contributions_accept_component_scoped_pointer_focus_and_actions() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec![
-            "markdown.focusPreview".to_string(),
-            "markdown.togglePreview".to_string(),
-        ];
-
-        let input = registry
-            .register_input(
-                &package,
-                &json!({
-                    "id": "markdown.preview.input",
-                    "scope": "component",
-                    "componentId": "markdown.preview.root",
-                    "pointer": {
-                        "click": "action",
-                        "action": "markdown.focusPreview",
-                        "drag": "select"
-                    },
-                    "focus": { "policy": "restore-editor" },
-                    "selectionPolicy": "component-local",
-                    "context": { "modes": ["markdown"] },
-                    "actionTargets": ["markdown.togglePreview"]
-                }),
-                &commands,
-            )
-            .unwrap();
-
-        assert_eq!(input.scope, "component");
-        assert_eq!(
-            input.pointer_action.as_deref(),
-            Some("markdown.focusPreview")
-        );
-        assert_eq!(input.action_targets.len(), 2);
-        let snapshot = registry.snapshot();
-        let mut runtime = crate::shell::PackageUiRuntimeState::new();
-        runtime
-            .apply_update(snapshot.runtime_update(0))
-            .expect("input routing should compose into inert runtime state");
-        let routes: Vec<_> = runtime.input_routes().collect();
-        assert_eq!(routes.len(), 1);
-        assert_eq!(routes[0].focus_policy, "restore-editor");
-    }
-
-    #[test]
-    fn input_contributions_reject_raw_callbacks_key_routing_and_unregistered_actions() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.focusPreview".to_string()];
-
-        let raw_callback = registry
-            .register_input(
-                &package,
-                &json!({
-                    "id": "markdown.preview.input",
-                    "scope": "component",
-                    "componentId": "markdown.preview.root",
-                    "pointer": { "click": "focus" },
-                    "clientJavaScript": "window.alert(1)"
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(raw_callback.rule, UiContributionRule::ProhibitedAuthority);
-
-        let key_route = registry
-            .register_input(
-                &package,
-                &json!({
-                    "id": "markdown.preview.keys",
-                    "scope": "component",
-                    "componentId": "markdown.preview.root",
-                    "keys": ["Enter"]
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(key_route.rule, UiContributionRule::ProhibitedAuthority);
-
-        let missing_action = registry
-            .register_input(
-                &package,
-                &json!({
-                    "id": "markdown.preview.missingAction",
-                    "scope": "component",
-                    "componentId": "markdown.preview.root",
-                    "pointer": { "click": "action", "action": "markdown.missing" }
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(missing_action.rule, UiContributionRule::InvalidActionTarget);
-    }
-
-    #[test]
-    fn ui_state_scope_registration_accepts_supported_scopes_and_lifecycles() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-
-        let scope = registry
-            .register_ui_state_scope(
-                &package,
-                &json!({
-                    "id": "markdown.preview.visibility",
-                    "scope": "pane",
-                    "targetId": "markdown.preview",
-                    "owner": "shell",
-                    "lifetime": "session",
-                    "persistence": "client-local",
-                    "implementationStatus": "implemented",
-                    "valueSchema": { "kind": "enum", "values": ["visible", "hidden"] }
-                }),
-            )
-            .unwrap();
-
-        assert_eq!(scope.scope, "pane");
-        assert_eq!(scope.persistence, "client-local");
-        assert_eq!(scope.implementation_status, "implemented");
-        assert_eq!(scope.value_schema_kind, "enum");
-        assert_eq!(scope.provenance.api_prefix, "markdown");
-        let snapshot = registry.snapshot();
-        assert_eq!(snapshot.ui_state_scopes.len(), 1);
-        assert_eq!(
-            snapshot.ui_state_scopes[0].target_id.as_deref(),
-            Some("markdown.preview")
-        );
-    }
-
-    #[test]
-    fn ui_state_scope_registration_rejects_hidden_globals_unsupported_scopes_and_payloads() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-
-        let hidden = registry
-            .register_ui_state_scope(
-                &package,
-                &json!({
-                    "id": "markdown._hidden",
-                    "scope": "package-global",
-                    "owner": "package",
-                    "lifetime": "session",
-                    "persistence": "none",
-                    "valueSchema": { "kind": "boolean" }
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(hidden.rule, UiContributionRule::InvalidId);
-
-        let unsupported = registry
-            .register_ui_state_scope(
-                &package,
-                &json!({
-                    "id": "markdown.preview.unsupported",
-                    "scope": "masonry-widget",
-                    "owner": "shell",
-                    "lifetime": "session",
-                    "persistence": "client-local",
-                    "valueSchema": { "kind": "boolean" }
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(unsupported.rule, UiContributionRule::InvalidStateScope);
-
-        let raw_value = registry
-            .register_ui_state_scope(
-                &package,
-                &json!({
-                    "id": "markdown.preview.raw",
-                    "scope": "component",
-                    "targetId": "markdown.preview.root",
-                    "owner": "shell",
-                    "lifetime": "session",
-                    "persistence": "client-local",
-                    "valueSchema": { "kind": "string", "defaultValue": "hidden" }
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(raw_value.rule, UiContributionRule::ProhibitedAuthority);
-
-        let raw_ops = registry
-            .register_ui_state_scope(
-                &package,
-                &json!({
-                    "id": "markdown.preview.ops",
-                    "scope": "component",
-                    "targetId": "markdown.preview.root",
-                    "owner": "shell",
-                    "lifetime": "session",
-                    "persistence": "client-local",
-                    "valueSchema": { "kind": "string", "code": "Deno.core.ops.op_clay_runtime_ping()" }
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(raw_ops.rule, UiContributionRule::ProhibitedAuthority);
-    }
-
-    #[test]
-    fn layout_override_applies_user_precedence_and_validates_theme_input_and_actions() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.togglePreview".to_string()];
-
-        registry
-            .register_panel(
-                &package,
-                &json!({
-                    "id": "markdown.preview",
-                    "slot": "right",
-                    "component": {
-                        "kind": "button",
-                        "id": "markdown.preview.button",
-                        "label": "Toggle",
-                        "action": { "commandId": "markdown.togglePreview" }
-                    }
-                }),
-                &commands,
-            )
-            .unwrap();
-        registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.background",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Markdown preview background"
-                }),
-            )
-            .unwrap();
-        registry
-            .register_input(
-                &package,
-                &json!({
-                    "id": "markdown.preview.input",
-                    "scope": "component",
-                    "componentId": "markdown.preview.button",
-                    "pointer": { "click": "action", "action": "markdown.togglePreview" }
-                }),
-                &commands,
-            )
-            .unwrap();
-
-        let visibility = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "visibility",
-                "value": "hidden",
-                "source": "user-config"
-            }))
-            .unwrap();
-        assert_eq!(visibility.precedence_rank, 1);
-
-        let token_remap = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "themeToken",
-                "value": { "token": "markdown.preview.background", "fallback": "surface.overlay" },
-                "source": "user-config"
-            }))
-            .unwrap();
-        assert_eq!(token_remap.property, "themeToken");
-
-        let input_default = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "inputDefault",
-                "value": { "inputId": "markdown.preview.input" },
-                "source": "active-major-mode"
-            }))
-            .unwrap();
-        assert_eq!(input_default.precedence_rank, 2);
-
-        let action_default = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "actionDefault",
-                "value": "markdown.togglePreview",
-                "source": "package-default"
-            }))
-            .unwrap();
-        assert_eq!(action_default.precedence_rank, 5);
-        assert_eq!(registry.snapshot().layout_overrides.len(), 4);
-    }
-
-    #[test]
-    fn layout_override_rejects_hidden_keys_unknown_tokens_raw_values_and_bad_slots() {
-        let mut registry = PackageUiRegistry::new();
-
-        let hidden_target = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown._hidden",
-                "property": "visibility",
-                "value": "hidden"
-            }))
-            .unwrap_err();
-        assert_eq!(hidden_target.rule, UiContributionRule::InvalidId);
-
-        let bad_slot = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "slot",
-                "value": "main"
-            }))
-            .unwrap_err();
-        assert_eq!(bad_slot.rule, UiContributionRule::InvalidSlot);
-
-        let unknown_token = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "themeToken",
-                "value": { "token": "markdown.preview.background", "fallback": "surface.overlay" }
-            }))
-            .unwrap_err();
-        assert_eq!(unknown_token.rule, UiContributionRule::InvalidThemeToken);
-
-        let raw_value = registry
-            .set_layout_override(&json!({
-                "targetId": "markdown.preview",
-                "property": "fallback",
-                "value": { "rawOps": "Deno.core.ops.op_clay_runtime_ping" }
-            }))
-            .unwrap_err();
-        assert_eq!(raw_value.rule, UiContributionRule::ProhibitedAuthority);
-    }
-
-    #[test]
-    fn theme_token_registry_rejects_raw_css_raw_colors_and_type_mismatches() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let commands = vec!["markdown.togglePreview".to_string()];
-
-        let raw_color_token = registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.raw",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Raw color should be rejected",
-                    "rawColor": "#ff00aa"
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(
-            raw_color_token.rule,
-            UiContributionRule::ProhibitedAuthority
-        );
-
-        let type_mismatch = registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.padding",
-                    "type": "spacing",
-                    "fallback": "surface.panel",
-                    "description": "Spacing cannot fall back to a color token"
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(type_mismatch.rule, UiContributionRule::InvalidThemeToken);
-
-        registry
-            .register_theme_token(
-                &package,
-                &json!({
-                    "token": "markdown.preview.background",
-                    "type": "color-role",
-                    "fallback": "surface.panel",
-                    "description": "Markdown preview background"
-                }),
-            )
-            .unwrap();
-        let raw_component_color = registry
-            .register_component(
-                &package,
-                &json!({
-                    "kind": "label",
-                    "id": "markdown.preview.rawColor",
-                    "text": "bad",
-                    "style": { "background": "#ff00aa" }
-                }),
-                &commands,
-            )
-            .unwrap_err();
-        assert_eq!(
-            raw_component_color.rule,
-            UiContributionRule::ProhibitedAuthority
-        );
-    }
-
-    /// Compile-time size guard for the boxed UI contribution diagnostic.
-    /// Mirrors the guard in `packages::record`; keeps `UiContributionDiagnostic`
-    /// under clippy's `result_large_err` 128-byte threshold.
-    #[test]
-    fn ui_contribution_diagnostic_size_remains_under_large_err_threshold() {
-        const _: () = assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
-        assert!(std::mem::size_of::<UiContributionDiagnostic>() <= 128);
-    }
-
-    // -- Phase 20.3: layout intent validation tests --
-
-    #[test]
-    fn layout_intent_valid_request_accepted() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let registered = registry
-            .request_layout_intent(
-                &package,
-                &json!({
-                    "id": "markdown.splitPreview",
-                    "targetPane": "active",
-                    "orientation": "horizontal",
-                    "ratio": 0.5,
-                    "position": "second"
-                }),
-            )
-            .unwrap();
-        assert_eq!(registered.id, "markdown.splitPreview");
-        assert_eq!(registered.target_pane, "active");
-        assert_eq!(registered.orientation, "horizontal");
-        assert!((registered.ratio - 0.5).abs() < 1e-9);
-        assert_eq!(registered.position, "second");
-        assert_eq!(registered.source, "markdown");
-        assert_eq!(registry.snapshot().layout_intents.len(), 1);
-    }
-
-    #[test]
-    fn layout_intent_invalid_ratio_rejected() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let err = registry
-            .request_layout_intent(
-                &package,
-                &json!({
-                    "id": "markdown.badRatio",
-                    "targetPane": "active",
-                    "orientation": "horizontal",
-                    "ratio": 1.5
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(err.rule, UiContributionRule::InvalidLayoutIntent);
-    }
-
-    #[test]
-    fn layout_intent_invalid_orientation_rejected() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let err = registry
-            .request_layout_intent(
-                &package,
-                &json!({
-                    "id": "markdown.badOrientation",
-                    "targetPane": "active",
-                    "orientation": "diagonal",
-                    "ratio": 0.5
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(err.rule, UiContributionRule::InvalidLayoutIntent);
-    }
-
-    #[test]
-    fn layout_intent_invalid_provenance_rejected() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        // ID not owned by the package's apiPrefix.
-        let err = registry
-            .request_layout_intent(
-                &package,
-                &json!({
-                    "id": "other.splitPreview",
-                    "targetPane": "active",
-                    "orientation": "horizontal",
-                    "ratio": 0.5
-                }),
-            )
-            .unwrap_err();
-        assert_eq!(err.rule, UiContributionRule::InvalidId);
-    }
-
-    #[test]
-    fn layout_intent_duplicate_id_rejected() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let declaration = json!({
-            "id": "markdown.splitPreview",
-            "targetPane": "active",
-            "orientation": "horizontal",
-            "ratio": 0.5
-        });
-        registry
-            .request_layout_intent(&package, &declaration)
-            .unwrap();
-        let err = registry
-            .request_layout_intent(&package, &declaration)
-            .unwrap_err();
-        assert_eq!(err.rule, UiContributionRule::DuplicateId);
-    }
-
-    #[test]
-    fn layout_intent_default_position_is_second() {
-        let mut registry = PackageUiRegistry::new();
-        let package = package();
-        let registered = registry
-            .request_layout_intent(
-                &package,
-                &json!({
-                    "id": "markdown.noPosition",
-                    "targetPane": "active",
-                    "orientation": "vertical",
-                    "ratio": 0.4
-                }),
-            )
-            .unwrap();
-        assert_eq!(registered.position, "second");
-    }
-}
+mod tests;

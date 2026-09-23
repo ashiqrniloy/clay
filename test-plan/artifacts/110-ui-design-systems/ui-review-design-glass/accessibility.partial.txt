@@ -1,0 +1,27 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/10|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/1|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/3|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/7|clay-desktop
+5|button|-|Minimise||/org/a11y/atspi/accessible/11|clay-desktop
+5|button|-|Maximise||/org/a11y/atspi/accessible/12|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/13|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/6|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/8|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/9|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/2|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/831d5a8b_b423_49db_a9dd_40d482a2da5c|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/e43e6f7e_b079_484e_9a73_6336b0a02ff3|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/ae216bc3_b9a6_4659_9962_a1baa428d98b|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/b36d4676_13a0_4bf3_af81_c899038f06e8|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/ed0cecdc_4358_45e5_909a_0174793a1325|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/d8284a0f_4818_488b_b2c3_f5e8a0927b62|clay-desktop
+9|page tab list|-|Window tabs||/org/a11y/atspi/accessible/9ddcf12d_3646_4f42_a67f_6f249829b1f9|clay-desktop
+10|page tab|selected|Workspace||/org/a11y/atspi/accessible/66e25172_9584_4f8f_bd5b_2042c5295d3a|clay-desktop
+7|landmark|-|Clay workspace||/org/a11y/atspi/accessible/3980b5fe_1869_4669_a02a_686cf50cdb74|clay-desktop
+8|notification|-|||/org/a11y/atspi/accessible/3c93a133_713b_4a03_b884_36e87bb6f58c|clay-desktop
+9|button|-|Reconnect session||/org/a11y/atspi/accessible/cb484f1b_ac52_4542_9dfc_76f14611a87a|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/46266476_8cb3_4089_adb1_689e8e90d008|clay-desktop
+8|status bar|-||Disconnected|/org/a11y/atspi/accessible/7cef4f50_1915_4ff0_8615_3b1b39d49b25|clay-desktop

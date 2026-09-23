@@ -1,0 +1,9 @@
+clay server listening on /tmp/clay-plan128-live/clay.sock
+[analysis-debug] doc analyzer invocation failed: JavaScript runtime error: Error: lsp.invalid_semantic_tokens: bounded five-integer records required
+    at semanticTokensToClay (clay://packages/lsp-shared/mapping.js:135:11)
+    at refreshSemantic (clay://packages/lsp-shared/bridge.js:263:14)
+    at async refresh (clay://packages/lsp-shared/bridge.js:307:7)
+    at async Object.handle (clay://packages/lsp-shared/bridge.js:388:7)
+    at async clay://runtime/document-analysis-lsp-rust.bridge-2.js:7:16
+[daemon] [skills] /tmp/clay-plan128-live/home/.clay/agents/coding-agent/skills.json absent or unreadable; using defaults (all roots enabled)
+[agent] ensure_tab_session(1): empty book (provider='' model='')

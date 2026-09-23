@@ -1,0 +1,29 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/10|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/1|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/3|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/7|clay-desktop
+5|button|-|Minimise||/org/a11y/atspi/accessible/11|clay-desktop
+5|button|-|Maximise||/org/a11y/atspi/accessible/12|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/13|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/6|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/8|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/9|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/2|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/170913c8_101f_4c04_8a5b_3e5438d8e927|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/50a93eb6_6fb5_4d63_9a79_7c6decdfb144|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/5f273cbe_28d0_4147_89b6_373d3b786a5f|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/d90b9794_553f_4aa2_a420_2ea09d87c56b|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/2308428f_fed0_423c_ac1e_0b4bc38650cc|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/d206a488_a567_4f48_8953_0b7bf59bdb2a|clay-desktop
+9|page tab list|-|Window tabs||/org/a11y/atspi/accessible/485ed057_ad58_4e73_bfd3_5c56a1baaae5|clay-desktop
+10|page tab|selected|Workspace||/org/a11y/atspi/accessible/bfd64345_a44a_47ea_8749_36229e93c818|clay-desktop
+7|landmark|-|Clay workspace||/org/a11y/atspi/accessible/d95c62f5_9748_4fa4_88cf_1e8251257c64|clay-desktop
+8|landmark|-|Pane 1||/org/a11y/atspi/accessible/acdf0fd8_3ed8_4fe3_9ee0_4e34e7b2d375|clay-desktop
+9|panel|-|Empty tab||/org/a11y/atspi/accessible/0248181d_8c17_43e6_b36d_b99524fad784|clay-desktop
+10|button|-|Open file||/org/a11y/atspi/accessible/4ac24e88_6c73_4301_8969_821903d0fe07|clay-desktop
+10|button|-|Open folder||/org/a11y/atspi/accessible/460ce0ac_f9bd_4fd1_9bd9_110a79a9102d|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/5ea0e25e_3052_4123_8f63_110adde0535f|clay-desktop
+8|status bar|-||unknown workspace document 1 Hint: Open the document through the server before saving, reloading, or querying it.|/org/a11y/atspi/accessible/62e72d1f_9278_44d9_aedd_c9e1be97cdad|clay-desktop

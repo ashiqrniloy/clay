@@ -1,0 +1,16 @@
+Plan 133 task 4 (giant inline test modules split into tests/ suite trees) — 2026-09-21,
+HEAD 6ee3b4c + working tree changes (tasks 2-4)
+
+  scripts/check.sh full     -> 0   (244 s, "full check PASSED", log: task4-check-full.log)
+  cargo test totals         -> 1996 passed / 0 failed / 1 ignored (identical to the task-1 baseline)
+  task4-verify.py           -> 0   (every original item placed exactly once; 456 tests; 0 root tests)
+  cargo check --all-targets -> 0   (clean; clippy -D warnings + cargo fmt --check clean in check.sh)
+  cargo check --all-targets after touching the tests root -> 6.5 s / 6.8 s vs
+    6.7 s pre-change steady state (A/B via stash; see task4-test-split.md)
+
+Per-module test counts (unchanged): js_runtime 241, connection 87, client 48, workspace 80.
+Suite trees: 24 + 14 + 8 + 9 = 55 suite files under src/**/tests/.
+Note: four aborted full-check attempts preceded the green run — each failed on an
+unrelated timing-sensitive test (worker-timeout RecvError, two ETXTBSY agent spawns,
+one fake-LSP early exit) or hung in the desktop capture harness; all passed
+standalone, and the final full run is green.

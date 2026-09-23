@@ -1,13 +1,13 @@
+//! Protocol/server benchmark helpers retained after native client removal.
+
 use crate::{
-    client::ClientEditQueue,
-    editor::{EditorCommand, EditorEditEvent, EditorSurface},
-    masonry_sdui::SduiNativeState,
+    client::{ClientEditQueue, EditorEditEvent},
     perf::fixtures::{FixtureKind, FixtureSpec, generate_fixture},
     protocol::{
-        ActiveTypography, BehaviorManifest, ClientMessage, DocumentAccess, EditOperation,
-        PROTOCOL_VERSION, SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection,
-        SduiListItem, SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation,
-        SduiTreeUpdate, ServerMessage, codec::Codec,
+        BehaviorManifest, ClientMessage, DocumentAccess, EditOperation, PROTOCOL_VERSION,
+        SduiActionIntent, SduiActionSource, SduiEditorBinding, SduiFlexDirection, SduiListItem,
+        SduiNode, SduiNodeId, SduiNodeKind, SduiTree, SduiTreeOperation, SduiTreeUpdate,
+        ServerMessage, codec::Codec,
     },
 };
 
@@ -19,76 +19,6 @@ pub fn fixture_text(kind: FixtureKind, size_bytes: usize) -> String {
     let spec = FixtureSpec::new(kind, size_bytes);
     generate_fixture(&spec, &mut bytes).expect("in-memory fixture generation should succeed");
     String::from_utf8(bytes).expect("fixture generator emits valid UTF-8")
-}
-
-pub fn editor_surface_with_fixture(size_bytes: usize) -> EditorSurface {
-    let mut surface = EditorSurface::default();
-    surface.load_snapshot(
-        7,
-        1,
-        fixture_text(FixtureKind::ManyShortLines, size_bytes),
-        DocumentAccess::Editable { lease_id: 1 },
-    );
-    surface.update_visible_line_count_for_height(720.0);
-    surface
-}
-
-pub fn editor_visible_text_len(size_bytes: usize) -> usize {
-    editor_surface_with_fixture(size_bytes).visible_text().len()
-}
-
-pub fn editor_insert_at_end(size_bytes: usize) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    surface.command(EditorCommand::DocumentEnd);
-    surface
-        .command_with_event(EditorCommand::Insert("x"))
-        .edit_event
-        .map_or(0, |event| match event.operation {
-            EditOperation::Insert { byte_offset, text } => byte_offset as usize + text.len(),
-            _ => 0,
-        })
-}
-
-pub fn editor_scroll_visible_text_len(size_bytes: usize) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    let _ = surface.scroll_lines(512);
-    surface.visible_text().len()
-}
-
-pub fn editor_scroll_window_signature(size_bytes: usize, delta_lines: isize) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    let _ = surface.scroll_lines(delta_lines);
-    let visible = surface.visible_text();
-    let line_count = visible.lines().count();
-    visible.len() ^ line_count
-}
-
-pub fn editor_resize_viewport_visible_text_len(size_bytes: usize, height: f64) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    let _ = surface.update_visible_line_count_for_height(height);
-    surface.visible_text().len()
-}
-
-pub fn editor_typography_viewport_visible_text_len(size_bytes: usize, font_size: f32) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    let mut typography = ActiveTypography {
-        revision: 1,
-        ..ActiveTypography::default()
-    };
-    typography.monospace.size = font_size;
-    typography.proportional.size = font_size;
-    let _ = surface.set_typography(typography);
-    let _ = surface.update_visible_line_count_for_height(1080.0);
-    surface.visible_text().len()
-}
-
-pub fn editor_render_adjacent_update(size_bytes: usize) -> usize {
-    let mut surface = editor_surface_with_fixture(size_bytes);
-    let _ = surface.command(EditorCommand::MoveDown);
-    let _ = surface.command(EditorCommand::MoveUp);
-    let _ = surface.command(EditorCommand::SelectRight);
-    let _ = surface.command(EditorCommand::MoveRight);
-    surface.visible_text().len()
 }
 
 pub fn client_edit_message(text_bytes: usize) -> ClientMessage {
@@ -129,7 +59,10 @@ pub fn encode_decode_initial_document(size_bytes: usize) -> usize {
     let message = ServerMessage::InitialDocument {
         document_id: 7,
         version: 1,
-        text: fixture_text(FixtureKind::MixedUnicode, size_bytes),
+        head: crate::protocol::DocumentTextHead::complete(fixture_text(
+            FixtureKind::MixedUnicode,
+            size_bytes,
+        )),
         access: DocumentAccess::Editable { lease_id: 1 },
         lease_id: Some(1),
         workspace_root: "/tmp/root".to_string(),
@@ -141,7 +74,7 @@ pub fn encode_decode_initial_document(size_bytes: usize) -> usize {
         .decode_server_message(&frame)
         .expect("representative initial document should decode");
     match decoded {
-        ServerMessage::InitialDocument { text, .. } => text.len(),
+        ServerMessage::InitialDocument { head, .. } => head.first_chunk.len(),
         _ => 0,
     }
 }
@@ -294,12 +227,14 @@ pub fn representative_sdui_tree() -> SduiTree {
                 label_id,
                 SduiNodeKind::Label {
                     text: "Document 7 · version 3".to_string(),
+                    icon: None,
                 },
             ),
             SduiNode::new(
                 button_id,
                 SduiNodeKind::Button {
                     label: "Refresh".to_string(),
+                    icon: None,
                     action: SduiActionIntent::command(
                         "workspace.refresh",
                         SduiActionSource::Button { node_id: button_id },
@@ -309,10 +244,12 @@ pub fn representative_sdui_tree() -> SduiTree {
             SduiNode::new(
                 list_id,
                 SduiNodeKind::List {
+                    filter: None,
                     items: vec![SduiListItem {
                         id: "active-document".to_string(),
                         label: "Document 7".to_string(),
                         detail: Some("Server-generated editor view".to_string()),
+                        icon: None,
                         action: Some(SduiActionIntent::command(
                             "document.open_recent",
                             SduiActionSource::ListItem {
@@ -345,17 +282,11 @@ pub fn representative_panel_update() -> SduiTreeUpdate {
                 SduiNodeId(4),
                 SduiNodeKind::Label {
                     text: "Document 7 · version 4".to_string(),
+                    icon: None,
                 },
             ),
         }],
     }
-}
-
-pub fn apply_sdui_snapshot_and_update() -> usize {
-    let mut state = SduiNativeState::empty();
-    state.apply_snapshot(representative_sdui_tree());
-    let update_applied = state.apply_update(representative_panel_update());
-    state.visible_texts().len() + usize::from(update_applied)
 }
 
 pub fn encode_decode_sdui_snapshot() -> usize {
@@ -377,7 +308,8 @@ pub fn encode_decode_sdui_snapshot() -> usize {
 }
 
 /// Phase 24.1: worst-case server-owned transient-menu snapshot (max items ×
-/// max label/detail/accessibility/query strings) must encode/decode and stay
+/// max label/detail/accessibility/query strings, plus the palette's row fields
+/// and the session's presentation mode) must encode/decode and stay
 /// far under the 1 MiB frame cap. The DTO clamps at construction, so the
 /// worst case is bounded by `TRANSIENT_MENU_MAX_*`; this asserts the wire
 /// size stays small enough that per-keystroke snapshot pushes on local IPC
@@ -391,16 +323,24 @@ pub fn encode_decode_max_transient_menu_snapshot() -> usize {
         crate::perf::budgets::TRANSIENT_MENU_MAX_LABEL_CHARS
             .max(crate::perf::budgets::TRANSIENT_MENU_MAX_DETAIL_CHARS),
     );
-    let items = (0..crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
-        .map(|i| {
-            TransientMenuItemData::new(
-                format!("item-{i}"),
-                max_string.clone(),
-                Some(max_string.clone()),
-                max_string.clone(),
-            )
-        })
-        .collect();
+    let items =
+        (0..crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS)
+            .map(|i| {
+                TransientMenuItemData::new(
+                    format!("item-{i}"),
+                    max_string.clone(),
+                    Some(max_string.clone()),
+                    max_string.clone(),
+                )
+                // Plan 124: the worst case includes the palette's row fields — a
+                // max-length scope tag and the full count of max-length chords.
+                .with_scope("x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_SCOPE_CHARS))
+                .with_bindings(vec![
+                "x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_BINDING_CHARS);
+                crate::perf::budgets::TRANSIENT_MENU_MAX_BINDINGS
+            ])
+            })
+            .collect();
     let snapshot = TransientMenuSnapshotData::new(
         1 << 63 | 1,
         max_string.clone(),
@@ -410,7 +350,9 @@ pub fn encode_decode_max_transient_menu_snapshot() -> usize {
         TransientMenuStatusData::Active,
         TransientMenuFocusPolicyData::Modal,
         TransientMenuOriginData::CommandPalette,
-    );
+    )
+    // Plan 125: and the session's presentation mode.
+    .with_mode("x".repeat(crate::perf::budgets::TRANSIENT_MENU_MAX_MODE_CHARS));
     let codec = Codec::default();
     let message = ServerMessage::TransientMenuSnapshot(Box::new(snapshot));
     let frame = codec
@@ -451,96 +393,17 @@ pub fn protocol_hello_roundtrip() -> u32 {
     }
 }
 
-// ── Phase 22.6 (plan 077 task 5): window-model geometry baselines ──
-//
-// Advisory pane-paint / tab-switch baselines. The shell's paint pass
-// (dividers, fixed-slot chrome, focus ring) and a tab switch's layout pass
-// (same geometry for the newly active tab) are pure geometry math over the
-// pane tree, so the benchable proxy is the chrome piece count and the time
-// to compute it. Editor-surface paint is viewport-bounded and separately
-// benched (`editor_baselines`). Results feed the advisory
-// `PANE_PAINT_P95_BUDGET_MS` / `TAB_SWITCH_P95_BUDGET_MS` constants
-// (docs/development/performance.md, Phase 22.6 section).
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-use crate::shell::layout::{
-    PaneId, PaneSplitTree, WorkingAreaId, WorkingAreaLayout, WorkingAreaLayoutUpdate,
-};
-use masonry::kurbo::Rect;
-
-/// A balanced `pane_count`-leaf split tree (active pane 1).
-pub(crate) fn pane_split_tree_with(pane_count: usize) -> PaneSplitTree {
-    let mut tree = PaneSplitTree::single_leaf(PaneId(1));
-    for _ in 1..pane_count {
-        tree = tree
-            .add_equal_pane()
-            .expect("adding a pane to a valid tree succeeds");
+    /// Plan 124: the palette's row fields (`scope`, `bindings`) join the
+    /// bounded item projection, so the worst-case snapshot must still encode,
+    /// decode, and stay far below the codec's frame cap. Runs in CI, unlike the
+    /// criterion benches that share this builder.
+    #[test]
+    fn worst_case_transient_menu_snapshot_stays_inside_the_frame_cap() {
+        let items = encode_decode_max_transient_menu_snapshot();
+        assert_eq!(items, crate::perf::budgets::TRANSIENT_MENU_MAX_ITEMS);
     }
-    tree
-}
-
-/// A working-area layout with `pane_count` panes and no fixed slots.
-pub(crate) fn working_area_layout_with(pane_count: usize) -> WorkingAreaLayout {
-    let mut layout = WorkingAreaLayout::single_editor();
-    if pane_count > 1 {
-        layout
-            .apply_update(WorkingAreaLayoutUpdate {
-                base_version: layout.version(),
-                working_area_id: WorkingAreaId(1),
-                pane_tree: pane_split_tree_with(pane_count),
-                editor_pane_id: PaneId(1),
-                pane_slots: Vec::new(),
-            })
-            .expect("valid pane tree update");
-    }
-    layout
-}
-
-/// Chrome pieces the shell paints for an N-pane window: split dividers
-/// (N-1), fixed-slot handles (none in the default layout), and the focus
-/// ring (1 when N > 1). Linear in pane count: 0, N, N for 1, 2+, N panes.
-pub fn pane_chrome_piece_count(pane_count: usize) -> usize {
-    let layout = working_area_layout_with(pane_count);
-    let area = Rect::new(0.0, 0.0, 1200.0, 800.0);
-    let dividers = layout.pane_tree().divider_rects(area).len();
-    let slots = layout
-        .pane_slot_geometry(layout.active_pane_id(), area)
-        .map_or(0, |geometry| geometry.fixed_slots.len());
-    // The shell paints the focus ring only while more than one pane exists.
-    let focus = if pane_count > 1 {
-        usize::from(layout.focused_pane_rect(area).is_some())
-    } else {
-        0
-    };
-    dividers + slots + focus
-}
-
-/// Geometry work a tab switch triggers on the newly active tab's layout
-/// pass: the same chrome pieces as a paint pass plus the editor component
-/// rect. No document text, serialization, or IPC is involved.
-pub fn tab_switch_geometry_work(pane_count: usize) -> usize {
-    let layout = working_area_layout_with(pane_count);
-    let area = Rect::new(0.0, 0.0, 1200.0, 800.0);
-    let dividers = layout.pane_tree().divider_rects(area).len();
-    let slots = layout
-        .pane_slot_geometry(layout.active_pane_id(), area)
-        .map_or(0, |geometry| geometry.fixed_slots.len());
-    let focus = if pane_count > 1 {
-        usize::from(layout.focused_pane_rect(area).is_some())
-    } else {
-        0
-    };
-    let editor = usize::from(layout.editor_component_rect(area).width() > 0.0);
-    dividers + slots + focus + editor
-}
-
-/// Geometry work a centered Command Centre open/theme update performs: the
-/// full-window scrim rect plus the centered surface rect and one rect per
-/// hosted overlay. Pure rect math over window bounds — no document text,
-/// serialization, IPC, or paint work — so the count is O(overlay_count) and
-/// independent of document size.
-pub fn centered_overlay_geometry_work(overlay_count: usize) -> usize {
-    let window = Rect::new(0.0, 0.0, 900.0, 600.0);
-    let centered = crate::shell::package_ui::centered_rect(window, 640.0, 220.0);
-    // One scrim fill rect + one centered surface rect + one rect per overlay.
-    1 + 1 + overlay_count * usize::from(centered.width() > 0.0)
 }

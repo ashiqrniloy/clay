@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenFile
 js_facade: runtime/js/commands.js::serverOpenFile
-backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file
+backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::open_existing_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
 name: serverOpenFile
@@ -35,7 +35,7 @@ Open a workspace-root-relative file or selected-file grant through the server co
 
 `serverOpenFile` is the Phase 18.12 runtime-backed Clay JS API for **Open File**. It is exposed through the curated `clay:commands` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 
@@ -91,7 +91,7 @@ Use `commands.serverOpenFile` only through the documented Clay JS facade. Do not
 
 - JS facade: `runtime/js/commands.js::serverOpenFile`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
-- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file`
+- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::open_existing_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file`
 
 ## Lookup metadata
 

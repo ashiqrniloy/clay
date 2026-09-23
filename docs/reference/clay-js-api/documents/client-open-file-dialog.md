@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:documents"
 js_export: clientOpenFileDialog
 js_facade: runtime/js/documents.js::clientOpenFileDialog
-backing_rust: src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command
+backing_rust: src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file; src/protocol/mod.rs::ClientMessage::OpenSelectedFile
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientOpenFileDialog
@@ -59,22 +59,22 @@ bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientOpenFileDialog } from "clay:documents";
 import { bindKey } from "clay:keybindings";
 
 bindKey("Ctrl+O", clientOpenFileDialog(), { scope: "editor" });
 ```
 
-On Windows, Linux, and macOS, the configured key opens the native file browser with fixed Markdown filters for `.md`, `.markdown`, and `.mdown`, plus an all-files fallback (Windows/Linux filter dropdown; macOS Markdown extensions with other types allowed). On unsupported platforms the command reports a diagnostic/status instead of panicking. Cancellation is a non-error no-op, and selected-file-only server validation applies before Clay opens the document.
+On Linux, the configured key opens the XDG file-chooser portal through the Tauri `dialog_open_file` command with fixed Markdown filters for `.md`, `.markdown`, and `.mdown`, plus an all-files fallback. The desktop bridge keeps one dialog of each kind in flight and reports a sanitized diagnostic where no native picker is available (other platforms are the long-term Windows/macOS target, not yet implemented). Cancellation is a non-error no-op, and selected-file-only server validation applies before Clay opens the document.
 
 ## Options
 
-No options are accepted by `clientOpenFileDialog`. Dialog filters, default directory behavior, and save behavior are not configurable through this API. The fixed defaults are native dialog support on Windows, Linux (xdg-desktop-portal), and macOS (`NSOpenPanel`), Markdown/all-files filters, cancellation as a no-op, and selected-file opening that still consumes server-issued single-use capabilities.
+No options are accepted by `clientOpenFileDialog`. Dialog filters, default directory behavior, and save behavior are not configurable through this API. The fixed defaults are the portal-backed native dialog via the desktop bridge command (`src-tauri/src/commands.rs::dialog_open_file`, XDG file-chooser portal on Linux), Markdown/all-files filters, cancellation as a no-op, and selected-file opening that still consumes server-issued single-use capabilities.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.clientOpenFileDialog` in `~/.config/clay/init.js`, for example:
+No default key binding is assigned. Users may bind a key to `documents.clientOpenFileDialog` in `~/.clay/init.js`, for example:
 
 ```ts
 bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" });
@@ -110,8 +110,10 @@ Use `documents.clientOpenFileDialog` as a documented command ID for `bindKey`. A
 
 - JS facade: `runtime/js/documents.js::clientOpenFileDialog`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command`
-- Current implementation audit path: `src/client/file_dialog.rs`, `src/main.rs`, `src/client/behavior.rs`, `src/server/workspace.rs::WorkspaceState::open_selected_file`, and `src/protocol/mod.rs::ClientMessage::OpenSelectedFile`
+- JS facade: `runtime/js/documents.js::clientOpenFileDialog`
+- Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
+- Backing Rust/current owner: `src-tauri/src/commands.rs::dialog_open_file` (native portal picker); `src/client/behavior.rs::ClientBehaviorState::route_key` (client UI command routing); `src/server/workspace/mod.rs::WorkspaceState::open_selected_file`; `src/protocol/mod.rs::ClientMessage::OpenSelectedFile`
+- Current implementation audit path: `frontend/src/shell/workspace-controller.ts` (command dispatch → `openFileDialog` adapter), `frontend/src/bridge/client.ts::openFileDialog` (Tauri invoke), `src-tauri/src/commands.rs::dialog_open_file` (ashpd portal picker, per-dialog busy lock, grant-feed via `BridgeState::accept_selected_path`), and `src/server/workspace/mod.rs::WorkspaceState::open_selected_file`
 
 ## Lookup metadata
 

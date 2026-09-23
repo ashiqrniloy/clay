@@ -13,11 +13,13 @@
 
 #![allow(dead_code)]
 
+use kurbo::Rect;
 use serde_json::Value;
 
 use crate::perf::budgets::{
-    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_DETAIL_CHARS,
-    TRANSIENT_MENU_MAX_ITEMS, TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS,
+    TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS, TRANSIENT_MENU_MAX_BINDING_CHARS,
+    TRANSIENT_MENU_MAX_BINDINGS, TRANSIENT_MENU_MAX_DETAIL_CHARS, TRANSIENT_MENU_MAX_ITEMS,
+    TRANSIENT_MENU_MAX_LABEL_CHARS, TRANSIENT_MENU_MAX_QUERY_CHARS, TRANSIENT_MENU_MAX_SCOPE_CHARS,
 };
 use crate::protocol::{
     BehaviorVersion, CompletionItem, CompletionReplacementRange, CompletionRequestId,
@@ -31,6 +33,9 @@ const MAX_QUERY_CHARS: usize = TRANSIENT_MENU_MAX_QUERY_CHARS;
 const MAX_LABEL_CHARS: usize = TRANSIENT_MENU_MAX_LABEL_CHARS;
 const MAX_DETAIL_CHARS: usize = TRANSIENT_MENU_MAX_DETAIL_CHARS;
 const MAX_ACCESSIBILITY_LABEL_CHARS: usize = TRANSIENT_MENU_MAX_ACCESSIBILITY_LABEL_CHARS;
+const MAX_SCOPE_CHARS: usize = TRANSIENT_MENU_MAX_SCOPE_CHARS;
+const MAX_BINDINGS: usize = TRANSIENT_MENU_MAX_BINDINGS;
+const MAX_BINDING_CHARS: usize = TRANSIENT_MENU_MAX_BINDING_CHARS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TransientMenuSessionId(pub u64);
@@ -47,6 +52,13 @@ pub struct TransientMenuSession {
     focus_policy: TransientMenuFocusPolicy,
     /// Phase 20.5: surface origin (command palette, context menu, menu bar).
     origin: TransientMenuOrigin,
+    /// Plan 125: the session's presentation mode (see
+    /// `protocol::TransientMenuSnapshotData::mode`). `None` = the catalogue,
+    /// which is also what an absent wire field means.
+    mode: Option<String>,
+    /// Clay-native caret bounds for completion projection. Stored as fixed
+    /// point so the session remains `Eq` without making geometry user-facing.
+    completion_anchor: Option<CompletionAnchor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +66,12 @@ pub(crate) struct TransientMenuItem {
     pub(crate) id: String,
     pub(crate) label: String,
     pub(crate) detail: Option<String>,
+    /// Plan 124: the item's scope tag (the palette's `All · Session · Shell ·
+    /// Files` chips); `None` = it shows under `All` only. The server owns the
+    /// vocabulary — see `protocol::TransientMenuItemData::scope`.
+    pub(crate) scope: Option<String>,
+    /// Plan 124: the item's chords, in the app's spelling (`"Ctrl+X Ctrl+P"`).
+    pub(crate) bindings: Vec<String>,
     pub(crate) accessibility_label: String,
     pub(crate) provenance: TransientMenuItemProvenance,
     pub(crate) action: TransientMenuAction,
@@ -94,14 +112,24 @@ pub(crate) enum TransientMenuFocusPolicy {
 /// Determines overlay anchor and focus policy defaults.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransientMenuOrigin {
-    /// Bottom-anchored command palette / completion picker (default).
+    /// The composer's command palette (default): the lane's own `/` palette in
+    /// plan 124 — the command catalogue and its path mode — drawn as the menu of
+    /// the composer box it answers to (the field is its query), plus the bottom
+    /// anchor for any other bottom-anchored menu.
     CommandPalette,
+    /// Clay-native completion picker, anchored to the active caret.
+    Completion,
     /// Pointer-anchored context menu.
     ContextMenu,
     /// Main-area-anchored menu bar dropdown.
     MenuBar,
-    /// Phase 24.4: window-centered Command Centre surface (command and path
-    /// modes) hosted in a window-level overlay layer with a scrim backdrop.
+    /// Phase 24.4: window-centered menu sessions, hosted in a window-level
+    /// overlay layer with a scrim backdrop. Plan 124 task 7 moved the command
+    /// catalogue and the path browser out of this set: they are the composer's
+    /// palette, anchored to the lane (`CommandPalette`). Plan 125 retired its
+    /// last live producer — the agent picker is a `CommandPalette` session with
+    /// a `mode` now — so no session is produced with this origin; the wire value
+    /// stays decodable and the package UI layer keeps its own anchor mapping.
     Centered,
 }
 
@@ -110,6 +138,36 @@ pub(crate) enum TransientMenuStatus {
     Active,
     Empty { message: String },
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionAnchor {
+    x0: i64,
+    y0: i64,
+    x1: i64,
+    y1: i64,
+}
+
+impl CompletionAnchor {
+    const SCALE: f64 = 1024.0;
+
+    pub(crate) fn from_rect(rect: Rect) -> Self {
+        Self {
+            x0: (rect.x0 * Self::SCALE).round() as i64,
+            y0: (rect.y0 * Self::SCALE).round() as i64,
+            x1: (rect.x1 * Self::SCALE).round() as i64,
+            y1: (rect.y1 * Self::SCALE).round() as i64,
+        }
+    }
+
+    pub(crate) fn rect(self) -> Rect {
+        Rect::new(
+            self.x0 as f64 / Self::SCALE,
+            self.y0 as f64 / Self::SCALE,
+            self.x1 as f64 / Self::SCALE,
+            self.y1 as f64 / Self::SCALE,
+        )
+    }
 }
 
 impl TransientMenuSession {
@@ -125,6 +183,8 @@ impl TransientMenuSession {
             },
             focus_policy: TransientMenuFocusPolicy::Modal,
             origin: TransientMenuOrigin::CommandPalette,
+            mode: None,
+            completion_anchor: None,
         }
     }
 
@@ -159,6 +219,11 @@ impl TransientMenuSession {
     /// Phase 20.5: surface origin for this session.
     pub(crate) fn origin(&self) -> TransientMenuOrigin {
         self.origin
+    }
+
+    /// Plan 125: the session's presentation mode; `None` = the catalogue.
+    pub(crate) fn mode(&self) -> Option<&str> {
+        self.mode.as_deref()
     }
 
     /// Phase 24.1: hydrate an inert protocol snapshot into a display session.
@@ -209,6 +274,9 @@ impl TransientMenuSession {
         .with_query(&snapshot.query)
         .with_focus_policy(focus_policy)
         .with_origin(origin);
+        if let Some(mode) = &snapshot.mode {
+            session = session.with_mode(mode.clone());
+        }
         if let Some(message) = status {
             session = session.with_empty_status(message);
         }
@@ -225,6 +293,26 @@ impl TransientMenuSession {
     pub(crate) fn with_origin(mut self, origin: TransientMenuOrigin) -> Self {
         self.origin = origin;
         self
+    }
+
+    /// Plan 125: set the presentation mode, clamped to
+    /// `TRANSIENT_MENU_MAX_MODE_CHARS`.
+    pub(crate) fn with_mode(mut self, mode: impl Into<String>) -> Self {
+        self.mode = Some(truncate(
+            &mode.into(),
+            crate::perf::budgets::TRANSIENT_MENU_MAX_MODE_CHARS,
+        ));
+        self
+    }
+
+    pub(crate) fn with_completion_anchor(mut self, anchor: Rect) -> Self {
+        self.origin = TransientMenuOrigin::Completion;
+        self.completion_anchor = Some(CompletionAnchor::from_rect(anchor));
+        self
+    }
+
+    pub(crate) fn completion_anchor(&self) -> Option<Rect> {
+        self.completion_anchor.map(CompletionAnchor::rect)
     }
 
     pub(crate) fn with_items(mut self, items: Vec<TransientMenuItem>) -> Self {
@@ -333,6 +421,8 @@ impl TransientMenuItem {
             id: id.into(),
             label: label.clone(),
             detail: None,
+            scope: None,
+            bindings: Vec::new(),
             accessibility_label: label,
             provenance: TransientMenuItemProvenance::BuiltIn,
             action,
@@ -341,6 +431,24 @@ impl TransientMenuItem {
 
     pub(crate) fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(truncate(&detail.into(), MAX_DETAIL_CHARS));
+        self
+    }
+
+    /// Plan 124: the item's scope tag (the palette's chips), clamped to the
+    /// shared menu budget.
+    pub(crate) fn with_scope(mut self, scope: impl Into<String>) -> Self {
+        self.scope = Some(truncate(&scope.into(), MAX_SCOPE_CHARS));
+        self
+    }
+
+    /// Plan 124: the item's chords (the palette's per-row chip groups),
+    /// clamped to the shared count/char budgets.
+    pub(crate) fn with_bindings(mut self, bindings: Vec<String>) -> Self {
+        self.bindings = bindings
+            .into_iter()
+            .take(MAX_BINDINGS)
+            .map(|binding| truncate(&binding, MAX_BINDING_CHARS))
+            .collect();
         self
     }
 
@@ -402,6 +510,7 @@ pub(crate) fn completion_result_to_menu_session(
     let session =
         TransientMenuSession::new(TransientMenuSessionId(result.request_id), "Completion")
             .with_focus_policy(TransientMenuFocusPolicy::Modeless)
+            .with_origin(TransientMenuOrigin::Completion)
             .with_items(items);
     if !result.items.is_empty() {
         return session;
@@ -741,51 +850,6 @@ mod tests {
     }
 
     #[test]
-    fn tab_close_confirm_session_lists_three_choices_with_client_id_arguments() {
-        // Phase 22.4: the driver-owned tab-close confirm menu. Every action
-        // carries the tab's client id (the pane view hands the selection back
-        // to the driver via `EditorAction::TabCloseMenuAction`); the action
-        // ids are driver-local and never collide with the per-view
-        // save-conflict family.
-        let session = super::super::tab_close_confirm_session(
-            9,
-            "Close tab 'work' with 2 unsaved documents (a.md, b.md)?".to_string(),
-            42,
-        );
-        assert_eq!(
-            session.prompt(),
-            "Close tab 'work' with 2 unsaved documents (a.md, b.md)?"
-        );
-        let items = session.items();
-        assert_eq!(items.len(), 3);
-        let labels = items
-            .iter()
-            .map(|item| item.label.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            labels,
-            vec!["Save all and close", "Discard and close", "Cancel"]
-        );
-        for item in items {
-            assert_eq!(
-                item.action
-                    .arguments
-                    .get("clientId")
-                    .and_then(|v| v.as_u64()),
-                Some(42),
-                "every choice carries the tab's client id"
-            );
-            assert!(
-                !item.accessibility_label.is_empty(),
-                "every choice has an accessibility label"
-            );
-        }
-        assert_eq!(items[0].action.command_id, "shell.clientTabCloseSaveAll");
-        assert_eq!(items[1].action.command_id, "shell.clientTabCloseDiscard");
-        assert_eq!(items[2].action.command_id, "shell.clientTabCloseCancel");
-    }
-
-    #[test]
     fn session_stores_prompt_and_starts_empty() {
         let session = TransientMenuSession::new(TransientMenuSessionId(1), "Control Center");
         assert_eq!(session.prompt(), "Control Center");
@@ -1015,6 +1079,7 @@ mod tests {
 
         assert_eq!(session.prompt(), "Completion");
         assert_eq!(session.focus_policy(), TransientMenuFocusPolicy::Modeless);
+        assert_eq!(session.origin(), TransientMenuOrigin::Completion);
         assert_eq!(session.items()[0].label, "println");
         assert_eq!(session.items()[0].accessibility_label, "Completion println");
         let accept = session.items()[0]

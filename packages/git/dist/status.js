@@ -90,18 +90,66 @@ export function gitStatusModel(statuses = []) {
 
 // Build an inert SDUI tree (labels only, no action targets, no callbacks) from
 // the sanitized status model. Clay owns rendering; this never runs in a paint
-// or keypress hot path.
+// or keypress hot path. Icons are semantic references resolved from the user's
+// active icon pack — the text always carries the full meaning on its own.
+const HEAD_ICONS = Object.freeze({
+  branch: "git.branch",
+  detached: "git.branch",
+  unborn: "git.branch"
+});
+
+function dirtyIcon(snapshot) {
+  if (!snapshot) {
+    return null;
+  }
+  if (!snapshot.dirty) {
+    return "status.success";
+  }
+  return "status.warning";
+}
+
+function refreshIcon(refreshState) {
+  if (!refreshState) {
+    return null;
+  }
+  switch (refreshState.kind) {
+    case "last-success":
+      return "status.success";
+    case "last-error":
+      return "status.error";
+    default:
+      return null;
+  }
+}
+
 export function buildGitStatusTree(claySdui, statuses = []) {
   const { definePanel, defineLabel, defineStack } = claySdui;
   const model = gitStatusModel(statuses);
 
   const children = model.length > 0
-    ? model.flatMap((root) => [
-        defineLabel({ id: `git.root.${root.workspaceRootId}`, text: root.rootLabel }),
-        defineLabel({ id: `git.head.${root.workspaceRootId}`, text: root.head }),
-        defineLabel({ id: `git.dirty.${root.workspaceRootId}`, text: root.dirty }),
-        defineLabel({ id: `git.refresh.${root.workspaceRootId}`, text: root.refresh })
-      ])
+    ? model.flatMap((root) => {
+        const entry = statuses.find((candidate) => String(candidate.workspaceRootId ?? "") === root.workspaceRootId) ?? {};
+        const snapshot = entry.snapshot;
+        const headKind = snapshot && snapshot.head ? snapshot.head.kind : null;
+        return [
+          defineLabel({ id: `git.root.${root.workspaceRootId}`, text: root.rootLabel }),
+          defineLabel({
+            id: `git.head.${root.workspaceRootId}`,
+            text: root.head,
+            icon: HEAD_ICONS[headKind] ?? null
+          }),
+          defineLabel({
+            id: `git.dirty.${root.workspaceRootId}`,
+            text: root.dirty,
+            icon: dirtyIcon(snapshot)
+          }),
+          defineLabel({
+            id: `git.refresh.${root.workspaceRootId}`,
+            text: root.refresh,
+            icon: refreshIcon(entry.refreshState)
+          })
+        ];
+      })
     : [defineLabel({ id: "git.empty", text: "No workspace roots" })];
 
   return definePanel({

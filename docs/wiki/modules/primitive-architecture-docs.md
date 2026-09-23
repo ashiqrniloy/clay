@@ -36,8 +36,8 @@ Phase 16 keeps the mode/package primitive architecture as documentation-as-code,
 3. `markdown-mode-requirements.md` consumes the registry as a Phase 18 readiness checklist. Every Markdown capability is expressed through existing, new, or deferred primitive registry entries rather than direct Rust implementation hooks.
 4. `docs/index.md` links the primitive documents under Developer Guides so the project documentation registry and agents can discover them.
 5. `docs/reference/primitives/implementation-gate.md` documents the Phase 16.5 runtime gate separately from full Phase 17 package installation. It explains the supported fixture format, validation failures, security boundaries, hot-path exclusions, and Phase 17/18 handoff.
-6. `docs/reference/clay-js-api/api-inventory.toml` now distinguishes implemented primitive/package-loading APIs (`clay:packages`, `clay:modes`, `clay:commands`, and promoted `packages.serverLoadPackage`) from planned Phase 18 provider APIs (`clay:decorations`, `clay:parse`, `clay:folding`, mode manifest selection, and planned configuration setters). Implemented entries point to facade files, op wrappers, Rust validators/registries, Markdown API docs, and generated-registry coverage.
-7. The Phase 16.5 configuration review uses the same inventory rather than hidden config keys. `configuration.setPackageOption`, `configuration.setModePreference`, `configuration.setDecorationTheme`, and `configuration.setParsePolicy` are planned-only stubs scoped to `~/.config/clay/init.js`; package enable/disable is documented as deferred because it would grant package-management authority.
+6. `docs/reference/clay-js-api/api-inventory.toml` now distinguishes implemented primitive/package-loading APIs (`clay:packages`, `clay:modes`, `clay:commands`, `clay:decorations`, `clay:parse`, promoted `clay:folding`, and `packages.serverLoadPackage`) from still-planned mode manifest selection and configuration setters. Implemented entries point to facade files, op wrappers, Rust validators/registries, Markdown API docs, and generated-registry coverage.
+7. The Phase 16.5 configuration review uses the same inventory rather than hidden config keys. `configuration.setPackageOption`, `configuration.setModePreference`, `configuration.setDecorationTheme`, and `configuration.setParsePolicy` are planned-only stubs scoped to `~/.clay/init.js`; package enable/disable is documented as deferred because it would grant package-management authority.
 8. `tests/primitives_docs.rs` performs static checks over the Markdown files, typed budget constants, implemented primitive gate docs, and planned primitive API/configuration stubs. These tests are intentionally non-mutating and do not generate artifacts.
 
 ## Code Examples
@@ -54,8 +54,8 @@ assert!(index.contains("reference/primitives/markdown-mode-requirements.md"));
 
 ## Invariants and Constraints
 
-- Phase 16 primitive documents remain architecture deliverables only, while Phase 16.5 may expose only the explicitly implemented package/mode/command validation gate through controlled server runtime facades and op wrappers. Full package installation/loading, Phase 18 decoration/parse/folding providers, protocol expansion, and editor rendering hooks remain deferred until later plans.
-- Configuration remains a Clay JS API surface rooted at `~/.config/clay/init.js`; planned settings must list behavior-changing `custom_properties` and must not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw op, or client-side JavaScript authority.
+- Phase 16 primitive documents remain architecture deliverables rather than executable API sources. The original Phase 16.5 gate exposed only the then-implemented package/mode/command validation surfaces; later plans promoted package loading, decoration/parse/folding publication, protocol expansion, and editor rendering through the documented facade/op boundary. Still-planned APIs remain explicit inventory stubs.
+- Configuration remains a Clay JS API surface rooted at `~/.clay/init.js`; planned settings must list behavior-changing `custom_properties` and must not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw op, or client-side JavaScript authority.
 - Package-provided rendering and parsing produce validated inert declarations; the Rust client never executes package JavaScript in paint/input hot paths.
 - Markdown mode POC requirements and new planned API stubs must trace capabilities to registry entries so Phase 17/18 plans can derive implementation tasks without rediscovering prerequisites.
 - Budget names referenced in docs must compile through `src/perf/budgets.rs`.
@@ -69,12 +69,13 @@ assert!(index.contains("reference/primitives/markdown-mode-requirements.md"));
 ## Related
 
 - [Primitive Architecture](primitive-architecture.md)
-- [Rendering Primitives](rendering-primitives.md)
+- [Rendering Primitives](../archive/rendering-primitives.md)
 - [Parse Task Lifecycle](parse-task-lifecycle.md)
 - [Behavior Manifests](behavior-manifests.md)
 - [Server-Driven UI Protocol Schema](server-driven-ui.md)
 - [Clay JS Documentation Registry](clay-js-doc-registry.md)
+- [Icon Pack Runtime](icon-pack-runtime.md) (Plan 112 React realization of the icon-slot/tooltip-shell primitive gaps: ClayIcon, ClayIconButton, ClayTooltip)
 - `plans/016-Phase16-Mode-and-Package-Primitive-Architecture-Analysis.md`
-- `.agents/skills/project-patterns/references/package-distribution.md`
-- `.agents/skills/project-patterns/references/behavior-manifests.md`
-- `.agents/skills/project-patterns/references/protocol-and-performance.md`
+- `.agents/skills/clay-execution/references/packages.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`
+- `.agents/skills/clay-execution/references/protocol-perf.md`

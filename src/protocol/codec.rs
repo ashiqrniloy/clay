@@ -10,7 +10,12 @@ use super::{ClientMessage, ServerMessage};
 const LENGTH_PREFIX_BYTES: usize = 4;
 
 /// Default maximum IPC frame size for Phase 4 protocol messages.
-pub const DEFAULT_MAX_FRAME_SIZE: usize = 1024 * 1024;
+/// 16 MiB: the UI lane to webviews. Read-side allocation is actual frame
+/// size (never the cap), so the ceiling costs nothing until a genuinely
+/// large frame (e.g. a multi-megabyte tool-result mirror) arrives. Kept
+/// below the daemon lane's 64 MiB so the webview never parses a
+/// multi-second JSON blob the transcript would truncate anyway.
+pub const DEFAULT_MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Codec {
@@ -272,21 +277,22 @@ mod tests {
     use super::{Codec, CodecError, DEFAULT_MAX_FRAME_SIZE, LENGTH_PREFIX_BYTES};
     use crate::{
         perf::budgets::{
-            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
-            MAX_OPENABLE_FILE_BYTES, SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES,
-            SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
+            COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, MAX_CHUNK_BYTES,
+            SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
         },
         protocol::{
-            ActiveTheme, ActiveTypography, BehaviorManifest, ClientMessage, CompletionItem,
-            CompletionProvenance, CompletionRejection, CompletionReplacementRange,
+            ActiveTheme, ActiveTypography, AgentClientCommand, BehaviorManifest, ClientMessage,
+            CompletionItem, CompletionProvenance, CompletionRejection, CompletionReplacementRange,
             CompletionRequest, CompletionResultSet, CompletionStatus, CompletionTrigger,
-            DocumentAccess, DocumentMetadata, DocumentRuntimeRenderState, EditOperation,
-            EditRejection, FileErrorCode, LanguageIntelligenceFeature, LanguageIntelligencePayload,
+            DocumentAccess, DocumentChunkRejection, DocumentMetadata, DocumentRuntimeRenderState,
+            DocumentTextHead, EditOperation, EditRejection, FileErrorCode,
+            LanguageIntelligenceFeature, LanguageIntelligencePayload,
             LanguageIntelligenceRejection, LanguageIntelligenceRequest, LanguageIntelligenceResult,
             LanguageIntelligenceStatus, LockOwner, PROTOCOL_VERSION, PackageUiSnapshot,
             RegionLockConflict, RuntimeDiagnostic, RuntimeStateSnapshot, SduiActionIntent,
             SduiActionSource, SduiEditorBinding, SduiNode, SduiNodeId, SduiNodeKind, SduiTree,
-            SduiTreeUpdate, ServerMessage, representative_panel_update, representative_sdui_tree,
+            SduiTreeUpdate, ServerMessage, UiChoicesSnapshot, bounded_document_chunk_bytes,
+            representative_panel_update, representative_sdui_tree,
         },
     };
 
@@ -310,7 +316,7 @@ mod tests {
         let message = ServerMessage::InitialDocument {
             document_id: 7,
             version: 42,
-            text: "Hello, Clay 🦀\nSecond line".to_string(),
+            head: DocumentTextHead::complete("Hello, Clay 🦀\nSecond line".to_string()),
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
             workspace_root: "/tmp/root".to_string(),
@@ -412,7 +418,7 @@ mod tests {
         let message = ServerMessage::ResyncSnapshot {
             document_id: 7,
             version: 42,
-            text: "Hello 🦀 é".to_string(),
+            head: DocumentTextHead::complete("Hello 🦀 é".to_string()),
             access: DocumentAccess::Editable { lease_id: 5 },
             lease_id: Some(5),
         };
@@ -579,12 +585,14 @@ mod tests {
             capability: "folder-token".to_string(),
             selected_path: "C:/Users/test/project".to_string(),
         };
-        let viewport = ClientMessage::DecorationViewportRequest {
+        let viewport = ClientMessage::ViewportRenderRequest {
             client_id: 9,
             document_id: 7,
             document_version: 3,
+            request_id: 12,
             byte_start: 4_096,
             byte_end: 8_192,
+            trace_id: Some(41),
         };
         let save = ClientMessage::SaveDocument {
             client_id: 9,
@@ -598,9 +606,127 @@ mod tests {
             force: true,
         };
 
-        for message in [open, selected, selected_folder, viewport, save, reload] {
+        let settings_list = ClientMessage::ListAgentSettingsFiles { client_id: 9 };
+        let settings_open = ClientMessage::OpenAgentSettingsFile {
+            client_id: 9,
+            name: "skills/graft/SKILL.md".to_string(),
+        };
+
+        for message in [
+            open,
+            selected,
+            selected_folder,
+            viewport,
+            save,
+            reload,
+            settings_list,
+            settings_open,
+        ] {
             let frame = codec.encode_client_message(&message).unwrap();
             let decoded = codec.decode_client_message(&frame).unwrap();
+            assert_eq!(decoded, message);
+        }
+    }
+
+    #[test]
+    fn protocol_round_trips_viewport_render_patches() {
+        use crate::protocol::{
+            DecorationKind, DecorationProvenance, DecorationSet, DecorationSpan, DiagnosticSet,
+            FoldingRange, FoldingRangeSet, Modifiers, ViewportRenderPatch, ViewportRenderStatus,
+        };
+        let codec = Codec::default();
+        let provenance = DecorationProvenance {
+            package_name: "@clay/rust".to_string(),
+            package_version: "1.0.0".to_string(),
+            package_prefix: "clay".to_string(),
+        };
+        let member = |index: u64| DecorationSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "clay".to_string(),
+            kind: DecorationKind::Syntax,
+            viewport_byte_start: index * 128,
+            viewport_byte_end: (index + 1) * 128,
+            spans: vec![DecorationSpan {
+                byte_start: index * 128,
+                byte_end: index * 128 + 8,
+                kind: DecorationKind::Syntax,
+                token_type: crate::protocol::TokenType::Keyword,
+                modifiers: Modifiers::NONE,
+                scope: None,
+                font_role: None,
+                priority: 1,
+                provenance: provenance.clone(),
+                target: None,
+                inlay: None,
+            }],
+            trace_id: Some(41),
+        };
+        let diagnostics = DiagnosticSet {
+            document_id: 7,
+            document_version: 3,
+            source: "analyzer".to_string(),
+            viewport_byte_start: 0,
+            viewport_byte_end: 256,
+            spans: Vec::new(),
+            provenance: provenance.clone(),
+        };
+        let folds = FoldingRangeSet {
+            document_id: 7,
+            document_version: 3,
+            package_prefix: "clay".to_string(),
+            ranges: vec![FoldingRange {
+                byte_start: 0,
+                byte_end: 64,
+                label: None,
+                provenance: crate::protocol::FoldingProvenance {
+                    package_name: "@clay/rust".to_string(),
+                    package_version: "1.0.0".to_string(),
+                    package_prefix: "clay".to_string(),
+                },
+            }],
+        };
+        let messages = [
+            // Complete with ordered split members (oversized dense output).
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                request_id: 12,
+                document_id: 7,
+                document_version: 3,
+                status: ViewportRenderStatus::Complete,
+                reason: None,
+                covered_ranges: vec![
+                    crate::protocol::TextByteRange::new(0, 128),
+                    crate::protocol::TextByteRange::new(128, 256),
+                ],
+                decorations: vec![member(0), member(1)],
+                diagnostics: vec![diagnostics],
+                folds: vec![folds],
+                trace_id: Some(41),
+            }),
+            // Empty completion.
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch {
+                request_id: 13,
+                document_id: 7,
+                document_version: 3,
+                status: ViewportRenderStatus::Empty,
+                reason: None,
+                covered_ranges: Vec::new(),
+                decorations: Vec::new(),
+                diagnostics: Vec::new(),
+                folds: Vec::new(),
+                trace_id: None,
+            }),
+            // Rejection with bounded reason.
+            ServerMessage::ViewportRenderPatch(ViewportRenderPatch::rejected(
+                14,
+                7,
+                3,
+                "staleVersion",
+            )),
+        ];
+        for message in messages {
+            let frame = codec.encode_server_message(&message).unwrap();
+            let decoded = codec.decode_server_message(&frame).unwrap();
             assert_eq!(decoded, message);
         }
     }
@@ -620,7 +746,7 @@ mod tests {
         let messages = [
             ServerMessage::DocumentOpened {
                 metadata: metadata.clone(),
-                text: "fn main() {}\n".to_string(),
+                head: DocumentTextHead::complete("fn main() {}\n".to_string()),
             },
             ServerMessage::DocumentSaved {
                 document_id: 7,
@@ -629,7 +755,7 @@ mod tests {
             },
             ServerMessage::DocumentReloaded {
                 metadata: metadata.clone(),
-                text: "reloaded\n".to_string(),
+                head: DocumentTextHead::complete("reloaded\n".to_string()),
             },
             ServerMessage::DocumentStatus {
                 metadata: metadata.clone(),
@@ -642,6 +768,16 @@ mod tests {
                 message: "workspace file is not valid UTF-8 text".to_string(),
                 workspace_root_id: Some(2),
                 document_id: None,
+            },
+            ServerMessage::AgentSettingsFiles {
+                client_id: 9,
+                files: vec![crate::protocol::AgentSettingsFileInfo {
+                    name: "SYSTEM.md".to_string(),
+                    display_path: "/home/u/.clay/agents/coding-agent/SYSTEM.md".to_string(),
+                    size_bytes: 12,
+                    modified_ms: Some(1_700_000_000_000),
+                    edited: false,
+                }],
             },
             ServerMessage::RuntimeDiagnostic(RuntimeDiagnostic::error(
                 "runtime.syntax_error",
@@ -708,6 +844,7 @@ mod tests {
             replacement_range: CompletionReplacementRange::new(10, 12),
             trigger: CompletionTrigger::Character(".".to_string()),
             provider_generation: 2,
+            recent_completions: vec!["foo".to_string()].into_boxed_slice(),
         };
         let message = ClientMessage::CompletionRequest { request };
 
@@ -730,6 +867,7 @@ mod tests {
             replacement_range: CompletionReplacementRange::new(10, 12),
             trigger: CompletionTrigger::Manual,
             provider_generation: 2,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
         };
         let message = ClientMessage::CompletionRequest { request };
 
@@ -978,8 +1116,13 @@ mod tests {
                 design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
+            active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+            active_icon_pack: None,
             sdui_tree: representative_sdui_tree(),
-            package_ui: PackageUiSnapshot { version: 2 },
+            package_ui: PackageUiSnapshot {
+                version: 2,
+                ..Default::default()
+            },
             documents: vec![DocumentRuntimeRenderState {
                 document_id: 1,
                 document_version: 3,
@@ -993,6 +1136,7 @@ mod tests {
                 "runtime.reload_succeeded",
                 "Configuration reloaded.",
             )],
+            ui_choices: UiChoicesSnapshot::default(),
         };
         snapshot.validate().expect("fixture snapshot is valid");
         let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot));
@@ -1052,10 +1196,13 @@ mod tests {
                 design_tokens: Vec::new(),
             },
             active_typography: ActiveTypography::default(),
+            active_design_system: crate::shell::design_system::ActiveDesignSystem::core_fallback(2),
+            active_icon_pack: None,
             sdui_tree: representative_sdui_tree(),
             package_ui: PackageUiSnapshot::default(),
             documents: Vec::new(),
             diagnostics: Vec::new(),
+            ui_choices: UiChoicesSnapshot::default(),
         };
         let message = ServerMessage::RuntimeStateSnapshot(Box::new(snapshot.clone()));
         let error = codec.encode_server_message(&message).unwrap_err();
@@ -1065,35 +1212,88 @@ mod tests {
         assert!(snapshot.validate().is_err());
     }
 
-    /// A full-text protocol message (`InitialDocument`) carrying more text than
-    /// the codec frame limit is rejected at encode. This is the transport-side
-    /// guard paired with the workspace-side `MAX_OPENABLE_FILE_BYTES` gate: any
-    /// file that passes the open gate must also fit in a single full-text frame.
     #[test]
-    fn full_text_snapshot_exceeding_frame_limit_is_rejected_at_encode() {
-        // The openable-file budget must sit below the frame limit so a file that
-        // passes the workspace gate always fits in a full-text frame.
+    fn maximum_document_chunk_fits_below_frame_limit() {
         const {
             assert!(
-                MAX_OPENABLE_FILE_BYTES < DEFAULT_MAX_FRAME_SIZE,
-                "openable-file budget must be below the IPC frame limit"
+                MAX_CHUNK_BYTES + 1024 < DEFAULT_MAX_FRAME_SIZE,
+                "document chunk plus envelope must fit below the IPC frame limit"
             );
         }
 
-        // A payload larger than the default frame limit is rejected at encode.
         let codec = Codec::default();
-        let oversized_text = "x".repeat(DEFAULT_MAX_FRAME_SIZE + 1);
-        let message = ServerMessage::InitialDocument {
+        let message = ServerMessage::DocumentChunk {
+            document_id: 1,
+            document_version: 1,
+            offset: 0,
+            text: "x".repeat(MAX_CHUNK_BYTES),
+        };
+        let frame = codec.encode_server_message(&message).unwrap();
+        assert!(frame.len() < DEFAULT_MAX_FRAME_SIZE);
+
+        let head = ServerMessage::InitialDocument {
             document_id: 1,
             version: 1,
-            text: oversized_text,
+            head: DocumentTextHead {
+                total_bytes: 1 << 30,
+                first_chunk: "x".repeat(MAX_CHUNK_BYTES),
+            },
             access: DocumentAccess::Editable { lease_id: 1 },
             lease_id: Some(1),
             workspace_root: "/tmp/root".to_string(),
         };
+        let head_frame = codec.encode_server_message(&head).unwrap();
+        assert!(head_frame.len() < DEFAULT_MAX_FRAME_SIZE);
+    }
 
-        let error = codec.encode_server_message(&message).unwrap_err();
-        assert!(matches!(error, CodecError::FrameTooLarge { .. }));
+    #[test]
+    fn document_chunk_request_round_trips_and_clamps_size() {
+        let codec = Codec::default();
+        let request = ClientMessage::DocumentChunkRequest {
+            client_id: 9,
+            document_id: 7,
+            document_version: 42,
+            offset: 4,
+            max_bytes: u32::MAX,
+        };
+        let frame = codec.encode_client_message(&request).unwrap();
+
+        assert_eq!(codec.decode_client_message(&frame).unwrap(), request);
+        assert_eq!(bounded_document_chunk_bytes(u32::MAX), Ok(MAX_CHUNK_BYTES));
+    }
+
+    #[test]
+    fn too_small_document_chunk_request_is_rejected() {
+        assert!(matches!(
+            bounded_document_chunk_bytes(3),
+            Err(DocumentChunkRejection::InvalidRequestSize { .. })
+        ));
+    }
+
+    #[test]
+    fn document_chunk_messages_round_trip() {
+        let codec = Codec::default();
+        let messages = [
+            ServerMessage::DocumentChunk {
+                document_id: 7,
+                document_version: 42,
+                offset: 4,
+                text: "🦀".to_string(),
+            },
+            ServerMessage::DocumentChunkRejected {
+                document_id: 7,
+                document_version: 41,
+                offset: 4,
+                reason: DocumentChunkRejection::StaleVersion {
+                    current_version: 42,
+                },
+            },
+        ];
+
+        for message in messages {
+            let frame = codec.encode_server_message(&message).unwrap();
+            assert_eq!(codec.decode_server_message(&frame).unwrap(), message);
+        }
     }
 
     /// Deterministic split-mix LCG for the mutation corpus — no `rand`
@@ -1170,6 +1370,90 @@ mod tests {
                 },
             ),
         ]
+    }
+
+    #[test]
+    fn compact_generated_frame_mutations_fail_closed_without_panicking() {
+        let codec = Codec::new(4096);
+        let mut rng = Lcg::new(0x0890_c0de_2026_0816);
+
+        for case in 0..64_u64 {
+            let frames = [
+                (
+                    false,
+                    codec
+                        .encode_client_message(&ClientMessage::MenuQueryUpdate {
+                            client_id: 7,
+                            session_id: (1 << 63) | (case + 1),
+                            query: format!("query-{case}"),
+                            scope: None,
+                        })
+                        .unwrap(),
+                ),
+                (
+                    true,
+                    codec
+                        .encode_server_message(&ServerMessage::TransientMenuClosed {
+                            session_id: (1 << 63) | (case + 1),
+                        })
+                        .unwrap(),
+                ),
+            ];
+
+            for (server, original) in frames {
+                let payload_len = original.len() - LENGTH_PREFIX_BYTES;
+                assert!(payload_len > 1, "mutation fixture must have a payload");
+                let mutation = (case as usize + if server { 1 } else { 0 }) % 5;
+                let mut mutated = original;
+                match mutation {
+                    // Truncate the archive and make the prefix agree with the
+                    // shorter buffer: bytecheck must reject the archive.
+                    0 => {
+                        let declared = rng.below(payload_len);
+                        mutated.truncate(LENGTH_PREFIX_BYTES + declared);
+                        mutated[..LENGTH_PREFIX_BYTES]
+                            .copy_from_slice(&(declared as u32).to_be_bytes());
+                    }
+                    // Prefixes that disagree with the actual payload stop at
+                    // the framing boundary, before archive access.
+                    1 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((payload_len - 1) as u32).to_be_bytes()),
+                    2 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((payload_len + 1) as u32).to_be_bytes()),
+                    // A byte mutation may still be a valid archive with a
+                    // changed value; either validated decode or rejection is
+                    // safe, but a panic is never acceptable.
+                    3 => {
+                        let offset = LENGTH_PREFIX_BYTES + rng.below(payload_len);
+                        mutated[offset] ^= (rng.next() as u8).max(1);
+                    }
+                    // Oversized declarations are rejected before allocation or
+                    // archive validation.
+                    4 => mutated[..LENGTH_PREFIX_BYTES]
+                        .copy_from_slice(&((codec.max_frame_size() + 1) as u32).to_be_bytes()),
+                    _ => unreachable!(),
+                }
+
+                let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if server {
+                        codec.decode_server_message(&mutated).map(|_| ())
+                    } else {
+                        codec.decode_client_message(&mutated).map(|_| ())
+                    }
+                }))
+                .unwrap_or_else(|_| panic!("generated codec mutation panicked: case={case}"));
+
+                match mutation {
+                    0 => assert!(decoded.is_err(), "truncated archive was accepted"),
+                    1 | 2 => assert!(matches!(decoded, Err(CodecError::LengthMismatch { .. }))),
+                    3 => match decoded {
+                        Ok(()) | Err(_) => {}
+                    },
+                    4 => assert!(matches!(decoded, Err(CodecError::FrameTooLarge { .. }))),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     #[test]
@@ -1308,5 +1592,28 @@ mod tests {
                 CodecError::FrameTooLarge { len: 9, max: 8 }
             ));
         });
+    }
+
+    #[test]
+    fn agent_unit_commands_deserialize_from_the_bare_string_only() {
+        // Plan 117 wire contract: unit AgentClientCommand variants
+        // (ListSessions, ResumableSessions) deserialize from the bare
+        // variant name. The `{ variant: {} }` map form the webviews once
+        // sent fails serde with "invalid type: map, expected unit" — the
+        // request dies silently and the panel never sees a reply. The
+        // frontend's agentCommandPayload must pass the bare string.
+        let listed: AgentClientCommand =
+            serde_json::from_str("\"listSessions\"").expect("bare string form");
+        assert!(matches!(listed, AgentClientCommand::ListSessions));
+        let resumable: AgentClientCommand =
+            serde_json::from_str("\"resumableSessions\"").expect("bare string form");
+        assert!(matches!(resumable, AgentClientCommand::ResumableSessions));
+        // Plan 117 follow-up: the coding-agent pane's mount STATE request.
+        let tab_state: AgentClientCommand =
+            serde_json::from_str("\"tabState\"").expect("bare string form");
+        assert!(matches!(tab_state, AgentClientCommand::TabState));
+        let map_form: Result<AgentClientCommand, _> =
+            serde_json::from_str("{\"listSessions\": {}}");
+        assert!(map_form.is_err(), "map content must stay rejected");
     }
 }

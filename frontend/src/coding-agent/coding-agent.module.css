@@ -1,0 +1,994 @@
+/* The agent view of a tab — DESIGN.md §12 composition: transcript at the 72ch
+ * measure / state strip (which swaps its tone dot for the working bars while a
+ * turn is in flight) / the inspector as the view's right column.
+ *
+ * The composer, the tab's agent controls, and the session-environment foot live
+ * in the shell's persistent agent lane (`shell/agent-lane.module.css`, plan
+ * 124) — this view draws none of them.
+ *
+ * Layout (grid, flex, paddings, measures) is host-owned; every colour, border,
+ * radius, shadow and duration is a recipe value or a theme role. The inspector
+ * keeps its own tabs and the composer keeps its keyboard behaviour — this file
+ * only paints them. */
+
+.surface {
+  height: 100%;
+  min-height: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  color: var(--clay-text-primary);
+}
+
+.agent {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(
+      --clay-dimension-inspector-width,
+      340px
+    );
+}
+
+.agent[data-inspector="collapsed"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.agent[data-inspector="collapsed"] .inspector {
+  display: none;
+}
+
+.agentColumn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* ---------- header ------------------------------------------------------ */
+
+[data-clay-component="agentPicker"][data-clay-slot="trigger"][data-hovered] {
+  background-color: var(
+    --clay-ds-agent-picker-default-trigger-hover-background-color
+  );
+}
+
+[data-clay-component="agentPicker"][data-clay-slot="trigger"][aria-expanded="true"] {
+  background-color: var(
+    --clay-ds-agent-picker-default-trigger-expanded-background-color
+  );
+  color: var(--clay-ds-agent-picker-default-trigger-expanded-text-color);
+}
+
+[data-clay-component="agentPicker"][data-clay-slot="trigger"]:focus-visible {
+  outline: var(--clay-ds-agent-picker-default-trigger-focus-outline-width)
+    var(--clay-ds-agent-picker-default-trigger-focus-outline-style)
+    var(--clay-ds-agent-picker-default-trigger-focus-outline-color);
+  outline-offset: var(
+    --clay-ds-agent-picker-default-trigger-focus-outline-offset
+  );
+}
+
+[data-clay-component="agentPicker"][data-clay-slot="trigger"][data-disabled] {
+  color: var(--clay-ds-agent-picker-default-trigger-disabled-text-color);
+  opacity: var(--clay-ds-agent-picker-default-trigger-disabled-opacity);
+}
+
+/* A turn produced by a different agent than the one before it: the note names
+ * the switch (derived from the per-turn stamps, so it survives a reload). */
+.turnSwitch {
+  display: block;
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-status-size, 11px);
+  letter-spacing: 0.08em;
+  padding-block: var(--clay-spacing-xxs, 6px) 2px;
+  text-transform: uppercase;
+}
+
+/* Usage meter: the fill is the stat row's bar (accent, pill radius); the track
+ * is an ink wash of the same shape, so the meter never invents a colour. */
+/* ---------- transcript: hairline-separated turns, 72ch measure ---------- */
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--clay-surface-scrollbar)
+    var(--clay-surface-scrollbar-track);
+}
+
+.transcriptInner {
+  max-width: 72ch;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: var(--clay-spacing-sm, 12px) var(--clay-spacing-md, 16px);
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xs, 8px);
+  width: 100%;
+  padding: var(--clay-spacing-md, 16px) 0;
+  /* A turn is a row, not a card: the recipe's 0 border-width clears the UA
+   * button border, the separator below is a leading edge, and the rest state
+   * stays square so the hairline runs straight (approved artifact). */
+  border-width: var(--clay-ds-list-default-row-rest-border-width);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  color: var(--clay-ds-list-default-row-rest-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color
+    var(--clay-ds-list-default-row-rest-transition-duration)
+    var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+/* The separator is a leading edge on every turn but the first, so the last
+ * turn needs no border removal. */
+.turn + .turn {
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.turn:hover {
+  /* Only a filled row rounds: the hover and selected states are the states the
+   * contract draws a row body for. */
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-list-default-row-hover-background-color);
+}
+
+.turn[data-selected="true"] {
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-list-default-row-selected-background-color)
+      calc(
+        var(--clay-ds-list-default-row-selected-background-opacity, 1) * 100%
+      ),
+    transparent
+  );
+}
+
+.turn:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+
+.turnHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.turnRole {
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.turn[data-role="agent"] .turnRole {
+  color: var(--clay-accent-primary);
+}
+
+.turn[data-role="error"] .turnRole,
+.turn[data-role="error"] .turnNote {
+  color: var(--clay-diagnostic-error);
+}
+
+.turnNote {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  color: var(--clay-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.turnBody {
+  font-size: var(--clay-text-body-size);
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Uniform truncated tool boxes: the machine's output is clamped to a fixed line
+ * count so a turn's height never depends on how much it printed, and it reads
+ * as an inset well rather than as more prose (DESIGN.md §6). */
+.turnBox {
+  display: block;
+  padding: var(--clay-ds-text-input-default-input-rest-padding);
+  border-width: var(--clay-ds-text-input-default-input-rest-border-width);
+  border-style: var(--clay-ds-text-input-default-input-rest-border-style);
+  border-color: var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  color: var(--clay-text-muted);
+}
+
+.turnBoxText {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  height: 4.35em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+  line-height: 1.45;
+}
+
+/* ---------- empty state ------------------------------------------------- */
+
+.empty {
+  display: grid;
+  gap: var(--clay-ds-empty-default-root-rest-gap);
+  padding: var(--clay-ds-empty-default-root-rest-padding);
+  background: var(--clay-ds-empty-default-root-rest-background-color);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: var(--clay-text-body-size);
+  font-weight: 500;
+}
+
+.emptyText {
+  margin: 0;
+  max-width: 48ch;
+  color: var(--clay-ds-empty-default-root-rest-text-color);
+  font-size: var(--clay-text-detail-size);
+  line-height: 1.6;
+}
+
+.keyHints {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--clay-spacing-md, 16px);
+  flex-wrap: wrap;
+  color: var(--clay-ds-key-hint-default-root-rest-text-color);
+  font-size: var(--clay-text-caption-size);
+}
+
+.keyHint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 4px);
+  color: inherit;
+}
+
+/* ---------- state strip ------------------------------------------------- */
+
+.stateStrip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+}
+
+.stateText {
+  color: var(--clay-text-primary);
+}
+
+.stateNote {
+  color: var(--clay-text-muted);
+}
+
+/* Working bars (plan 124, DESIGN.md §7): three accent bars at the text's cap
+ * height, pulsing 1.1s ease-in-out with 160ms offsets — the window mark's
+ * cadence, drawn as bars so "working" is motion in the words. Decoration over
+ * the strip's own `role="status"` text. */
+.workingBars {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 11px;
+}
+
+.workingBars > span {
+  display: block;
+  width: 4px;
+  height: 11px;
+  /* The bar family's own radius: a pill, never a hardcoded corner. */
+  border-radius: var(--clay-ds-stat-row-default-bar-rest-border-radius);
+  background: var(--clay-accent-primary);
+  animation: workingBar 1.1s ease-in-out infinite;
+}
+
+.workingBars > span:nth-child(2) {
+  animation-delay: 160ms;
+}
+
+.workingBars > span:nth-child(3) {
+  animation-delay: 320ms;
+}
+
+@keyframes workingBar {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workingBars > span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.statusDot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--clay-ds-status-dot-muted-root-rest-border-radius);
+  background: var(--clay-ds-status-dot-muted-root-rest-background-color);
+}
+
+.statusDot[data-tone="busy"] {
+  background: var(--clay-ds-status-dot-busy-root-rest-background-color);
+}
+
+.statusDot[data-tone="success"] {
+  background: var(--clay-ds-status-dot-success-root-rest-background-color);
+}
+
+.statusDot[data-tone="warning"] {
+  background: var(--clay-ds-status-dot-warning-root-rest-background-color);
+}
+
+.statusDot[data-tone="error"] {
+  background: var(--clay-ds-status-dot-error-root-rest-background-color);
+}
+
+/* ---------- composer ---------------------------------------------------- */
+
+.approvalStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-md, 16px);
+  border-bottom-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-divider-default-root-rest-border-color);
+  color: var(--clay-diagnostic-warning);
+}
+
+/* The decision is the trailing edge: the sentence grows, Allow/Deny sit at the
+ * lane's own inset (approved composition). */
+.approvalStrip > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: 10px 18px 12px;
+}
+
+.composerActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 4px);
+}
+
+.composerHints {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-key-hint-default-root-rest-gap);
+  padding: var(--clay-ds-key-hint-default-root-rest-padding);
+  color: var(--clay-ds-key-hint-default-root-rest-text-color);
+  font-size: var(--clay-text-caption-size);
+  flex-wrap: wrap;
+}
+
+.hintCount {
+  font-family: var(--clay-font-monospace);
+  color: var(--clay-text-disabled);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Suggestion menu (`/` commands, `@` mentions): the menu recipe, anchored above
+ * the composer so it never scrolls the transcript. */
+.completions {
+  position: absolute;
+  z-index: 45;
+  bottom: 100%;
+  left: 18px;
+  right: 18px;
+  margin: 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--clay-ds-menu-default-root-rest-padding);
+  border-width: var(--clay-ds-menu-default-root-rest-border-width);
+  border-style: var(--clay-ds-menu-default-root-rest-border-style);
+  border-color: var(--clay-ds-menu-default-root-rest-border-color);
+  border-radius: var(--clay-ds-menu-default-root-rest-border-radius);
+  background: var(--clay-ds-menu-default-root-rest-background-color);
+  box-shadow: var(--clay-ds-menu-default-root-rest-shadow);
+}
+
+.completionRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--clay-spacing-sm, 12px);
+  width: 100%;
+  padding: var(--clay-ds-menu-default-item-rest-padding);
+  border-width: var(--clay-ds-menu-default-item-rest-border-width);
+  border-radius: var(--clay-ds-menu-default-item-rest-border-radius);
+  background: var(--clay-ds-menu-default-item-rest-background-color);
+  color: var(--clay-ds-menu-default-item-rest-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color
+    var(--clay-ds-menu-default-item-rest-transition-duration)
+    var(--clay-ds-menu-default-item-rest-transition-timing);
+}
+
+.completionRow:hover {
+  background: var(--clay-ds-menu-default-item-hover-background-color);
+}
+
+.completionRow:active {
+  background: var(--clay-ds-menu-default-item-active-background-color);
+  color: var(--clay-ds-menu-default-item-active-text-color);
+}
+
+.completionRow[aria-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-menu-default-item-selected-background-color)
+      calc(
+        var(--clay-ds-menu-default-item-selected-background-opacity, 1) * 100%
+      ),
+    transparent
+  );
+}
+
+.completionRow:focus-visible {
+  outline: var(--clay-ds-menu-default-item-focus-outline-width)
+    var(--clay-ds-menu-default-item-focus-outline-style)
+    var(--clay-ds-menu-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-menu-default-item-focus-outline-offset);
+  transition-duration: var(
+    --clay-ds-menu-default-item-focus-transition-duration
+  );
+}
+
+.completionName {
+  flex: none;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+}
+
+.completionDetail {
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-caption-size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.completionSection {
+  display: block;
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-xs, 8px) 0;
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+}
+
+/* ---------- environment foot -------------------------------------------- */
+
+/* ---------- inspector --------------------------------------------------- */
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--clay-ds-shell-default-working-area-rest-background-color);
+  border-left-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-left-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-left-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.tabs {
+  min-height: 0;
+  height: 100%;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.section + .section {
+  margin-top: var(--clay-spacing-md, 16px);
+  padding-top: var(--clay-spacing-md, 16px);
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+.sectionLabel {
+  font-size: var(--clay-text-caption-size);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.skillRows,
+.statRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.skillRow,
+.serverRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--clay-ds-list-default-row-rest-padding);
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  color: var(--clay-ds-list-default-row-rest-text-color);
+}
+
+.serverRow {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rowMain {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.rowName {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+  word-break: break-word;
+}
+
+.rowDetail {
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-caption-size);
+  line-height: 1.5;
+}
+
+.rowDetail[data-tone="err"] {
+  color: var(--clay-diagnostic-error);
+}
+
+.contextTab {
+  display: grid;
+  gap: var(--clay-spacing-sm, 12px);
+  align-content: start;
+}
+
+/* Context counts: the inspector's stat rows — label, mono value, share bar
+ * relative to the largest real count on screen. */
+.statRow {
+  display: grid;
+  gap: var(--clay-ds-stat-row-default-root-rest-gap);
+  padding: var(--clay-ds-stat-row-default-root-rest-padding);
+  border-radius: var(--clay-ds-stat-row-default-root-rest-border-radius);
+  background: var(--clay-ds-stat-row-default-root-rest-background-color);
+  color: var(--clay-ds-stat-row-default-root-rest-text-color);
+  transition: background-color
+    var(--clay-ds-stat-row-default-root-rest-transition-duration)
+    var(--clay-ds-stat-row-default-root-rest-transition-timing);
+}
+
+.statRow:hover {
+  background: var(--clay-ds-stat-row-default-root-hover-background-color);
+}
+
+.statButton {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--clay-spacing-xs, 8px);
+  width: 100%;
+  border-width: var(--clay-ds-stat-row-default-root-rest-border-width);
+  background: var(--clay-ds-stat-row-default-root-rest-background-color);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.statLabel {
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--clay-text-muted);
+}
+
+.statValue {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.statBar {
+  display: block;
+  height: 3px;
+  border-radius: var(--clay-ds-stat-row-default-bar-rest-border-radius);
+  background: color-mix(in srgb, var(--clay-text-primary) 12%, transparent);
+  overflow: hidden;
+}
+
+.statBarFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--clay-ds-stat-row-default-bar-rest-border-radius);
+  background: var(--clay-ds-stat-row-default-bar-rest-background-color);
+}
+
+/* ---------- inspector tab bodies ---------------------------------------- */
+
+.tabEmpty {
+  display: grid;
+  gap: var(--clay-spacing-sm, 12px);
+  justify-items: start;
+}
+
+.infoMeta {
+  margin: 0;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.infoRow {
+  display: flex;
+  gap: var(--clay-spacing-sm, 12px);
+}
+
+.infoRow dt {
+  min-width: 4em;
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-detail-size);
+}
+
+.infoRow dd {
+  margin: 0;
+  font-size: var(--clay-text-detail-size);
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-spacing-sm, 12px);
+}
+
+.detailContent {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--clay-font-monospace);
+}
+
+/* Plan 109 I7 context inspector: in-tab drawer (no modal/overlay) —
+   item rows are full-width buttons over the same hairline list. */
+.contextDrawer {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  align-content: start;
+}
+
+.contextScroll {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.contextItem {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  border-width: var(--clay-ds-list-default-row-rest-border-width);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color
+    var(--clay-ds-list-default-row-rest-transition-duration)
+    var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+.contextItem:hover {
+  background: var(--clay-ds-list-default-row-hover-background-color);
+}
+
+.contextItem:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+
+.contextMore {
+  padding: var(--clay-spacing-xs, 8px);
+}
+
+.contextDetail {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+}
+
+/* Session files (Files tab, plan 118 task 36): the files this session touched
+   — mark, basename over its muted directory, role — on the session row recipe.
+   The filter is the approved quiet field: the well carries the boundary and the
+   accent halo (one ring per surface), the input inside draws none. */
+.sessionFilter {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-2xs, 4px);
+  min-width: 0;
+}
+
+.sessionFilterInput {
+  max-width: 118px;
+  min-width: 0;
+  border-width: var(--clay-ds-text-input-default-input-rest-border-width);
+  border-style: var(--clay-ds-text-input-default-input-rest-border-style);
+  border-color: var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  color: var(--clay-ds-text-input-default-input-rest-text-color);
+  font-size: var(--clay-text-detail-size);
+  padding: var(--clay-ds-text-input-default-input-rest-padding);
+  transition:
+    border-color
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing),
+    background-color
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing);
+}
+
+.sessionFilterInput:hover {
+  border-color: var(--clay-ds-text-input-default-input-hover-border-color);
+  background: var(--clay-ds-text-input-default-input-hover-background-color);
+}
+
+.sessionFilterInput:focus,
+.sessionFilterInput:focus-visible {
+  outline: none;
+  border-color: var(--clay-ds-text-input-default-input-focus-border-color);
+  background: var(--clay-ds-text-input-default-input-focus-background-color);
+  box-shadow: var(--clay-ds-text-input-default-input-focus-shadow);
+}
+
+.sessionFilterInput::placeholder {
+  color: var(--clay-text-muted);
+}
+
+.sessionList {
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-session-row-default-root-rest-gap);
+  width: 100%;
+  padding: var(--clay-ds-session-row-default-root-rest-padding);
+  border-radius: var(--clay-ds-session-row-default-root-rest-border-radius);
+  background: var(--clay-ds-session-row-default-root-rest-background-color);
+  color: var(--clay-ds-session-row-default-root-rest-text-color);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color
+    var(--clay-ds-session-row-default-root-rest-transition-duration)
+    var(--clay-ds-session-row-default-root-rest-transition-timing);
+}
+
+.sessionRow:hover {
+  background: var(--clay-ds-session-row-default-root-hover-background-color);
+}
+
+.sessionRow:focus-visible {
+  outline: var(--clay-ds-session-row-default-root-focus-outline-width)
+    var(--clay-ds-session-row-default-root-focus-outline-style)
+    var(--clay-ds-session-row-default-root-focus-outline-color);
+  outline-offset: var(--clay-ds-session-row-default-root-focus-outline-offset);
+}
+
+.sessionRow .rowName,
+.sessionRow .rowDetail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionRow .rowDetail {
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+}
+
+/* The mark is the row's state signal: one letter, toned by role (accent stays
+   reserved for state, DESIGN.md §11). */
+.sessionMark {
+  flex: none;
+  width: 14px;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-weight: 600;
+  text-align: center;
+  color: var(--clay-text-muted);
+}
+
+.sessionRow[data-role="modified"] .sessionMark {
+  color: var(--clay-diagnostic-warning);
+}
+
+.sessionRow[data-role="created"] .sessionMark {
+  color: var(--clay-diagnostic-success);
+}
+
+.sessionRow[data-role="deleted"] .sessionMark {
+  color: var(--clay-diagnostic-error);
+}
+
+.sessionRole {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--clay-text-caption-size);
+  color: var(--clay-text-muted);
+}
+
+/* Plan 109 I8 Observational Memory tab: worker dropdowns over the same
+   grouped model list as the session model, plus the bounded activity log
+   (recorded observations, reflections, drops, folds). */
+.omTab {
+  display: grid;
+  gap: var(--clay-spacing-sm, 12px);
+  align-content: start;
+}
+
+.omWorkers {
+  display: grid;
+  gap: var(--clay-spacing-xs, 8px);
+  padding-bottom: var(--clay-spacing-xs, 8px);
+  border-bottom-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.omWorkerRow {
+  display: grid;
+  gap: 2px;
+}
+
+.omActivity {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--clay-spacing-2xs, 4px);
+}
+
+.omActivityRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  min-width: 0;
+}
+
+.omActivityRow > :global(*) {
+  min-width: 0;
+}
+
+.omKind {
+  flex: none;
+  padding: 0 var(--clay-spacing-xxs, 4px);
+  border-width: var(--clay-ds-badge-default-root-rest-border-width);
+  border-style: var(--clay-ds-badge-default-root-rest-border-style);
+  border-color: var(--clay-ds-badge-default-root-rest-border-color);
+  border-radius: var(--clay-ds-badge-default-root-rest-border-radius);
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-caption-size);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- narrow: the inspector becomes a right-hand drawer ----------- */
+
+@media (max-width: 1240px) {
+  .agent {
+    grid-template-columns: minmax(0, 1fr) 312px;
+  }
+}
+
+@media (max-width: 1000px) {
+  .agent,
+  .agent[data-inspector="collapsed"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .inspector {
+    position: fixed;
+    z-index: 40;
+    top: var(--clay-dimension-titlebar-height, 40px);
+    right: 0;
+    bottom: var(--clay-dimension-statusbar-height, 28px);
+    width: min(400px, 92vw);
+    /* Opaque: a drawer sits over transcript text, so legibility wins over the
+     * veil fill (§6 sidebar/rail are 1.0; the pop shadow carries the lift). */
+    background: var(--clay-surface-main);
+    box-shadow: var(--clay-ds-panel-transient-root-rest-shadow);
+  }
+
+  .agentHead,
+  .composer,
+  .stateStrip {
+    padding-left: var(--clay-spacing-sm, 12px);
+    padding-right: var(--clay-spacing-sm, 12px);
+  }
+
+  .transcriptInner {
+    padding-left: var(--clay-spacing-sm, 12px);
+    padding-right: var(--clay-spacing-sm, 12px);
+  }
+
+  .completions {
+    left: var(--clay-spacing-sm, 12px);
+    right: var(--clay-spacing-sm, 12px);
+  }
+}

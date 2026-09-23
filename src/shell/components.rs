@@ -4,12 +4,22 @@
 //! package UI validators accept. It intentionally has no Masonry widget IDs,
 //! native handles, renderer callbacks, CSS parsing, or client JavaScript hooks.
 
+use crate::str_enum::string_enum_impl;
+
 use serde_json::{Map, Value};
 
 use crate::protocol::FontRole;
 
-use super::primitives::InteractionState;
 use super::theme::{ThemeTokenResolver, ThemeTokenType};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InteractionState {
+    Rest,
+    Hover,
+    Active,
+    Focus,
+    Disabled,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ComponentKind {
@@ -32,55 +42,41 @@ pub(crate) enum ComponentKind {
     Modal,
     /// Phase 20.5: single-line editable text field with focus, placeholder, and validation states.
     TextInput,
+    /// Plan 108 task 8: tab strip hosting per-tab children. `items` carry tab
+    /// metadata (id/label/selected); children render as tab panels in order.
+    /// Selection is widget-local (React Aria Tabs), like `dropdown`.
+    TabList,
 }
 
-impl ComponentKind {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "editorView" => Some(Self::EditorView),
-            "panel" => Some(Self::Panel),
-            "label" => Some(Self::Label),
-            "button" => Some(Self::Button),
-            "list" => Some(Self::List),
-            "flex" => Some(Self::Flex),
-            "stack" => Some(Self::Stack),
-            "overlay" => Some(Self::Overlay),
-            "scroll" => Some(Self::Scroll),
-            "portal" => Some(Self::Portal),
-            "statusItem" => Some(Self::StatusItem),
-            "dropdown" => Some(Self::Dropdown),
-            "collapse" => Some(Self::Collapse),
-            "modal" => Some(Self::Modal),
-            "textInput" => Some(Self::TextInput),
-            _ => None,
-        }
-    }
-
+string_enum_impl! {
     /// Inverse of `parse`: the catalog string this variant round-trips to.
     /// Used by the package UI conformance matrix (Plan 068 task 5) so a single
     /// `ComponentKind` value drives both `applicable_states` and the
     /// `component_state_palette` paint path, tying the state table to paint.
     #[allow(dead_code)] // conformance primitive; consumed by the package UI conformance suite
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::EditorView => "editorView",
-            Self::Panel => "panel",
-            Self::Label => "label",
-            Self::Button => "button",
-            Self::List => "list",
-            Self::Flex => "flex",
-            Self::Stack => "stack",
-            Self::Overlay => "overlay",
-            Self::Scroll => "scroll",
-            Self::Portal => "portal",
-            Self::StatusItem => "statusItem",
-            Self::Dropdown => "dropdown",
-            Self::Collapse => "collapse",
-            Self::Modal => "modal",
-            Self::TextInput => "textInput",
-        }
+    pub(crate) ComponentKind {
+        EditorView => "editorView",
+        Panel => "panel",
+        Label => "label",
+        Button => "button",
+        List => "list",
+        Flex => "flex",
+        Stack => "stack",
+        Overlay => "overlay",
+        Scroll => "scroll",
+        Portal => "portal",
+        StatusItem => "statusItem",
+        Dropdown => "dropdown",
+        Collapse => "collapse",
+        Modal => "modal",
+        TextInput => "textInput",
+        // Plan 108 task 8: tab strip hosting per-tab children (React Aria
+        // Tabs substrate; selection is widget-local like dropdown).
+        TabList => "tabList",
     }
+}
 
+impl ComponentKind {
     pub(crate) const fn supports_text_font_role(self) -> bool {
         matches!(
             self,
@@ -93,6 +89,7 @@ impl ComponentKind {
                 | Self::Collapse
                 | Self::Modal
                 | Self::TextInput
+                | Self::TabList
         )
     }
 }
@@ -215,10 +212,12 @@ pub(crate) fn applicable_states(kind: ComponentKind) -> &'static [InteractionSta
     match kind {
         // Interactive triggers: Rest/Hover/Active/Focus/Disabled (components.md
         // lines 35, 36, 51, 52, 54).
-        Button | List | Dropdown | Collapse | TextInput => &[Rest, Hover, Active, Focus, Disabled],
+        Button | List | Dropdown | Collapse | TextInput | TabList => {
+            &[Rest, Hover, Active, Focus, Disabled]
+        }
         // Chrome containers: state-independent chrome; currently Rest
         // (components.md lines 38, 53).
-        Panel | Overlay | Modal => &[Rest],
+        Panel | Overlay | Modal | Flex | Stack | Portal => &[Rest],
         // Text-no-fill: focus ring on Focus, disabled dim, no fill
         // (components.md line 37).
         Label | StatusItem => &[Rest, Focus, Disabled],
@@ -226,7 +225,6 @@ pub(crate) fn applicable_states(kind: ComponentKind) -> &'static [InteractionSta
         // state-token fill (components.md lines 38, 39).
         EditorView | Scroll => &[Rest, Hover, Active],
         // Layout containers: non-interactive (no per-kind state notes).
-        Flex | Stack | Portal => &[Rest],
     }
 }
 
@@ -451,6 +449,8 @@ mod tests {
             "modal",
             // Phase 20.5: new kind.
             "textInput",
+            // Plan 108 task 8: tab strip hosting per-tab children.
+            "tabList",
         ];
 
         for kind in supported {
@@ -544,7 +544,7 @@ mod tests {
     /// edit cannot silently narrow or widen a kind's applicable states.
     #[test]
     fn applicable_states_table_matches_components_md() {
-        use crate::shell::primitives::InteractionState;
+        use super::InteractionState;
         use ComponentKind::*;
         use InteractionState::*;
 

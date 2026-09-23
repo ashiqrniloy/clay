@@ -1,12 +1,14 @@
 # Versioned Text Synchronization
 
+> Native-client portions (`EditorSurface`/`EditorWidget`) are historical; the optimistic-version/shadow/resync semantics remain implemented in the retained `clay::client` module and the current frontend path is [Frontend Edit Synchronization](frontend-edit-synchronization.md).
+
 ## Source
 
 - `src/protocol/mod.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 - `src/masonry_editor.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/document.rs`
 - `src/protocol/codec.rs`
 
@@ -73,18 +75,18 @@ ClientMessage::RequestResync {
 
 ## Tests
 
-- `src/client/mod.rs`: `client_ack_advances_confirmed_version` validates acknowledgement-driven confirmed version updates.
-- `src/client/mod.rs`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
-- `src/client/mod.rs`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable stale rejection.
-- `src/client/mod.rs`: `client_applies_resync_snapshot_and_clears_pending_edits` validates snapshot recovery and pending cleanup.
-- `src/client/mod.rs`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale rejection and resync through a real Unix socket server.
+- `src/client/tests/`: `client_ack_advances_confirmed_version` validates acknowledgement-driven confirmed version updates.
+- `src/client/tests/`: `client_keeps_pending_edit_until_ack_or_rejection` validates deterministic pending transaction bookkeeping.
+- `src/client/tests/`: `client_requests_resync_after_stale_rejection` validates automatic resync requests after recoverable stale rejection.
+- `src/client/tests/`: `client_applies_resync_snapshot_and_clears_pending_edits` validates snapshot recovery and pending cleanup.
+- `src/client/tests/`: `real_server_end_to_end_stale_edit_rejected_then_resynced` validates stale rejection and resync through a real Unix socket server.
 - `src/masonry_editor.rs`: `resync_event_replaces_editor_snapshot` validates the UI resync boundary.
 - Relevant commands: `cargo test client --quiet`, `cargo test server --quiet`, `cargo test --quiet`.
 
 ## Related
 
-- [Client Edit Emission](client-edit-emission.md)
-- [Client/Server Edit Acknowledgement Flow](client-server-edit-ack.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
+- [Client/Server Edit Acknowledgement Flow](../archive/client-server-edit-ack.md)
 - [Document Leases and Region Locks](document-leases-and-region-locks.md)
 - [Server Document State](../modules/server-document-state.md)
 - [Protocol Codec](../modules/protocol-codec.md)

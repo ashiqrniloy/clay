@@ -82,6 +82,7 @@ fn request(generation: CompletionProviderGeneration, request_id: u64) -> Complet
         replacement_range: CompletionReplacementRange::new(10, 12),
         trigger: CompletionTrigger::Character(".".to_string()),
         provider_generation: generation,
+        recent_completions: Vec::<String>::new().into_boxed_slice(),
     }
 }
 
@@ -305,7 +306,7 @@ fn immediate_provider() -> impl Fn(
 }
 
 #[tokio::test]
-async fn builtin_buffer_word_provider_returns_unique_sorted_prefix_matches() {
+async fn builtin_buffer_word_provider_returns_unique_ranked_prefix_matches() {
     let coordinator = CompletionCoordinator::new();
     coordinator
         .register_builtin(
@@ -342,7 +343,7 @@ async fn builtin_buffer_word_provider_returns_unique_sorted_prefix_matches() {
             .iter()
             .map(|item| item.label.as_str())
             .collect::<Vec<_>>(),
-        vec!["println", "prism", "private"]
+        vec!["prism", "println", "private"]
     );
     assert!(
         result

@@ -11,12 +11,23 @@ trees, and per-pane documents across full restarts — plus the Phase 22.7
 tab-bar overflow scroll (cards shrink to a 100 px minimum, then the strip
 scrolls under the wheel). Deep references:
 `docs/reference/primitives/shell-layout-strategy.md` (Phase 22.3 + 22.4 +
-22.5 sections), `docs/wiki/modules/masonry-shell.md` (tab bar + lifecycle),
-`docs/wiki/modules/tabs-and-clients.md` (registry + driver policies),
+22.5 sections), `docs/wiki/modules/react-tabs-and-splits.md` (React tab bar
++ lifecycle), `docs/wiki/modules/tabs-and-clients.md` (registry + driver
+policies),
 `docs/wiki/modules/multi-document-sessions.md` (reconnect restoration),
 `docs/reference/clay-js-api/shell/client-tab-*.md` + `examples/init.js`
 sections 7–8 (the tab command IDs/chords and per-active-tab pane
 commands/focus policy), `docs/development/launch-and-gui-smoke.md`.
+
+> **Plan 118 status (2026-09-13):** the *approved* tab model — one tab holding
+> one workspace **and** one agent with a titlebar view switcher (`⌘1`/`⌘2`), an
+> agent-type picker and a session-files inspector — is drawn in
+> `design-artifacts/approved/quiet-instrument-migration/` and is **not shipped
+> yet** (plan 118 Part D task 33). Every step below still describes the shipped
+> tab: one view per tab, opened from the landing. The only landing-visible
+> change is that an empty tab now renders the bundled launcher when its package
+> is loaded (module [01](01-launch-and-connection.md) L12a) instead of the old
+> Clay-owned card, which stays as the no-contribution fallback (L12).
 
 ## Setup
 
@@ -119,8 +130,8 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 |---|--------|----------|
 | T25 | 2 tabs open (card order A B, A active); `Ctrl+Tab` repeatedly | Active tab advances one card per press in card order (A → B); from the LAST tab it WRAPS to the FIRST (B → A); no flicker, switch feels instant |
 | T26 | `Ctrl+Shift+Tab` repeatedly | Active tab steps back one card per press (B → A); from the FIRST tab it WRAPS to the LAST (A → B) |
-| T27 | 2 tabs open; `Ctrl+1`, `Ctrl+2`, `Ctrl+3` | `Ctrl+1` activates the first card, `Ctrl+2` the second (1-based, card order); `Ctrl+3` is a SILENT no-op (beyond tab count) |
-| T28 | One tab open; `Ctrl+1`, `Ctrl+Tab`, `Ctrl+Shift+Tab` | All silent no-ops — next/prev need two tabs, numbered activation has no second position; nothing flickers, active tab unchanged |
+| T27 | 2 tabs open; `Ctrl+Alt+1`, `Ctrl+Alt+2`, `Ctrl+Alt+3` | `Ctrl+Alt+1` activates the first card, `Ctrl+Alt+2` the second (1-based, card order); `Ctrl+Alt+3` is a SILENT no-op (beyond tab count) (`Ctrl+1`/`Ctrl+2` are the tab's view switcher since plan 118 task 33) |
+| T28 | One tab open; `Ctrl+Alt+1`, `Ctrl+Tab`, `Ctrl+Shift+Tab` | All silent no-ops — next/prev need two tabs, numbered activation has no second position; nothing flickers, active tab unchanged |
 | T29 | `Ctrl+T` with 2 tabs open | Same flow as the `+` affordance: native folder picker opens; picking a folder mounts a new tab (becomes active) with the new workspace; a second `Ctrl+T` while the picker is open is ignored |
 | T30 | Clean tab active; `Ctrl+Shift+W` | The active tab closes (connection released, registry entry removed, bar reflows); the remaining tab becomes active with layout/documents intact — same contract as `✕` (T15) |
 | T31 | Single tab open; `Ctrl+Shift+W` | NO-OP — the last tab is protected from the keyboard too (same contract as T7; the client also refuses defensively) |
@@ -131,12 +142,12 @@ Phase 22.4 section and the `docs/reference/clay-js-api/shell/`
 | T36 | 3 tabs open (order A B C, A active); `Ctrl+Shift+]` twice | First press moves A right → B A C (A stays active); second press moves A right again → B C A; a further press at the LAST position is a silent no-op; moves NEVER wrap; active-tab status survives (switch away and back, A still active) |
 | T37 | 3 tabs open (order A B C, A active); `Ctrl+Shift+[` | NO-OP — A is already first (boundary); with B active, `Ctrl+Shift+[` moves B left → B A C; at the first position moves are silent no-ops |
 | T38 | 3 tabs open (order A B C, C active); `Ctrl+Shift+1` | C moves to position 1 → C A B (C stays active); `Ctrl+Shift+2` on the result moves C to position 2 → A C B; `Ctrl+Shift+4` (beyond count) is a silent no-op; numbered moves are 1-based, capped at 9 |
-| T39 | Move a tab (T36–T38), then `Ctrl+<N>` at its new position | Numbered activation follows the NEW card order — the registry is authoritative (switch-then-activate round trip stays consistent) |
-| T40 | With 3 tabs open, run `Ctrl+Tab`, `Ctrl+1`, `Ctrl+Shift+]`, `Ctrl+Shift+2` back-to-back | Every chord lands immediately with no lag — switch = one layout pass; move/close reflow is immediate (subjective responsiveness check) |
+| T39 | Move a tab (T36–T38), then `Ctrl+Alt+<N>` at its new position | Numbered activation follows the NEW card order — the registry is authoritative (switch-then-activate round trip stays consistent) |
+| T40 | With 3 tabs open, run `Ctrl+Tab`, `Ctrl+Alt+1`, `Ctrl+Shift+]`, `Ctrl+Shift+2` back-to-back | Every chord lands immediately with no lag — switch = one layout pass; move/close reflow is immediate (subjective responsiveness check) |
 
 ## Window-state persistence (Phase 22.5)
 
-Client-owned `layout.json` v2 (in `~/.config/clay/` or `$XDG_CONFIG_HOME`)
+Client-owned `layout.json` v2 (in `~/.clay/layout.json`; legacy `$XDG_CONFIG_HOME/clay/layout.json` still loads)
 persists tab order, the active tab, each tab's workspace root + split tree,
 and each pane's open document; a full quit/relaunch (client AND server)
 restores the window. Deep reference:
@@ -185,9 +196,10 @@ At a ~900 px window, 5 cards still fit (the last card shrinks to ~124 px)
 and overflow starts at 6+ cards. The `+` affordance stays pinned at the
 bar's right edge; cards clip at its left boundary. Deep reference:
 `docs/reference/ui-components.md` Tabs row (Phase 22.7 scroll behavior).
-Automated equivalents: `tab_bar_cards_never_below_min_width`,
-`tab_bar_wheel_scroll_clamps`, `tab_bar_hit_test_honors_scroll`, and
-`activating_offscreen_tab_scrolls_it_into_view` in `src/masonry_shell.rs`.
+Automated equivalents: the tab-bar minimum-width clamp and scroll styles
+(`frontend/src/app/layout/tab-bar.module.css`) plus the Plan 097 Phase 12
+review captures (`code-reviews/screenshots/2026-08-24-tauri-react-parity/tabs-splits/`);
+the Masonry-era unit tests were removed with the native client.
 
 Setup: use `Ctrl+T` (or `+`) to open workspaces `/tmp/clay-manual`,
 `/tmp/clay-manual-tab2`, … `/tmp/clay-manual-tab7` (8 tabs total), then
@@ -198,7 +210,7 @@ resize the window to ~900 px wide.
 | T57 | 8 tabs at ~900 px wide | Every card is ≥100 px wide (cards stop shrinking at the floor); the rightmost cards are CLIPPED at the `+` slot — the strip overflows; the `+` stays pinned at the bar's right edge, always fully visible; no layout break, no overlap |
 | T58 | Wheel up/down over the tab bar | The strip scrolls left/right smoothly; scrolling CLAMPS at both ends — no overscroll, no bounce, no elastic; wheel over the working area (below the bar) does NOT scroll the strip |
 | T59 | 5 or fewer tabs (or a wide window) | No overflow: the strip starts flush at the left edge, every card fully visible, and wheel over the bar is a NO-OP — scrolling is only active while cards hit the minimum width |
-| T60 | Scroll the strip so a card is scrolled out of view, then activate it via `Ctrl+<N>` numbered activation | The strip AUTO-SCROLLS the active card fully into view — the active card is never left clipped; switching back and forth keeps the active card visible |
+| T60 | Scroll the strip so a card is scrolled out of view, then activate it via `Ctrl+Alt+<N>` numbered activation | The strip AUTO-SCROLLS the active card fully into view — the active card is never left clipped; switching back and forth keeps the active card visible |
 | T61 | Scroll so a card is partially clipped, then click its visible part | Hit-testing follows the SCROLLED position: the click activates the card under the pointer in the scrolled strip (not the card that would sit there at scroll 0); clicking a clipped-away region does nothing |
 | T62 | Scroll the strip, then type in the active tab and run `Ctrl+\` / `Ctrl+-` | The scroll offset is chrome-only: editing, splits, pane focus, and the working area are unaffected; the strip keeps its offset until an activation auto-scrolls |
 
@@ -219,6 +231,28 @@ roots containing distinct filenames/content.
 | T68 | In tab B, try to open tab A's file by path/browser-relative identity and list/open tab A's documents | Server rejects the foreign/out-of-root request; tab B's document list, text, version, dirty state, and grants remain unchanged; tab A remains readable/editable only in tab A |
 | T69 | Open a selected-file capability in tab A, then attempt to reuse that path/token from tab B | The request is denied or the token is replenished without opening the file in tab B; no foreign document/lease appears in tab B |
 | T70 | Repeat T63–T69 while watching tab creation, split, restore, and reconnect latency | No perceptible stall is introduced on typing or pane paint; restore/reconnect work is bounded and asynchronous after the normal startup/connection sequence |
+
+## Plan 088 shell/tab modernization steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| T71 | Apply the large UI typography fixture with two or more tabs | Tab bar/card/close/+ geometry follows active UI typography and remains clamped inside logical window bounds; active/inactive/dirty states remain distinguishable without color alone |
+| T72 | Open six or more tabs at the supported window width and scroll the tab bar | Cards stop at the documented minimum, the + affordance stays pinned, wheel offset clamps, and clipped cards do not paint or enter the accessibility tree outside the strip |
+| T73 | Use workspace roots with long/control-character/path-like names | Visible and accessible tab labels use a bounded sanitized basename/fallback; no absolute filesystem layout leaks |
+| T74 | Compare dark/light theme tab chrome with the same tab order | Active, inactive, hover/focus, close, dirty, and new-tab affordances remain legible and token-driven in both themes |
+| T75 | Switch among tabs with multiple panes and status diagnostics | Active tab/pane/status ownership is clear; inactive panes are absent from accessibility traversal; recovery/dirty/connection state is textual and synchronized |
+| T76 | Run the representative high-DPI logical-window layout check with multiple tabs | Tab bar, cards, pane hosts, and + affordance remain inside logical bounds; no physical-pixel overflow or duplicate scale compensation |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| T71 | PASS strongest available evidence | `code-reviews/screenshots/2026-08-14-plan088-modernization/large-typography/` shows no welcome accessibility regression; shell geometry tests cover dynamic Status metrics, but live multi-tab large-type capture is blocked |
+| T72 | PASS structural / NOT RUN visually | `tab_bar_cards_never_below_min_width`, wheel-clamp, hit-test, and offscreen-activation tests pass; compositor resize/focus targeting is unavailable |
+| T73 | PASS structural / partial live | `tab_card_display_name_never_falls_back_to_an_absolute_path` passes; current welcome artifact exposes only `Workspace: clay`; multi-tab label inspection was not safely targetable |
+| T74 | PASS structural / NOT RUN tab-bar visually | Dark/light Task 8 welcome artifacts and bundled contrast tests pass; no raw colors were introduced, but multi-tab theme chrome was not safely targetable |
+| T75 | PASS structural / UNRESOLVED live | Tab/pane roles, announcements, recovery/dirty state tests pass; current recovery capture records the known stale WelcomeWidget Connected status (P1), so state synchronization is not called green |
+| T76 | PASS structural / NOT RUN visually | `high_dpi_layout_uses_logical_window_bounds` passes; live DPI/window resize is unavailable on this host |
 
 ## Linux execution record (2026-08-10)
 
@@ -304,10 +338,11 @@ roots containing distinct filenames/content.
   pinned and cards clip at its left boundary (no overflow `»` menu).
 - **No drag-to-reorder**: card order changes only via the 22.4 move chords;
   drag reordering is not implemented.
-- **No tab persistence to disk**: tab structure and per-tab split trees live
-  in the in-memory server registry only — a full server restart (not just
-  the client) resets them to the single initial workspace. Disk persistence
-  for the registry and split trees arrives with Phase 22.5.
+- **Persistence is split by owner**: the server registry is in-memory and
+  does not survive a full server restart, while the client-owned `layout.json`
+  v2 persists tab order, active tab, workspace roots, split trees, and open
+  per-pane documents across a full client/server relaunch (T41/T66). Unsaved
+  edits, caret/viewport positions, and some runtime-only policy state do not.
 - **Restart drops unsaved state (22.5)**: the persisted window state is tab
   order, active tab, per-tab workspace + split tree, and per-pane open
   documents only — unsaved edits, caret/viewport/scroll positions, and
@@ -336,3 +371,115 @@ roots containing distinct filenames/content.
   repeated twice in a row) — documented, not a bug.
 - **Per-tab pane cap still 4**: each tab's split tree caps at
   `MAX_PANES_PER_TAB = 4` (module 13, S4) — the cap is per tab.
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| T71 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/large-typography/` shows the large UI fixture in bounds; shell geometry tests cover dynamic Status metrics |
+| T72 | PASS structural | Tab bar card minimum, wheel-clamp, hit-test, and offscreen-activation tests pass |
+| T73 | PASS structural + partial live | `tab_card_display_name_never_falls_back_to_an_absolute_path` passes; welcome artifact exposes only `Workspace: clay` |
+| T74 | PASS structural | Dark/light captures and bundled contrast tests pass; no raw colors were introduced |
+| T75 | PASS live | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/recovery/` shows `Connection lost` / `Connection: Disconnected` consistently in the welcome panel, status chrome, and AT-SPI tree after the `request_welcome_render` fix; the Plan 088 P1 stale WelcomeWidget Connected status is resolved |
+| T76 | PASS structural | `high_dpi_layout_uses_logical_bounds_from_physical_size` passes; live DPI/window resize is covered by the multi-window smoke test (module 01 L20) |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Tab bar/single workspace | PASS static/real AT-SPI | Fixture captures expose `Window tabs`/selected Workspace; `tabs-splits/accessibility.txt` confirms the real Tauri tree |
+| Tab/split persistence and switching | PASS automated; UNRESOLVED physical interaction | Layout/persistence/controller tests pass; host keyboard/window targeting prevented a live switch/reload sequence |
+| Tab labels and path privacy | PASS | Real and fixture trees expose workspace/document basenames only; no retained PNG includes a host absolute path |
+
+## Plan 099 tab/session recovery steps
+
+| # | Action | Expected |
+|---|---|---|
+| T77 | With two tabs/documents open, stop and restart the server, then reload both tabs | Each tab reconnects through its own session, restores its workspace/document identity, drops stale patches, and does not lose authoritative text or dirty-state ownership. |
+| T78 | In two tabs with split panes, open duplicate files and switch tabs while a viewport request is pending | Routing remains active-tab/per-pane scoped; one tab's document, patch, or grant never appears in the other; pending work is latest-wins and bounded. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| T77 | UNRESOLVED live; retained PASS evidence | No document session or keyboard-capable backend was available. Prior final-build recovery/tab artifacts and automated reconnect/isolation tests remain the available evidence. |
+| T78 | UNRESOLVED live; PASS automated companion | The profiled client launched only its bootstrap state; cross-tab/pane routing was not manually driven. |
+
+Do not treat the harness's zero parser queue as evidence that tab recovery
+had no pending syntax work; this run did not establish document sessions.
+
+## Plan 103 Tab Bar Recipe & Design-System Cross-Reference (2026-08-30)
+
+Tab bar container, card slots, card labels, close affordance, and dirty indicators consume `--clay-ds-tab-bar-*` recipe variables. Tab switching, selection state, and active workspace binding remain host-owned and unaffected by design-system switching. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+## Plan 112 cross-reference (2026-09-07)
+
+Tab-strip glyphs migrated to the shared icon primitives: per-tab close uses
+`action.close` and the new-tab button uses `action.new` via ClayIcon, with
+accessible names preserved (`Close ${label}`, `New tab`); the empty-state
+"New tab" discovery button keeps visible text. Steps:
+[18 — Icon packs](18-icon-packs.md) (ICON-02, ICON-08, ICON-09, executed
+2026-09-07).
+
+## Plan 118 execution record (2026-09-13)
+
+The tab model itself is unchanged in this plan step (the approved
+workspace+agent tab is task 33); the empty-tab *content* changed to the package
+landing. Artifacts: `test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| T67/T71/T73/T75 (reconnect, large type, labels, recovery) | PASS live (static) / UNRESOLVED interactive | `recovery/` shows `Reconnect session` with the sanitized status bar; `launcher-landing/` and `core-fallback/` expose the `Window tabs` page-tab list with the selected `Workspace` tab and no absolute path outside the launcher's intended recents row; multi-tab keyboard legs remain input-blocked as recorded above |
+| Tab model (approved, not shipped) | NOT RUN — not built | Recorded here so no reader assumes the titlebar view switcher exists; tracking: plan 118 Part D task 33 |
+
+No existing step was deleted or weakened.
+
+## Plan 124 steps (per-tab lane state, 2026-09-17)
+
+Deep references: `DESIGN.md` §12, `frontend/src/shell/persist.ts`, `src/shell/layout_persist.rs`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T79 | Hide the lane on tab A (`Ctrl+X Ctrl+P`), then create a new tab B and switch back and forth | The lane state is per tab: tab B starts with the lane visible while tab A keeps it hidden; switching tabs never copies one tab's lane state to the other, and the state survives the workspace ⇄ agent view switch inside a tab (the lane is tab chrome, not a view). Automated: `frontend/src/shell/WorkspacePanes.test.tsx`, `layout-state`/`persist` tests |
+| T80 | Type a draft in the lane, hide the lane, show it again, then switch tabs and come back | The draft is preserved per tab (hide/show does not remount the composer; the same session stays adopted); the palette sheet and its veil belong to the tab that opened them — switching tabs cancels the session and leaves no sheet or veil on the other tab. Automated: `WorkspacePanes.test.tsx` (session cancel on switch, veil coupling), `AgentLane.test.tsx` (draft) |
+| T81 | Hide the lane in one tab, switch to the other tab, quit the client, and relaunch; also relaunch after a hostile/truncated `layout.json` (module 14 window-state steps) | The persisted layout carries `laneVisible` per tab, so the hidden state comes back with that tab while the other tab stays visible; a truncated/invalid layout file falls back to the visible default without losing the other tabs' fields (fail-closed restore, unchanged by this plan). Automated: `frontend/src/shell/tab-store.test.ts`, `frontend/src/shell/workspace-controller.test.ts`, `src/shell/layout_persist.rs` tests |
+| T82 | With the lane visible, switch tabs and close one; inspect the tab list and the session list in the accessibility tree | Tab activation/close never remounts the lane's session (the store is per tab runtime, disposed only when the tab closes) and the lane is not part of the tab list traversal; the tab list still announces activate/create/close as before. Automated: `WorkspacePanes.test.tsx` (one store per tab runtime), tab a11y tests |
+
+## Plan 125 steps (default agent + typable lane, 2026-09-18)
+
+Deep references: `DESIGN.md` §12, `plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`,
+`frontend/src/coding-agent/Composer.tsx`, `frontend/src/shell/tab-store.ts`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| T83 | Open a tab with a workspace but no agent and watch the lane's agent picker; then create a second tab and switch back | The tab **adopts the default agent type** as soon as the server's agent listing lands (preference order `coding-agent`, then `coding`, else the first listed type): the picker shows that type, its model/effort/token controls appear, and the tab's title becomes the agent's name (`workspace agent`-style label in the tab strip). The adoption is per tab and happens once — a tab that already carries an agent is left alone, no extra pick is made, and switching tabs never copies one tab's agent onto another. On a tab with **no** agent types listed the picker offers `Attach an agent` and the field stays typable. Automated: `WorkspacePanes.test.tsx` (adopts the default agent for a tab with none, once the listing lands; leaves an already-attached tab alone), `AgentLane.test.tsx` (offers the agent picker and keeps the field typable with no agent), `Composer.test.tsx` |
+| T84 | On a tab with no workspace root, check the landing; then adopt an agent (or reload) and check it again | A folder-less tab keeps the launcher landing even after the default agent is auto-attached: "uncommitted" depends only on the **workspace root**, never on agent attachment, so the landing is not swallowed by adoption. Opening a folder commits the tab as before. Automated: `frontend/src/shell/tab-store.test.ts` (agent-only tab is uncommitted; the round trip keeps the agent half), `WorkspacePanes.test.tsx` (keeps the launcher landing when the default agent auto-attaches) |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+| Step | Result | Evidence |
+|---|---|---|
+| T79 | PASS live | Live: hiding the lane on the first tab and creating a new tab showed the lane visible on the new tab (`Agent lane` footer present, `Attach an agent` picker) while the first tab's lane stayed hidden — per-tab state, not global. Capture: `test-plan/artifacts/124-agent-lane/12-newtab-lane-visible.png`. |
+| T80 | PASS live (hide/show) + automated (switch) | Live: hiding the lane with `/` + `Session` scope in the palette and showing it again restored the sheet with the same draft and 14 results. Tab-switch cancellation is pinned by `WorkspacePanes.test.tsx`. |
+| T81 | PASS automated / NOT RUN live | `laneVisible` is persisted per tab (`frontend/src/shell/persist.ts` and its `tab-store`/`workspace-controller` tests, `src/shell/layout_persist.rs`); the live root's `layout.json` carries the field (`"laneVisible": true` for the visible tab) and the restore/fallback paths are pinned by the persist suites. A live quit/relaunch cycle of two tabs was not driven (the AT-SPI default action on a tab node closes it on this host — recorded below). |
+| T82 | PASS automated | Store hoisting/diposal and lane/tab-list separation are pinned by `WorkspacePanes.test.tsx`; live tab activation was not safely drivable. |
+
+**Observed (not a defect):** one rapid sequence (create tab → AT-SPI "activate"
+on a tab node → create tab again) surfaced the empty-tab diagnostic
+`no live server session; call session_bootstrap first` (bridge `NotConnected`)
+in the pane's `role="alert"`; the AT-SPI default action on a tab node closes
+that tab on this host, so the diagnostic is a bootstrap-race observation in a
+sequence no human produces. A plain `New tab` immediately afterwards produced
+zero diagnostics in the same tab's accessibility dump. The bridge `busy`/bootstrap path is untouched by plan
+124.
+
+## Plan 125 execution record (Linux, 2026-09-18)
+
+| Step | Result | Evidence |
+|---|---|---|
+| T83 (default agent adoption) | PASS live + PASS automated | Live (canonical config, fresh build, isolated root): the first tab came up with the lane already showing `Coding Agent` in the agent-type picker and its tab label reading `workspace agent` — no user pick — while the model trigger stayed the disabled `Configure a provider` row (no provider configured). A second tab behaved the same and the first tab's state was untouched. Automated: `WorkspacePanes.test.tsx` (adopts the default agent for a tab with none, once the listing lands; leaves an already-attached tab alone, no extra pick), `AgentLane.test.tsx` (hands the picked type to the tab), `Composer.test.tsx`. Evidence: `test-plan/artifacts/125-palette/screenshots/01-rest.ax.txt` (`combo box Coding Agent Agent type`, `page tab … workspace agent`). |
+| T84 (folder-less tab keeps the landing) | PASS live + PASS automated | Live: tab creation on the review root never suppressed the empty-tab landing path; on a folder-less tab the landing stays up after auto-adoption (recorded during the plan-125 task-12/15 sessions), and opening a folder commits the tab. Automated: `frontend/src/shell/tab-store.test.ts` (`tabUncommitted` keys on the workspace root only; agent-only tabs stay uncommitted), `WorkspacePanes.test.tsx` (keeps the launcher landing when the default agent auto-attaches). |
+
+The per-tab lane rules from plan 124 (T79–T82) were re-run in the same session
+and still hold: hiding the lane on one tab left the new tab's lane visible, and
+the hidden lane's draft survived the hide/show round trip.

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::lock_util::LockOrRecover;
 use deno_core::{OpState, op2};
 use deno_error::JsErrorBox;
 use serde_json::{Value, json};
@@ -135,10 +136,7 @@ pub(super) fn op_clay_language_register_document_analyzer(
             "language.invalid_analyzer: moduleSpecifier must resolve to a loaded module owned by the package",
         ));
     }
-    let service = clay
-        .package_service()
-        .lock()
-        .expect("package service mutex poisoned");
+    let service = clay.package_service().lock_or_recover();
     let enabled = service.enabled_records().any(|record| record == &package);
     drop(service);
     if !enabled {

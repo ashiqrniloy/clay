@@ -1,0 +1,26 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/12|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/2|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/3|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/6|clay-desktop
+5|button|-|Minimise||/org/a11y/atspi/accessible/9|clay-desktop
+5|button|-|Maximise||/org/a11y/atspi/accessible/10|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/11|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/7|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/8|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/13|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/1|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/de6ba56e_7ab4_4b6a_a4a2_ebdb90d47497|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/9a5a83f1_3be2_4624_8521_6a6cc8f54c09|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/969fa729_a14e_45a6_9067_ca23ae08c0ac|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/a25bae4c_97c7_4a6c_9166_a35d95386b83|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/9a98dcac_2a48_4c33_be69_f3744ecb04c4|clay-desktop
+8|page tab list|-|Window tabs||/org/a11y/atspi/accessible/5d200543_f564_47e1_86e9_50635f079ac2|clay-desktop
+9|page tab|selected|Workspace||/org/a11y/atspi/accessible/7b5e7499_3525_42fc_a7dd_1cb2d01e219f|clay-desktop
+7|landmark|-|Clay workspace||/org/a11y/atspi/accessible/d8446e9e_4d38_4a0d_be2f_634ff0fd1b05|clay-desktop
+8|notification|-|||/org/a11y/atspi/accessible/5de3d1fc_137b_4ef0_b731_84c973c1e146|clay-desktop
+9|button|-|Reconnect session||/org/a11y/atspi/accessible/a898f0ac_4619_47a3_a032_d44f2d110c4c|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/a29b627d_b69b_425c_862e_d68720073dee|clay-desktop
+8|status bar|-||Disconnected|/org/a11y/atspi/accessible/742549be_81bf_4eae_ab45_405a62fd0370|clay-desktop

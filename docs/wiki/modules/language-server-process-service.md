@@ -3,14 +3,14 @@
 ## Source
 
 - `src/packages/permissions.rs`
-- `src/packages/record.rs`
+- `src/packages/record/mod.rs`
 - `src/packages/authorization.rs`
 - `src/packages/service.rs`
 - `src/server/language_server.rs`
 - `src/server/ops/language_server.rs`
 - `src/server/ops/mod.rs`
 - `runtime/js/language-server.js`
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/perf/budgets.rs`
 - `tests/language_server_authority.rs`
 - `tests/package_loading.rs`
@@ -54,6 +54,8 @@ await loadPackage("@clay/lsp-rust");
 
 Grant creation resolves and canonicalizes the executable, validates directory workspace roots, and binds package name/version/source/API prefix, contribution ID/fingerprint, canonical executable, fixed argv/environment declaration, workspace-root IDs, and approver. The authorization gate is open only while evaluating the configuration root. `loadPackage` seals it before package enable/import, so loaded package code cannot self-authorize.
 
+`startLanguageServerSession` accepts only `{ contribution, workspaceRootId }`. The host stamps the package identity from the executing package context and resolves the current workspace root from the analyzer's connection-owned workspace; a bridge cannot smuggle another package name or use the persistent runtime's empty default workspace.
+
 Bundled `NativeTrust` explicitly filters out `language-server`. Enablement re-resolves the executable and verifies the exact current grant; package/source/version/contribution/executable/root drift fails closed.
 
 ## Process and Concurrency Model
@@ -89,7 +91,7 @@ Phase 18.21 replaces the text-only `send`/`read` with exact byte `sendBytes`/`re
 
 `LanguageServerError` distinguishes unauthorized/mismatched sessions, unknown sessions, too many sessions, payload overflow, spawn/I/O failure, timeout, child exit, and invalid roots. Facade ops translate failures to stable Clay error codes and do not expose raw process handles or unrestricted stderr.
 
-Every operation first rechecks the current grant in the op layer, then the central router rechecks package name, contribution ID, and descriptor fingerprint immediately before actor ingress. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which removes and signals every owned actor; runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_generation_resources`. Actor stop signals interrupt an in-flight read/write and are not queued behind ordinary actor commands.
+Every operation first rechecks the current grant in the op layer, then the central router rechecks package name, contribution ID, and descriptor fingerprint immediately before actor ingress. Revocation therefore fails the next operation even before asynchronous package cleanup completes. Package withdrawal calls `revoke_for_package`, which removes and signals every owned actor; runtime-generation commit calls `shutdown_all` through `ClayJsRuntimeService::shutdown_trusted_generation_resources`. Actor stop signals interrupt an in-flight read/write and are not queued behind ordinary actor commands.
 
 ## Primitive Coverage
 
@@ -130,7 +132,7 @@ Bridge release notes must repeat trusted-subprocess containment language and mus
 - `tests/language_server_authority.rs`: shell/external executable rejection, pre-spawn byte budget, bad cwd spawn error, timeout with stoppable session, sanitized child exit, duplicate contribution/root rejection, session cap, package-withdrawal reaping, lossless split-UTF-8 round-trip, fragmented LSP frame reassembly, oversize byte write/read rejection, cross-session head-of-line isolation, and bounded actor-ingress rejection. 16 tests total.
 - `src/server/language_server.rs`: `capped_stderr_retains_prefix_and_drains_remainder_to_eof` uses a small duplex pipe and an over-cap payload to prove retained bytes/truncation stay bounded while the writer still reaches normal EOF.
 - `tests/package_loading.rs`: descriptor validation, no bundled auto-grant, exact grant enablement, and revocation failure.
-- `src/server/js_runtime.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
+- `src/server/js_runtime/mod.rs`: grant-before-load, unknown-root rejection, and loaded-package self-grant denial.
 - `tests/editor_performance_invariants.rs`: process service and `tokio::process::Command` absent from editor/client hot paths.
 - `tests/package_loading_docs.rs`, `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`: configuration/API/security documentation and registry freshness.
 
@@ -144,10 +146,10 @@ cargo test --test editor editor_performance_invariants::
 
 - [First-Party LSP Bridge Packages](first-party-lsp-bridge-packages.md)
 - [Language Intelligence](language-intelligence.md)
-- [Phase 18.20 Primitive Review](phase18.20-language-intelligence-primitive-review.md)
+- [Phase 18.20 Primitive Review](../archive/phase18.20-language-intelligence-primitive-review.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)
 - [Third-Party Runtime Authority](third-party-runtime-authority.md)
 - [Package Loading](package-loading.md)
-- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `shutdown_all` kills and reaps all previous-generation language-server sessions after atomic commit; `shutdown_generation_resources` delegates through `ClayJsRuntimeService`.
+- [Persistent Runtime Hot Reload](persistent-runtime-hot-reload.md) — Phase 19 `shutdown_all` kills and reaps all previous-generation language-server sessions after atomic commit; `shutdown_trusted_generation_resources` delegates through `ClayJsRuntimeService`.
 - [Package Security Reference](../../reference/primitives/package-security.md)
 - [LSP 3.17 Bridge Contract](../../reference/primitives/language-intelligence.md)

@@ -1,0 +1,321 @@
+/* Launcher surface (plan 118 Part D): the start surface's composition.
+ *
+ * Values come from the shipped recipe language — panel, list rows, badge and
+ * the input well — with only layout (grid, padding, measure) owned here, per
+ * the host/design-system split. Translucency is composed with color-mix so the
+ * pre-bootstrap fallback and the activated package paint identically. */
+
+.launcher {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1 / -1;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--clay-surface-main);
+  color: var(--clay-text-primary);
+}
+
+.inner {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 1320px;
+  min-height: 0;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 22px 26px 0;
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 92ch;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-title-size);
+  font-weight: 600;
+  line-height: var(--clay-text-title-line-height);
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  margin: 0;
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size);
+  line-height: 1.6;
+}
+
+.grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-width: var(--clay-ds-panel-default-root-rest-border-width);
+  border-style: var(--clay-ds-panel-default-root-rest-border-style);
+  border-color: var(--clay-ds-panel-default-root-rest-border-color);
+  border-radius: var(--clay-ds-panel-default-root-rest-border-radius);
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-panel-default-root-rest-background-color)
+      calc(var(--clay-ds-panel-default-root-rest-background-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-panel-default-root-rest-text-color);
+}
+
+.paneHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-bottom-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-bottom-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.paneLabel {
+  margin: 0;
+  color: var(--clay-text-primary);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-section-size);
+  font-weight: 500;
+  line-height: var(--clay-text-section-line-height);
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  min-width: 18px;
+  padding: 0 5px;
+  border-width: var(--clay-ds-badge-default-root-rest-border-width);
+  border-style: var(--clay-ds-badge-default-root-rest-border-style);
+  border-color: var(--clay-ds-badge-default-root-rest-border-color);
+  border-radius: var(--clay-ds-badge-default-root-rest-border-radius);
+  background: var(--clay-ds-badge-default-root-rest-background-color);
+  color: var(--clay-ds-badge-default-root-rest-text-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  font-variant-numeric: tabular-nums;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.filterInput {
+  max-width: 190px;
+  min-width: 0;
+  border-width: var(--clay-ds-text-input-default-input-rest-border-width);
+  border-style: var(--clay-ds-text-input-default-input-rest-border-style);
+  border-color: var(--clay-ds-text-input-default-input-rest-border-color);
+  border-radius: var(--clay-ds-text-input-default-input-rest-border-radius);
+  background: var(--clay-ds-text-input-default-input-rest-background-color);
+  color: var(--clay-ds-text-input-default-input-rest-text-color);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+  padding: 3px 8px;
+  transition:
+    border-color
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing),
+    background-color
+      var(--clay-ds-text-input-default-input-rest-transition-duration)
+      var(--clay-ds-text-input-default-input-rest-transition-timing);
+}
+
+.filterInput:hover {
+  border-color: var(--clay-ds-text-input-default-input-hover-border-color);
+  background: var(--clay-ds-text-input-default-input-hover-background-color);
+}
+
+/* Focus lives on the well: accent border plus the recipe's accent halo — one
+ * ring per surface, never an inner outline (DESIGN.md §14.4). */
+.filterInput:focus,
+.filterInput:focus-visible {
+  outline: none;
+  border-color: var(--clay-ds-text-input-default-input-focus-border-color);
+  background: var(--clay-ds-text-input-default-input-focus-background-color);
+  box-shadow: var(--clay-ds-text-input-default-input-focus-shadow);
+}
+
+.filterInput::placeholder {
+  color: var(--clay-text-muted);
+}
+
+.paneBody {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 138px;
+  overflow: auto;
+  padding: 5px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xxs);
+  min-height: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  padding: var(--clay-spacing-xs, 8px);
+  border-width: var(--clay-ds-list-default-row-rest-border-width);
+  border-color: var(--clay-ds-list-default-row-rest-border-color);
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  color: var(--clay-ds-list-default-row-rest-text-color);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition:
+    background-color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing),
+    color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+.row:hover {
+  background: var(--clay-ds-list-default-row-hover-background-color);
+  color: var(--clay-ds-list-default-row-hover-text-color);
+}
+
+.row:active {
+  background: var(--clay-ds-list-default-row-active-background-color);
+}
+
+.row[data-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--clay-ds-list-default-row-selected-background-color)
+      calc(
+        var(--clay-ds-list-default-row-selected-background-opacity, 1) * 100%
+      ),
+    transparent
+  );
+  color: var(--clay-ds-list-default-row-selected-text-color);
+}
+
+.row:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+
+.rowMain {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowName {
+  color: var(--clay-text-primary);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-body-size);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.rowDesc,
+.rowMeta {
+  overflow: hidden;
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  flex: none;
+}
+
+.note {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  line-height: 1.6;
+}
+
+.paneFoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 0 14px;
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+}
+
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-caption-size);
+  line-height: 1.5;
+}
+
+.hint > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.summary {
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-caption-size);
+}
+
+@media (max-width: 1080px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .paneBody {
+    min-height: 96px;
+  }
+}

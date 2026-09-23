@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:commands"
 js_export: serverOpenDirectory
 js_facade: runtime/js/commands.js::serverOpenDirectory
-backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection.rs::file_browser_snapshot_message
+backing_rust: src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::list_directory; src/server/connection/workspace.rs::file_browser_snapshot_message
 deno_op: op_clay_commands_execute_command
 deno_op_path: src/server/ops/commands.rs::op_clay_commands_execute_command
 name: serverOpenDirectory
@@ -35,7 +35,7 @@ Navigate the Clay-owned workspace file browser to a root-relative directory thro
 
 `serverOpenDirectory` is the runtime-backed Clay JS API for **Open Directory**. It wraps the built-in `workspace.openDirectory` command and returns the validated navigation target. The same command ID is used by Clay-owned file-browser SDUI directory rows, which include the required `workspaceRootId` and `relativePath` arguments.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths. The server validates the directory with `WorkspaceState::list_directory` bounds and refreshes file-browser SDUI when invoked from the live file-browser action path.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths. The server validates the directory with `WorkspaceState::list_directory` bounds and refreshes file-browser SDUI when invoked from the live file-browser action path.
 
 ## When to use
 
@@ -98,7 +98,7 @@ Use `commands.serverOpenDirectory` only through the documented Clay JS facade or
 
 - JS facade: `runtime/js/commands.js::serverOpenDirectory`
 - Deno op: `src/server/ops/commands.rs::op_clay_commands_execute_command` (`op_clay_commands_execute_command`)
-- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace`; `src/server/workspace.rs::WorkspaceState::list_directory`; `src/server/connection.rs::file_browser_snapshot_message`
+- Backing Rust/current owner: `src/server/command_execution.rs::CommandExecutor::execute_workspace`; `src/server/workspace/mod.rs::WorkspaceState::list_directory`; `src/server/connection/workspace.rs::file_browser_snapshot_message`
 
 ## Lookup metadata
 

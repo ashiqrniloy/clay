@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: serverAddWorkspaceRoot
 js_facade: runtime/js/workspace.js::serverAddWorkspaceRoot
-backing_rust: src/server/workspace.rs::WorkspaceState::add_explicit_user_grant
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::add_explicit_user_grant
 deno_op: op_clay_workspace_add_root
 deno_op_path: src/server/ops/workspace.rs::op_clay_workspace_add_root
 name: serverAddWorkspaceRoot
@@ -35,7 +35,7 @@ Add an explicit user-approved workspace grant through the server workspace autho
 
 `serverAddWorkspaceRoot` is the Phase 18.12 runtime-backed Clay JS API for **Add Workspace Root**. It is exposed through the curated `clay:workspace` facade so package/configuration/runtime code does not call raw ops or Rust internals.
 
-This API is server-first background/action work. It must not run in ordinary typing, Masonry paint, Masonry layout, pointer, scroll, keypress, or text-event hot paths.
+This API is server-first background/action work. It must not run in ordinary typing, client paint, client layout, pointer, scroll, keypress, or text-event hot paths.
 
 ## When to use
 
@@ -91,7 +91,7 @@ Use `workspace.serverAddWorkspaceRoot` only through the documented Clay JS facad
 
 - JS facade: `runtime/js/workspace.js::serverAddWorkspaceRoot`
 - Deno op: `src/server/ops/workspace.rs::op_clay_workspace_add_root` (`op_clay_workspace_add_root`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::add_explicit_user_grant`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::add_explicit_user_grant`
 
 ## Lookup metadata
 

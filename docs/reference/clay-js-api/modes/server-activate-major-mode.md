@@ -84,7 +84,7 @@ const activation = serverActivateMajorMode(manifest, { documentId: 5, path: "REA
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `modes.serverActivateMajorMode` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverActivateMajorMode` in `~/.clay/init.js`.
 
 ## Custom properties
 
@@ -92,6 +92,7 @@ No default key binding is assigned. Users may bind a key to `modes.serverActivat
 - `path` (`string`, default `optional`): Behavior-changing setting `path` for this API.
 - `mimeType` (`string`, default `optional`): Behavior-changing setting `mimeType` for this API.
 - `behaviorVersion` (`number`, default `generated`): Behavior-changing setting `behaviorVersion` for this API.
+- `editorRules`: Optional declarative editor rules applied to the published behavior manifest for this activation (validated server-side, deny-by-default).
 
 ## Return and async behavior
 

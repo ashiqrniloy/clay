@@ -70,11 +70,30 @@ binding from Setup.
 | # | Action | Expected |
 |---|--------|----------|
 | F13 | Fresh launch with a workspace root and no prior toggle | Workspace pane starts hidden; the editor occupies the left slot; no file-browser `Panel`/`List` is visible |
-| F14 | Press `Ctrl+B` | Workspace pane appears for the active tab; header contains `Workspace`, the folder name, and the full workspace location |
+| F14 | Press `Ctrl+B` | Workspace pane appears for the active tab; header contains `Workspace` and a sanitized workspace name (plus only workspace-relative location when shown); the full authorized absolute path is excluded |
 | F15 | Press `Ctrl+B` again | Pane disappears; the editor reclaims the left slot; no other tab or document state changes |
 | F16 | While pane is hidden, press `Ctrl+O` and select `b.md` | Native file dialog opens normally; selected document opens in the active pane despite hidden workspace chrome; cancellation remains a no-op |
 
 ## Path Browser — dired-style filesystem browsing (Phase 24.3)
+
+**Plan 124 note (2026-09-17).** The Path Browser was re-anchored with the
+command surface: it renders as the same composer-width bottom sheet as the `/`
+palette (server origin `CommandPalette`) instead of a centered panel, sharing
+the `modal.scrim` veil over the panes + inspector rail. The step expectations
+below keep their semantics (seed fallback, fuzzy filter, descend/ascend/jump,
+recovery, security checks, one named dialog + one polite status); read
+"centered" placement statements against module 10 K92–K99 (sheet anchoring and
+veil) and the plan-124 execution record in `test-plan/index.md`. F30's
+"one centered Spotlight-style panel dims full window" is the historical
+geometry.
+
+**Plan 125 note (2026-09-18).** The path session is now a **mode of the one
+palette session** (`mode=path`) rather than its own surface family: the sheet,
+its width, its 6px gap and its veil come from the composer box (module 10
+K100/K106), the `/` sigil stays visible only in `catalogue` and `path` modes,
+and the same `Esc` cancels it. The picker stages (provider, model, session) ride
+the same sheet without the sigil. Nothing in the path workflow below changes
+otherwise, and the centered projection it replaced is deleted (module 10 K107).
 
 Built-in server-first browse workflow (`controlCenter.openPath`, shipped with
 the temporary default `Ctrl+Alt+P` chord — no init.js needed; see module 10
@@ -108,12 +127,67 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
 | F30 | Open Path Browser and inspect its surface/accessibility tree | One centered Spotlight-style panel dims full window; exactly one named modal Dialog contains Menu/MenuItems and a polite Status with `0 results`, `1 result`, or `{n} results`; path prompt is bounded/sanitized. |
 | F31 | Click scrim, type unsupported modifier/function input, paste, or start IME while Path Browser is open | Scrim/input is contained; no editor text/caret/selection mutation or path authority change. Escape closes and returns focus to originating pane. |
 
+## Plan 087 entry-state steps (welcome)
+
+| # | Action | Expected |
+|---|--------|----------|
+| F32 | Fresh launch on an empty tab (no restored document) | The empty tab is the **landing** (plan 118 Part D): the bundled `@clay/launcher` contribution renders the `Start` surface (module [01](01-launch-and-connection.md) L12a) when it is loaded, and the Clay-owned `Start with a file or folder` card with `Open file` / `Open folder` when no empty-tab contribution is installed (module [01](01-launch-and-connection.md) L12 — no product name in core). Either way: no prototype/stale document text, no document opened by rendering the landing, status bar normal |
+| F32a | With the launcher loaded, pick a recents row and activate the primary button (`Open <name>`) | The chosen folder becomes the tab's workspace and the landing is replaced by the editor pane + docbar; the tab label updates. UNRESOLVED on hosts without input synthesis — automated legs `frontend/src/launcher/LauncherPanel.test.tsx`, `frontend/src/shell/WorkspacePanes.test.tsx` |
+| F33 | Activate `Open file` (fallback card) or `Open folder…` (launcher, workspace pane foot) | Native file/folder dialog opens (user dialog, no implicit authority); cancelling leaves the current state intact |
+| F34 | Select a file in the native dialog and accept | Document opens in the pane; the landing hides; status/entry show `doc N` with the basename only (e.g. `review.md — doc 3 — v1`) |
+| F35 | Repeat with the folder dialog and accept a directory | Workspace root rebinds to the chosen folder (existing validated-grant path) **and the folder is stamped into the launcher recents** (one entry, newest first, duplicates moved to the front); the landing stays absent while a document is open |
+| F36 | Close the last document/pane | Pane returns to the landing state (the launcher when its package is loaded, else the core card), functional again |
+| F37 | Negative: check AT-SPI names for the landing state | Labels show basenames and sanitized copy only — no host path segments or secrets, with one documented exception: the launcher's recents rows deliberately show the stored absolute workspace path (module [01](01-launch-and-connection.md) L14) |
+| F37a | Negative: recents hygiene | A stored recent whose folder no longer exists is pruned on the next launcher read (not listed); removing a row (`⌫`) removes it from the server list only, never from disk; the launcher's own `listLauncherEntries` request never opens or writes a workspace |
+| F37b | Negative: first-run store | With no `launcher.json` (or a malformed one) the launcher shows its first-run note instead of placeholder rows, and the read path does not create the data root |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — restored multi-document panes:** the isolated v2 layout restored `a.txt` and `b.md` into separate panes. AT-SPI exposed `Pane 1 of 2: editor` / `Pane 2 of 2: b.md`, separate editor/status nodes, and `Open docs: 2`; the connection remained live.
 - **BLOCKED — native dialog steps (F1/F2/F16/F23):** this host's portal path could open a dialog but could not safely target/select its UI from the agent, so file-picker selection/cancellation was not re-run. No product failure inferred.
 - **FAIL/BLOCKER — dirty close path:** typing into `a.txt` and pressing `Ctrl+Alt+W` reproduced a client panic, `accesskit_consumer-0.31.0/src/tree.rs:34:13: Focused ID #4 is not in the node list`; the isolated server stayed alive. Evidence: `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. Clean pane close passed separately and announced `Closed pane; 1 pane remains`.
 - **PASS — negative checks:** status/entry labels showed sanitized basenames and bounded diagnostics, not `/tmp` paths or document secrets. HOME/XDG config/data roots were isolated under the mode-700 temporary root; no ambient config was used.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — F32/F33/F34/F37:** from the welcome state, AT-SPI `click` on the `Open File` button opened the native Nautilus Open File dialog (no implicit authority — a real user dialog was required); typing the workspace path into the dialog's location box and accepting opened `review.md` as `doc 3` (`DocumentOpened` in the client log, entry `Clay — Connected — Editable — review.md — doc 3 — v1`, welcome hidden). AT-SPI names showed only basenames — no `/tmp/…` or `/home/…` segments.
+- **Coverage note:** F35 (Open Folder) and F36 (close-last-pane returns to welcome) were not re-run this session; F36's welcome-return is covered by unit tests (`close_pane` resets to welcome) and S35 below.
+
+## Plan 088 workspace-surface steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F38 | Toggle the workspace browser on a real workspace and inspect its header/rows | Header uses `Workspace · <sanitized name>`; visible directory labels are bounded and sanitized; no full `/home/...` or `/tmp/...` authorization path leaks |
+| F39 | Return to an empty tab/landing state after closing its document | The landing uses the sanitized workspace basename in the status chrome and keeps its actions accessible (launcher rows/primary button, or the fallback card); it does not reserve an unnecessary left browser slot |
+| F40 | Use long/control-character/path-separator file and workspace names where the host permits | Labels truncate/fallback safely, never expose host path layout, and accessibility names stay bounded |
+| F41 | Inspect browser and welcome trees while a file is selected | Browser/welcome labels and status diagnostics remain non-color-only and contain no document secrets or absolute paths |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F14/F38/F40 | BLOCKED — host window targeting/native dialog limitation | Existing structural sanitization test and Task 4 implementation evidence pass; this host cannot focus Clay or drive the browser/native chooser safely, so no browser visual pass is claimed |
+| F39 | PASS | Current Clay-only default artifact `code-reviews/screenshots/2026-08-15-plan088-task12-manual/default/` exposes sanitized `Workspace: clay`, bounded welcome actions/status, and no absolute path in screenshot/tree |
+| F41 | PASS welcome / BLOCKED browser | Current tree proves non-color-only welcome/status names and no path leak; browser tree could not be targeted safely on this host |
+| F35/F36 | NOT RUN manually | Welcome-return structural coverage passes (`new welcome_entry_reclaims_workspace_sidebar_space`, `S35`); direct Open Folder/last-document interaction remains blocked by targeted input |
+
+## Plan 097 Phase 9 Tauri/React desktop workflow steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F42 | Use empty-tab Open File in the Tauri client, select a file, then cancel a second picker | Existing native backend opens off the render thread; selection travels directly through the single-use selected-path capability; cancel is a no-op and no absolute path enters DOM/package data |
+| F43 | Use Open Folder and the tab `+` action | Open Folder rebinds only the active tab workspace through the existing directory grant; `+` opens a folder picker and creates one independent tab bootstrap without exposing the selected path to React |
+| F44 | Open Path Browser with `Ctrl+X Ctrl+F`; filter, descend, ascend, direct-jump, and cancel | One React modal/list projection updates only from server snapshots; semantic Backspace ascends; no filesystem work or local fuzzy matching runs in React |
+| F45 | `Enter` a file and `Alt+Enter` a directory in Path Browser | Server resolves only installed canonical entries; file gets one `SingleFile` grant, directory gets one tab-bound `Directory` root; menu closes before document/tab updates |
+| F46 | Toggle workspace browser, open files, and run Git refresh/status commands | Existing validated SDUI/file-browser tree and Git command/status data render through React; package/server filesystem authority remains unchanged |
+| F47 | Switch tabs or reload while Path Browser is open | Explicit close removes only the owning tab's menu; stale intents fail bounded; no hidden session or cross-tab path grant remains |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F42–F43 | PASS Rust/bridge path; native picker interaction BLOCKED | Tauri desktop tests pass and keep `core:default` only; commands reuse Clay's existing native backend and `ClientEditQueue` capability helpers. Computer-use reports no keyboard backend, so portal selection was not falsely claimed |
+| F44–F47 | PASS automated + deterministic React fixture | Command/path lifecycle suites and frontend opaque-intent tests pass; command active/empty wide+narrow screenshots and accessibility snapshots are under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/` |
 
 ## Negative checks
 
@@ -155,3 +229,112 @@ ln -s /tmp/clay-manual/a.txt /tmp/clay-manual/link.txt
   defaults without changing the command id; `Alt+Enter` is the fixed
   secondary activation (not configurable in 24.3).
 - Windows dialog specifics belong to module 12.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Path Browser rest state | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/path-browser/fixture-{wide,narrow}.*` shows one bounded modal, Search field, two results, count, and action instructions |
+| Editor path display | PASS | `editor/fixture-*` no longer exposes the `/tmp/ws` fixture root; `ClayEditor` reduces absolute labels to a basename and the editor test locks this behavior |
+| File/folder dialog and path activation | UNRESOLVED interaction | No safe keyboard/window-targeting backend on this host; native dialog path remains covered by bridge/server/security suites |
+
+Retained evidence contains fixture paths only; unrelated full-desktop portal
+screenshots were removed.
+
+## Plan 098 chunked document loading steps
+
+Setup: run `scripts/large-document-smoke.sh`. Its synthetic workspace contains
+`large.md` (50 MiB UTF-8 text), `oversize.txt` (257 MiB sparse file), and
+`binary.dat` (a NUL-containing sample). The script uses a private socket and
+removes its fixtures on exit.
+
+| # | Action | Expected |
+|---|--------|----------|
+| F48 | Open `large.md` through Open File | `DocumentOpened` installs a bounded head; CodeMirror shows `Loading full document…`, the editor is read-only while chunks arrive, and the first content paints before the full 50 MiB document is ready |
+| F49 | After `large.md` reaches ready, insert text, Save, then Reload | Editing becomes enabled; Save clears dirty state; disk bytes and the reloaded chunk assembly equal the edited document; no diagnostic or hang appears |
+| F50 | Open `oversize.txt` | Open is refused with `DocumentBudgetExceeded`/resident-document-budget text in status and the empty pane; no document or grant is created and another Open File attempt remains possible |
+| F51 | Open `binary.dat` | Open is refused with `BinaryFileNotSupported`/binary text in status and the empty pane; no document or grant is created |
+| F52 | After F50/F51, cancel a picker and retry a valid open | Refusals do not leave a dialog lock or stale loading state; cancellation is a no-op and the workspace remains responsive |
+
+## Plan 098 Linux execution record (2026-08-26)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| F48–F52 | PASS protocol/server path; UNRESOLVED live editor interaction | `cargo test --test runtime large_document:: -- --nocapture` passed the 50 MiB open/chunk/edit/save/reload flow plus oversize and binary refusals. Fresh output is `code-reviews/screenshots/2026-08-26-plan098-manual/large-document-runtime.log`; the real Tauri launch and welcome state are captured in `real-app-welcome.png`, but portal/window targeting became unstable after synthetic file selection before a stable loaded-editor state could be inspected |
+| Negative path | PASS automated; NOT RUN visually | The runtime test asserts typed `DocumentBudgetExceeded` and `BinaryFileNotSupported` messages and no unexpected opens. No user files or host paths were retained |
+
+Live interaction is explicitly unresolved because AT-SPI exposed only the
+native Tauri frame and the Linux compositor moved the portal/client window
+partly off-screen. Do not count F48–F52 as manual GUI passes until a stable
+WebKitGTK target can be controlled.
+
+## Plan 099 progressive document/session steps
+
+| # | Action | Expected |
+|---|---|---|
+| F53 | Open each generated `perf-<size>mib-<kind>.<ext>` fixture through the workspace file browser | First text paints before ready; one pane session owns one current document and one request stream per chunk offset; ready clears loading without a blank editor; mode follows the extension. The 50 MiB ready target is ≤2 s on the reference host and ≤5 s on the designated device. |
+| F54 | While syntax is delayed, type, save, reload, and resync the active fixture | Local edits remain responsive; save/reload/resync preserves authoritative text and does not create partial-chunk undo history; edit acknowledgement target remains ≤40 ms p95. |
+
+## Plan 119 large-document loading check (P1-1)
+
+| # | Action | Expected |
+|---|--------|----------|
+| F55 | Fresh debug build: open the generated 50 MiB UTF-8 fixture, wait for ready, edit, save, and reload (`cargo test --test runtime large_document::` is the deterministic companion) | The head arrives within `max(500 ms, bytes / 25 MiB/s)` — 2 s at 50 MiB — then bounded chunks assemble before editing enables. The edit/save/reload round trip preserves exact bytes; every chunk stays ≤256 KiB. Oversize and binary inputs still refuse visibly without a stale loading state. This replaces the former flat 500 ms debug-only expectation, which flaked under ordinary CI contention; the 5 s full-load guard remains. |
+
+## Plan 126 document access-path steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| F56 | Open the ≥4 MiB fixture (`scripts/capture-ui-review.sh --fixture ui-review-large-document`, or `test-plan/artifacts/126-access-paths/launch-live.sh start`) | The document opens through the chunked path, first text paints before ready, and the editor becomes editable once chunks assemble. The accessible editor text stays bounded (a few thousand characters, never document-sized) and, once the analysis route reports the over-budget document, the status bar carries `Document exceeds the package analysis limit; baseline language support remains active.` Negative: no document-sized text in the accessibility tree, no stale loading state, no refusal of the client open (the package-op budget is module 09 P55 and never gates this path). |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| F53 | UNRESOLVED live; retained PASS evidence | The full harness generated all 72 synthetic files and launched the real client, but no file-browser input reached the WebKit view. Final-build progressive-loading captures remain under `code-reviews/screenshots/2026-08-28-plan099-editor-performance/editor-large-loading/`. |
+| F54 | UNRESOLVED live; PASS automated companion | No keyboard-capable backend or opened document was available. Server matrix save/reload/resync and single-session/no-history invariants remain the automated companion. |
+
+Do not convert harness `editor.open`/`editor.ready` bootstrap values into F53
+latency evidence; the run recorded no `bridge.patch_delivery` or parser stage.
+
+## Plan 119 execution record (2026-09-15)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F55 (including F48–F52 refusal/round-trip coverage) | PASS real-server automated path; UNRESOLVED loaded-editor interaction | Fresh `cargo test --test runtime large_document::` passed both tests in 2.04 s. The 50 MiB head/chunk/edit/save/reload scenario enforces the current 25 MiB/s + 500 ms-floor debug budget, 256 KiB chunks, exact round-trip bytes, plus oversize/binary refusal. No manual loaded-document claim is made: this review host still cannot drive a file picker into a stable WebKit editor target. |
+
+No existing step was deleted. F55 records the size-scaled P1-1 budget explicitly rather than silently retaining the flaky flat debug ceiling.
+
+## Plan 112 cross-reference (2026-09-07)
+
+File-browser rows carry semantic kind icons (folder/file/symlink from
+`file_browser.rs` SDUI projection, `navigation.up` for the parent row) rendered
+by the shared ClayIcon primitive from the active icon pack; labels and
+keyboard behavior are unchanged. Steps: [18 — Icon packs](18-icon-packs.md)
+(ICON-02, ICON-07, ICON-10, executed 2026-09-07).
+
+## Plan 118 execution record (2026-09-13)
+
+Executed against the freshly rebuilt Linux desktop build; artifacts under
+`test-plan/artifacts/118-quiet-instrument-migration/` (shared with modules
+01/13/14/15/17 — the evidence set is captured once per state).
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F32 (landing, both states) | PASS live | `core-fallback/` and `launcher-landing/` captures: the empty tab renders the fallback card and the launcher respectively; no document is opened by either, the workspace sidebar/rail still show the tab's empty state |
+| F35 (folder → workspace + recents stamp) | PASS live (read side) / UNRESOLVED interactive | `launcher-landing/accessibility.txt` lists exactly one recents row for the harness workspace — the row the client's own tab bootstrap stamped — proving the write path ran on a real build; driving the native dialog by hand stays input-blocked on this host |
+| F36 (close last document → landing) | UNRESOLVED interactive / PASS structural | `close_pane` resets the pane to the empty tab, which now resolves to the landing (`WorkspacePanes.test.tsx`: "keeps the core Open File / Open Folder fallback with no empty-tab contribution" + the launcher variant); no live input backend for the close chord |
+| F37/F37a/F37b negative checks | PASS structural | Sanitize tests unchanged; launcher store tests (`launcher.rs`: malformed file ⇒ empty store, missing folder pruned on read and persisted, out-of-range removal is a no-op, cap/prune bounds) and the read-path test that a listing never creates the data root |
+| F39 (landing after close) | PASS live (static) | The landing capture shows the sanitized `Workspace · workspace` chrome with the landing actions available |
+
+No existing step was deleted or weakened; F32's expected result was rewritten
+because the empty tab is a package contribution now, and F32a/F37a/F37b add
+the launcher-specific negative coverage.
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| F48–F55 (automated companion) | PASS | `cargo test --test runtime large_document:: -- --nocapture` on this tree: 50 MiB open→head 256 ms (262,142-byte head, 52,428,800 bytes total), chunked open/edit/save/reload round trip, plus oversize and binary refusals — 2 passed in 2.11 s. |
+| F56 | PASS live | Isolated live launch (`test-plan/artifacts/126-access-paths/launch-live.sh`, private mode-700 root, `tests/fixtures/configuration/ui-review-large-document/init.js`): `review.rs` = 4,231,903 bytes (808,003 words) restored through `layout.json`; the editor exposed `role=entry name='Document editor'`, `chars=2759` (bounded window of the document head, `pub fn helper_000000…`), states `editable,focused,supports-autocompletion`, and the status bar carried the analysis-limit note. Harness run on the same fixture: `scripts/capture-ui-review.sh --fixture ui-review-large-document` PASS with `viewport=1500x1104` and a clean 1500×1151 window crop (`test-plan/artifacts/126-access-paths/live-large-open/screenshot.png`, `a11y-tree.txt`, `metadata.txt`); the live-completion run's capture is `live-large-completion/screenshot.png`. An earlier harness attempt whose window sat off-screen under an overlapping terminal was discarded rather than recorded (artifact note in `live-large-open/`). |
+| Host note (changed ceiling) | — | Input synthesis works on this host through the **xdg-desktop-portal remote-desktop keyboard session** (the computer-use-linux MCP `press_key`/`type_text`): typing and chords reached the Clay window and were verified in the document text. `ydotool`/`wtype` remain unusable and the AT-SPI editor node still exposes no `EditableText`, so the AT-SPI `--drive` path cannot type into the editor — but the earlier "no keyboard backend at all" ceiling no longer holds for portal-driven runs. |

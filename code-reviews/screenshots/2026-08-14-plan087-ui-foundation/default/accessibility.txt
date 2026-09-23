@@ -1,0 +1,15 @@
+0|application|-|clay|/org/a11y/atspi/accessible/root|clay
+1|frame|-||/org/a11y/atspi/accessible/0/14|clay
+2|panel|-|Clay working area shell. Active pane 1.|/org/a11y/atspi/accessible/0/12|clay
+3|panel|-|Pane 1 of 1: editor|/org/a11y/atspi/accessible/0/11|clay
+4|panel|-|Ready to edit; Open a file or folder to start editing.; Workspace: clay; Connection: Connected; Access: Editable.|/org/a11y/atspi/accessible/0/10|clay
+5|panel|-|Welcome to Clay|/org/a11y/atspi/accessible/0/3|clay
+6|status bar|-|Ready to edit; Open a file or folder to start editing.; Workspace: clay; Connection: Connected; Access: Editable.|/org/a11y/atspi/accessible/0/14987979559889012225|clay
+6|button|-|Open File|/org/a11y/atspi/accessible/0/1|clay
+6|button|-|Open Folder|/org/a11y/atspi/accessible/0/2|clay
+5|panel|-|Server-driven UI region|/org/a11y/atspi/accessible/0/4|clay
+6|label|-||/org/a11y/atspi/accessible/0/15|clay
+5|panel|-|Package panels|/org/a11y/atspi/accessible/0/5|clay
+5|panel|-|Package overlays|/org/a11y/atspi/accessible/0/6|clay
+5|status bar|-|Clay — Connected — Editable — doc 1 — v1|/org/a11y/atspi/accessible/0/14987979559889015809|clay
+3|status bar|-||/org/a11y/atspi/accessible/0/14987979559889016834|clay

@@ -1,13 +1,15 @@
 # Document Leases and Region Locks
 
+> Lease/region-lock server semantics are current. `EditorSurface` references are historical native-client records; today the read-only gate lives in the frontend document session ([Frontend Edit Synchronization](frontend-edit-synchronization.md)).
+
 ## Source
 
 - `src/protocol/mod.rs`
 - `src/server/document.rs`
 - `src/server/locks.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/client/mod.rs`
-- `src/editor/surface.rs`
+- `src/editor/surface/mod.rs`
 
 ## Overview
 
@@ -29,7 +31,7 @@ Every edit message includes both `client_id` and `lease_id`. `DocumentState::app
 
 Region locks are server-internal metadata stored in `DocumentState::region_locks`. `register_region_lock` validates that each lock range is non-empty, in bounds, and aligned to UTF-8 character boundaries, then records a lock ID, byte range, owner metadata, and the document version at which the lock was created. Phase 5 exposes conflict metadata in protocol rejections, but it does not expose public lock-management APIs or AI/extension mutation authority.
 
-Phase 19 adds a separate transient `ScopedLockManager` for command/service mutation scopes. `ScopedLockTarget` carries range coordinates or document identity where `LockScope` alone is not enough, and `ScopedLockGuard` releases on drop. Range locks share `ranges_overlap` with `DocumentState`; document/range conflicts are document-local, behavior locks do not block ordinary document edits, and workspace locks conflict with every scope. Acquisition is immediate rather than queued, so callers remain cancellable and can return a typed conflict. Runtime reload currently uses only the behavior target during final commit; other targets are generic primitives for later server/AI mutations.
+Phase 19 adds a separate transient `ScopedLockManager` for command/service mutation scopes in `src/server/locks.rs`: a behavior-only serialization lock with an RAII `ScopedLockGuard`, acquired for the runtime-generation compare-and-swap commit and released before document refresh. Acquisition is immediate rather than queued, so callers remain cancellable and a lock already held returns the typed `BehaviorLocked` conflict instead of waiting. Behavior locks do not block ordinary document edits. Plan 131 deleted the generic `ScopedLockTarget` range/document/workspace variants and the shared `ranges_overlap` helper as unwired (they were pre-wired for server/AI mutation scopes that never arrived); region-lock overlap checks live entirely in `DocumentState`, as described below.
 
 Before rope mutation, the server converts each edit into an affected range. Inserts conflict when the insertion offset falls inside a locked half-open range. Delete and replace spans conflict when their half-open byte range overlaps a lock. Empty replace ranges are treated like inserts so a client cannot bypass a lock by changing operation shape. A conflict returns `EditRejection::RegionLocked { conflict }` with the lock ID, range, owner, and creation version; the canonical rope, document version, and last transaction ID remain unchanged.
 
@@ -75,17 +77,17 @@ let response = document.apply_edit(
 - `src/server/document.rs`: `second_client_receives_read_only_access` validates observer access.
 - `src/server/document.rs`: `server_rejects_edit_without_current_lease` validates missing/wrong lease rejection.
 - `src/server/document.rs`: `lease_released_or_retained_on_disconnect_matches_policy` validates deterministic lease release behavior.
-- `src/editor/surface.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
-- `src/client/mod.rs`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
+- `src/editor/surface/mod.rs`: `read_only_editor_allows_navigation_but_not_mutation` validates observer UI behavior.
+- `src/client/tests/`: `read_only_client_queue_does_not_emit_edit_message` validates queue-side authority enforcement.
 - `src/server/document.rs`: region-lock tests validate insert/delete conflicts, non-overlapping edits, invalid lock range rejection, and conflict metadata.
-- `src/server/locks.rs`: tests validate range/document/workspace conflict rules and behavior-lock RAII release.
-- `src/server/mod.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflicts across the real Unix socket IPC path.
+- `src/server/locks.rs`: tests validate the behavior lock's typed `BehaviorLocked` conflict and RAII release.
+- `src/server/tests.rs`: `real_server_end_to_end_region_locked_edit_rejected` validates region-lock conflicts across the real Unix socket IPC path.
 - Relevant commands: `cargo test server --quiet`, `cargo test client --quiet`, `cargo test --quiet`.
 
 ## Related
 
 - [Versioned Text Synchronization](versioned-text-synchronization.md)
 - [Server Document State](../modules/server-document-state.md)
-- [Client Edit Emission](client-edit-emission.md)
+- [Client Edit Emission](../archive/client-edit-emission.md)
 - [Protocol Codec](../modules/protocol-codec.md)
 - `plans/006-Phase5-Versioned-Text-Synchronization-and-Leases.md`

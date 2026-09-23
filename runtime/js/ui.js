@@ -8,7 +8,8 @@
 // JavaScript hooks are not package-facing authorities.
 function uiOps() {
     const ops = Deno?.core?.ops;
-    if (typeof ops?.op_clay_ui_register_panel_contribution !== "function" ||
+    if (typeof ops?.op_clay_ui_register_pane_content_contribution !== "function" ||
+        typeof ops?.op_clay_ui_register_panel_contribution !== "function" ||
         typeof ops?.op_clay_ui_register_component_contribution !== "function" ||
         typeof ops?.op_clay_ui_register_transient_overlay_contribution !== "function" ||
         typeof ops?.op_clay_ui_register_theme_token !== "function" ||
@@ -21,6 +22,9 @@ function uiOps() {
 }
 function encode(value) {
     return JSON.stringify(value ?? null);
+}
+export function serverRegisterPaneContentContribution(declaration) {
+    return JSON.parse(uiOps().op_clay_ui_register_pane_content_contribution(encode(declaration)));
 }
 export function serverRegisterPanelContribution(declaration) {
     return JSON.parse(uiOps().op_clay_ui_register_panel_contribution(encode(declaration)));

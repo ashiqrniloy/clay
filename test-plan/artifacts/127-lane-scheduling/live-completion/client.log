@@ -1,0 +1,7 @@
+
+** (clay-desktop:4162923): CRITICAL **: 23:39:25.294: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+Couldn't get key from code: Unidentified(Gtk(109))
+Couldn't get key from code: Unidentified(Gtk(109))
+Couldn't get key from code: Unidentified(Gtk(109))
+
+** (clay-desktop:4162923): CRITICAL **: 23:41:28.051: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed

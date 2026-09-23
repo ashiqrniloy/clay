@@ -1,0 +1,6 @@
+fixture=ui-review-error
+window_logical_size=900x600
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi

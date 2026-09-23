@@ -1,0 +1,36 @@
+
+** (clay-desktop:3061168): CRITICAL **: 21:47:15.667: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:48:05.574: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:48:55.580: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:49:45.459: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:50:35.997: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:51:26.023: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:52:15.720: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:53:05.709: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"getDocumentStatus","payload":{"clientId":0,"documentId":2}}
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"listLauncherEntries","payload":{"clientId":0}}
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"agent","payload":{"clientId":0,"command":"listSessions"}}
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"agent","payload":{"clientId":0,"command":"tabState"}}
+
+** (clay-desktop:3061168): CRITICAL **: 21:53:56.713: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:54:46.794: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:56:46.842: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"getDocumentStatus","payload":{"clientId":0,"documentId":3}}
+
+** (clay-desktop:3061168): CRITICAL **: 21:58:02.076: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:58:51.945: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+
+** (clay-desktop:3061168): CRITICAL **: 21:59:49.571: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed
+[bridge] session_request failed: NotConnected: no live server session; call session_bootstrap first :: {"family":"getDocumentStatus","payload":{"clientId":0,"documentId":4}}
+
+** (clay-desktop:3061168): CRITICAL **: 22:02:18.010: impl_GetExtents: assertion 'ATK_IS_COMPONENT (user_data)' failed

@@ -70,7 +70,7 @@ Semantic requests and notification-driven diagnostics run in bounded document-an
 ## Implementation and tests
 
 - Policy/load: `packages/lsp-typescript/dist/{index,load,server}.js`
-- Shared TypeScript-language-server policy: `packages/lsp-shared/typescript-language-server.js` copied into `dist/shared/`
+- Shared TypeScript-language-server policy: inventory specifier `lsp-shared/typescript-language-server.js`
 - Deterministic package suite: `node --test packages/lsp-typescript/typescript-package.test.mjs`
 - Cargo ownership/freshness suite: `cargo test --test lsp_bridge`
 - Real workspace fixture: `tests/fixtures/lsp/typescript/`

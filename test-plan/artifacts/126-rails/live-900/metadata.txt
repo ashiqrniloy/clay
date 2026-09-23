@@ -1,0 +1,11 @@
+fixture=ui-review-workspace
+config_source=tests/fixtures/configuration/ui-review-workspace/init.js
+window_requested_size=900x700
+theme=fixture-default
+appearance=fixture-default
+drive_steps=none
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+window_resize_note=requested 900x700, compositor kept 900x1151

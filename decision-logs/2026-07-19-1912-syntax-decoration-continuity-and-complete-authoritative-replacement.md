@@ -21,7 +21,7 @@ Manual testing after Plan 056 showed that the approved architecture did not solv
 Code-path review found two composed defects:
 
 1. `src/editor/surface.rs::interpolate_decoration_span` intentionally excludes insertion at the end of narrow syntax spans, so every appended word byte paints with the base brush until server output arrives.
-2. `src/server/syntax.rs` queries only the normalized changed envelope, then `decoration_sets_for_range` aligns publication to whole 128-byte chunks. Such a set can omit unchanged captures inside the larger range it claims to replace. `EditorDecorationState::apply_set` correctly removes overlapping provisional package/layer chunks before installing authoritative data, so omitted captures disappear. A short file commonly occupies one chunk, matching the all-white newline report.
+2. `src/server/syntax/mod.rs` queries only the normalized changed envelope, then `decoration_sets_for_range` aligns publication to whole 128-byte chunks. Such a set can omit unchanged captures inside the larger range it claims to replace. `EditorDecorationState::apply_set` correctly removes overlapping provisional package/layer chunks before installing authoritative data, so omitted captures disappear. A short file commonly occupies one chunk, matching the all-white newline report.
 
 Plan 056 tests checked parser captures, synthetic interpolation, and replacement behavior separately. They did not compose real grammar output, optimistic local edit, edit acknowledgement, and each streamed authoritative set while checking visible style after every transition.
 
@@ -53,7 +53,7 @@ Correctness must be tested through the composed state machine. Regression covera
 
 - `plans/057-Syntax-Decoration-Continuity-and-Replacement-Correctness.md`
 - `decision-logs/2026-07-19-0351-low-latency-incremental-syntax-decoration.md`
-- `src/server/syntax.rs::{decorations_for_window,decoration_sets_for_range}`
+- `src/server/syntax/mod.rs::{decorations_for_window,decoration_sets_for_range}`
 - `src/editor/surface.rs::{EditorDecorationState::apply_edit,EditorDecorationState::apply_set,interpolate_decoration_span}`
 - `tests/syntax_grammar.rs`
 - `tests/decoration_transport.rs`

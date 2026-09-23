@@ -1,0 +1,9 @@
+Plan 133 task 2 (protocol family split) — 2026-09-21, HEAD 6ee3b4c + working tree changes
+
+  scripts/check.sh full                 -> 0   (325 s, "full check PASSED", log: task2-check-full.log)
+  cargo test --test protocol            -> 0   (227 passed, all protocol suites)
+  cargo check --lib (after touch)       -> 0   4.7 s split vs 4.6 s pre-split steady state (A/B below)
+
+Same gate set as the task-1 baseline (all nine stages): audit / fmt / check --all-targets /
+clippy -D warnings (zero warnings) / test --all-targets (1996 passed, 1 ignored, 0 failed —
+identical to baseline) / bench-compile / desktop-clippy / desktop-test / bindings.

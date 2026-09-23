@@ -3,15 +3,599 @@
   "source": "docs/index.md#Clay JS API Registry Source Files",
   "entries": [
     {
+      "id": "agent.commandDispatch",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/command-dispatch.md",
+      "js_module": "clay:agent",
+      "js_export": "commandDispatch",
+      "js_facade": "runtime/js/agent.js::commandDispatch",
+      "backing_rust": "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::commandDispatch",
+      "deno_op": "op_clay_agent_command_dispatch",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_command_dispatch",
+      "name": "commandDispatch",
+      "user_facing_name": "Dispatch Agent Command",
+      "summary": "Dispatch a registered daemon command (slash surface) against daemon session state; live execution only.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the registered daemon command name (for example `\"/compact\"`)."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "optional",
+          "description": "the session to act on. Session-scoped handlers (`compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`) require it and fail closed without it."
+        },
+        {
+          "name": "args",
+          "type": "object",
+          "default": "optional",
+          "description": "handler arguments, e.g. `{ \"entryId\": \"...\" }` for `/branch`, `/fork`, `/clone`, or `{ \"sessionId\": \"...\" }` for the open-session commands."
+        }
+      ],
+      "security": "Dispatches a registered daemon command (slash surface) against daemon session state; handlers call daemon session RPCs only and cannot elevate acceptance policy or spawn processes. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.commandDispatch` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Dispatch is live-only: an unavailable daemon is a typed failure, never a deferred execution.",
+      "lookup_tags": ["agent", "command", "dispatch", "slash-commands", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.commandRegister",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/command-register.md",
+      "js_module": "clay:agent",
+      "js_export": "commandRegister",
+      "js_facade": "runtime/js/agent.js::commandRegister",
+      "backing_rust": "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::commandRegister",
+      "deno_op": "op_clay_agent_command_register",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_command_register",
+      "name": "commandRegister",
+      "user_facing_name": "Register Agent Command",
+      "summary": "Register an agent command declaration (slash-surface data) on the daemon's validated command registry; one-shot during package load.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short description shown in command discovery."
+        },
+        {
+          "name": "handler",
+          "type": "string",
+          "default": "optional",
+          "description": "a host-built-in handler — `compact`, `newSession`, `checkout`, `forkSession`, `cloneSession`, `tree`, `openSession`, `openSessionAsFork`, `startRun`, `startWorkflow`, or `steer`. Omitted handlers are data-only commands (dispatch rejects them)."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the daemon command name. Slash names (`\"/compact\"`) are invocable from prompt text; other names are dispatch-only. Duplicate names fail closed."
+        }
+      ],
+      "security": "Forwards an inert command declaration (name, optional handler name and description) to the daemon's validated command registry; handlers are host-built-in only and can never inject drivers or execute client code. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.commandRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Commands are data; the daemon's built-in handlers execute them under existing session authority.",
+      "lookup_tags": ["agent", "command", "registration", "slash-commands", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.compact",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/compact.md",
+      "js_module": "clay:agent",
+      "js_export": "compact",
+      "js_facade": "runtime/js/agent.js::compact",
+      "backing_rust": "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCompact",
+      "deno_op": "op_clay_agent_compact_session",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_compact_session",
+      "name": "compact",
+      "user_facing_name": "Compact Agent Session",
+      "summary": "Request a mid-session compaction of the agent conversation history.",
+      "owner": "server",
+      "phase": "Phase 1",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "compactAfterTokens",
+          "type": "number",
+          "default": "80000",
+          "description": "Observational-memory auto-compaction threshold override in tokens (decision 2158 default 80000; Prism package default 81000). Only meaningful for OM-attached sessions; also governs post-run auto-compaction."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session to compact."
+        },
+        {
+          "name": "strategy",
+          "type": "enum",
+          "default": "default",
+          "description": "`default`, `llm`, or `om`. Defaults to `agent.setRunOptions` `compaction` (default `llm`)."
+        }
+      ],
+      "security": "Forwards user intent to the clay-agent daemon through a validated op; the daemon applies the secret redactor to the compaction run. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.compact` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Compaction runs mid-session and fails closed while another run is active.",
+      "lookup_tags": ["agent", "compaction", "session", "history", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.knowledgeSetOptions",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/knowledge-set-options.md",
+      "js_module": "clay:agent",
+      "js_export": "knowledgeSetOptions",
+      "js_facade": "runtime/js/agent.js::knowledgeSetOptions",
+      "backing_rust": "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::knowledgeSetOptions",
+      "deno_op": "op_clay_agent_knowledge_set_options",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_knowledge_set_options",
+      "name": "knowledgeSetOptions",
+      "user_facing_name": "Set Agent Knowledge Options",
+      "summary": "Opt a workspace in (or out) of the opt-in knowledge bases (wiki, graft); the daemon loads or disposes the kernel extensions.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "graft",
+          "type": "boolean",
+          "default": "optional",
+          "description": "`true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required)."
+        },
+        {
+          "name": "graftCliPath",
+          "type": "string",
+          "default": "optional",
+          "description": "explicit path to a `graft` CLI entry (host-owned)."
+        },
+        {
+          "name": "graftDeepModel",
+          "type": "object",
+          "default": "optional",
+          "description": "Explicit model for `/graft-build-deep`; requires `graft: true`."
+        },
+        {
+          "name": "graftMode",
+          "type": "enum",
+          "default": "optional",
+          "description": "graft extension mode — `pull` (tools + commands + skill, default), `push` (retrieval pack + first-turn orientation + edit blast radius), or `both`."
+        },
+        {
+          "name": "wiki",
+          "type": "boolean",
+          "default": "optional",
+          "description": "`true` loads the wiki kernel extension; `false` disposes it. Absent = no change (at least one of `wiki`/`graft` is required)."
+        },
+        {
+          "name": "workspaceRoot",
+          "type": "string",
+          "default": "required",
+          "description": "absolute workspace root the knowledge base binds to."
+        }
+      ],
+      "security": "Forwards a configuration intent (workspace root, opt-in flags, and an optional graft deep-build model identity) to the daemon, which owns activation; writes stay inside the workspace `.wiki/` tree, the optional qmd binary is never spawned unless explicitly configured, and a graft deep-build key is read from the credential vault unless the trusted caller passes one inline (it joins the redactor and reaches the child process only in its environment, never argv). Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript.",
+      "agent_guidance": "Use `agent.knowledgeSetOptions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. The call is queued while the daemon is down and applies after the daemon initializes, so load entries never block on daemon startup.",
+      "lookup_tags": ["agent", "knowledge", "wiki", "graft", "prism-memory", "options", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.profileRegister",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/profile-register.md",
+      "js_module": "clay:agent",
+      "js_export": "profileRegister",
+      "js_facade": "runtime/js/agent.js::profileRegister",
+      "backing_rust": "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::profileRegister",
+      "deno_op": "op_clay_agent_profile_register",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_profile_register",
+      "name": "profileRegister",
+      "user_facing_name": "Register Agent Profile",
+      "summary": "Register an agent profile (name, prompt layer, tools, skills) on the daemon's validated registry; one-shot during package load.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short profile description shown in pickers."
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "default": "optional",
+          "description": "the profile's system prompt layer."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the profile name; sessions select it by name. Duplicate names fail closed."
+        },
+        {
+          "name": "skills",
+          "type": "string[]",
+          "default": "optional",
+          "description": "skill names resolved against the daemon skill registry; register skills before the profile that references them."
+        },
+        {
+          "name": "tools",
+          "type": "string[]",
+          "default": "optional",
+          "description": "tool names resolved against the daemon tool registry; unknown names fail closed at session start."
+        }
+      ],
+      "security": "Forwards an inert profile declaration to the daemon's validated registry; re-registering a profile name replaces the definition, and unknown tool or skill ids fail closed at session start, before any provider turn. Tool execution authority stays governed by the acceptance policy, not by registration. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.profileRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register referenced skills first (`agent.skillRegister`); a profile that names an unregistered skill fails closed before any provider turn.",
+      "lookup_tags": ["agent", "profile", "registration", "tools", "skills", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.resumeRun",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/resume-run.md",
+      "js_module": "clay:agent",
+      "js_export": "resumeRun",
+      "js_facade": "runtime/js/agent.js::resumeRun",
+      "backing_rust": "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::runResume",
+      "deno_op": "op_clay_agent_resume_run",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_resume_run",
+      "name": "resumeRun",
+      "user_facing_name": "Resume Suspended Agent Run",
+      "summary": "Deliver the user's approval decision to a suspended durable agent run.",
+      "owner": "server",
+      "phase": "Phase 1",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "decision",
+          "type": "enum",
+          "default": "optional",
+          "description": "single decision for the pending interruption."
+        },
+        {
+          "name": "decisions",
+          "type": "object[]",
+          "default": "optional",
+          "description": "batch of per-tool-call decisions with outcomes (`allow_once`, `allow_for_run`, `deny_once`, `deny_for_run`). Mutually exclusive with `decision`."
+        },
+        {
+          "name": "expectedVersion",
+          "type": "number",
+          "default": "required",
+          "description": "optimistic run-state version; mismatch fails closed."
+        },
+        {
+          "name": "runId",
+          "type": "string",
+          "default": "required",
+          "description": "the suspended run to resume."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the session that owns the suspended run."
+        }
+      ],
+      "security": "Forwards the user's decision to the daemon, which validates the decision shape and run-state version fail-closed; stale or malformed resumes have no side effects. Surfaces the pending approval to the user when not resuming programmatically. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.resumeRun` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Only resume with a decision the user actually made; automated approval without user intent is forbidden.",
+      "lookup_tags": ["agent", "approval", "resume", "run", "durable", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.searchSessions",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/search-sessions.md",
+      "js_module": "clay:agent",
+      "js_export": "searchSessions",
+      "js_facade": "runtime/js/agent.js::searchSessions",
+      "backing_rust": "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSearch",
+      "deno_op": "op_clay_agent_search_sessions",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_search_sessions",
+      "name": "searchSessions",
+      "user_facing_name": "Search Agent Sessions",
+      "summary": "Search past agent sessions within the session's workspace; hits are metadata, never implicit context.",
+      "owner": "server",
+      "phase": "Phase 1",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "limit",
+          "type": "number",
+          "default": "optional",
+          "description": "maximum hits (server caps the page size)."
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "default": "optional",
+          "description": "full-text query. Omitted queries list recent sessions."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live session whose workspace scopes the search."
+        }
+      ],
+      "security": "Workspace scoping is server-owned (the daemon filters by the session's stamped workspaceRoot); snippets are redacted daemon-side. Results are transcript metadata for explicit user-facing flows and are never auto-injected into agent context. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.searchSessions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Never treat search hits as injectable context; content becomes context only when the user explicitly opens or attaches a result.",
+      "lookup_tags": ["agent", "search", "sessions", "workspace", "fts", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.sessionTree",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/session-tree.md",
+      "js_module": "clay:agent",
+      "js_export": "sessionTree",
+      "js_facade": "runtime/js/agent.js::sessionTree",
+      "backing_rust": "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionCheckout",
+      "deno_op": "op_clay_agent_session_tree",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_session_tree",
+      "name": "sessionTree",
+      "user_facing_name": "Navigate Agent Session Tree",
+      "summary": "Checkout, fork, clone, or checkpoint an agent session's conversation tree with document restore.",
+      "owner": "server",
+      "phase": "Phase 1",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "entryId",
+          "type": "string",
+          "default": "required",
+          "description": "the target tree entry."
+        },
+        {
+          "name": "method",
+          "type": "enum",
+          "default": "required",
+          "description": "the tree operation."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session."
+        }
+      ],
+      "security": "Checkout first restores server-recorded document checkpoints (buffer-only, lease-respecting) before moving the conversation leaf; abandoned branches are kept, never deleted. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.sessionTree` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Checkout rewrites the live branch; confirm with the user before discarding their current position.",
+      "lookup_tags": ["agent", "tree", "checkout", "fork", "clone", "checkpoint", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.setFullAutonomy",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/set-full-autonomy.md",
+      "js_module": "clay:agent",
+      "js_export": "setFullAutonomy",
+      "js_facade": "runtime/js/agent.js::setFullAutonomy",
+      "backing_rust": "src/server/agent.rs::AgentHost::run; clay-agent/src/host.ts::sessionSetAutonomy",
+      "deno_op": "op_clay_agent_set_autonomy",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_set_autonomy",
+      "name": "setFullAutonomy",
+      "user_facing_name": "Set Agent Full Autonomy",
+      "summary": "Toggle full autonomy for one live agent session; on by default, host-set only.",
+      "owner": "server",
+      "phase": "Phase 1",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "default",
+          "type": "boolean",
+          "default": "true",
+          "description": "The autonomy default itself — sessions are fully autonomous unless a caller explicitly blocks it (decision 2026-09-20-2049, superseding the \"off by default\" part of decision 2157). Documented as a property, not a settable option; there is no \"default autonomy\" key in init.js."
+        },
+        {
+          "name": "enabled",
+          "type": "boolean",
+          "default": "required",
+          "description": "true skips approval prompts for gated calls; false restores them. New sessions start with true unless their creator passed `fullAutonomy: false`."
+        },
+        {
+          "name": "sessionId",
+          "type": "string",
+          "default": "required",
+          "description": "the live agent session."
+        }
+      ],
+      "security": "Autonomy is on by default and only the host side can change it; no agent-facing tool can flip this flag. With autonomy on, gated tool calls — out-of-workspace writes, delete/move, and shell-metacharacter commands — run without an approval prompt in that session, and a fresh session inherits the same default. Callers who want prompts must block autonomy explicitly (`fullAutonomy: false` at creation, or this API with `enabled: false`). A resumed session restores the autonomy recorded with it. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.setFullAutonomy` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Autonomy defaults to on: do not change it on a user's behalf in either direction, and never re-enable it after a user block without an explicit user action.",
+      "lookup_tags": ["agent", "autonomy", "approval", "permissions", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.setRunOptions",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/set-run-options.md",
+      "js_module": "clay:agent",
+      "js_export": "setRunOptions",
+      "js_facade": "runtime/js/agent.js::setRunOptions",
+      "backing_rust": "src/server/ops/agent.rs::agent_registration_rpc; clay-agent/src/host.ts::runSetOptions",
+      "deno_op": "op_clay_agent_run_set_options",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_run_set_options",
+      "name": "setRunOptions",
+      "user_facing_name": "Set Agent Run Options",
+      "summary": "Set coding-run policy caps and the default compaction strategy for the clay-agent daemon.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "maxInputTokens",
+          "type": "number",
+          "default": "null",
+          "description": "Cumulative billed input-token cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxOutputTokens",
+          "type": "number",
+          "default": "null",
+          "description": "Cumulative billed output-token cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxTurns",
+          "type": "number",
+          "default": "null",
+          "description": "Turn cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxToolRounds",
+          "type": "number",
+          "default": "null",
+          "description": "Tool-round cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxToolCalls",
+          "type": "number",
+          "default": "null",
+          "description": "Tool-call cap. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "maxWallTimeMs",
+          "type": "number",
+          "default": "null",
+          "description": "Wall-clock cap in milliseconds. Positive safe integer, or null to disable (default)."
+        },
+        {
+          "name": "compactAfterTokens",
+          "type": "number",
+          "default": "800000",
+          "description": "Auto-compact ceiling in tokens for the next created coding sessions with a declared context window. Fires at or above this estimate in addition to the attention compiler's compactRatio gate. Distinct from agent.compact compactAfterTokens (OM threshold, decision 2158 default 80000)."
+        },
+        {
+          "name": "compaction",
+          "type": "string",
+          "default": "llm",
+          "description": "Default compaction when agent.compact or /compact omit strategy. One of default, llm, om."
+        }
+      ],
+      "security": "Forwards a configuration intent (policy caps and a named compaction strategy) to the daemon. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority to package JavaScript.",
+      "agent_guidance": "Use `agent.setRunOptions` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. The call is queued while the daemon is down and applies after the daemon initializes, so init.js never blocks on daemon startup.",
+      "lookup_tags": ["agent", "run", "limits", "tokens", "compaction", "options", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
+      "id": "agent.skillRegister",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/agent/skill-register.md",
+      "js_module": "clay:agent",
+      "js_export": "skillRegister",
+      "js_facade": "runtime/js/agent.js::skillRegister",
+      "backing_rust": "src/server/ops/agent.rs::agent_rpc; clay-agent/src/host.ts::skillRegister",
+      "deno_op": "op_clay_agent_skill_register",
+      "deno_op_path": "src/server/ops/agent.rs::op_clay_agent_skill_register",
+      "name": "skillRegister",
+      "user_facing_name": "Register Agent Skill",
+      "summary": "Register an agent skill (progressive-disclosure instructions) on the daemon's validated registry; one-shot during package load.",
+      "owner": "server",
+      "phase": "Phase 2",
+      "visibility": "public",
+      "permissions": ["agent-host"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "description",
+          "type": "string",
+          "default": "optional",
+          "description": "short description shown in the skill catalog."
+        },
+        {
+          "name": "instructions",
+          "type": "string",
+          "default": "optional",
+          "description": "full instructions loaded on demand through `load_skill`."
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": "required",
+          "description": "the skill name; profiles reference it by name. Duplicate names fail closed."
+        },
+        {
+          "name": "toolNames",
+          "type": "string[]",
+          "default": "optional",
+          "description": "tools the skill documents; validated against the tool registry."
+        }
+      ],
+      "security": "Forwards an inert skill declaration (name, description, instructions, tool names) to the daemon's validated skill registry; re-registering a name replaces the definition. Skills surface only through the daemon's load_skill progressive-disclosure tool and never execute anything by being registered. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `agent.skillRegister` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`. Register skills before the profile that references them; keep instructions as documentation, never as an execution surface.",
+      "lookup_tags": ["agent", "skill", "registration", "progressive-disclosure", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": true
+    },
+    {
       "id": "application.quit",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/application/quit.md",
       "js_module": "clay:application",
       "js_export": "quit",
       "js_facade": "runtime/js/application.js::quit",
-      "backing_rust": "src/masonry_editor.rs::EditorAction::ExitRequested",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_application_quit",
-      "deno_op_path": "src/server/ops/application.rs::op_clay_application_quit",
+      "deno_op_path": "planned: src/server/ops/application.rs::op_clay_application_quit",
       "name": "quit",
       "user_facing_name": "Quit Clay",
       "summary": "Quit Clay through the planned `clay:application` Clay JavaScript facade.",
@@ -20,7 +604,20 @@
       "visibility": "public",
       "permissions": [],
       "key_bindings": ["Escape"],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "force",
+          "type": "boolean",
+          "default": "planned",
+          "description": "Planned force-quit flag that skips the save/confirm prompts."
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "default": "planned",
+          "description": "Planned reason string recorded for diagnostics and shutdown prompts."
+        }
+      ],
       "security": "Requests application shutdown only; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `application.quit` only for its documented application responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["application", "escapequitapplicationactions", "js-api"],
@@ -245,7 +842,7 @@
       "js_module": "clay:commands",
       "js_export": "serverOpenDirectory",
       "js_facade": "runtime/js/commands.js::serverOpenDirectory",
-      "backing_rust": "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::list_directory; src/server/connection.rs::file_browser_snapshot_message",
+      "backing_rust": "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::list_directory; src/server/connection/workspace.rs::file_browser_snapshot_message",
       "deno_op": "op_clay_commands_execute_command",
       "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_execute_command",
       "name": "serverOpenDirectory",
@@ -272,7 +869,7 @@
       "js_module": "clay:commands",
       "js_export": "serverOpenFile",
       "js_facade": "runtime/js/commands.js::serverOpenFile",
-      "backing_rust": "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace.rs::WorkspaceState::open_existing_file; src/server/workspace.rs::WorkspaceState::open_selected_file",
+      "backing_rust": "src/server/command_execution.rs::CommandExecutor::execute_workspace; src/server/workspace/mod.rs::WorkspaceState::open_existing_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file",
       "deno_op": "op_clay_commands_execute_command",
       "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_execute_command",
       "name": "serverOpenFile",
@@ -444,7 +1041,7 @@
         }
       ],
       "security": "Suppresses registered completion providers from selection, stale-drops in-flight results, and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw-op, native-widget, or package-manager authority. Does not remove registered metadata.",
-      "agent_guidance": "Use from ~/.config/clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.",
+      "agent_guidance": "Use from ~/.clay/init.js or test setup. Call once per target; re-enabling a disabled provider requires a package reload or runtime restart. Prefer packagePrefix when disabling all providers from one package; use exact provider when suppressing a single built-in or package-owned provider.",
       "lookup_tags": ["js-api", "completion", "provider", "disable", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
@@ -497,100 +1094,34 @@
       "deno_op_path": "src/server/ops/completion.rs::op_clay_completion_register_completion_provider",
       "name": "serverRegisterCompletionProvider",
       "user_facing_name": "Register Completion Provider",
-      "summary": "Register package-provided completion metadata and bounded static keyword/snippet items for Clay's server-side completion framework. Phase 18.19 adds inert snippet text-format, exclusive provider claim, and structured item descriptors.",
+      "summary": "Registers the completion providers declared in a package's `clay.contributions.completionProviders` manifest entries and optionally binds a package-owned handler module (`module` or `moduleSpecifier` plus `exportName`) that Clay invokes itself under the per-provider timeout. A `moduleSpecifier` handler runs on the domain's latency lane (plan 127); provider metadata, items, and budgets stay manifest-declared data.",
       "owner": "server",
-      "phase": "Phase 18.19",
+      "phase": "Phase 27",
       "visibility": "public",
       "permissions": ["completion-provider"],
       "key_bindings": [],
       "custom_properties": [
         {
-          "name": "packageManifest",
+          "name": "module",
           "type": "object",
           "default": "optional",
-          "description": "Full package.json-shaped manifest; when provided, Clay validates its completionProviders metadata directly."
+          "description": "Package-owned module object whose `exportName` export receives completion requests. Clay invokes that export itself on the domain's general runtime lane; the function value never crosses the op boundary and no callback, cross-package module, command, or native handle is accepted."
         },
         {
-          "name": "packageName",
+          "name": "exportName",
           "type": "string",
-          "default": "required-without-packageManifest",
-          "description": "Package name used for provenance when a load entry passes one provider descriptor."
+          "default": "provideCompletion",
+          "description": "Export of `module` (or `moduleSpecifier`) that Clay invokes, max 128 chars. Ignored when neither handler binding is present."
         },
         {
-          "name": "packagePrefix",
+          "name": "moduleSpecifier",
           "type": "string",
-          "default": "required-without-packageManifest",
-          "description": "Package apiPrefix used for provider ID ownership and provenance."
-        },
-        {
-          "name": "permissions",
-          "type": "string[]",
-          "default": "required-without-packageManifest",
-          "description": "Must include completion-provider."
-        },
-        {
-          "name": "completionProvider",
-          "type": "object",
-          "default": "required-without-packageManifest",
-          "description": "Inert completion provider descriptor matching clay.contributions.completionProviders."
-        },
-        {
-          "name": "providerId",
-          "type": "string",
-          "default": "required-without-completionProvider",
-          "description": "Package-prefixed provider ID such as example.words."
-        },
-        {
-          "name": "triggerCharacters",
-          "type": "string[]",
-          "default": "[]",
-          "description": "Inert trigger characters. They request completion but never execute callbacks."
-        },
-        {
-          "name": "wordBoundaryChars",
-          "type": "string[]",
-          "default": "core-buffer-word-boundaries",
-          "description": "Inert word-boundary characters used by providers to split tokens."
-        },
-        {
-          "name": "items",
-          "type": "(string|object)[]",
-          "default": "[]",
-          "description": "Bounded inert static keyword/snippet items. Strings become both label and insertText with textFormat plainText; structured objects carry label, insertText, optional detail, and optional textFormat."
-        },
-        {
-          "name": "exclusive",
-          "type": "boolean",
-          "default": "false",
-          "description": "When true and this provider matches at the highest priority tier, suppresses all strictly lower-priority matching providers while preserving equal-priority peers."
-        },
-        {
-          "name": "textFormat",
-          "type": "plainText\"|\"snippet",
-          "default": "plainText",
-          "description": "Per-item text format. Snippet items carry inert LSP placeholder syntax expanded client-local on accept."
-        },
-        {
-          "name": "priority",
-          "type": "number",
-          "default": "0",
-          "description": "Higher priority providers are considered first; ties are deterministic by ID."
-        },
-        {
-          "name": "timeoutMs",
-          "type": "number",
-          "default": "500",
-          "description": "Provider timeout budget, bounded to 1..=5000."
-        },
-        {
-          "name": "maxItems",
-          "type": "number",
-          "default": "64",
-          "description": "Per-provider item cap bounded by COMPLETION_RESULT_MAX_ITEMS."
+          "default": "optional",
+          "description": "Package-owned module specifier (max 512 chars), typically `import.meta.resolve(\"./provider.js\")`. When present the provider runs on the domain's latency lane by importing that module in the lane's isolate, so a busy parse, analysis, or configuration lane cannot delay completions. Must resolve to a loaded module owned by the registering package."
         }
       ],
-      "security": "Requires completion-provider permission and server-side package record validation of provider ID ownership, duplicate IDs/items, trigger metadata, static item/result bounds, timeout/item budgets, and inert load-time metadata. The public API registers inert keyword/snippet items only; JS provider execution tokens are intentionally not exposed. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function/module, client JavaScript, native handles, raw ops, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
-      "agent_guidance": "Use `completion.serverRegisterCompletionProvider` only from package load entries or tests that model package load entries. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
+      "security": "Requires completion-provider permission and a package record whose `clay.contributions.completionProviders` entries passed package-record validation (package-owned IDs, unique IDs and item labels, payload budget, inert trigger/boundary metadata, item/budget bounds). Optionally accepts a package-owned `module` object or package-owned `moduleSpecifier` whose `exportName` export Clay invokes itself on the runtime worker under the per-provider timeout budget; the op validates specifier ownership against the package's loaded-module allowlist and never receives a function value, callback, or native handle. Snippet items carry inert LSP placeholder syntax expanded client-local on accept with no callback, command, or provider code. It rejects handler/callback/complete/function, client JavaScript, native handles, raw ops, non-package module references, command side effects, URLs, CSS/raw colors, shell, network, AI, WASM/native/library, package-manager/download authority, and does not grant filesystem, workspace-index, extension loading authority, AI mutation authority, client-side JavaScript authority, raw-op, native-widget, or package-manager authority.",
+      "agent_guidance": "Declare provider metadata, trigger characters, items, and budgets in `package.json` under `clay.contributions.completionProviders` — this call never reads those fields from its options object. Use the options only to bind a package-owned handler module. Prefer `loadPackage(\"@vendor/provider\")` from user configuration; do not pass callbacks, raw Deno ops, another package's modules, commands, or UI widget code. Structured snippet items are data; do not pass executable snippet transforms or callback-accept hooks.",
       "lookup_tags": ["js-api", "completion", "provider", "package", "phase18.19"],
       "app_visible": true,
       "help_visible": true,
@@ -609,7 +1140,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_get_state",
       "name": "getConfigurationState",
       "user_facing_name": "Get Configuration State",
-      "summary": "Inspect Clay configuration metadata for the `~/.config/clay/init.js` entry point and local modules.",
+      "summary": "Inspect Clay configuration metadata for the `~/.clay/init.js` entry point and local modules.",
       "owner": "server",
       "phase": "Phase 13",
       "visibility": "public",
@@ -619,7 +1150,7 @@
         {
           "name": "entryPoint",
           "type": "string",
-          "default": "~/.config/clay/init.js",
+          "default": "~/.clay/init.js",
           "description": "User configuration entry point path reported by configuration state."
         },
         {
@@ -649,7 +1180,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_load_module",
       "name": "loadConfigurationModule",
       "user_facing_name": "Load Configuration Module",
-      "summary": "Load a local modular configuration file from the runtime-backed `~/.config/clay/init.js` server-side configuration runtime.",
+      "summary": "Load a local modular configuration file from the runtime-backed `~/.clay/init.js` server-side configuration runtime.",
       "owner": "server",
       "phase": "Phase 13",
       "visibility": "public",
@@ -660,7 +1191,7 @@
           "name": "path",
           "type": "string",
           "default": "none",
-          "description": "Local configuration module path relative to the configuration root (e.g. `~/.config/clay/init.js`)."
+          "description": "Local configuration module path relative to the configuration root (e.g. `~/.clay/init.js`)."
         },
         {
           "name": "optional",
@@ -670,7 +1201,7 @@
         }
       ],
       "security": "Local modular configuration contract only; Phase 13 executes only server-side configuration JavaScript through the constrained runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
-      "agent_guidance": "Use `configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.config/clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
+      "agent_guidance": "Use `configuration.loadConfigurationModule` only to describe modular local Clay configuration from `~/.clay/init.js`; do not invent filesystem, package, extension, network, shell, workspace, AI, WASM, or client-side JavaScript authority.",
       "lookup_tags": ["configuration", "entrypoint", "initjs", "js-api"],
       "app_visible": true,
       "help_visible": true,
@@ -689,7 +1220,7 @@
       "deno_op_path": "src/server/ops/configuration.rs::op_clay_configuration_set_package_option",
       "name": "setPackageOption",
       "user_facing_name": "Set Package Option",
-      "summary": "Register a validated package-owned configuration option from `~/.config/clay/init.js`.",
+      "summary": "Register a validated package-owned configuration option from `~/.clay/init.js`.",
       "owner": "server",
       "phase": "Phase 18.4",
       "visibility": "public",
@@ -721,7 +1252,7 @@
           "description": "One of `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6 persisted user-preference source)."
         }
       ],
-      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct Masonry widgets, native widget handles, raw CSS, callbacks, or state-value authority.",
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct client widgets, native widget handles, raw CSS, callbacks, or state-value authority.",
       "agent_guidance": "Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
       "lookup_tags": ["configuration", "package-options", "init-js", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
@@ -761,10 +1292,28 @@
           "description": "Server document version the spans were produced for."
         },
         {
-          "name": "viewportByteRange",
-          "type": "byte-range",
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "documentVersion",
+          "description": "Validation override used by tests/server integration; defaults to `documentVersion`."
+        },
+        {
+          "name": "viewport",
+          "type": "object",
           "default": "required",
-          "description": "Visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+          "description": "Required visible byte range `{ byteStart, byteEnd }`; ordinary publications must be viewport-bounded."
+        },
+        {
+          "name": "viewport.byteStart",
+          "type": "number",
+          "default": "required",
+          "description": "First byte of the visible range."
+        },
+        {
+          "name": "viewport.byteEnd",
+          "type": "number",
+          "default": "required",
+          "description": "Last byte of the visible range."
         },
         {
           "name": "spans",
@@ -841,6 +1390,12 @@
           "type": "string",
           "default": "package context",
           "description": "Package API prefix retained as provenance."
+        },
+        {
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Validation override used by tests/server integration; defaults to `documentVersion`."
         }
       ],
       "security": "Requires render-decorations permission plus server validation of package provenance, current document version, byte ranges, viewport bounds, source/code/message bounds, and DIAGNOSTIC_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, language-server process, client-side JavaScript, raw Deno ops, arbitrary CSS, draw callbacks, GPU commands, or native widget mutation authority.",
@@ -858,7 +1413,7 @@
       "js_module": "clay:documents",
       "js_export": "clientOpenFileDialog",
       "js_facade": "runtime/js/documents.js::clientOpenFileDialog",
-      "backing_rust": "src/client/file_dialog.rs::FileDialogResult; src/client/file_dialog.rs::open_markdown_file_dialog; src/main.rs::handle_client_ui_command",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_file; src/server/workspace/mod.rs::WorkspaceState::open_selected_file; src/protocol/mod.rs::ClientMessage::OpenSelectedFile",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientOpenFileDialog",
@@ -939,7 +1494,7 @@
       "js_module": "clay:documents",
       "js_export": "serverGetDocumentStatus",
       "js_facade": "runtime/js/documents.js::serverGetDocumentStatus",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::document_metadata",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::document_metadata",
       "deno_op": "op_clay_documents_get_document_status",
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_get_document_status",
       "name": "serverGetDocumentStatus",
@@ -966,7 +1521,7 @@
       "js_module": "clay:documents",
       "js_export": "serverListDocuments",
       "js_facade": "runtime/js/documents.js::serverListDocuments",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::list_documents",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::list_documents",
       "deno_op": "op_clay_documents_list_documents",
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_list_documents",
       "name": "serverListDocuments",
@@ -993,7 +1548,7 @@
       "js_module": "clay:documents",
       "js_export": "serverOpenDocument",
       "js_facade": "runtime/js/documents.js::serverOpenDocument",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::open_existing_file",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::open_existing_file",
       "deno_op": "op_clay_documents_open_document",
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_open_document",
       "name": "serverOpenDocument",
@@ -1004,7 +1559,20 @@
       "visibility": "public",
       "permissions": ["workspace-read", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "path",
+          "type": "string",
+          "default": "required",
+          "description": "Workspace-relative path to an existing UTF-8 text file."
+        },
+        {
+          "name": "workspaceRootId",
+          "type": "string",
+          "default": "required",
+          "description": "Configured server workspace root identifier advertised by Clay."
+        }
+      ],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverOpenDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "open", "js-api"],
@@ -1020,7 +1588,7 @@
       "js_module": "clay:documents",
       "js_export": "serverReloadDocument",
       "js_facade": "runtime/js/documents.js::serverReloadDocument",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::reload_document",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::reload_document",
       "deno_op": "op_clay_documents_reload_document",
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_reload_document",
       "name": "serverReloadDocument",
@@ -1031,7 +1599,26 @@
       "visibility": "public",
       "permissions": ["workspace-read", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Open document to reload."
+        },
+        {
+          "name": "force",
+          "type": "boolean",
+          "default": "false",
+          "description": "Permit replacing a dirty server document when the user has explicitly chosen to discard edits."
+        },
+        {
+          "name": "knownVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Version the caller expects."
+        }
+      ],
       "security": "Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "reload", "dirty-state", "js-api"],
@@ -1047,7 +1634,7 @@
       "js_module": "clay:documents",
       "js_export": "serverSaveDocument",
       "js_facade": "runtime/js/documents.js::serverSaveDocument",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::save_document",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::save_document",
       "deno_op": "op_clay_documents_save_document",
       "deno_op_path": "src/server/ops/documents.rs::op_clay_documents_save_document",
       "name": "serverSaveDocument",
@@ -1058,7 +1645,20 @@
       "visibility": "public",
       "permissions": ["workspace-write", "document-read"],
       "key_bindings": [],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Open document to save."
+        },
+        {
+          "name": "knownVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Confirmed server version known by the caller. Values at or below the canonical version are accepted; a value newer than the server is rejected as protocol/state confusion. Omission uses the server-internal baseline."
+        }
+      ],
       "security": "The trusted-only documents facade uses server-internal save authority, validates any explicit knownVersion against canonical server state, confines writes to an already-authorized open workspace document with path traversal rejection, and performs exclusive same-directory atomic replacement with target-identity revalidation; it is absent from the third-party package runtime and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `documents.serverSaveDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.",
       "lookup_tags": ["documents", "workspace", "file", "save", "dirty-state", "js-api"],
@@ -1074,7 +1674,7 @@
       "js_module": "clay:editor",
       "js_export": "clientAddCursor",
       "js_facade": "runtime/js/editor.js::clientAddCursor",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::add_cursor_line",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_add_cursor",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_add_cursor",
       "name": "clientAddCursor",
@@ -1091,6 +1691,12 @@
           "type": "enum",
           "default": "none",
           "description": "Where the new caret is added relative to the primary (below, above)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Reserved surface target; the client applies the command to the focused editor."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1108,7 +1714,7 @@
       "js_module": "clay:editor",
       "js_export": "clientCancelMultipleSelections",
       "js_facade": "runtime/js/editor.js::clientCancelMultipleSelections",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::cancel_multiple_selections",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientCancelMultipleSelections",
@@ -1135,7 +1741,7 @@
       "js_module": "clay:editor",
       "js_export": "clientColumnSelect",
       "js_facade": "runtime/js/editor.js::clientColumnSelect",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::add_cursor_line",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_column_select",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_column_select",
       "name": "clientColumnSelect",
@@ -1152,6 +1758,12 @@
           "type": "enum",
           "default": "none",
           "description": "Column-select direction (down, up, left, right)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Reserved surface target; the client applies the command to the focused editor."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1169,7 +1781,7 @@
       "js_module": "clay:editor",
       "js_export": "clientCopySelection",
       "js_facade": "runtime/js/editor.js::clientCopySelection",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::copy_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientCopySelection",
@@ -1196,7 +1808,7 @@
       "js_module": "clay:editor",
       "js_export": "clientCutSelection",
       "js_facade": "runtime/js/editor.js::clientCutSelection",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::cut_selection_to_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::selected_text",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientCutSelection",
@@ -1223,7 +1835,7 @@
       "js_module": "clay:editor",
       "js_export": "clientDismissRecovery",
       "js_facade": "runtime/js/editor.js::clientDismissRecovery",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::dismiss_recovery",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientDismissRecovery",
@@ -1250,7 +1862,7 @@
       "js_module": "clay:editor",
       "js_export": "clientExecuteEditorCommand",
       "js_facade": "runtime/js/editor.js::clientExecuteEditorCommand",
-      "backing_rust": "src/server/ops/editor.rs::op_clay_editor_execute_command; src/masonry_editor.rs::EditorWidget::apply_editor_command_request",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/server/ops/editor.rs::op_clay_editor_execute_command",
       "deno_op": "op_clay_editor_execute_command",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_execute_command",
       "name": "clientExecuteEditorCommand",
@@ -1284,7 +1896,7 @@
       "js_module": "clay:editor",
       "js_export": "clientKeepSelection",
       "js_facade": "runtime/js/editor.js::clientKeepSelection",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::keep_selection",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientKeepSelection",
@@ -1311,7 +1923,7 @@
       "js_module": "clay:editor",
       "js_export": "clientMoveCursor",
       "js_facade": "runtime/js/editor.js::clientMoveCursor",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::move_word_start",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_move_cursor",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_move_cursor",
       "name": "clientMoveCursor",
@@ -1346,6 +1958,12 @@
           "type": "number",
           "default": "1",
           "description": "Repeat count for the motion (clamped to >= 1)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only client-local caret/selection/viewport state and grants no document mutation or external authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1363,7 +1981,7 @@
       "js_module": "clay:editor",
       "js_export": "clientPasteClipboard",
       "js_facade": "runtime/js/editor.js::clientPasteClipboard",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::paste_from_system_clipboard; src/client/clipboard.rs::SystemClipboard; src/editor/surface.rs::EditorSurface::paste_text_with_event",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientPasteClipboard",
@@ -1390,7 +2008,7 @@
       "js_module": "clay:editor",
       "js_export": "clientRedo",
       "js_facade": "runtime/js/editor.js::clientRedo",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::redo; src/editor/surface.rs::EditorSurface::redo_with_event; src/editor/history.rs::EditHistory",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientRedo",
@@ -1417,7 +2035,7 @@
       "js_module": "clay:editor",
       "js_export": "clientRemoveSelection",
       "js_facade": "runtime/js/editor.js::clientRemoveSelection",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::remove_selection",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientRemoveSelection",
@@ -1444,7 +2062,7 @@
       "js_module": "clay:editor",
       "js_export": "clientRequestResync",
       "js_facade": "runtime/js/editor.js::clientRequestResync",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::request_resync_active_document; src/client/mod.rs::ClientEditQueue::enqueue_request_resync",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/client/mod.rs::ClientEditQueue::enqueue_request_resync",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientRequestResync",
@@ -1471,7 +2089,7 @@
       "js_module": "clay:editor",
       "js_export": "clientScrollTo",
       "js_facade": "runtime/js/editor.js::clientScrollTo",
-      "backing_rust": "src/editor/viewport.rs::Viewport::scroll_lines",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_scroll_to",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_scroll_to",
       "name": "clientScrollTo",
@@ -1500,6 +2118,12 @@
           "type": "boolean",
           "default": "false",
           "description": "Behavior-changing setting `revealCursor` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1517,7 +2141,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSelectAllMatches",
       "js_facade": "runtime/js/editor.js::clientSelectAllMatches",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::select_all_matches",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSelectAllMatches",
@@ -1544,7 +2168,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSelectNextMatch",
       "js_facade": "runtime/js/editor.js::clientSelectNextMatch",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::select_next_match",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSelectNextMatch",
@@ -1571,7 +2195,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSelectPrevMatch",
       "js_facade": "runtime/js/editor.js::clientSelectPrevMatch",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::select_next_match",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSelectPrevMatch",
@@ -1598,7 +2222,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSelectTextobject",
       "js_facade": "runtime/js/editor.js::clientSelectTextobject",
-      "backing_rust": "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/server/syntax/mod.rs::TreeSitterSyntaxHandler::selection_query_ranges",
       "deno_op": "op_clay_editor_select_textobject",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_select_textobject",
       "name": "clientSelectTextobject",
@@ -1644,7 +2268,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSetCursorStyle",
       "js_facade": "runtime/js/editor.js::clientSetCursorStyle",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::set_caret_style_override",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_set_cursor_style",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_cursor_style",
       "name": "clientSetCursorStyle",
@@ -1702,13 +2326,53 @@
       "async": false
     },
     {
+      "id": "editor.clientSetEditorLayout",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-set-editor-layout.md",
+      "js_module": "clay:editor",
+      "js_export": "clientSetEditorLayout",
+      "js_facade": "runtime/js/editor.js::clientSetEditorLayout",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_editor_set_editor_layout",
+      "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_editor_layout",
+      "name": "clientSetEditorLayout",
+      "user_facing_name": "Set Editor Layout",
+      "summary": "Set the user-owned document wrap-policy override through the `clay:editor` Clay JavaScript facade.",
+      "owner": "client",
+      "phase": "Phase 26",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "wrapPolicy",
+          "type": "enum",
+          "default": "required",
+          "description": "Document wrap policy; allowed values are none, viewport, and column. `none` disables wrapping and enables horizontal scrolling; `viewport` wraps to the pane content width; `column` wraps to `columnCap` average character widths. The override beats the per-mode manifest `editorRules.layout.wrap`."
+        },
+        {
+          "name": "columnCap",
+          "type": "number",
+          "default": "72",
+          "description": "Column cap for `column` (clamped to 16–240). Ignored for `none` and `viewport`."
+        }
+      ],
+      "security": "Configuration-only rendering customization; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
+      "agent_guidance": "Use `editor.clientSetEditorLayout` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
+      "lookup_tags": ["editorlayout", "editor", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "editor.clientSetSelection",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-set-selection.md",
       "js_module": "clay:editor",
       "js_export": "clientSetSelection",
       "js_facade": "runtime/js/editor.js::clientSetSelection",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::select_word",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_set_selection",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_selection",
       "name": "clientSetSelection",
@@ -1737,6 +2401,12 @@
           "type": "enum",
           "default": "current",
           "description": "Selection direction (current, next, prev)."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "optional",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1754,7 +2424,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSetViewport",
       "js_facade": "runtime/js/editor.js::clientSetViewport",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::update_visible_line_count_for_height",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_editor_set_viewport",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_set_viewport",
       "name": "clientSetViewport",
@@ -1777,6 +2447,12 @@
           "type": "number",
           "default": "4",
           "description": "Behavior-changing setting `overscanLines` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target editor/document surface."
         }
       ],
       "security": "Controls local viewport metadata only and does not expose document contents beyond the visible editor surface; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, or document mutation authority.",
@@ -1794,7 +2470,7 @@
       "js_module": "clay:editor",
       "js_export": "clientShowOpenDocuments",
       "js_facade": "runtime/js/editor.js::clientShowOpenDocuments",
-      "backing_rust": "src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/main.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientShowOpenDocuments",
@@ -1821,7 +2497,7 @@
       "js_module": "clay:editor",
       "js_export": "clientSmartSelect",
       "js_facade": "runtime/js/editor.js::clientSmartSelect",
-      "backing_rust": "src/server/syntax.rs::TreeSitterSyntaxHandler::selection_query_ranges; src/masonry_editor.rs::EditorWidget::apply_selection_query_result",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/server/syntax/mod.rs::TreeSitterSyntaxHandler::selection_query_ranges",
       "deno_op": "op_clay_editor_smart_select",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_smart_select",
       "name": "clientSmartSelect",
@@ -1849,13 +2525,40 @@
       "async": false
     },
     {
+      "id": "editor.clientToggleFold",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/client-toggle-fold.md",
+      "js_module": "clay:editor",
+      "js_export": "clientToggleFold",
+      "js_facade": "runtime/js/editor.js::clientToggleFold",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "clientToggleFold",
+      "user_facing_name": "Toggle Fold",
+      "summary": "Return the stable client command ID for collapsing or expanding the fold containing the caret.",
+      "owner": "client",
+      "phase": "Phase 28.3",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; changes client-local collapse state for validated inert fold ranges and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `editor.clientToggleFold` through `bindKey`; packages publish inert ranges through `folding.serverPublishFoldingRanges`, while Clay owns collapse state and painting. Do not expose fold handles or raw ops.",
+      "lookup_tags": ["editor", "folding", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
       "id": "editor.clientUndo",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/editor/client-undo.md",
       "js_module": "clay:editor",
       "js_export": "clientUndo",
       "js_facade": "runtime/js/editor.js::clientUndo",
-      "backing_rust": "src/masonry_editor.rs::EditorWidget::undo; src/editor/surface.rs::EditorSurface::undo_with_event; src/editor/history.rs::EditHistory",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientUndo",
@@ -1882,7 +2585,7 @@
       "js_module": "clay:editor",
       "js_export": "clientUndoCursorMove",
       "js_facade": "runtime/js/editor.js::clientUndoCursorMove",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::undo_cursor_move",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientUndoCursorMove",
@@ -1897,6 +2600,33 @@
       "security": "Bindable client UI command ID only; after explicit user routing it changes transient client selection state, and this API does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
       "agent_guidance": "Use `editor.clientUndoCursorMove` only as a documented command ID for `bindKey`; do not expose raw Rust calls, protocol DTOs, or `Deno.core.ops`.",
       "lookup_tags": ["editor", "js-api", "multi-cursor", "selection", "undo"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "editor.rotateHeading",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/rotate-heading.md",
+      "js_module": "clay:editor",
+      "js_export": "rotateHeading",
+      "js_facade": "runtime/js/editor.js::rotateHeading",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "rotateHeading",
+      "user_facing_name": "Rotate Heading",
+      "summary": "Return the stable command ID for cycling manifest-declared heading prefixes.",
+      "owner": "client",
+      "phase": "Phase 28.2",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client-first editor command ID only; cycles inert heading prefixes locally after explicit user routing and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `editor.rotateHeading` through `bindKey`; heading prefixes come from the active behavior manifest. Do not add language-specific Rust branches or raw Deno ops.",
+      "lookup_tags": ["editor", "heading", "text-transform", "keybindings", "js-api"],
       "app_visible": true,
       "help_visible": true,
       "stability": "runtime-backed-command",
@@ -1920,7 +2650,26 @@
       "visibility": "public",
       "permissions": ["document-edit"],
       "key_bindings": ["Backspace", "Delete"],
-      "custom_properties": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier."
+        },
+        {
+          "name": "end",
+          "type": "number",
+          "default": "required",
+          "description": "Exclusive end offset of the range to delete."
+        },
+        {
+          "name": "start",
+          "type": "number",
+          "default": "required",
+          "description": "Start offset of the range to delete."
+        }
+      ],
       "security": "Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
       "agent_guidance": "Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.",
       "lookup_tags": ["backspacedelete", "editor", "js-api"],
@@ -1936,7 +2685,7 @@
       "js_module": "clay:editor",
       "js_export": "serverInsertNewline",
       "js_facade": "runtime/js/editor.js::serverInsertNewline",
-      "backing_rust": "src/editor/surface.rs::EditorSurface::insert_newline_with_event; src/server/document.rs::DocumentState::apply_edit",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/server/document.rs::DocumentState::apply_edit",
       "deno_op": "op_clay_editor_insert_newline",
       "deno_op_path": "src/server/ops/editor.rs::op_clay_editor_insert_newline",
       "name": "serverInsertNewline",
@@ -1959,6 +2708,18 @@
           "type": "manifest",
           "default": "//",
           "description": "Behavior-changing setting `commentContinuation` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier."
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "default": "required",
+          "description": "Insertion offset for the newline."
         }
       ],
       "security": "Uses inert behavior manifest rules for hot-path newline shaping and still requires document edit authority; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -1993,6 +2754,24 @@
           "type": "boolean",
           "default": "true",
           "description": "Behavior-changing setting `normalizeLineEndings` for this API."
+        },
+        {
+          "name": "documentId",
+          "type": "string",
+          "default": "required",
+          "description": "Target document identifier such as `\"current\"` once runtime document IDs exist."
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "default": "required",
+          "description": "Protocol-defined insertion offset."
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "default": "required",
+          "description": "Inert text to insert."
         }
       ],
       "security": "Requires edit authority for the target document and a valid lease once runtime permission checks exist; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.",
@@ -2002,6 +2781,145 @@
       "help_visible": true,
       "stability": "planned",
       "async": true
+    },
+    {
+      "id": "editor.toggleComment",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/toggle-comment.md",
+      "js_module": "clay:editor",
+      "js_export": "toggleComment",
+      "js_facade": "runtime/js/editor.js::toggleComment",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "toggleComment",
+      "user_facing_name": "Toggle Comment",
+      "summary": "Return the stable command ID for the manifest-driven line-prefix comment toggle.",
+      "owner": "client",
+      "phase": "Phase 28.2",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+/"],
+      "custom_properties": [],
+      "security": "Bindable client-first editor command ID only; applies line-prefix edits locally after explicit user routing and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `editor.toggleComment` through `bindKey`; comment syntax comes from the active behavior manifest. Do not add language-specific Rust branches, raw edit operations, or raw Deno ops.",
+      "lookup_tags": ["editor", "comment", "text-transform", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "editor.toggleInlayHints",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/toggle-inlay-hints.md",
+      "js_module": "clay:editor",
+      "js_export": "toggleInlayHints",
+      "js_facade": "runtime/js/editor.js::toggleInlayHints",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "toggleInlayHints",
+      "user_facing_name": "Toggle Inlay Hints",
+      "summary": "Return the stable client command ID for showing or hiding inlay-hint overlays.",
+      "owner": "client",
+      "phase": "Phase 28.5",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client UI command ID only; changes the client-local inlay visibility override for inert decoration data and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `editor.toggleInlayHints` through `bindKey`; inlay data is published by the existing decoration/LSP path and painted by Clay as an overlay. Do not expose LSP clients, decoration handles, or raw ops.",
+      "lookup_tags": ["editor", "inlay-hints", "decorations", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "editor.toggleListMarker",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/editor/toggle-list-marker.md",
+      "js_module": "clay:editor",
+      "js_export": "toggleListMarker",
+      "js_facade": "runtime/js/editor.js::toggleListMarker",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "toggleListMarker",
+      "user_facing_name": "Toggle List Marker",
+      "summary": "Return the stable command ID for the manifest-driven list-marker toggle.",
+      "owner": "client",
+      "phase": "Phase 28.2",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [],
+      "security": "Bindable client-first editor command ID only; applies inert line-prefix changes locally after explicit user routing and does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use `editor.toggleListMarker` through `bindKey`; list markers come from the active behavior manifest. Do not add Markdown-specific Rust branches or raw Deno ops.",
+      "lookup_tags": ["editor", "list", "text-transform", "keybindings", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
+      "id": "folding.serverPublishFoldingRanges",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/folding/server-publish-folding-ranges.md",
+      "js_module": "clay:folding",
+      "js_export": "serverPublishFoldingRanges",
+      "js_facade": "runtime/js/folding.js::serverPublishFoldingRanges",
+      "backing_rust": "src/server/folding.rs::validate_folding_publication",
+      "deno_op": "op_clay_folding_publish_ranges",
+      "deno_op_path": "src/server/ops/folding.rs::op_clay_folding_publish_ranges",
+      "name": "serverPublishFoldingRanges",
+      "user_facing_name": "Publish Folding Ranges",
+      "summary": "Publish validated, inert folding ranges from server-side package code.",
+      "owner": "server",
+      "phase": "Phase 28",
+      "visibility": "public",
+      "permissions": ["render-folding"],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "documentId",
+          "type": "number",
+          "default": "required",
+          "description": "Target open document ID."
+        },
+        {
+          "name": "documentVersion",
+          "type": "number",
+          "default": "required",
+          "description": "Server document version the ranges were produced for."
+        },
+        {
+          "name": "ranges",
+          "type": "FoldingRange[]",
+          "default": "[]",
+          "description": "Bounded inert byte ranges with optional labels."
+        },
+        {
+          "name": "packagePrefix",
+          "type": "string",
+          "default": "package context",
+          "description": "Package API prefix retained as provenance."
+        },
+        {
+          "name": "currentDocumentVersion",
+          "type": "number",
+          "default": "optional",
+          "description": "Validation override; defaults to `documentVersion`. A mismatch drops the publication."
+        }
+      ],
+      "security": "Requires render-folding permission plus server validation of package provenance, current document version, byte ranges, nesting, and FOLDING_RANGE_PAYLOAD_BUDGET_BYTES; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript, raw Deno ops, arbitrary GPU draw calls, or native widget mutation authority.",
+      "agent_guidance": "Use `folding.serverPublishFoldingRanges` from server-side package code only. Publish inert ranges; never invent renderer callbacks or client-side JavaScript hooks. Collapse state is client-local.",
+      "lookup_tags": ["js-api", "folding", "foldingrange"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
     },
     {
       "id": "git.serverListGitStatuses",
@@ -2364,7 +3282,7 @@
       "deno_op_path": "src/server/ops/language_intelligence.rs::op_clay_language_register_intelligence_provider",
       "name": "serverRegisterLanguageIntelligenceProvider",
       "user_facing_name": "Register Language Intelligence Provider",
-      "summary": "Register a feature-tagged language-intelligence provider (hover, definition, code action, signature help) under `parse-document` authority for cancellable UI-reactive requests.",
+      "summary": "Register a feature-tagged language-intelligence provider (hover, definition, code action, signature help) under `parse-document` authority for cancellable UI-reactive requests; plan 127 adds an optional moduleSpecifier that routes a module-backed handler to the runtime's latency lane.",
       "owner": "server",
       "phase": "Phase 18.20",
       "visibility": "public",
@@ -2436,6 +3354,24 @@
           "type": "object",
           "default": "optional",
           "description": "Token-keyed module object for JS-backed providers; never a cross-package or native handle."
+        },
+        {
+          "name": "moduleSpecifier",
+          "type": "string",
+          "default": "optional",
+          "description": "Package-owned module specifier (max 512 chars), typically `import.meta.resolve(\"./provider.js\")`. When present the provider runs on the domain's latency lane via module import; omit it to keep an inline `module` handler on the general lane."
+        },
+        {
+          "name": "provider",
+          "type": "object",
+          "default": "optional",
+          "description": "Pre-assembled provider declaration, equivalent to passing `id`, `modes`, `features`, `priority`, `exportName`, `timeoutMs`, and `budgets` at the top level; a nested `moduleSpecifier` is honored."
+        },
+        {
+          "name": "budgets.timeoutMs",
+          "type": "number",
+          "default": "500",
+          "description": "Nested timeout form accepted inside a `provider` declaration; bounded 1..=5000 and equal to `timeoutMs`."
         }
       ],
       "security": "Requires parse-document. does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript. Providers receive only bounded Clay-provided open-document text (64 KB window); executable/process fields are rejected. Hover/definition/code-action/signature results are inert validated data with UTF-8 byte offsets; no commands auto-execute. Code-action edits are inert versioned previews in Phase 18.20. Provider provenance is stamped by the coordinator, not trusted from provider output.",
@@ -2594,6 +3530,42 @@
           "description": "Behavior-changing setting `fileNamePatterns` for this primitive gate API."
         },
         {
+          "name": "shebangPatterns",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Shebang patterns matched against the first line during classification (declaration field read by the registration op)."
+        },
+        {
+          "name": "contentProbes",
+          "type": "string[]",
+          "default": "[]",
+          "description": "Bounded leading-content probes matched during classification (declaration field read by the registration op)."
+        },
+        {
+          "name": "displayName",
+          "type": "string",
+          "default": "Mode",
+          "description": "Human-readable mode name stored with the declaration."
+        },
+        {
+          "name": "defaultFontRole",
+          "type": "enum",
+          "default": "proportional",
+          "description": "Default document font role for this mode; `monospace` or `proportional`."
+        },
+        {
+          "name": "commands",
+          "type": "object[]",
+          "default": "[]",
+          "description": "Command declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated."
+        },
+        {
+          "name": "keymaps",
+          "type": "object[]",
+          "default": "[]",
+          "description": "Keymap declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated."
+        },
+        {
           "name": "modeId",
           "type": "string",
           "default": "required",
@@ -2621,13 +3593,71 @@
       "async": false
     },
     {
+      "id": "packages.authorize",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/packages/authorize.md",
+      "js_module": "clay:packages",
+      "js_export": "authorize",
+      "js_facade": "runtime/js/packages.js::authorize",
+      "backing_rust": "src/server/ops/packages.rs::op_clay_packages_authorize; src/packages/service.rs::PackageService::authorize_package; src/packages/authorization.rs::PackageAuthorizationRecord",
+      "deno_op": "op_clay_packages_authorize",
+      "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_authorize",
+      "name": "authorize",
+      "user_facing_name": "Authorize Package Capabilities and Runtime Profile",
+      "summary": "Record an explicit user capability grant and runtime profile for an installed package.",
+      "owner": "server",
+      "phase": "Phase 18.6",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "package",
+          "type": "string",
+          "default": "required",
+          "description": "Installed package name or the original requested source specifier, e.g. \"@vendor/words\" or \"github:user/repo\"."
+        },
+        {
+          "name": "capabilities",
+          "type": "string[]",
+          "default": "required",
+          "description": "Manifest-declared capability names to approve, e.g. [\"completion-provider\", \"parse-document\"]."
+        },
+        {
+          "name": "runtimeProfile",
+          "type": "enum",
+          "default": "native-trust",
+          "description": "One of \"native-trust\", \"sandboxed\", or \"restricted\"; recorded with the grant."
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "default": "optional",
+          "description": "Optional provenance match; must equal the original requested specifier or the resolved package name."
+        },
+        {
+          "name": "approvedBy",
+          "type": "enum",
+          "default": "required",
+          "description": "One of \"user\", \"cli\", or \"config\"; names who approved the grant. Package activation can never approve."
+        }
+      ],
+      "security": "Records an explicit user/CLI/config capability grant and runtime profile for an installed package's exact provenance. The trusted-only packages facade cannot be imported by third-party code, the op refuses while a package load entry is activating, and every granted capability must be declared by the manifest, so no package can grant itself authority. Grants are visible, revocable, provenance-bound, and fail-closed when absent; hidden JSON/TOML/ad hoc keys cannot grant capabilities. The grant authorizes a package to use separately implemented documented APIs; it does not materialize surfaces, bypass client validation, or grant filesystem, network, shell, extension loading, AI mutation, workspace, WASM, client-side JavaScript, package-manager, native-widget, raw-op, or implicit package-control authority.",
+      "agent_guidance": "Call this only from trusted user configuration (init.js), the CLI, or an explicit user action, after installing the package. Grant only the capabilities the package declares and the user intends. Grants are required before a package that requests powerful capabilities can be enabled; revoke with `clay package revoke`.",
+      "lookup_tags": ["packages", "js-api", "authorize", "capability-grant", "provenance", "init"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "packages.loadPackage",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/packages/load-package.md",
       "js_module": "clay:packages",
       "js_export": "loadPackage",
       "js_facade": "runtime/js/packages.js::loadPackage",
-      "backing_rust": "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime.rs::ClayModuleLoader::resolve; src/server/js_runtime.rs::ClayModuleLoader::load",
+      "backing_rust": "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier; src/server/js_runtime/source.rs::ClayModuleLoader::resolve; src/server/js_runtime/source.rs::ClayModuleLoader::load",
       "deno_op": "op_clay_packages_load_package_by_specifier",
       "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_load_package_by_specifier",
       "name": "loadPackage",
@@ -2647,7 +3677,7 @@
         }
       ],
       "security": "The trusted-only packages facade cannot be imported by third-party code. Bundled trust requires an exact compiled inventory/provenance/integrity match; every other source remains third-party and must have a current durable user adoption record before enable or execution. Approved third-party load entries execute only in the shared third-party runtime, never the trusted runtime, and are not mutually isolated from sibling third-party packages. Graph relations and first-party mutations require declared extension scope plus durable user consent; stale/revoked approval fails closed. Root-confined loading grants no filesystem, network, shell, extension loading, AI mutation, workspace, WASM, raw-op, native-widget, client-side JavaScript, package-manager, or implicit package-control authority.",
-      "agent_guidance": "Use as the one-line default for loading packages from ~/.config/clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.",
+      "agent_guidance": "Use as the one-line default for loading packages from ~/.clay/init.js. Do not pass enable/disable flags. Ensure packages are installed and authorized before loading.",
       "lookup_tags": ["packages", "js-api", "load", "source-aware", "init"],
       "app_visible": true,
       "help_visible": true,
@@ -2661,7 +3691,7 @@
       "js_module": "clay:packages",
       "js_export": "serverLoadPackage",
       "js_facade": "runtime/js/packages.js::serverLoadPackage",
-      "backing_rust": "src/packages/record.rs::assemble_package_record",
+      "backing_rust": "src/packages/record/mod.rs::assemble_package_record",
       "deno_op": "op_clay_packages_load_package",
       "deno_op_path": "src/server/ops/packages.rs::op_clay_packages_load_package",
       "name": "serverLoadPackage",
@@ -2824,10 +3854,10 @@
           "description": "Export name resolved from module; the export must be a function and is never serialized to Rust."
         },
         {
-          "name": "modeId",
+          "name": "mode",
           "type": "string",
           "default": "required",
-          "description": "Active mode ID this handler serves."
+          "description": "Active mode ID this handler serves; the registration op reads `mode` (not `modeId`)."
         },
         {
           "name": "parseUnit",
@@ -2852,6 +3882,12 @@
           "type": "number",
           "default": "65536",
           "description": "Maximum bytes included in one bounded parse-window snapshot."
+        },
+        {
+          "name": "parseWindowBytes",
+          "type": "number",
+          "default": "65536",
+          "description": "Alias of `maxWindowBytes`, read with `maxWindowBytes` when both are absent."
         },
         {
           "name": "guardBytes",
@@ -3219,13 +4255,47 @@
       "async": true
     },
     {
+      "id": "settings.setDesignSystem",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/settings/set-design-system.md",
+      "js_module": "clay:settings",
+      "js_export": "setDesignSystem",
+      "js_facade": "packages/settings/dist/load.js::setDesignSystem",
+      "backing_rust": "src/server/command_execution.rs::execute_settings; src/server/connection/runtime.rs::persist_settings_change; src/server/js_runtime/evaluation.rs::apply_persisted_preferences; src/server/ops/theme.rs::apply_design_system",
+      "deno_op": "op_clay_commands_execute_command",
+      "deno_op_path": "src/server/ops/commands.rs::op_clay_commands_execute_command",
+      "name": "setDesignSystem",
+      "user_facing_name": "Set Design System",
+      "summary": "Settings-panel command that activates a UI design system (`@clay/core` baseline or a bundled `@clay/design-*` contributor) and persists the choice in `preferences.json` so it survives restarts.",
+      "owner": "server",
+      "phase": "Phase 22.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "`@clay/core` (built-in baseline) or the name of one bundled package that contributes a `uiDesignSystem` (`@clay/design-instrument` — Quiet Instrument). Also accepts `item_id` from dropdown action payloads."
+        }
+      ],
+      "security": "Validates the specifier server-side and persists an inert preference only: activation applies through the same inert-recipe path as theme.setDesignSystem (recipes reference theme color roles by name and never contain concrete colors, so no raw CSS or color authority exists) and the reload re-validates the stored value through apply_design_system, preserving the previous valid design system on failure. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package manager, WASM, client-side JavaScript, raw Deno ops, raw CSS, or renderer callback authority, and never promotes package trust by naming a specifier.",
+      "agent_guidance": "Use `settings.setDesignSystem` (or the Settings panel \"Design system\" dropdown) when the user changes the design system interactively; the persisted choice reapplies on every reload. Use `theme.setDesignSystem` from init.js for declarative startup configuration. Never suggest raw CSS or untrusted design-system packages.",
+      "lookup_tags": ["settings", "design-system", "preferences", "theme", "recipes", "panel", "core", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "shell.clientAddEqualPane",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/shell/client-add-equal-pane.md",
       "js_module": "clay:shell",
       "js_export": "clientAddEqualPane",
       "js_facade": "runtime/js/shell.js::clientAddEqualPane",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientAddEqualPane",
@@ -3252,7 +4322,7 @@
       "js_module": "clay:shell",
       "js_export": "clientClosePane",
       "js_facade": "runtime/js/shell.js::clientClosePane",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree; src/main.rs::Driver (dirty guard, document release, conflict-menu sync); src/masonry_pane_document.rs::PaneDocumentView::guard_pane_close / close_pane",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientClosePane",
@@ -3279,7 +4349,7 @@
       "js_module": "clay:shell",
       "js_export": "clientFocusPaneNext",
       "js_facade": "runtime/js/shell.js::clientFocusPaneNext",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientFocusPaneNext",
@@ -3306,7 +4376,7 @@
       "js_module": "clay:shell",
       "js_export": "clientFocusPanePrev",
       "js_facade": "runtime/js/shell.js::clientFocusPanePrev",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientFocusPanePrev",
@@ -3333,7 +4403,7 @@
       "js_module": "clay:shell",
       "js_export": "clientMovePaneNext",
       "js_facade": "runtime/js/shell.js::clientMovePaneNext",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientMovePaneNext",
@@ -3360,7 +4430,7 @@
       "js_module": "clay:shell",
       "js_export": "clientMovePanePrev",
       "js_facade": "runtime/js/shell.js::clientMovePanePrev",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientMovePanePrev",
@@ -3387,7 +4457,7 @@
       "js_module": "clay:shell",
       "js_export": "clientResizePaneDown",
       "js_facade": "runtime/js/shell.js::clientResizePaneDown",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientResizePaneDown",
@@ -3414,7 +4484,7 @@
       "js_module": "clay:shell",
       "js_export": "clientResizePaneLeft",
       "js_facade": "runtime/js/shell.js::clientResizePaneLeft",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientResizePaneLeft",
@@ -3441,7 +4511,7 @@
       "js_module": "clay:shell",
       "js_export": "clientResizePaneRight",
       "js_facade": "runtime/js/shell.js::clientResizePaneRight",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientResizePaneRight",
@@ -3468,7 +4538,7 @@
       "js_module": "clay:shell",
       "js_export": "clientResizePaneUp",
       "js_facade": "runtime/js/shell.js::clientResizePaneUp",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientResizePaneUp",
@@ -3495,7 +4565,7 @@
       "js_module": "clay:shell",
       "js_export": "clientSplitPaneDown",
       "js_facade": "runtime/js/shell.js::clientSplitPaneDown",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSplitPaneDown",
@@ -3522,7 +4592,7 @@
       "js_module": "clay:shell",
       "js_export": "clientSplitPaneHorizontal",
       "js_facade": "runtime/js/shell.js::clientSplitPaneHorizontal",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSplitPaneHorizontal",
@@ -3549,7 +4619,7 @@
       "js_module": "clay:shell",
       "js_export": "clientSplitPaneRight",
       "js_facade": "runtime/js/shell.js::clientSplitPaneRight",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSplitPaneRight",
@@ -3576,7 +4646,7 @@
       "js_module": "clay:shell",
       "js_export": "clientSplitPaneVertical",
       "js_facade": "runtime/js/shell.js::clientSplitPaneVertical",
-      "backing_rust": "src/masonry_shell.rs::ClayShellWidget::apply_shell_client_command; src/shell/layout.rs::PaneSplitTree",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/shell/layout/mod.rs::PaneSplitTree",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientSplitPaneVertical",
@@ -3603,7 +4673,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabActivate",
       "js_facade": "runtime/js/shell.js::clientTabActivate",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabActivate",
@@ -3613,7 +4683,7 @@
       "phase": "Phase 22.4",
       "visibility": "public",
       "permissions": [],
-      "key_bindings": ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"],
+      "key_bindings": ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "Ctrl+Alt+4", "Ctrl+Alt+5", "Ctrl+Alt+6", "Ctrl+Alt+7", "Ctrl+Alt+8", "Ctrl+Alt+9"],
       "custom_properties": [],
       "security": "Bindable client UI command ID only; after explicit user routing it mutates only the Clay-owned tab state via TabCommand::Activate with server-confirmed snapshot reconciliation and no package JavaScript. Does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget handles, or client-side JavaScript authority. Tabs are independent client views; this command does not open files or grant document authority.",
       "agent_guidance": "Use `shell.clientTabActivate` only as a documented command ID for `bindKey` to remap the default Phase 22.4 tab-management chord. Avoid raw Rust calls, protocol DTOs, or `Deno.core.ops`. Tab topology mutation is Clay-owned client behavior; packages interact through inert `serverRequestLayoutIntent` only.",
@@ -3630,7 +4700,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabClose",
       "js_facade": "runtime/js/shell.js::clientTabClose",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabClose",
@@ -3657,7 +4727,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabMoveLeft",
       "js_facade": "runtime/js/shell.js::clientTabMoveLeft",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabMoveLeft",
@@ -3684,7 +4754,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabMoveRight",
       "js_facade": "runtime/js/shell.js::clientTabMoveRight",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabMoveRight",
@@ -3711,7 +4781,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabMoveTo",
       "js_facade": "runtime/js/shell.js::clientTabMoveTo",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabMoveTo",
@@ -3738,7 +4808,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabNew",
       "js_facade": "runtime/js/shell.js::clientTabNew",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabNew",
@@ -3765,7 +4835,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabNext",
       "js_facade": "runtime/js/shell.js::clientTabNext",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabNext",
@@ -3792,7 +4862,7 @@
       "js_module": "clay:shell",
       "js_export": "clientTabPrev",
       "js_facade": "runtime/js/shell.js::clientTabPrev",
-      "backing_rust": "src/main.rs::Driver::apply_tab_command (tab-order policy resolvers + execution); src/masonry_shell.rs::ShellClientCommand (command mapping)",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientTabPrev",
@@ -3819,7 +4889,7 @@
       "js_module": "clay:shell",
       "js_export": "setPaneFocusPolicy",
       "js_facade": "runtime/js/shell.js::setPaneFocusPolicy",
-      "backing_rust": "src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy; src/masonry_shell.rs::ClayShellWidget::set_pane_focus_policy",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy",
       "deno_op": "op_clay_shell_set_pane_focus_policy",
       "deno_op_path": "src/server/ops/shell.rs::op_clay_shell_set_pane_focus_policy",
       "name": "setPaneFocusPolicy",
@@ -3847,13 +4917,40 @@
       "async": false
     },
     {
+      "id": "shell.toggleAgentLane",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/shell/toggle-agent-lane.md",
+      "js_module": "clay:shell",
+      "js_export": "toggleAgentLane",
+      "js_facade": "runtime/js/shell.js::toggleAgentLane",
+      "backing_rust": "src/client_commands.rs::ShellClientCommand::ToggleAgentLane; src/protocol/mod.rs::default_keymaps; frontend/src/shell/workspace-commands.ts::dispatchClientCommand",
+      "deno_op": "op_clay_keybindings_bind_key",
+      "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
+      "name": "toggleAgentLane",
+      "user_facing_name": "Toggle Agent Lane",
+      "summary": "Return the stable bindable command ID for toggling the persistent per-tab agent lane.",
+      "owner": "client",
+      "phase": "Plan 124",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": ["Ctrl+X Ctrl+P"],
+      "custom_properties": [],
+      "security": "Names a bounded client UI command only; after explicit user routing it changes Clay-owned per-tab lane visibility and grants no filesystem, network, process, shell, extension loading, AI mutation, workspace, package, WASM, raw Deno ops, native widget, or client-side JavaScript authority.",
+      "agent_guidance": "Use toggleAgentLane only as the documented command ID for bindKey when a user wants to show or hide the persistent agent lane; do not invent a direct lane, palette, layout, or filesystem API.",
+      "lookup_tags": ["shell", "agent-lane", "visibility", "keybindings", "command", "js-api"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed-command",
+      "async": false
+    },
+    {
       "id": "syntax.serverRegisterSyntaxGrammar",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/syntax/server-register-syntax-grammar.md",
       "js_module": "clay:syntax",
       "js_export": "serverRegisterSyntaxGrammar",
       "js_facade": "runtime/js/syntax.js::serverRegisterSyntaxGrammar",
-      "backing_rust": "src/server/syntax.rs::SyntaxGrammarRegistry::register_package",
+      "backing_rust": "src/server/syntax/mod.rs::SyntaxGrammarRegistry::register_package",
       "deno_op": "op_clay_syntax_register_syntax_grammar",
       "deno_op_path": "src/server/ops/syntax.rs::op_clay_syntax_register_syntax_grammar",
       "name": "serverRegisterSyntaxGrammar",
@@ -3947,7 +5044,7 @@
       "js_module": "clay:syntax",
       "js_export": "setSyntaxEnginePreference",
       "js_facade": "runtime/js/syntax.js::setSyntaxEnginePreference",
-      "backing_rust": "src/server/syntax.rs::SyntaxGrammarRegistry::set_engine_preference",
+      "backing_rust": "src/server/syntax/mod.rs::SyntaxGrammarRegistry::set_engine_preference",
       "deno_op": "op_clay_syntax_set_engine_preference",
       "deno_op_path": "src/server/ops/syntax.rs::op_clay_syntax_set_engine_preference",
       "name": "setSyntaxEnginePreference",
@@ -4015,6 +5112,74 @@
       "async": false
     },
     {
+      "id": "theme.setDesignSystem",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-design-system.md",
+      "js_module": "clay:theme",
+      "js_export": "setDesignSystem",
+      "js_facade": "runtime/js/theme.js::setDesignSystem",
+      "backing_rust": "src/server/ops/theme.rs::op_clay_theme_set_design_system; src/server/ops/theme.rs::apply_design_system; src/shell/design_system.rs::resolve_design_system",
+      "deno_op": "op_clay_theme_set_design_system",
+      "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_design_system",
+      "name": "setDesignSystem",
+      "user_facing_name": "Set Design System",
+      "summary": "Explicitly activate a UI design system (the built-in `@clay/core` baseline or one adopted package's `uiDesignSystem` contribution) for component recipes; color authority always stays with the active theme.",
+      "owner": "server",
+      "phase": "Phase 22.4",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "`@clay/core` (built-in baseline) or the name of one loaded package that contributes a `uiDesignSystem` declaration."
+        }
+      ],
+      "security": "Activates inert recipe data only: recipes may select among active-theme color roles and set bounded non-color values, but never contain concrete colors, so color authority always stays with the active theme and no raw CSS is possible. `@clay/core` is built in and always selectable; a bundled `@clay/` specifier (the shipped `@clay/design-instrument`, the approved Quiet Instrument language) resolves through the first-party bundled record path with its manifest read and nothing installed, and a third-party specifier must be an installed package that still passes the package service's existing enable/trust validation — selection itself never installs, adopts, or enables a capability, and there is no automatic trust promotion; provenance/trust-domain requirements come from that path. On failure or later package revocation the previous valid design system is preserved and the sanitized diagnostic surfaces; recipes resolve through `@clay/core` fallbacks for missing components. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "agent_guidance": "Use setDesignSystem(\"@clay/core\") from init.js for the built-in baseline, or a loaded package name that contributes a `uiDesignSystem` (the approved default language is Quiet Instrument, specified in DESIGN.md). Colors come only from the active theme; never suggest raw CSS or package-owned colors. If the package is later removed — for example by a migration that deletes a shipped design system — Clay keeps the last valid design system active, records one bounded diagnostic naming the rejected specifier and the system that stays active, and never fails the generation.",
+      "lookup_tags": ["theme", "design-system", "recipes", "init", "core", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
+      "id": "theme.setIconPack",
+      "kind": "clay-js-api",
+      "documentation_path": "docs/reference/clay-js-api/theme/set-icon-pack.md",
+      "js_module": "clay:theme",
+      "js_export": "setIconPack",
+      "js_facade": "runtime/js/theme.js::setIconPack",
+      "backing_rust": "src/server/ops/theme.rs::op_clay_theme_set_icon_pack; src/server/ops/theme.rs::apply_icon_pack; src/shell/icons.rs::ActiveIconPack::from_record",
+      "deno_op": "op_clay_theme_set_icon_pack",
+      "deno_op_path": "src/server/ops/theme.rs::op_clay_theme_set_icon_pack",
+      "name": "setIconPack",
+      "user_facing_name": "Set Icon Pack",
+      "summary": "Explicitly activate an icon pack (a first-party `@clay/icons-*` pack or one enabled package's `iconPack` contribution) for UI glyph rendering; icons ride the active theme's text color and never carry their own colors.",
+      "owner": "server",
+      "phase": "Phase 112",
+      "visibility": "public",
+      "permissions": [],
+      "key_bindings": [],
+      "custom_properties": [
+        {
+          "name": "specifier",
+          "type": "string",
+          "default": "required",
+          "description": "Name of one icon-pack contributor: a bundled first-party `@clay/icons-*` package or an already-enabled package record that declares a `clay.contributions.iconPack`."
+        }
+      ],
+      "security": "Selects inert, bounded vector-geometry data only: paths are host-validated against a bounded schema (schema version, path/coordinate/command limits, absolute commands, no raw SVG, CSS, URLs, scripts, or events) and render through the host's own SVG pipeline with `fill=\"currentColor\"`, so the active theme stays the sole color authority. Bundled `@clay/*` packs resolve from the compiled inventory without executing anything; third-party specifiers must already be enabled package records — selection never installs, adopts, or promotes trust. Package runtime callers cannot reach this op: it is registered only in the trusted runtime extension. On failure or later package revocation the previously valid pack is preserved and a sanitized diagnostic surfaces; missing or failed selections fall back to the bundled default subset. Does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
+      "agent_guidance": "Use the bundled default (no `setIconPack` call at all) unless the user asks for a specific icon pack; zero configuration renders the bundled Regular subset. Never suggest raw SVG markup, package-owned colors, or icon packs from untrusted packages. If the selected pack is later removed or revoked, Clay keeps working controls with the bundled fallback and surfaces a sanitized diagnostic on the next reload.",
+      "lookup_tags": ["theme", "icons", "icon-pack", "ui", "init", "fallback"],
+      "app_visible": true,
+      "help_visible": true,
+      "stability": "runtime-backed",
+      "async": false
+    },
+    {
       "id": "theme.setTheme",
       "kind": "clay-js-api",
       "documentation_path": "docs/reference/clay-js-api/theme/set-theme.md",
@@ -4041,7 +5206,7 @@
         }
       ],
       "security": "Accepts only bundled first-party @clay/* theme specifiers, reads static package.json textStyles and optional designTokens contributions, validates typed UI overrides against core token types and domain bounds, and sends inert RGBA/style-attribute data plus validated typed UI token overrides to the client; does not grant filesystem, network, shell, package manager, extension loading, workspace mutation, clipboard, AI mutation, native widget, WASM, raw Deno ops, client-side JavaScript, raw CSS, or renderer callback authority.",
-      "agent_guidance": "Use setTheme(\"@clay/theme-gruvbox-material-dark\") or setTheme(\"@clay/theme-gruvbox-material-light\") from init.js. Do not expose arbitrary CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
+      "agent_guidance": "Use a bundled specifier from init.js — the four shipped themes are `@clay/theme-modus-operandi` and `@clay/theme-modus-vivendi` (the canonical light/dark defaults) plus `@clay/theme-gruvbox-material-dark` and `@clay/theme-gruvbox-material-light`. Every shipped theme declares the language's theme-side roles and must pass the composited contrast gate, so never hand-edit a palette to \"fix\" contrast, and never suggest raw CSS, theme code execution, raw color ops, or third-party theme loading through this API.",
       "lookup_tags": ["theme", "syntax", "colors", "gruvbox", "init"],
       "app_visible": true,
       "help_visible": true,
@@ -4222,6 +5387,18 @@
           "description": "Bounded child component declarations."
         },
         {
+          "name": "style",
+          "type": "object",
+          "default": "optional",
+          "description": "Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed style-variable names."
+        },
+        {
+          "name": "action",
+          "type": "object",
+          "default": "optional",
+          "description": "UI action intent validated against the registered package-prefixed command IDs (`action.commandId`)."
+        },
+        {
           "name": "styleTokens",
           "type": "string[]",
           "default": "[]",
@@ -4246,8 +5423,8 @@
           "description": "Registered package-prefixed command IDs referenced by component action intents."
         }
       ],
-      "security": "Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.",
-      "agent_guidance": "Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.",
+      "security": "Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.",
+      "agent_guidance": "Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, client-machinery names, CSS strings, or executable client hooks.",
       "lookup_tags": ["ui", "package-ui", "component-catalog", "style-tokens", "clay-js-api", "phase18.3", "phase20.5", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4334,7 +5511,7 @@
           "description": "Registered package command IDs allowed for component-scoped actions."
         }
       ],
-      "security": "Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.",
+      "security": "Validates package-prefixed input IDs, supported pointer/focus/selection policies, manifest-declared modes, registered action targets, provenance, and payload ceilings; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, raw native event callbacks, or key-routing authority.",
       "agent_guidance": "Use `ui.serverRegisterInputContribution` for inert pointer/focus/action metadata only; keep keys in behavior manifests/keybindings and never expose raw event callbacks, native handles, raw ops, CSS, or client-side JavaScript hooks.",
       "lookup_tags": ["ui", "package-ui", "input", "focus", "action-routing", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
@@ -4398,8 +5575,8 @@
           "description": "Package-prefixed command IDs that panel components may emit as inert action intents."
         }
       ],
-      "security": "Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
-      "agent_guidance": "Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.",
+      "security": "Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
+      "agent_guidance": "Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, client APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.",
       "lookup_tags": ["ui", "package-ui", "panel", "slot-layout", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4456,7 +5633,7 @@
           "description": "Provenance source for the declaration; Phase 18.3 accepts package declarations."
         }
       ],
-      "security": "Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct Masonry widgets, native widget handles, Vello callbacks, Parley callbacks, renderer callbacks, arbitrary GPU draw authority, or external authority.",
+      "security": "Validates package-prefixed semantic token names, token types, same-type Clay core fallbacks, descriptions, provenance, and token conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, raw CSS, raw style strings, arbitrary raw colors, direct client widgets, native widget handles, renderer callbacks, arbitrary GPU draw authority, or external authority.",
       "agent_guidance": "Use `ui.serverRegisterThemeToken` for semantic package theme tokens only; do not expose raw colors, CSS, renderer callbacks, native handles, raw ops, hidden theme override keys, or client-side JavaScript style hooks.",
       "lookup_tags": ["ui", "package-ui", "theme-token", "style-tokens", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
@@ -4520,8 +5697,8 @@
           "description": "Registered package-prefixed command IDs that overlay components may emit."
         }
       ],
-      "security": "Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
-      "agent_guidance": "Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct Masonry APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.",
+      "security": "Validates package-prefixed overlay IDs, anchors, focus and dismissal policy, bounded component payloads, registered action targets, provenance, and conflicts while Clay owns z-order, focus, accessibility, and native overlay rendering; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.",
+      "agent_guidance": "Use `ui.serverRegisterTransientOverlayContribution` for declarative dismissible package overlays only; avoid fixed-slot panels, raw ops, native widget handles, direct client APIs, raw CSS, renderer callbacks, client-side JavaScript hooks, and hidden focus/z-order settings.",
       "lookup_tags": ["ui", "package-ui", "overlay", "focus-policy", "clay-js-api", "phase18.3", "runtime-backed"],
       "app_visible": true,
       "help_visible": true,
@@ -4596,7 +5773,7 @@
           "description": "Bounded schema kind, one of `boolean`, `number`, `string`, `enum`, or `object`."
         }
       ],
-      "security": "Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.",
+      "security": "Validates package-prefixed IDs, supported state scopes, lifecycle metadata, schema kind, target IDs, provenance, hidden-key rejection, prohibited authority fields, and payload ceilings; registers schemas only and does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, state-value mutation, hidden globals, or raw JSON blob authority.",
       "agent_guidance": "Use `ui.serverRegisterUiStateScope` for inert state schema and lifecycle declarations only. Do not store package state values, raw documents, hidden configuration, native handles, callbacks, raw ops, CSS, or client-side JavaScript through this API.",
       "lookup_tags": ["ui", "package-ui", "state", "lifecycle", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
@@ -4654,7 +5831,7 @@
           "description": "One of `first` or `second`; controls which side the new pane occupies."
         }
       ],
-      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.",
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct client widgets, native widget handles, raw CSS, or renderer callbacks. Packages cannot mutate native layout directly; intents are advisory and composed at Clay's discretion.",
       "agent_guidance": "Use only documented typed intent records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
       "lookup_tags": ["ui", "package-ui", "layout-intent", "split", "configuration", "clay-js-api", "phase20.3", "runtime-backed"],
       "app_visible": true,
@@ -4706,7 +5883,7 @@
           "description": "One of `user-config`, `active-major-mode`, `compatible-minor-mode`, `global-package`, or `package-default`."
         }
       ],
-      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks.",
+      "security": "does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct client widgets, native widget handles, raw CSS, or renderer callbacks.",
       "agent_guidance": "Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.",
       "lookup_tags": ["ui", "package-ui", "layout-overrides", "configuration", "clay-js-api", "phase18.4", "runtime-backed"],
       "app_visible": true,
@@ -4721,7 +5898,7 @@
       "js_module": "clay:workspace",
       "js_export": "clientOpenFolderDialog",
       "js_facade": "runtime/js/workspace.js::clientOpenFolderDialog",
-      "backing_rust": "src/client/file_dialog.rs::open_folder_dialog; src/main.rs::handle_client_ui_command; src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot",
+      "backing_rust": "src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_folder; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot",
       "deno_op": "op_clay_keybindings_bind_key",
       "deno_op_path": "src/server/ops/keybindings.rs::op_clay_keybindings_bind_key",
       "name": "clientOpenFolderDialog",
@@ -4748,7 +5925,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverAddWorkspaceRoot",
       "js_facade": "runtime/js/workspace.js::serverAddWorkspaceRoot",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::add_explicit_user_grant",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::add_explicit_user_grant",
       "deno_op": "op_clay_workspace_add_root",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_add_root",
       "name": "serverAddWorkspaceRoot",
@@ -4775,7 +5952,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverCancelListing",
       "js_facade": "runtime/js/workspace.js::serverCancelListing",
-      "backing_rust": "src/server/workspace.rs::cancel_listing",
+      "backing_rust": "src/server/workspace/mod.rs::cancel_listing",
       "deno_op": "op_clay_workspace_cancel_listing",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_cancel_listing",
       "name": "serverCancelListing",
@@ -4802,7 +5979,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverCreateListingCancelToken",
       "js_facade": "runtime/js/workspace.js::serverCreateListingCancelToken",
-      "backing_rust": "src/server/workspace.rs::create_listing_cancel_token",
+      "backing_rust": "src/server/workspace/mod.rs::create_listing_cancel_token",
       "deno_op": "op_clay_workspace_create_listing_cancel_token",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_create_listing_cancel_token",
       "name": "serverCreateListingCancelToken",
@@ -4829,7 +6006,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverDiscoverWorkspaceRootForPath",
       "js_facade": "runtime/js/workspace.js::serverDiscoverWorkspaceRootForPath",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::discover_root_for_path",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::discover_root_for_path",
       "deno_op": "op_clay_workspace_discover_root_for_path",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_discover_root_for_path",
       "name": "serverDiscoverWorkspaceRootForPath",
@@ -4856,7 +6033,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverListDirectory",
       "js_facade": "runtime/js/workspace.js::serverListDirectory",
-      "backing_rust": "src/server/workspace.rs::WorkspaceState::list_directory",
+      "backing_rust": "src/server/workspace/mod.rs::WorkspaceState::list_directory",
       "deno_op": "op_clay_workspace_list_directory",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_list_directory",
       "name": "serverListDirectory",
@@ -4868,6 +6045,18 @@
       "permissions": ["workspace-read"],
       "key_bindings": [],
       "custom_properties": [
+        {
+          "name": "rootId",
+          "type": "WorkspaceRootId",
+          "default": "required",
+          "description": "Workspace root returned by the root-listing API; the listing is confined to it."
+        },
+        {
+          "name": "relativePath",
+          "type": "string",
+          "default": "package-relative-path",
+          "description": "Package-root-relative path inside the workspace root; defaults to the root itself."
+        },
         {
           "name": "maxDepth",
           "type": "number",
@@ -4902,7 +6091,7 @@
       "js_module": "clay:workspace",
       "js_export": "serverListWorkspaceRoots",
       "js_facade": "runtime/js/workspace.js::serverListWorkspaceRoots",
-      "backing_rust": "src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace.rs::WorkspaceState::add_root",
+      "backing_rust": "src/server/mod.rs::ServerConfig::workspace_roots; src/server/workspace/mod.rs::WorkspaceState::add_root",
       "deno_op": "op_clay_workspace_list_roots",
       "deno_op_path": "src/server/ops/workspace.rs::op_clay_workspace_list_roots",
       "name": "serverListWorkspaceRoots",

@@ -1,0 +1,21 @@
+Plan 133 task 5 (table-driven closed-choice validation in src/server/ui.rs) — 2026-09-21,
+working tree with plan 133 tasks 2-5 applied
+
+  scripts/check.sh full     -> 0   ("full check PASSED"; log: task5-check-full.log)
+  cargo test totals         -> 1998 passed / 0 failed / 1 ignored
+                               (task-1 baseline 1996 + the 2 new table tests:
+                                choice_fields_pin_every_allowed_set,
+                                choice_messages_match_the_shipped_diagnostics)
+  cargo clippy --all-targets -- -D warnings -> 0 (zero warnings; in check.sh)
+  cargo fmt --check         -> 0
+  cargo audit               -> 0 (9 allowed RUSTSEC warnings, unchanged from baseline)
+  cargo test --lib server::ui:: -> 24 passed (22 moved + 2 new)
+  cargo test --test presentation package_ui_conformance -> 31 passed
+  cargo test --test protocol -- performance_budgets documentation_coverage clay_js_doc_registry -> 99 passed
+  cargo test --test security -- visibility -> 6 passed
+
+Files: src/server/ui.rs 3,320 -> 2,164 lines; new src/server/ui/tests.rs 1,289 lines
+(the 1,112-line inline test module plus the two new tests).
+One earlier full-gate attempt hung in the desktop capture harness test
+(manual_smoke_docs::plan118_ui_review_harness_...; passes standalone in 50 s and
+passed in the rerun recorded above) after 1488 tests had passed with 0 failures.

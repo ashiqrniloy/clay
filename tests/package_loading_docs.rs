@@ -130,6 +130,24 @@ fn package_author_guide_uses_public_facades_not_raw_ops() {
     assert!(api_ids.contains("packages.loadPackage"));
     assert!(guide.contains("`packages.loadPackage`"));
     assert!(
+        guide.contains("execute-only"),
+        "package author guide must document execute-only load entries"
+    );
+    for preset in ["code-mode", "prose-mode", "lsp-bridge"] {
+        assert!(
+            guide.contains(preset),
+            "package author guide must document preset `{preset}`"
+        );
+    }
+    assert!(
+        guide.contains("createLspBridge") && guide.contains("lsp-shared/bridge.js"),
+        "package author guide must document the shared LSP factory"
+    );
+    assert!(
+        guide.contains("clay package inspect"),
+        "package author guide must document CLI inspect"
+    );
+    assert!(
         guide.contains("raw `Deno.core.ops`"),
         "package author guide must retain raw-op boundary marker"
     );

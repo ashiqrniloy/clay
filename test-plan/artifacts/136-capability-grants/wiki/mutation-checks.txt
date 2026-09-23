@@ -1,0 +1,18 @@
+Plan 136 wiki contract test mutation checks (2026-09-23)
+
+test: tests/documentation_coverage.rs::plan136_wiki_pages_describe_capability_grants_and_lane_counters
+command: cargo test --test protocol documentation_coverage::plan136
+
+baseline: PASS (1 passed; 0 failed)
+
+mutation 1 — renamed the authority page's grant section heading
+("## Capability Grants" -> "## Grants (renamed)"):
+  FAILED: docs/wiki/modules/third-party-runtime-authority.md is missing the Plan 136 marker "## Capability Grants"
+  (exit 101)
+  reverted -> PASS
+
+mutation 2 — replaced the counter identifiers on the hardening page
+("JS_RUNTIME_LANE_METRICS" -> "LANE_METRICS", "CLAY_PERF_REPORT_DIR" -> "PERF_DIR"):
+  FAILED: docs/wiki/modules/persistent-runtime-hardening.md is missing the Plan 136 marker "JS_RUNTIME_LANE_METRICS"
+  (exit 101)
+  reverted -> PASS

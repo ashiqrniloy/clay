@@ -32,6 +32,30 @@ custom_properties:
     type: string[]
     default: []
     description: Behavior-changing setting `fileNamePatterns` for this primitive gate API.
+  - name: shebangPatterns
+    type: string[]
+    default: []
+    description: Shebang patterns matched against the first line during classification (declaration field read by the registration op).
+  - name: contentProbes
+    type: string[]
+    default: []
+    description: Bounded leading-content probes matched during classification (declaration field read by the registration op).
+  - name: displayName
+    type: string
+    default: Mode
+    description: Human-readable mode name stored with the declaration.
+  - name: defaultFontRole
+    type: enum
+    default: proportional
+    description: Default document font role for this mode; `monospace` or `proportional`.
+  - name: commands
+    type: object[]
+    default: []
+    description: Command declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated.
+  - name: keymaps
+    type: object[]
+    default: []
+    description: Keymap declarations cached by the `clay:modes` facade and applied to the behavior manifest when the registered pattern is activated.
   - name: modeId
     type: string
     default: required
@@ -89,12 +113,19 @@ serverRegisterModePattern(manifest, { modeId: "markdown", displayName: "Markdown
 - `mimeTypes` (`string[]`, default `[]`): Behavior-changing setting `mimeTypes` for this API.
 - `fileNames` (`string[]`, default `[]`): Behavior-changing setting `fileNames` for this API.
 - `fileNamePatterns` (`string[]`, default `[]`): Behavior-changing setting `fileNamePatterns` for this API.
+- `shebangPatterns` (`string[]`, default `[]`): Patterns matched against the document's first line during classification.
+- `contentProbes` (`string[]`, default `[]`): Bounded leading-content probes matched during classification.
+- `displayName` (`string`, default `Mode`): Human-readable mode name stored with the declaration.
+- `defaultFontRole` (`"monospace" | "proportional"`, default `proportional`): Default document font role for documents classified into this mode.
+- `commands` (`object[]`, default `[]`): Command declarations cached by the `clay:modes` facade and published with the behavior manifest when the pattern is activated.
+- `keymaps` (`object[]`, default `[]`): Keymap declarations cached by the `clay:modes` facade and published with the behavior manifest when the pattern is activated.
 - `modeId` (`string`, default `required`): Behavior-changing setting `modeId` for this API.
 - `apiPrefix` (`string`, default `required`): Behavior-changing setting `apiPrefix` for this API.
+- `editorRules` (`object | undefined`, default `built-in code-editing defaults`): Optional declarative editor rules stored with the mode declaration and applied at activation. Generic rule fields (enter, tab, pairs, comments, electricCharacters, autocompleteTriggers) plus per-mode movement and caretStyle (Plan 071 tasks 4/6/11). Optional movement policy (Plan 071 task 4/11), validated by the server. Fields — wordSeparators ('code', 'prose', or { custom: string[] }), treatUnderscoreAsWord, camelCaseSubWord, paragraphStyle ('blankLine' | 'blankLineOrWhitespace'), stopAtEolWordEnd, lineMovement ('character' | 'screenLine'), stickyColumn. Absent fields fall back to the code-editing defaults. Optional caret appearance override (Plan 071 task 6/11), validated by the server. Fields — shape ('bar' | 'line' | 'block' | 'underline'), widthPx, heightPct, hollow, blink ('solid' | 'blink' | 'phase' | 'smooth'), smoothAnimationMs, stopBlinkOnTyping. Absent means the reduced-motion-safe editor default bar; clientSetCursorStyle overrides it at runtime. Every field is validated server-side; unknown keys and values are rejected deny-by-default. Build the object with behavior.buildCodeEditingManifest.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `modes.serverRegisterModePattern` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `modes.serverRegisterModePattern` in `~/.clay/init.js`.
 
 ## Custom properties
 
@@ -102,8 +133,15 @@ No default key binding is assigned. Users may bind a key to `modes.serverRegiste
 - `mimeTypes` (`string[]`, default `[]`): Behavior-changing setting `mimeTypes` for this API.
 - `fileNames` (`string[]`, default `[]`): Behavior-changing setting `fileNames` for this API.
 - `fileNamePatterns` (`string[]`, default `[]`): Behavior-changing setting `fileNamePatterns` for this API.
+- `shebangPatterns` (`string[]`, default `[]`): Patterns matched against the document's first line during classification.
+- `contentProbes` (`string[]`, default `[]`): Bounded leading-content probes matched during classification.
+- `displayName` (`string`, default `Mode`): Human-readable mode name stored with the declaration.
+- `defaultFontRole` (`"monospace" | "proportional"`, default `proportional`): Default document font role for documents classified into this mode.
+- `commands` (`object[]`, default `[]`): Command declarations cached by the `clay:modes` facade and published with the behavior manifest when the pattern is activated.
+- `keymaps` (`object[]`, default `[]`): Keymap declarations cached by the `clay:modes` facade and published with the behavior manifest when the pattern is activated.
 - `modeId` (`string`, default `required`): Behavior-changing setting `modeId` for this API.
 - `apiPrefix` (`string`, default `required`): Behavior-changing setting `apiPrefix` for this API.
+- `editorRules`: Optional declarative editor rules stored with the mode declaration and applied at activation.
 
 ## Return and async behavior
 

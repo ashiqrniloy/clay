@@ -50,7 +50,7 @@ fn manual_file_browser_workflow_bug_contract_locks_reported_failures() {
     for expected in [
         "Manual File Browser Workflow Bug Contract",
         "cargo run",
-        "~/.config/clay/init.js",
+        "~/.clay/init.js",
         "do not use `cargo run -- smoke-gui --config-fixture file-browser-workflow`",
         "Ctrl+Shift+O",
         "clientOpenFolderDialog()",
@@ -518,14 +518,14 @@ fn end_to_end_file_browser_workflow_smoke_covers_cargo_run_config_path() {
     let launch_doc = launch_smoke_doc();
 
     // The real product workflow path must be documented alongside the
-    // fixture: a bare `cargo run` driven by `~/.config/clay/init.js`, with
+    // fixture: a bare `cargo run` driven by `~/.clay/init.js`, with
     // the Plan 044/Phase 20 regressions (shifted folder picker, nested `.rs` open,
     // multi-document retain/switch, dirty/save/conflict UX, file browser surviving
     // Markdown activation, file-browser scroll, editor scroller, copy) as a manual checklist.
     for expected in [
         "Product `cargo run` configuration path",
         "cargo run",
-        "~/.config/clay/init.js",
+        "~/.clay/init.js",
         "Ctrl+Shift+O",
         "src/main.rs",
         "Opening a second file retains the prior document session",
@@ -639,13 +639,12 @@ fn phase19_code_wiki_documents_open_dialog_path() {
     let index = wiki_doc("docs/wiki/index.md");
     let client_dialog = wiki_doc("docs/wiki/modules/client-file-dialog.md");
     let workspace = wiki_doc("docs/wiki/modules/server-file-workspace.md");
-    let edit_ack = wiki_doc("docs/wiki/flows/client-server-edit-ack.md");
+    let edit_ack = wiki_doc("docs/wiki/archive/client-server-edit-ack.md");
     let markdown = wiki_doc("docs/wiki/modules/first-party-markdown-package.md");
 
     for linked_page in [
         "modules/client-file-dialog.md",
         "modules/server-file-workspace.md",
-        "flows/client-server-edit-ack.md",
         "modules/first-party-markdown-package.md",
     ] {
         assert!(
@@ -656,8 +655,8 @@ fn phase19_code_wiki_documents_open_dialog_path() {
 
     for expected in [
         "docs/reference/clay-js-api/documents/client-open-file-dialog.md",
-        "Shell COM APIs",
-        "FileDialogResult::Selected(PathBuf)",
+        "dialog_open_file",
+        "BridgeState::accept_selected_path",
         "Cancellation is a non-error no-op",
         "WorkspaceState::open_selected_file",
     ] {
@@ -735,7 +734,7 @@ fn phase20_end_user_markdown_setup_is_one_line_load_plus_bind_key() {
         "Smoke-only (dev validation, never the product path)",
         "End-user (product baseline)",
         "inline a full `markdownPackage` manifest object",
-        "Pasting the smoke fixture manifest block into `~/.config/clay/init.js` is not supported",
+        "Pasting the smoke fixture manifest block into `~/.clay/init.js` is not supported",
     ] {
         assert!(
             launch_doc.contains(required),
@@ -884,6 +883,7 @@ fn plan086_live_atspi_smoke_command_and_prerequisites_are_documented() {
         "gir1.2-atspi-2.0",
         "mode-700 temporary IPC/config home",
         "Workspace tabs",
+        "EditableText",
         "tests/live_atspi_smoke.rs",
         "CLAY_LIVE_A11Y_SMOKE",
     ] {
@@ -905,6 +905,46 @@ fn plan086_live_atspi_smoke_command_and_prerequisites_are_documented() {
 }
 
 #[test]
+fn plan089_live_multi_window_scale_smoke_and_targeting_prerequisites_are_documented() {
+    let launch_doc = launch_smoke_doc();
+    for expected in [
+        "Plan 089 Linux multi-window, DPI, font-scale, and Wayland smoke",
+        "CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security",
+        "live_atspi_smoke::live_multi_window_scale_smoke",
+        "two real Clay clients",
+        "900×600 logical window",
+        "Rescale(2.0)",
+        "physical 1800×1200",
+        "theme.setTypography",
+        "WAYLAND_DISPLAY",
+        "computer-use-linux doctor",
+        "computer-use-linux setup-window-targeting",
+        "can_query_windows",
+        "can_focus_windows",
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "portal coordinates and unscoped chords must not be used",
+        "UNRESOLVED",
+    ] {
+        assert!(
+            launch_doc.contains(expected),
+            "Plan 089 platform docs must contain `{expected}`"
+        );
+    }
+
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/configuration/ui-review-large-typography/init.js");
+    let fixture_text = std::fs::read_to_string(&fixture)
+        .unwrap_or_else(|error| panic!("read {}: {error}", fixture.display()));
+    assert!(
+        fixture_text.contains("setTypography")
+            && fixture_text.contains("size: 24")
+            && fixture_text.contains("size: 20")
+            && fixture_text.contains("size: 21"),
+        "large typography review fixture must use the complete three-profile API"
+    );
+}
+
+#[test]
 fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
     let launch_doc = launch_smoke_doc();
     let observability_doc = wiki_doc("docs/development/ui-observability.md");
@@ -917,6 +957,7 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "ui-review-loading",
         "ui-review-error",
         "ui-review-recovery",
+        "ui-review-large-typography",
         "ui-review-completion",
         "ui-review-command-centre",
         "screenshot.png",
@@ -947,8 +988,10 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "ui-review-loading",
         "ui-review-error",
         "ui-review-recovery",
+        "ui-review-large-typography",
         "ui-review-completion",
         "ui-review-command-centre",
+        "ui-review-rust",
     ] {
         let path = format!(
             "{}/tests/fixtures/configuration/{fixture}/init.js",
@@ -976,6 +1019,7 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         "Ctrl+Space",
         "Ctrl+Alt+P",
         "900×600",
+        "ui-review-large-typography",
     ] {
         assert!(
             script.contains(expected),
@@ -986,4 +1030,267 @@ fn plan087_ui_review_harness_command_and_prerequisites_are_documented() {
         !script.contains("cargo run -- smoke-gui"),
         "UI review wrapper must not create a second Cargo/build target path"
     );
+}
+
+#[test]
+fn check_script_reports_artifacts_without_deleting_or_masking_failures() {
+    let script_source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/check.sh");
+    let root =
+        std::env::temp_dir().join(format!("clay-build-artifact-report-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("scripts")).expect("create report test root");
+    let script = root.join("scripts/check.sh");
+    std::fs::copy(&script_source, &script).expect("copy check wrapper");
+
+    let run_report = || {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .arg("report")
+            .current_dir(&root)
+            .output()
+            .expect("run artifact report")
+    };
+
+    let missing = run_report();
+    assert!(
+        missing.status.success(),
+        "missing target must not fail report"
+    );
+    let missing_stdout = String::from_utf8_lossy(&missing.stdout);
+    assert!(missing_stdout.contains("target: missing"));
+    assert!(missing_stdout.contains("debug-deps: missing"));
+    assert!(missing_stdout.contains("debug-incremental: missing"));
+
+    std::fs::create_dir_all(root.join("target/debug/deps")).expect("create deps report fixture");
+    std::fs::create_dir_all(root.join("target/debug/incremental"))
+        .expect("create incremental report fixture");
+    let present = run_report();
+    assert!(
+        present.status.success(),
+        "present target must not fail report"
+    );
+    let present_stdout = String::from_utf8_lossy(&present.stdout);
+    assert!(present_stdout.contains("target: "));
+    assert!(present_stdout.contains("debug-deps: "));
+    assert!(present_stdout.contains("debug-incremental: "));
+    assert!(present_stdout.contains("executable files (target/debug/deps): 0"));
+
+    let ci = wiki_doc(".github/workflows/ci.yml");
+    let docs = wiki_doc("docs/development/build-and-test.md");
+    let script_text = wiki_doc("scripts/check.sh");
+    assert!(ci.contains("if: always()") && ci.contains("scripts/check.sh report"));
+    for expected in [
+        "report)",
+        "report_artifacts",
+        "target/debug/deps",
+        "target/debug/incremental",
+        "advisory; no cleanup performed",
+    ] {
+        assert!(
+            script_text.contains(expected),
+            "artifact report must retain marker `{expected}`"
+        );
+    }
+    for expected in [
+        "50 GiB",
+        "20 GiB",
+        "cargo clean --profile debugging",
+        "Never set `CARGO_TARGET_DIR`",
+    ] {
+        assert!(
+            docs.contains(expected),
+            "build docs must retain cleanup marker `{expected}`"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn check_script_pins_quick_and_full_gates_and_ci_parity() {
+    let script = wiki_doc("scripts/check.sh");
+
+    for expected in [
+        "quick)",
+        "full)",
+        "cargo fmt --check",
+        "cargo test --lib --quiet",
+        "cargo audit",
+        "cargo check --all-targets",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo test --all-targets --quiet",
+        "cargo bench --no-run",
+        "flock 9",
+        "target/.clay-full-check.lock",
+        "set -eu",
+    ] {
+        assert!(
+            script.contains(expected),
+            "scripts/check.sh must keep marker `{expected}`"
+        );
+    }
+
+    // Full-gate stage order within the `full)` branch: audit, fmt, check,
+    // clippy, test, bench compile — never reordered or parallelized.
+    let full_branch = &script[script.find("full)").expect("full branch")..];
+    let mut pos = 0;
+    for stage in [
+        "cargo audit",
+        "cargo fmt --check",
+        "cargo check --all-targets",
+        "cargo clippy --all-targets -- -D warnings",
+        "cargo test --all-targets --quiet",
+        "cargo bench --no-run",
+    ] {
+        let at = full_branch
+            .find(stage)
+            .unwrap_or_else(|| panic!("full branch must run stage `{stage}`"));
+        assert!(
+            at >= pos,
+            "full branch stages must be serial in gate order: `{stage}`"
+        );
+        pos = at;
+    }
+
+    assert!(
+        !script.contains("CARGO_TARGET_DIR"),
+        "check wrapper must reuse the repository target/"
+    );
+
+    let ci = wiki_doc(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("scripts/check.sh full"),
+        "CI must invoke the same full gate script"
+    );
+}
+
+/// Plan 118 task 9: the review harness captures the shipped design system and
+/// outright rejects the removed Neobrutal/Glass fixture names.
+#[test]
+fn plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = root.join("scripts/capture-ui-review.sh");
+    let output = std::env::temp_dir().join(format!("clay-ds-harness-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&output);
+
+    let run = |fixture: &str| {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .arg("--fixture")
+            .arg(fixture)
+            .arg("--output")
+            .arg(&output)
+            .output()
+            .unwrap_or_else(|err| panic!("run capture-ui-review.sh for {fixture}: {err}"))
+    };
+
+    // 1. The removed states are rejected by the argument check (exit 2), never
+    //    silently captured as something else.
+    for fixture in [
+        "ui-review-design-neobrutal",
+        "ui-review-design-neobrutal-light",
+        "ui-review-design-glass",
+        "ui-review-design-glass-light",
+    ] {
+        let result = run(fixture);
+        assert_eq!(result.status.code(), Some(2), "{fixture} must exit 2");
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert!(
+            stderr.contains("unknown --fixture"),
+            "{fixture} must be rejected as unknown: {stderr}"
+        );
+    }
+
+    // 2. The shipped fixture is accepted by the argument check. It may still end
+    //    UNRESOLVED off a desktop (exit 2 for a prereq), but never as unknown.
+    let shipped = run("ui-review-design-system");
+    let shipped_stderr = String::from_utf8_lossy(&shipped.stderr);
+    assert!(
+        !shipped_stderr.contains("unknown --fixture"),
+        "ui-review-design-system must remain a valid fixture: {shipped_stderr}"
+    );
+
+    // 3. Its fixture selects the shipped design system, and the removed fixture
+    //    directories are gone.
+    let init = root.join("tests/fixtures/configuration/ui-review-design-system/init.js");
+    let init_text = std::fs::read_to_string(&init).expect("read design-system review fixture");
+    assert!(
+        init_text.contains("@clay/design-instrument"),
+        "the review fixture must activate the shipped design system"
+    );
+    for slug in [
+        "ui-review-design-neobrutal",
+        "ui-review-design-neobrutal-light",
+        "ui-review-design-glass",
+        "ui-review-design-glass-light",
+    ] {
+        let dir = root.join("tests/fixtures/configuration").join(slug);
+        assert!(!dir.exists(), "{slug} fixture directory must be deleted");
+    }
+
+    // 3b. The landing fixture loads the bundled launcher (plan 118) and the
+    //     help text lists it, so the landing is capturable on a real build.
+    let launcher_fixture = root.join("tests/fixtures/configuration/ui-review-launcher/init.js");
+    let launcher_text =
+        std::fs::read_to_string(&launcher_fixture).expect("read launcher review fixture");
+    assert!(
+        launcher_text.contains("loadPackage(\"@clay/launcher\")"),
+        "the landing fixture must load the bundled launcher"
+    );
+    let launcher_run = run("ui-review-launcher");
+    assert!(
+        !String::from_utf8_lossy(&launcher_run.stderr).contains("unknown --fixture"),
+        "ui-review-launcher must remain a valid fixture"
+    );
+
+    // 3c. The canonical-example leg (plan 118): `--example-config` copies the
+    //     shipped examples/config tree instead of a fixture init.js, and it is
+    //     refused for fixtures whose checks assert their own panel content — a
+    //     mismatched pair would be captured as a false pass.
+    let run_args = |args: &[&str]| {
+        std::process::Command::new("bash")
+            .arg(&script)
+            .args(args)
+            .output()
+            .unwrap_or_else(|err| panic!("run capture-ui-review.sh {args:?}: {err}"))
+    };
+    let mismatched = run_args(&[
+        "--fixture",
+        "ui-review-design-system",
+        "--example-config",
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert_eq!(mismatched.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&mismatched.stderr).contains("--example-config is only valid"),
+        "--example-config must refuse a fixture with its own panel content"
+    );
+
+    // 4. The help text documents the shipped state and no removed one.
+    let help = std::process::Command::new("bash")
+        .arg(&script)
+        .arg("--help")
+        .output()
+        .expect("run capture-ui-review.sh --help");
+    assert!(help.status.success(), "--help must succeed");
+    let help_text = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help_text.contains("ui-review-design-system"),
+        "help must list the shipped design-system fixture"
+    );
+    assert!(
+        help_text.contains("ui-review-launcher"),
+        "help must list the launcher landing fixture"
+    );
+    assert!(
+        help_text.contains("--example-config"),
+        "help must document the canonical-example leg"
+    );
+    assert!(
+        !help_text.contains("neobrutal") && !help_text.contains("design-glass"),
+        "help must not list removed design-system fixtures"
+    );
+
+    let _ = std::fs::remove_dir_all(&output);
 }

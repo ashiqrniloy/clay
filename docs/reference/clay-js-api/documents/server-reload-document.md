@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverReloadDocument
 js_facade: runtime/js/documents.js::serverReloadDocument
-backing_rust: src/server/workspace.rs::WorkspaceState::reload_document
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::reload_document
 deno_op: op_clay_documents_reload_document
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_reload_document
 name: serverReloadDocument
@@ -15,7 +15,19 @@ phase: Phase 9
 visibility: public
 permissions: ["workspace-read", "document-read"]
 key_bindings: []
-custom_properties: []
+custom_properties:
+  - name: documentId
+    type: string
+    default: required
+    description: Open document to reload.
+  - name: force
+    type: boolean
+    default: false
+    description: Permit replacing a dirty server document when the user has explicitly chosen to discard edits.
+  - name: knownVersion
+    type: number
+    default: optional
+    description: Version the caller expects.
 security: Requires server-side validation of document/workspace permissions, workspace root authorization, path traversal rejection, and typed file errors; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `documents.serverReloadDocument` only through the documented Clay JS facade. Do not call raw Rust functions, protocol DTOs, or `Deno.core.ops`; do not invent filesystem access, network effects, shell commands, extension loading, AI mutation, broader workspace authority, package loading, WASM, or client-side JavaScript execution.
 lookup_tags: [documents, workspace, file, reload, dirty-state, js-api]
@@ -64,7 +76,7 @@ console.log(reloaded.metadata.version);
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverReloadDocument` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverReloadDocument` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -72,13 +84,17 @@ No behavior-changing custom properties are defined for this API.
 
 ## Return and async behavior
 
-Returns a promise for refreshed metadata and text snapshot.
+Returns a promise for refreshed metadata and the complete document text as a JSON `text` field.
+
+**Chunking note**: This trusted-runtime facade returns the full document text in a single JSON string, not the protocol's `DocumentTextHead`/chunk transfer path. The trusted JS runtime heap (128 MiB) is the effective bound; external packages never receive this full-text JSON. The protocol chunked path (`DocumentTextHead` + `DocumentChunkRequest`/`DocumentChunk`) is a separate Tauri/client bridge concern.
+
+**Package budget**: reloading a document over `DOCUMENTS_OP_MAX_DOCUMENT_BYTES` (256 KiB) fails with a typed `documents.document_too_large` error before any document text is converted for JavaScript, so a package cannot pull an unbounded document into the V8 heap by reloading a file that grew after it was opened. The client editor is unaffected: it reloads and transfers large files through the chunked protocol path.
 
 Current Phase 13 facade/runtime status is runtime-backed for server-side configuration and extension execution through explicit `deno_core` ops, while the API remains documented with the Phase 9 public contract.
 
 ## Errors
 
-The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, or a dirty document would be overwritten without an explicit force option. The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
+The runtime fails if arguments are malformed, the referenced workspace root or document does not exist, required permissions are absent, the server rejects workspace authorization, path traversal leaves the authorized root, the file is missing, permission is denied, the content is not valid UTF-8, the path is a directory or unsupported special file, stale file metadata is detected, a dirty document would be overwritten without an explicit force option, or the document exceeds the package documents budget (`documents.document_too_large`, 256 KiB — open larger files in the Clay editor). The Phase 13 runtime-backed facade reports typed JavaScript errors converted from server workspace diagnostics rather than performing unauthorized filesystem operations.
 
 ## Permissions and security
 
@@ -98,8 +114,8 @@ Use `documents.serverReloadDocument` only through the documented Clay JS facade.
 
 - JS facade: `runtime/js/documents.js::serverReloadDocument`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_reload_document` (`op_clay_documents_reload_document`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::reload_document`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::reload_document`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace/mod.rs`
 
 ## Lookup metadata
 

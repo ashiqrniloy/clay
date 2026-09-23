@@ -1,0 +1,6 @@
+developer_profile=unchanged
+checked=~/.clay/init.js, ~/.clay/layout.json, ~/.clay/launcher.json, ~/.clay/preferences.json, ~/.config/clay/*
+method=sha256 of every existing path captured before and after a capture run; identical
+isolated_launch_env=HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, TMPDIR all under a private mktemp root (mode 700), private unix socket (scripts/capture-ui-review.sh:843 server, :856 client)
+config_source=examples/config copied with cp -r into <root>/home/.clay (the documented `cp -r examples/config/. ~/.clay/`)
+authority=the copied example activates no process/LSP grant: authorizeLanguageServer only records grants for workspace roots that exist, and no session was started in these runs

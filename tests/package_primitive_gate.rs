@@ -165,7 +165,7 @@ fn package_manifest_accepts_minimal_markdown_fixture() {
         ]
     );
     assert_eq!(manifest.clay.modes, vec!["markdown".to_string()]);
-    assert_eq!(manifest.clay.entry, "./dist/index.js");
+    assert_eq!(manifest.clay.entry.as_deref(), Some("./dist/index.js"));
     assert_eq!(manifest.clay.load_entry.as_deref(), Some("./dist/load.js"));
 }
 
@@ -1229,7 +1229,7 @@ fn fallback_activation_manifest_fits_payload_budget() {
 //
 // Verifies the always-available guarantee: `core.text`/`core.code` are
 // Clay-owned built-in modes registered at `ModeRegistry::new()` (server
-// startup) with no `~/.config/clay/init.js` line, no `loadPackage` step, and
+// startup) with no `~/.clay/init.js` line, no `loadPackage` step, and
 // no package enable/load authority. A fresh registry with zero packages is
 // the faithful simulation of an absent/empty `init.js`: no package has been
 // loaded, yet every file still classifies and activates an editable built-in

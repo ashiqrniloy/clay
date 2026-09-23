@@ -1,0 +1,262 @@
+import { EditorState } from "@codemirror/state";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  cleanup,
+  render,
+  screen,
+  act,
+  fireEvent,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+import type { BootstrapDto } from "../bridge/types";
+import { editorPerformance, PERFORMANCE_STAGE } from "../editor/performance";
+import { ClayEditor } from "../editor/ClayEditor";
+import {
+  clayEditorTheme,
+  createEditor,
+  setReadOnly,
+  setTheme,
+} from "../editor/create-editor";
+import { createDocumentSession } from "../editor/sync/session";
+import { behaviorManifestFixture } from "../test/contract-fixtures";
+
+afterEach(cleanup);
+
+const bootstrap = {
+  clientId: 1,
+  protocolVersion: 28,
+  endpoint: "test",
+  generation: 1,
+  initialDocument: {
+    documentId: 1,
+    version: 1,
+    head: { totalBytes: 4, firstChunk: "seed" },
+    access: { editable: { leaseId: 1 } },
+    workspaceRoot: "/tmp/ws",
+  },
+  behaviorManifest: behaviorManifestFixture({ behaviorVersion: 2 }),
+} as unknown as BootstrapDto;
+
+describe("editor lifecycle", () => {
+  it("preserves document text across theme and read-only reconfigure", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = createEditor({ parent: host, doc: "keep me" });
+    expect(view.state.doc.toString()).toBe("keep me");
+    setTheme(view, clayEditorTheme);
+    setReadOnly(view, true);
+    expect(view.state.doc.toString()).toBe("keep me");
+    expect(view.state.facet(EditorState.readOnly)).toBe(true);
+    view.destroy();
+    host.remove();
+  });
+
+  it("renders chrome from metadata without putting text in React", () => {
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    render(<ClayEditor session={session} />);
+    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    expect(screen.getByText("ws")).toBeInTheDocument();
+    expect(screen.queryByText("/tmp/ws")).not.toBeInTheDocument();
+    // The badges are the document's real state: revision and dirty flag (this
+    // bootstrap holds an edit lease and no pending edits).
+    expect(screen.getByText(/clean/)).toBeInTheDocument();
+    expect(screen.getByText("v1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: /Editor ws/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("applies a local transaction before a blocked send settles", async () => {
+    let release: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const session = createDocumentSession({ send: () => blocked });
+    session.installInitial(bootstrap);
+    const host = document.createElement("div");
+    document.body.append(host);
+    const view = createEditor({
+      parent: host,
+      doc: "seed",
+      onUserChanges: (oldText, changes) => {
+        session.emitUserChanges(oldText, changes);
+      },
+    });
+    session.attachView(view);
+    view.dispatch({ changes: { from: 4, insert: "!" } });
+    expect(view.state.doc.toString()).toBe("seed!");
+    expect(session.store.get()?.pending).toBe(1);
+    release?.();
+    view.destroy();
+    host.remove();
+  });
+
+  it("shows a loading status during chunk assembly that clears at ready", () => {
+    const sent: string[] = [];
+    const session = createDocumentSession({
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+    const loadingBootstrap = {
+      ...bootstrap,
+      initialDocument: {
+        ...bootstrap.initialDocument,
+        head: { totalBytes: 8, firstChunk: "seed" },
+      },
+    } as unknown as BootstrapDto;
+    session.installInitial(loadingBootstrap);
+    render(<ClayEditor session={session} />);
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading full document…",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(
+      sent
+        .map((payload) => JSON.parse(payload))
+        .some((message) => message.family === "viewportRenderRequest"),
+    ).toBe(true);
+
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentChunk",
+          data: { documentId: 1, documentVersion: 1, offset: 4, text: "-full" },
+        },
+      });
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(screen.getByText(/seed-full/)).toBeInTheDocument();
+  });
+
+  it("invokes the exact document handlers and keeps Open as the on-demand strip", async () => {
+    const user = userEvent.setup();
+    const sent: string[] = [];
+    const session = createDocumentSession({
+      send: (payload: string) => {
+        sent.push(payload);
+        return Promise.resolve();
+      },
+    });
+    session.installInitial(bootstrap);
+    render(<ClayEditor session={session} />);
+
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save.querySelector("svg")).not.toBeNull();
+    const reload = screen.getByRole("button", { name: "Reload" });
+    expect(reload.querySelector("svg")).not.toBeNull();
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.querySelector("svg")).not.toBeNull();
+    // Open stays a labeled text action (discovery/destination label).
+    const open = screen.getByRole("button", { name: "Open" });
+    expect(open.querySelector("svg")).toBeNull();
+    expect(open.textContent).toContain("Open");
+
+    // The relative-path field is on demand, not permanently visible.
+    expect(screen.queryByTestId("editor-open-strip")).not.toBeInTheDocument();
+    await user.click(open);
+    expect(screen.getByTestId("editor-open-strip")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("Open relative path"), {
+      key: "Escape",
+    });
+    expect(screen.queryByTestId("editor-open-strip")).not.toBeInTheDocument();
+
+    await user.click(save);
+    await user.click(reload);
+    fireEvent.click(close);
+    const families = sent
+      .map((payload) => JSON.parse(payload) as { family?: string })
+      .map((message) => message.family);
+    expect(families.filter((f) => f === "saveDocument")).toHaveLength(1);
+    expect(families.filter((f) => f === "reloadDocument")).toHaveLength(1);
+    expect(families.filter((f) => f === "closeDocument")).toHaveLength(1);
+    // Save is disabled while not editable; it was enabled here, so this
+    // guards the disabled condition indirectly via the single-shot sends.
+  });
+
+  it("does not reconfigure read-only on unrelated metadata updates", () => {
+    editorPerformance.configure(true);
+    editorPerformance.clear();
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    render(<ClayEditor session={session} />);
+    const reconfigures = () =>
+      editorPerformance.snapshot().metrics[
+        PERFORMANCE_STAGE.compartmentReconfigure
+      ]?.count ?? 0;
+    const before = reconfigures();
+
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "editAck",
+          data: { documentId: 1, version: 2, transactionId: 1 },
+        },
+      });
+    });
+    expect(session.store.get()?.version).toBe(2);
+    expect(reconfigures()).toBe(before);
+
+    // Flipping loading (or access) still reconfigures exactly once.
+    act(() => {
+      session.handleEnvelope({
+        kind: "event",
+        data: {
+          kind: "documentOpened",
+          data: {
+            metadata: {
+              documentId: 1,
+              version: 2,
+              dirty: false,
+              access: "readOnly",
+              path: "",
+            },
+            head: { totalBytes: 4, firstChunk: "seed" },
+          },
+        },
+      });
+    });
+    expect(reconfigures()).toBe(before + 1);
+    editorPerformance.configure(false);
+  });
+
+  it("preserves EditorView and document text across recipe CSS variable updates", () => {
+    const session = createDocumentSession({ send: async () => undefined });
+    session.installInitial(bootstrap);
+    const { rerender } = render(<ClayEditor session={session} />);
+
+    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    expect(screen.getByText("ws")).toBeInTheDocument();
+
+    // Modify recipe variables on document root
+    document.documentElement.style.setProperty(
+      "--clay-ds-editor-default-root-rest-background-color",
+      "var(--clay-surface-main)",
+    );
+    document.documentElement.style.setProperty(
+      "--clay-ds-editor-default-gutters-rest-background-color",
+      "var(--clay-surface-panel)",
+    );
+
+    rerender(<ClayEditor session={session} />);
+
+    expect(screen.getByTestId("clay-editor")).toBeInTheDocument();
+    expect(screen.getByText("ws")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: /Editor ws/ }),
+    ).toBeInTheDocument();
+
+    document.documentElement.style.removeProperty(
+      "--clay-ds-editor-default-root-rest-background-color",
+    );
+    document.documentElement.style.removeProperty(
+      "--clay-ds-editor-default-gutters-rest-background-color",
+    );
+  });
+});

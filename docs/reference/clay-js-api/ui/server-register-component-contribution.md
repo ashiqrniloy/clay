@@ -32,6 +32,14 @@ custom_properties:
     type: ComponentContributionDefinition[]
     default: []
     description: Bounded child component declarations.
+  - name: style
+    type: object
+    default: optional
+    description: Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed style-variable names.
+  - name: action
+    type: object
+    default: optional
+    description: UI action intent validated against the registered package-prefixed command IDs (`action.commandId`).
   - name: styleTokens
     type: string[]
     default: []
@@ -48,8 +56,8 @@ custom_properties:
     type: string[]
     default: []
     description: Registered package-prefixed command IDs referenced by component action intents.
-security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
-agent_guidance: Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, Masonry names, CSS strings, or executable client hooks.
+security: Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
+agent_guidance: Use `ui.serverRegisterComponentContribution` for declarative component trees only; keep native rendering, layout, style resolution, and action execution Clay-owned and avoid raw Rust, raw ops, client-machinery names, CSS strings, or executable client hooks.
 lookup_tags: [ui, package-ui, component-catalog, style-tokens, clay-js-api, phase18.3, phase20.5, runtime-backed]
 app_visible: true
 help_visible: true
@@ -67,7 +75,7 @@ Register a bounded inert Clay component tree for package UI through the runtime-
 
 `serverRegisterComponentContribution` validates and stores a package-owned component root that can be reused by package panels and overlays. Clay validates component IDs, supported component kinds, child traversal limits, typed style variables, theme-token compatibility, action intents, and prohibited authority fields before the component can affect native UI state.
 
-The API documents Clay's package-facing component catalog. It does not expose Masonry widgets, Vello/Parley callbacks, raw CSS, raw op names, native handles, or executable client-side JavaScript.
+The API documents Clay's package-facing component catalog. It does not expose client widgets, renderer callbacks, raw CSS, raw op names, native handles, or executable client-side JavaScript.
 
 ## When to use
 
@@ -117,6 +125,8 @@ console.log(toolbar.id, toolbar.rootKind, toolbar.componentCount);
 - `kind` (`enum`, required): Supported kind: `editorView`, `panel`, `label`, `button`, `list`, `flex`, `stack`, `overlay`, `scroll`, `portal`, `statusItem`, `dropdown`, `collapse`, `modal`, or `textInput`.
 - `deferredKinds` (`enum`, default `table`): As of Phase 20.5 only `table` remains deferred and rejected with diagnostics.
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child component declarations.
+- `style` (`object`, optional): Component style-variable tokens, for example `style.validationState` and `style.placeholderColor`, validated against the closed style-variable names.
+- `action` (`object`, optional): UI action intent validated against registered package-prefixed command IDs.
 - `styleTokens` (`string[]`, default `[]`): Typed style-variable token references through known Clay core tokens or package theme tokens.
 - `actionTargets` (`string[]`, default `[]`): Registered command IDs referenced by action intents in this tree.
 
@@ -132,6 +142,10 @@ No default key binding is assigned. Components may emit inert command intents on
 - `children` (`ComponentContributionDefinition[]`, default `[]`): Bounded child declarations.
 - `styleTokens` (`string[]`, default `[]`): Typed style-token references.
 - `actionTargets` (`string[]`, default `[]`): Registered command action IDs.
+- `style`: Component style-variable tokens (for example `style.validationState` and `style.placeholderColor`), validated against the type's closed s...
+- `action`: UI action intent validated against the registered package-prefixed command IDs (`action.commandId`).
+- `validationState`: Phase 20.5: `textInput` validation border state: `none`, `error`, `warning`, or `success`.
+- `placeholderColor`: Phase 20.5: `textInput` placeholder text color-role token.
 
 ## Return and async behavior
 
@@ -147,13 +161,13 @@ Fails when the manifest is invalid, IDs are not package-prefixed, the kind is un
 
 No additional permission is required for inert component metadata. Component action targets must refer to registered commands whose own permissions and routing policies are validated separately.
 
-Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
+Validates component kind, duplicate component IDs, package-prefixed IDs, bounded payloads, typed style-token references, registered action targets, provenance, and prohibited fields; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, native component mutation authority, or external authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
 ## Agent guidance
 
-Use `ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, Masonry widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
+Use `ui.serverRegisterComponentContribution` when the user asks for a public Clay JS API for package component trees or style-token-validated component catalog entries. Do not bypass with raw Rust constructors, raw `Deno.core.ops`, protocol DTOs, client widgets, raw CSS, renderer callbacks, hidden config keys, or client-side JavaScript execution.
 
 ## Backing implementation
 

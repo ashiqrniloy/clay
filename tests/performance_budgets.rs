@@ -1,7 +1,16 @@
 use clay::perf::budgets::{
-    BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
-    DECORATION_PAYLOAD_BUDGET_BYTES, EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
-    KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB,
+    AGENT_DAEMON_SPAWN_P95_BUDGET_MS, AGENT_DELTA_IPC_P95_BUDGET_MS,
+    AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS, BEHAVIOR_MANIFEST_PAYLOAD_BUDGET_BYTES,
+    BINARY_SNIFF_BYTES, CLIENT_EDIT_PAYLOAD_BUDGET_BYTES,
+    COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS, COMMAND_CENTRE_OPEN_P95_BUDGET_MS,
+    COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES, COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX,
+    COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+    DECORATION_PAYLOAD_BUDGET_BYTES, DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES,
+    DOCUMENTS_OP_MAX_DOCUMENT_BYTES, EDIT_ACK_P95_BUDGET_MS, EDIT_ACK_PAYLOAD_BUDGET_BYTES,
+    FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES,
+    INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES, KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS,
+    LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES,
+    LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS, LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB,
     MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES, PANE_PAINT_P95_BUDGET_MS,
     RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS, SCROLL_LAYOUT_RENDER_ADJACENT_P95_BUDGET_MS,
     SDUI_SNAPSHOT_PAYLOAD_BUDGET_BYTES, SDUI_UPDATE_PAYLOAD_BUDGET_BYTES,
@@ -22,6 +31,65 @@ fn ui_observability_doc() -> String {
         "/docs/development/ui-observability.md"
     ))
     .expect("read docs/development/ui-observability.md")
+}
+
+#[test]
+fn workspace_open_path_stays_streamed_and_head_bounded() {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/workspace/mod.rs"
+    ))
+    .expect("read src/server/workspace/mod.rs");
+    let start = source
+        .find("async fn read_file_streamed")
+        .expect("streaming open helper must remain present");
+    let end = source[start..]
+        .find("/// Heavy disk read for file open/reload")
+        .map(|offset| start + offset)
+        .expect("streaming helper must have a bounded wrapper");
+    let helper = &source[start..end];
+    assert!(helper.contains("RopeBuilder"));
+    assert!(!helper.contains("read_to_end"));
+    assert!(!helper.contains("String::from_utf8(bytes)"));
+    // Plan 119 P1-1: the read loop reuses one scratch buffer and carries the
+    // incomplete UTF-8 scalar inside it; a per-chunk `combined` Vec cost ~800
+    // allocations on a 50 MiB open in the debug profile.
+    assert!(helper.contains("copy_within"));
+    assert!(!helper.contains("let mut combined"));
+
+    let document_source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/document.rs"
+    ))
+    .expect("read src/server/document.rs");
+    assert!(document_source.contains("pub(crate) fn document_text_head"));
+
+    let connection_source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/server/connection/documents.rs"
+    ))
+    .expect("read src/server/connection/documents.rs");
+    assert!(!connection_source.contains("DocumentTextHead::complete(document.text())"));
+    assert!(connection_source.contains("parse_window_snapshot"));
+    assert!(connection_source.contains("DOCUMENT_ANALYSIS_MAX_DOCUMENT_BYTES"));
+
+    assert!(!source.contains("open_document_snapshots"));
+    assert!(!source.contains("struct OpenDocumentSnapshot"));
+    assert!(source.contains("open_document_refreshes"));
+    assert!(source.contains("struct OpenDocumentRefresh"));
+
+    let save_start = source
+        .find("async fn save_io")
+        .expect("save_io must remain present");
+    let save_end = source[save_start..]
+        .find("async fn reload_io")
+        .map(|offset| save_start + offset)
+        .expect("save_io must be followed by reload_io");
+    let save_io = &source[save_start..save_end];
+    assert!(save_io.contains("clone_rope"));
+    assert!(save_io.contains("chunks("));
+    assert!(!save_io.contains("document.text()"));
+    assert!(!save_io.contains("as_bytes()"));
 }
 
 fn phase18_plan_doc() -> String {
@@ -55,24 +123,55 @@ fn performance_docs_list_all_supported_benchmark_commands() {
     for command in [
         "cargo bench",
         "cargo bench --no-run",
-        "cargo bench --bench editor_baselines editor_visible_extraction -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "cargo bench --bench protocol_server_baselines -- --save-baseline phase14-baseline",
         "cargo bench --bench protocol_server_baselines -- --baseline phase14-baseline",
         "cargo bench --bench protocol_server_baselines -- --baseline-lenient phase14-baseline",
-        "cargo bench --bench markdown_baselines markdown_activation_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
-        "cargo bench --bench markdown_baselines markdown_parse_and_decoration_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
         "node --check tools/bench/markdown-parser.mjs",
         "node tools/bench/markdown-parser.mjs --dry-run --sizes 1MiB --source-limit 8",
         "node --expose-gc tools/bench/markdown-parser.mjs --sizes 64KiB,256KiB,1MiB,5MiB,16MiB --parser markdown-it,adapter,windowed-adapter --iterations 1 --warmup 0 --json",
-        "cargo test --test protocol performance_protocol::",
+        "cargo test --test protocol performance_budgets::",
+        "cargo test --lib server::syntax::tests",
+        "cargo test --lib server::parse_coordinator::tests",
         "cargo test --test runtime lsp_bridge::",
         "cargo test --test security language_server_authority::",
-        "cargo bench --bench first_party_language_baselines -- --save-baseline pre-lsp",
-        "cargo bench --bench window_baselines -- --sample-size 10 --warm-up-time 1 --measurement-time 2",
     ] {
         assert!(
             doc.contains(command),
             "performance guide must document benchmark/profiling command: {command}"
+        );
+    }
+}
+
+#[test]
+fn chunked_document_security_budgets_are_pinned() {
+    assert_eq!(DOCUMENT_RESIDENT_MEMORY_BUDGET_BYTES, 256 * 1024 * 1024);
+    assert_eq!(BINARY_SNIFF_BYTES, 8 * 1024);
+    assert_eq!(DOCUMENTS_OP_MAX_DOCUMENT_BYTES, 256 * 1024);
+}
+
+#[test]
+fn plan126_provider_document_window_budgets_are_pinned_and_documented() {
+    // Plan 126 task 2: completion and language-intelligence share one bounded
+    // window budget, and the window handed to providers never exceeds it
+    // (windows are clamped to char boundaries at or inside the budget).
+    assert_eq!(COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES, 64 * 1024);
+    assert_eq!(
+        COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES,
+        LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES
+    );
+
+    let doc = performance_doc();
+    for expected in [
+        "COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES".to_string(),
+        "LANGUAGE_INTELLIGENCE_DOCUMENT_WINDOW_BUDGET_BYTES".to_string(),
+        format!(
+            "<= {} bytes (`COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES`)",
+            COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES
+        ),
+    ] {
+        assert!(
+            doc.contains(&expected),
+            "performance guide must document provider window budget marker `{expected}`"
         );
     }
 }
@@ -493,6 +592,43 @@ fn performance_budget_constants_are_exported() {
     assert_eq!(RUNTIME_CONFIGURATION_EVAL_P95_BUDGET_MS, 25);
     assert_eq!(LARGE_FILE_RESIDENT_MEMORY_BUDGET_MIB, 256);
     assert_eq!(SYNTAX_CACHE_BUDGET_BYTES, 30 * 1024 * 1024);
+    assert_eq!(COMPLETION_MAX_VISIBLE_ROWS, 8);
+    assert_eq!(COMPLETION_MAX_WIDTH_PX.to_bits(), 480.0_f64.to_bits());
+}
+
+#[test]
+fn plan087_completion_surface_budgets_are_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "COMPLETION_MAX_VISIBLE_ROWS".to_string(),
+        "COMPLETION_MAX_WIDTH_PX".to_string(),
+        format!("{} visible rows", COMPLETION_MAX_VISIBLE_ROWS),
+        format!("{} logical px", COMPLETION_MAX_WIDTH_PX),
+    ] {
+        assert!(
+            doc.contains(&expected),
+            "performance guide must document completion budget marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn plan087_focused_ui_regression_coverage_is_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "Plan 087 focused UI regression coverage",
+        "completion_open_baselines",
+        "completion_filter_baselines",
+        "completion_layout_baselines",
+        "eight-row/480-pixel caps",
+        "reject stale snapshots carrying a foreign document or behavior version",
+        "No pixel goldens",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Plan 087 regression marker `{expected}`"
+        );
+    }
 }
 
 #[test]
@@ -515,11 +651,281 @@ fn phase22_6_window_budget_constants_are_pinned_and_documented() {
         format!("<= {} ms (P95, advisory)", PANE_PAINT_P95_BUDGET_MS),
         format!("<= {} ms (P95, advisory)", TAB_SWITCH_P95_BUDGET_MS),
         format!("<= {} bytes", MULTI_PANE_DECORATION_AGGREGATE_BUDGET_BYTES),
-        "cargo bench --bench window_baselines".to_string(),
+        "PANE_PAINT_P95_BUDGET_MS".to_string(),
     ] {
         assert!(
             doc.contains(&expected),
             "performance guide must document Phase 22.6 budget marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn phase25_agent_host_budget_constants_are_pinned_and_documented() {
+    assert_eq!(AGENT_DAEMON_SPAWN_P95_BUDGET_MS, 2_000);
+    assert_eq!(AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS, 2_000);
+    assert_eq!(AGENT_DELTA_IPC_P95_BUDGET_MS, 4);
+    const { assert!(AGENT_DELTA_IPC_P95_BUDGET_MS < KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS) };
+    assert_eq!(COMMAND_CENTRE_OPEN_P95_BUDGET_MS, 50);
+    assert_eq!(COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS, 4);
+
+    let doc = performance_doc();
+    for expected in [
+        "## Phase 25 agent-host budgets",
+        "AGENT_DAEMON_SPAWN_P95_BUDGET_MS",
+        "AGENT_PROMPT_TO_FIRST_DELTA_P95_BUDGET_MS",
+        "AGENT_DELTA_IPC_P95_BUDGET_MS",
+        "AGENT_TRANSCRIPT_SNAPSHOT_BUDGET_BYTES",
+        "slow_daemon_submit_does_not_block_caller",
+        "agent_io_stays_off_paint_and_keypress",
+        "Deltas never block",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Phase 25 budget marker {expected:?}"
+        );
+    }
+}
+
+#[test]
+fn plan088_responsive_layout_conformance_and_baseline_are_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "Plan 088 modernization conformance and responsive layout baselines",
+        "responsive_layout_baselines",
+        "responsive_layout_work",
+        "responsive_layout_work_preserves_sidebar_and_editor_bounds",
+        "Screenshot goldens remain deferred",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Plan 088 guard/baseline marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn plan089_editor_menu_completion_and_accessibility_costs_are_documented() {
+    let doc = performance_doc();
+    let wiki = performance_fixtures_wiki_doc();
+    for expected in [
+        "Plan 089 editor, menu, tab, completion, and accessibility cost guards",
+        "command_centre_open_baselines",
+        "completion_selection_baselines",
+        "accessibility_tree_update_baselines",
+        "accessibility_updates_reuse_stable_virtual_ids_without_allocator_churn",
+        "retained_accessibility_update_fixture_stays_bounded",
+        "Criterion's saved-target comparisons remain advisory",
+        "existing `editor_baselines` `editor_render_adjacent`",
+    ] {
+        assert!(
+            doc.contains(expected) || wiki.contains(expected),
+            "performance docs/wiki must document Plan 089 cost marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn phase28_budget_constants_match_docs() {
+    assert_eq!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES, 2048);
+    assert_eq!(INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES, 4096);
+    assert_eq!(
+        INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES,
+        INCREMENTAL_PARSE_UPDATE_BUDGET_BYTES + FOLDING_RANGE_PAYLOAD_BUDGET_BYTES
+    );
+    assert_eq!(DECORATION_PAYLOAD_BUDGET_BYTES, 8192);
+    assert_eq!(COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES, 16 * 1024);
+    assert_eq!(COMPLETION_RESULT_MAX_ITEMS, 256);
+    assert_eq!(LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS, 4096);
+    assert_eq!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS, 16);
+    const {
+        assert!(KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS == 16);
+        assert!(FOLDING_RANGE_PAYLOAD_BUDGET_BYTES < DECORATION_PAYLOAD_BUDGET_BYTES);
+    }
+
+    let doc = performance_doc();
+    for expected in [
+        "Phase 28.7".to_string(),
+        "FOLDING_RANGE_PAYLOAD_BUDGET_BYTES".to_string(),
+        "INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES".to_string(),
+        format!("<= {} bytes", FOLDING_RANGE_PAYLOAD_BUDGET_BYTES),
+        format!(
+            "{} B when",
+            INCREMENTAL_PARSE_UPDATE_WITH_FOLDING_BUDGET_BYTES
+        ),
+        format!("<= {} bytes", DECORATION_PAYLOAD_BUDGET_BYTES),
+        format!("<= {} bytes", COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES),
+        format!(
+            "<= {} ({})",
+            COMPLETION_RESULT_MAX_ITEMS, "COMPLETION_RESULT_MAX_ITEMS"
+        ),
+        format!(
+            "<= {} chars",
+            LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS
+        ),
+        format!(
+            "<= {} ms (P95, advisory)",
+            KEYPRESS_TO_LOCAL_PAINT_P95_BUDGET_MS
+        ),
+        "phase28_budget_constants_match_docs".to_string(),
+        "folding_and_inlay_payloads_deny_above_cap".to_string(),
+        "completion_ranking_stays_inside_existing_scan_budget".to_string(),
+    ] {
+        assert!(
+            doc.contains(&expected),
+            "performance guide must document Phase 28.7 budget marker `{expected}`"
+        );
+    }
+}
+
+#[test]
+fn folding_and_inlay_payloads_deny_above_cap() {
+    let decorations = production_src("src/server/decorations.rs");
+    assert!(
+        decorations.contains("DECORATION_PAYLOAD_BUDGET_BYTES"),
+        "inlay/link reuse decoration publication; must keep the named cap"
+    );
+    assert!(
+        decorations.contains("PayloadBudgetExceeded"),
+        "oversized decoration (inlay/link) must deny, not truncate"
+    );
+
+    let intelligence = production_src("src/server/language_intelligence.rs");
+    assert!(
+        intelligence.contains("LANGUAGE_INTELLIGENCE_MAX_HOVER_MARKDOWN_CHARS"),
+        "hover payloads must keep the named markdown cap"
+    );
+
+    for path in ["src/protocol", "src/server", "src/editor"] {
+        for rust_file in rust_sources_under(path) {
+            if is_sibling_test_file(&rust_file) {
+                continue;
+            }
+            let source = std::fs::read_to_string(&rust_file)
+                .unwrap_or_else(|error| panic!("read {}: {error}", rust_file.display()));
+            let body = production_body(&source);
+            if mentions_folding_publish(body) {
+                assert!(
+                    body.contains("FOLDING_RANGE_PAYLOAD_BUDGET_BYTES"),
+                    "{} publishes folding ranges without the named cap",
+                    rust_file.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn completion_ranking_stays_inside_existing_scan_budget() {
+    let completion = production_src("src/server/completion.rs");
+    assert!(
+        completion.contains("COMPLETION_RESULT_MAX_ITEMS"),
+        "buffer-word scan / ranking must keep the existing item cap"
+    );
+    assert!(
+        completion.contains("COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES"),
+        "buffer-word scan / ranking must keep the existing payload cap"
+    );
+    assert!(
+        completion.contains("estimated_result_payload_bytes"),
+        "scan must stop before exceeding the payload estimate"
+    );
+    for line in completion.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("fn ") && function_name_looks_like_rank(trimmed) {
+            let name = trimmed.split('(').next().unwrap_or(trimmed);
+            assert!(
+                completion.contains("COMPLETION_RESULT_MAX_ITEMS"),
+                "{name} must stay inside COMPLETION_RESULT_MAX_ITEMS"
+            );
+        }
+    }
+}
+
+fn production_src(path: &str) -> String {
+    let source = std::fs::read_to_string(concat_manifest(path))
+        .unwrap_or_else(|error| panic!("read {path}: {error}"));
+    production_body(&source).to_string()
+}
+
+fn concat_manifest(path: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
+fn production_body(src: &str) -> &str {
+    if let Some(index) = src.find("\nmod tests") {
+        return &src[..index];
+    }
+    if let Some(index) = src.find("\n#[cfg(test)]") {
+        return &src[..index];
+    }
+    src
+}
+
+/// Sibling `tests.rs` module files are test-only by convention
+/// (`#[cfg(test)] mod tests;` in the owning mod.rs), as are `<module>_tests.rs`
+/// siblings and the split suites under a `tests/` directory
+/// (`src/**/tests/mod.rs` + `src/**/tests/<suite>.rs`); the guards above cannot
+/// see the declaration from the test file itself.
+fn is_sibling_test_file(path: &std::path::Path) -> bool {
+    let under_tests_dir = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        == Some("tests");
+    under_tests_dir
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "tests.rs" || name.ends_with("_tests.rs"))
+}
+
+fn mentions_folding_publish(body: &str) -> bool {
+    body.contains("FoldingRange")
+        || body.contains("publish_folding")
+        || body.contains("serverPublishFoldingRanges")
+}
+
+fn function_name_looks_like_rank(fn_line: &str) -> bool {
+    let name = fn_line
+        .trim_start_matches("fn ")
+        .split(['<', '('])
+        .next()
+        .unwrap_or("");
+    name.contains("rank") || name.contains("score")
+}
+
+fn rust_sources_under(dir: &str) -> Vec<std::path::PathBuf> {
+    let root = concat_manifest(dir);
+    let mut stack = vec![root];
+    let mut files = Vec::new();
+    while let Some(path) = stack.pop() {
+        let entries = std::fs::read_dir(&path)
+            .unwrap_or_else(|error| panic!("read_dir {}: {error}", path.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| panic!("dir entry: {error}"));
+            let child = entry.path();
+            if child.is_dir() {
+                stack.push(child);
+            } else if child.extension().is_some_and(|ext| ext == "rs") {
+                files.push(child);
+            }
+        }
+    }
+    files
+}
+
+#[test]
+fn tauri_react_bundle_budgets_are_documented() {
+    let doc = performance_doc();
+    for expected in [
+        "<= 180 kB gzip (startup shell)",
+        "<= 404 kB gzip (total frontend)",
+        "bun --cwd frontend run check:budget",
+    ] {
+        assert!(
+            doc.contains(expected),
+            "performance guide must document Tauri/React budget: {expected}"
         );
     }
 }

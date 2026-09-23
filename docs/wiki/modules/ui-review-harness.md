@@ -1,0 +1,424 @@
+# Repeatable UI Review Harness (Plan 087)
+
+## Source
+
+- `scripts/capture-ui-review.sh`
+- `scripts/capture-editor-performance-review.sh` (Plan 099 real Tauri editor states)
+- `tests/fixtures/configuration/ui-review-*` (the script accepts 16 named
+  fixtures: the shell states, the design-system/theme runs, the icon runs, and
+  `ui-review-workspace` / `ui-review-coding-agent` / `ui-review-launcher`)
+- `frontend/src/routes/fixture.tsx` (Plan 098 document-transfer fixture routes)
+- `design-artifacts/tools/{capture-agent-lane,capture-lane-palette}.mjs`
+- `test-plan/artifacts/124-agent-lane/` (Plan 124 live evidence)
+- `tests/manual_smoke_docs.rs` — command/fixture documentation drift guard
+- `docs/development/launch-and-gui-smoke.md` — harness documentation
+- `docs/development/ui-observability.md` — observability entry point
+- `plans/087-Audit-Remediation-UI-Foundation-and-Review-Harness.md`
+
+## Overview
+
+Plan 087 adds one documented command that launches isolated, fixed-size Linux GUI fixtures for repeatable state capture. The harness exists because `smoke-gui` mode forces a smoke endpoint and applies no window restore or HOME/XDG isolation, so it cannot represent normal end-user entry states (welcome, restored documents, completion, or the legacy `ui-review-command-centre` fixture — the composer-anchored `/` palette since Plan 125). The Plan 124 lane/palette review uses dedicated capture tools and a real Tauri build; its evidence is documented below. The harness is a review workflow, not a CI golden-image system: screenshots are review artifacts, and GPU pixel snapshots stay deferred (Masonry's `TestHarness` is CPU-only and not production-renderer faithful).
+
+## How It Works
+
+### Command
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-default --output <artifact-dir>
+```
+
+Optional `--timeout <seconds>` (default 45, `CLAY_UI_REVIEW_TIMEOUT_SECONDS`), `--theme <specifier>` / `--appearance light|dark|system` (seed `~/.clay/preferences.json` inside the isolated root, so any fixture can be captured under any shipped theme), `--example-config` (boot the canonical `examples/config/` tree instead of the fixture's own `init.js`), `--size <WxH>`, and `--drive <json>` (AT-SPI steps executed before the capture). The script:
+
+1. Creates a mode-700 `mktemp` root with isolated `HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, and `TMPDIR`.
+2. Copies the fixture `init.js` to `$home/.clay/init.js` and, for document-bearing fixtures, writes `layout.json` v2 with an explicit leaf-form `splitTree` (`{"leaf":{"paneId":1}}` — a null `splitTree` degrades to the default single-pane layout and never reopens documents).
+3. Spawns `clay server <socket>` (no `--config-fixture`; that flag is bypassed because fixtures depend on the watcher path) from the private fixture workspace, then `clay client <socket>`. The workspace cwd keeps bootstrap document IDs aligned with the loading SDUI binding. Fixture `init.js` is copied before launch, and the script touches it only after the client shell/handshake is observable so the runtime snapshot is delivered through the live connection.
+4. Polls an embedded python3 GI-Atspi probe for the named state, then records `metadata.txt`, `instructions.md`, `accessibility.txt`, `screenshot.png`, and `review.status` into `--output`. The loading fixture additionally waits for exact `Loading review` / `Loading workspace…` fields in the delivered `RuntimeStateSnapshot` and writes `runtime-tree.txt`; it does not pass on a welcome-only tree.
+
+Exit codes: `0` with `review.status PASS` on success; `2` with an explicit reason (`UNRESOLVED`) when the fixture state cannot be reached or the desktop accessibility bus is missing — never a false pass. Interactive TTY states (completion, the Control Center palette) are recorded `UNRESOLVED` off a TTY with their reasons. The default welcome capture is structural: it proves names, roles, bounds, and status text, but does not exercise mouse hit-testing or keyboard shortcuts; those paths are covered by the RenderRoot regressions `welcome_button_pointer_press_emits_open_file_command` and `welcome_global_keybindings_emit_commands_without_editing_text` in `src/masonry_editor.rs`.
+
+### Fixtures
+
+| Fixture                         | init.js content                                                                                                | State captured                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `ui-review-default`             | empty comment                                                                                                  | welcome entry state (empty-tab bootstrap)                           |
+| `ui-review-loading`             | static SDUI `Loading workspace…` panel                                                                         | published loading panel via watcher reload                          |
+| `ui-review-error`               | `setTheme('@clay/does-not-exist')`                                                                             | sanitized `Runtime packages.not_installed` diagnostic, usable shell |
+| `ui-review-recovery`            | empty comment                                                                                                  | disconnected/reconnect-guidance state                               |
+| `ui-review-large-typography`    | `setTypography` with UI 24 and document 20/21                                                                  | bounded large-type shell                                            |
+| `ui-review-completion`          | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space`                                             | completion popup (interactive)                                      |
+| `ui-review-large-document`      | `loadPackage('@clay/rust')` + `completion.trigger` on `Ctrl+Space` (plan 126), with a generated ≥4 MiB `review.rs` restored by `layout.json` | large document open + completion provider (plan 126 steps) |
+| `ui-review-command-centre`      | legacy single-stroke `controlCenter.open` fixture override (not shipped defaults) | composer-anchored `/` palette, catalogue mode (interactive)          |
+| `ui-review-rust`                | language-server authorization + `editor.toggleInlayHints` binding                                              | Rust analyzer/inlay states (interactive)                            |
+| `ui-review-design-system`       | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Dark                                       | Shipped design system active (Plan 118)                             |
+| `ui-review-design-system-light` | `setDesignSystem('@clay/design-instrument')` under Gruvbox Material Light                                      | Cross-theme color authority verification (Plan 118)                 |
+| `ui-review-launcher`            | `loadPackage('@clay/launcher')` under Gruvbox Material Dark                                                    | Bundled launcher landing on the empty tab (Plan 118 Part D)         |
+
+#### `--example-config` and `--drive`
+
+`--example-config` copies the whole canonical tree (`init.js` plus
+`packages/`) into the isolated config root, exactly as
+`cp -r examples/config/. ~/.clay/` would, and records
+`config_source=examples/config` in `metadata.txt`. It is accepted only with
+`--fixture ui-review-launcher` (the landing the canonical config renders) and
+refused with exit 2 for fixtures whose checks assert their own panel content, so
+a mismatched pair can never be captured as a pass.
+
+`--drive` executes AT-SPI steps (`click`, `focus`, `type`, `clear`, `wait`)
+before the capture, which reaches palette/menu/modal/rail states without input
+synthesis. Every step is verified against the live AT-SPI tree; a step that
+cannot be applied records `UNRESOLVED` with its reason — never a pass. Limits
+found in practice (re-confirmed in the Plan 125 review): the composer field
+exposes no reachable `org.a11y.atspi.EditableText`, so a palette query cannot be
+typed from AT-SPI on this stack; palette rows are `list item` nodes without a
+usable action, so row activation cannot be driven either; and a launcher
+`list item` does not select on AT-SPI `click`.
+
+A PASS capture also writes a bounded, root-redacted `server.diagnostics.txt`
+(diagnostic/configuration/generation lines plus `configuration_failed_lines` and
+`agent_registration_lines` counters) so the startup contract is evidenced
+without retaining full logs. A failed drive step keeps its whole probe
+transcript in `drive.failed.txt`.
+
+The approved design language is Quiet Instrument ([`DESIGN.md`](../../../DESIGN.md)),
+shipped as `@clay/design-instrument`. The dedicated `ui-review-design-instrument`
+states were never needed: the `ui-review-design-system` / `…-light` states were
+retargeted to the shipped system (plan 118 task 9), and the removed Neobrutal and
+Glass fixture names are rejected by the script's argument check. The table lists
+only states the script can capture.
+
+The probe first locates the `clay` application index by scanning desktop children (`app INDEX` with per-call timeouts — whole-desktop enumeration hangs on some hosts), then dumps only that subtree. Hosts without `python3` + `gi.repository.Atspi` are reported as a prerequisite skip, never a pass.
+
+### Plan 119 agent-panel review (2026-09-15)
+
+`ui-review-coding-agent` now reaches the agent **view**, not just the landing:
+the fixture loads `@clay/coding-agent` and the AT-SPI drive step selects the
+shell's `Agent` tab, so the capture is a PASS for the first time (the state
+historically recorded UNRESOLVED for want of input synthesis).
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-coding-agent \
+  --drive '[{"find":{"role":"tab","name":"Agent"},"do":"click"}]' \
+  --output <artifact-dir>
+```
+
+The retained AT-SPI dump exposes `landmark "Coding Agent"`,
+`log "Transcript"`, `entry "Message"`, and `page tab list "Agent detail"`.
+The current lane has no Send button: Enter is the submit path and Stop appears
+only while streaming. Evidence:
+`code-reviews/screenshots/2026-09-15-plan119-sc4-agent-review/`. Interactive
+keyboard work that the harness cannot synthesize was driven through the
+browser-fixture route instead (`/?fixture=coding-agent&state=…`, keyboard and
+accessibility transcripts in the same directory).
+
+The plan-119 further-actions pass added a second evidence set:
+`code-reviews/screenshots/2026-09-15-plan119-further-actions/` (D2 inspector-strip
+affordance measurements, F3 approval focus, the live two-tab attempt with its
+rerun recipe, and the bundle-ceiling decision). The live two-tab leg ran a real
+`clay server` + `clay client` with two tabs rooted at distinct scratch folders;
+driving the composer from the desktop stayed impossible on this host because
+`ydotool` cannot open `/dev/uinput` and the portal keyboard grant is
+interactive — recorded in that folder's `review-log.md` §4, not waived.
+
+### Plan 124 persistent agent lane and `/` palette review (2026-09-17)
+
+The Plan 124 review used the real Linux Tauri build against an isolated copy of
+`examples/config/`, with window-cropped captures and AT-SPI restricted to the
+Clay application subtree. The authoritative artifacts are
+`test-plan/artifacts/124-agent-lane/`: rest state, palette-open state, scope
+state, lane-hidden/recovery state, accessibility dump, geometry measurements,
+launch/drive log, and sanitized server diagnostics. The review confirmed the
+lane at that time, the inspector ending at its top edge, the composer-width
+palette with a 6px gap and 420px cap, the pane/rail veil, and removal of the
+veil when the lane hides. Plan 125 supersedes that lane/rail reading: the lane
+is the view pane's strip (`grid-column: 1`) and the rail runs the working
+area's full height, with the veil covering it.
+
+The host could not synthesize keyboard or pointer input, and WebKitGTK exposed
+neither reachable `EditableText` for the composer nor actions for palette rows.
+Therefore chord strokes, free-text filtering, Enter/Escape/Shift+Tab,
+prompt submission, and row activation remain `UNRESOLVED` live; frontend and
+server tests cover those paths. This is a host ceiling, not a screenshot pass.
+The lane/palette capture tools are separate from the legacy fixture harness:
+`design-artifacts/tools/capture-agent-lane.mjs` and
+`design-artifacts/tools/capture-lane-palette.mjs`.
+
+### Plan 099 Tauri/React editor review
+
+`scripts/capture-editor-performance-review.sh` launches an isolated profiled
+Tauri/WebKit client against synthetic files and writes frontend, desktop, and
+server traces under
+`code-reviews/screenshots/<date>-plan099-editor-performance/<state>/`. The
+review states cover light and dark four-pane documents, progressive 50 MiB
+loading, large typography, Markdown analyzer diagnostics, binary rejection,
+and the 256 MiB resident-document rejection. Multi-pane restore replies are
+matched to each session's in-flight path, not the bootstrap placeholder id.
+The large-file ready capture must show the typed package-analysis-limit status,
+not stale `Loading document…`; `shellStatusProjection` and fresh workspace
+snapshot identity keep that live status synchronized without making every ack
+rerender the shell. The diagnostics fixture uses an unresolved synthetic wiki
+link (`[[missing-doc]]`) and records the host's absence of a visible Marksman
+marker if it remains absent after confirmation.
+
+Current evidence is under
+`code-reviews/screenshots/2026-08-28-plan099-editor-performance/`; all real
+Tauri runs use synthetic content and sanitized metadata. `get_app_state`
+exposes the Clay frame and named Minimise/Maximise/Close controls. This host's
+keyboard backend remains unavailable, so keyboard-only focus and interactive
+scroll claims stay unresolved; native deterministic fixture results are recorded
+with PASS/UNRESOLVED rather than inferred from screenshots.
+
+### Plan 098 document-transfer fixtures
+
+The Vite development client also exposes deterministic fixture routes for the
+chunked document-loading review. These routes render the real React editor and
+empty-pane surfaces with fixture-only data; they do not add production routes
+or call the Tauri bridge:
+
+| Route                            | State captured                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `/fixture/document-loading`      | First document head visible, remaining chunks pending, editor read-only, loading status live regions, and disabled Save action. |
+| `/fixture/document-budget-error` | Server-style resident document budget refusal in the shell status and empty-pane alert.                                         |
+| `/fixture/document-binary-error` | Server-style binary-content refusal in the shell status and empty-pane alert.                                                   |
+| `/fixture/editor`                | Ready editor baseline used to compare loaded small-file controls and focus target.                                              |
+
+Capture wide and narrow viewport evidence with the browser fixture/CDP
+harness when available. Pair it with a real Tauri AT-SPI dump; if the browser
+fixture is reachable but the real WebKitGTK application state cannot be
+attached, record the browser result as supplemental and mark real-app AT-SPI
+`UNRESOLVED` with the exact blocker. Fixture screenshots and semantic dumps
+must contain only synthetic document names and text, never ambient workspace
+content or host paths.
+
+### Window backend note
+
+Keyboard-driven captures on the review host require the X11 backend: launching the client with `WINIT_UNIX_BACKEND=x11` gives the clay Frame AT-SPI `active`+`focused` states and lets xdg-desktop-portal key delivery reach the editor. Wayland sessions deliver portal keys only to native dialogs, not clay windows. Multi-stroke chords (`Ctrl+X Ctrl+P`) cannot be delivered through the portal (each combo arrives as press+release and the pending-chord timeout is ~1.5 s); the Command Centre capture instead re-binds `controlCenter.open` to a single chord, or reuses a prior live capture of the same build.
+
+### Plan 089 Wayland platform smoke
+
+`tests/live_atspi_smoke.rs::live_multi_window_scale_smoke` is an ignored,
+environment-gated check (`CLAY_LIVE_WINDOW_SMOKE=1`) rather than part of the
+ordinary suite. It starts one isolated server and two real clients, applies a
+complete three-profile `setTypography` configuration, and probes AT-SPI frame
+identity using application PIDs because separate Clay processes can expose the
+same per-application object path. `bounds` mode reads screen-coordinate
+component extents; the test requires two distinct frames, positive extents
+within a logical-900×600-derived envelope, and two bounded large-type status
+bars. `masonry_shell::tests::rescale_event_recomputes_logical_bounds_from_physical_size`
+provides deterministic `Rescale(2.0)`/1800×1200-to-900×600 coverage.
+
+Manual completion, Command Centre, settings, file-browser, multi-tab/multi-pane,
+narrow/wide, DPI, and native-dialog flows must first pass
+`computer-use-linux doctor` with safe window query/focus backends. If
+`can_query_windows` or `can_focus_windows` is false, run
+`computer-use-linux setup-window-targeting` and complete the requested shell
+reload; never use blind portal coordinates or unscoped chords. On the current
+GNOME host the exact blocker is
+`org.freedesktop.DBus.Error.ServiceUnknown`, so those states remain
+`UNRESOLVED` until targeting or a semantic no-focus action path exists.
+
+## Review Artifacts
+
+Captured runs live under `code-reviews/screenshots/<run>/` with `review.status` per state plus a `review-log.md` state table (screenshot/AT-SPI result/verdict per state, numbered findings, and an explicit "no screenshot contains secrets or absolute paths" statement). Example evidence trees:
+
+- `code-reviews/screenshots/2026-08-14-plan086-a11y/` — plan 086 accessibility review
+- `code-reviews/screenshots/2026-08-14-plan087-ui-foundation/` — plan 087 default/loading/error/recovery/opened-document/completion/empty-completion/command-centre captures
+
+Screenshots are full-desktop portal PNGs; the current host has no imaging
+library or pure-stdlib cropper, so inspect the PNG before retaining it and do
+not claim it is app-only. `accessibility.txt` is restricted to the Clay
+application subtree. PNGs are review evidence, not CI goldens.
+
+## Plan 089 runtime loading/recovery closure
+
+The Plan 088 follow-up exposed two separate startup races: runtime reload itself was working (generation 2 reached the client), but an empty initial `TabRegistrySnapshot` could prematurely finish layout restore before its `TabId` confirmation, dropping the `loading.txt` reopen; and nested SDUI reconciliation reused an unchanged node ID across a kind change, leaving the editor-only bootstrap child in place. The restore gate now waits for confirmation, the fixture server starts in its private workspace, and nested kind changes rebuild. The sidebar viewport supplies bounded width/fill constraints so the published loading panel is visible and accessible.
+
+`code-reviews/screenshots/2026-08-14-plan089-platform-validation/` records `PASS` for `default`, `error`, `loading`, and `recovery`. The loading capture's `runtime-tree.txt` records the published `Loading review` / `Loading workspace…` snapshot; the cropped screenshot shows the label in Clay's SDUI slot and the AT-SPI dump exposes the Server-driven UI region with a distinct fixture document. Recovery shows synchronized `Connection lost` / `Connection: Disconnected` labels. Structural guards are `masonry_editor::tests::runtime_loading_tree_reaches_accessibility_after_document_open`, `driver::restore::tests::restore_completion_waits_for_registry_tab_id`, and `masonry_editor::tests::disconnected_welcome_accessibility_tracks_status_update`.
+
+## Plan 088 modernization review record
+
+Task 8 retained current-build evidence under `code-reviews/screenshots/2026-08-14-plan088-modernization/`: `default`, `error`, `recovery`, `light-default`, `large-typography`, `loading`, `completion`, and `command-centre`, plus comparison-only pre-task artifacts. The non-interactive capture files report `PASS` for the reachable fixture shell, but review findings still matter: the loading fixture exposed the welcome shell instead of the intended loading SDUI tree, and the recovery tree/status showed a stale WelcomeWidget `Connected` label while the pane/status chrome said `Disconnected`. Those are observability/state-sync follow-ups, not visual passes.
+
+Completion and Command Centre remain `UNRESOLVED` in the current run because this GNOME Wayland host has no safe window-list/focus backend: targeted actions cannot map to the Clay window and unscoped portal chords land in the globally focused application. Narrow/wide, live DPI, file-browser, settings, and multi-tab/multi-pane interaction states likewise retain structural evidence but no false visual pass. The harness contract is to preserve the artifact and reason in `review.status`, then rerun once window targeting or a no-focus fixture action path is available.
+
+Plan 088 manual-plan records link these findings to step ranges `L15–L19`, `F38–F41`, `E22–E24`, `K73–K77`, `Q15–Q19`, `S36–S40`, and `T71–T76`; the review is a bounded evidence-producing gate, not a replacement for source/conformance tests or a GPU pixel golden.
+
+## Phase 28.7 P2 visual and accessibility recapture (2026-08-21)
+
+The P2 review used the UI guidance current at execution time, then called
+`computer-use-linux_get_app_state` before any interaction. Fresh static
+fixtures passed and were inspected under
+`code-reviews/screenshots/2026-08-21-phase28.7-p2-recapture/`:
+`default`, `loading`, `error`, `recovery`, and `large-typography`.
+
+Interactive fixtures are intentionally recorded as `UNRESOLVED` when their
+state was not reached: the completion and Command Centre triggers had no
+keyboard backend, and the Rust analyzer fixture did not produce a non-empty
+inlay set after an AT-SPI `SetValue` edit. Fold collapse, link hover/focus/
+activate, comment/list/heading mutation, inlay toggle, and narrow/wide live
+resize therefore retain structural/security evidence rather than false visual
+passes. `review-log.md` records the exact `computer-use-linux_doctor` blocker
+(`/dev/uinput` denied, no xdotool/ydotool, Wayland portal input unavailable)
+and all per-state verdicts.
+
+This review also records a current accessibility ceiling: the custom editor
+has no separate AT-SPI Link node or link-purpose announcement. Links retain
+underline/rest styling, caret/keyboard activation, safe target planning, and
+HTTP/traversal denial; adding native link semantics later must remain a generic
+Clay-owned AccessKit surface, not a package callback or client-JavaScript path.
+
+## Phase 25 Chat landing review (2026-08-22)
+
+The Phase 25 review captured the core fallback, `@clay/chat` dark/light
+unconfigured landing, large UI typography, runtime-error, and disconnected
+recovery states under
+`code-reviews/screenshots/2026-08-22-plan096-ui-review/`. The review used the
+UI guidance current at execution time, then called
+`computer-use-linux_get_app_state` before inspection. AT-SPI verified named
+`Agent`, `Provider`, `Model`, `Open File`, `Open Folder`, and `Cancel` buttons,
+a reachable package region, and a focused `Message` composer. Provider/model/
+agent/setup/session menus and stream/cancel states remain `UNRESOLVED` because
+this Wayland host has no keyboard-capable input backend.
+
+The first live Chat capture exposed an AccessKit orphan-node panic: the
+connection-owned `EditorWidget` registered `PaneDocumentView::package_entry`
+without attaching it in the editor accessibility parent. The fix is in
+`src/masonry_editor.rs`; `src/masonry_pane_document.rs` also unstashes the
+package entry before requesting initial composer focus. These are host-owned
+a11y invariants, not package callbacks. The remaining Phase 25 follow-up is
+multiline composer semantics/direct naming for the inner text area; current
+Chat uses the generic single-line `textInput` contract.
+
+## Plan 097 Phase 12 Tauri/React review (2026-08-24)
+
+The production desktop client is now Tauri v2 + React; the review harness
+therefore treats the Clay webview as the reviewed surface rather than a
+Masonry render tree. Evidence is retained under
+`code-reviews/screenshots/2026-08-24-tauri-react-parity/`:
+
+- 20 app-only CDP PNGs and paired accessibility snapshots at 1440×900 and
+  780×900 cover `states`, `editor`, `intelligence`, `package-ui`,
+  `command-centre`, `command-centre-empty`, `path-browser`, `settings`,
+  `chat`, and `splits`.
+- Real Tauri AT-SPI dumps cover the default welcome, opened editor,
+  tabs/splits, and Chat landing. They expose `Clay workspace`, `Window tabs`,
+  pane/editor names, named buttons, CodeMirror's document entry, Chat's log,
+  and the shell status path.
+- Portal PNGs from real desktop runs were inspected and removed when unrelated
+  terminal/window content was visible. No retained PNG contains host paths,
+  credentials, or user data. The path-browser fixture uses the safe display
+  label `workspace`; the editor fixture no longer falls back to `/tmp/ws`.
+  `scripts/capture-ui-review.sh` recognizes both legacy `clay` and current
+  `clay-desktop` AT-SPI application names, waits for the current `Clay
+workspace` landmark, and tracks the Tauri child during cleanup.
+
+Review findings and resolutions:
+
+1. **Fixed:** editor chrome used the workspace root as a fallback label and
+   could expose an absolute path. `ClayEditor` now keeps relative document
+   paths and reduces absolute fallback values to a basename; regression is
+   covered by `frontend/src/test/editor.test.tsx`.
+2. **Fixed:** the shell connection status was visible but not a live region.
+   `AppShell` now wraps it in `role="status" aria-live="polite"`, covered by
+   `frontend/src/test/shell.test.tsx`.
+3. **Low follow-up:** an unselected settings theme control is announced as
+   `Theme Theme` because its label and placeholder are identical. It remains
+   operable and unambiguous; add a distinct generic dropdown placeholder if
+   screen-reader testing shows the repetition is harmful.
+4. **UNRESOLVED host limitation:** physical keyboard-only completion,
+   Command Centre/path activation, native dialogs, settings interaction, and
+   tab/pane keyboard flows could not be re-driven. `computer-use-linux doctor`
+   reports denied `/dev/uinput`, no `xdotool`/`ydotool`, and no Wayland portal
+   path that targets the Clay window. Static DOM/AX semantics and component,
+   bridge, server, and security tests pass; no interactive pass is inferred.
+
+Final verification for this review: Rust fmt/check/clippy and 1117 Rust lib
+plus 4 launch, 30 presentation, 184 protocol, 68 runtime, and 130 security
+tests pass; frontend format/lint/typecheck and 99 Vitest tests pass; frontend
+budgets are 160.6 kB shell / 343.2 kB total gzip against 180 / 404 kB limits;
+`security-audit.sh` and `package-smoke.sh` pass; Clay Agent tests pass 8/8.
+
+## Plan 118 landing launch test (2026-09-13)
+
+Evidence: `test-plan/artifacts/118-quiet-instrument-migration/launch-test/`
+(`README.md` + 5 PASS captures, one recorded `UNRESOLVED` handoff attempt, one
+recorded `UNRESOLVED` palette-typing attempt, `isolation.txt`).
+
+The migration's launch test ran the real GUI against the canonical example:
+
+```bash
+scripts/capture-ui-review.sh --fixture ui-review-launcher --example-config \
+  --size 1500x950 --output test-plan/artifacts/.../launch-test/landing-1500x950
+```
+
+Findings and recorded limits:
+
+- The copied example boots healthy and lands on the launcher (`Start`, the
+  `Workspaces` and `Agents` panes, the action row, a disabled `Open`), with the
+  full shell chrome present. Every PASS run records
+  `configuration_failed_lines=0` and `agent_registration_lines=22` (the
+  example's `@clay/coding-agent` load entry ran) plus the expected
+  `store packages stay unloaded` note from an isolated root without
+  `node_modules`.
+- Four theme captures (modus-operandi, modus-vivendi, gruvbox-material-dark,
+  gruvbox-material-light) confirm the shipped design system under every palette.
+- The Command Centre opened over the landing exposes **94** command entries in
+  the AT-SPI tree with **0** hits for `chat`, `neobrutal`, `glass` — the
+  negative check for the removed surfaces that palette _filtering_ would
+  otherwise provide.
+- A **fresh landing shows a stale error status**: `unknown workspace document 1 —
+Hint: Open the document through the server before saving, reloading, or
+querying it.` It is the bootstrap placeholder diagnostic
+  (`src/server/workspace/mod.rs`, cleared on `documentOpened`) and appears in
+  every capture back to plan 109 — pre-existing, not caused by the example
+  config, but it should not be visible on a surface that never opened a
+  document.
+- Workspace isolation: both processes run with `HOME`, `XDG_CONFIG_HOME`,
+  `XDG_DATA_HOME`, `TMPDIR` and a private socket inside the mode-700 root; a
+  sha256 of the developer's real `~/.clay/*` and `~/.config/clay/*` is identical
+  before and after a run. The copied example activates no process/LSP grant
+  (`authorizeLanguageServer` records grants, and no session was started).
+
+## Invariants and Constraints
+
+- Every run uses a fresh mode-700 root: no ambient `~/.clay`, no default socket, no ambient server/config.
+- Server and client are killed and the root removed on every exit path (timeout included).
+- A missing accessibility bus or unreachable state yields `UNRESOLVED` with a reason (exit 2), never `PASS`.
+- Clay AT-SPI dumps must contain no document secrets or host paths; fixture
+  workspaces hold only review files. Full-desktop PNGs are inspected before
+  retention because unrelated desktop context can be visible.
+- The drift guard `plan087_ui_review_harness_command_and_prerequisites_are_documented` in `tests/manual_smoke_docs.rs` (protocol suite) re-asserts the documented commands, the fixture `init.js` files, and script safety markers, and forbids `cargo run -- smoke-gui` as a review substitute. The plan-118 additions are pinned in `plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`: the shipped system captures, the removed-specifier rejection, `--example-config` refusal for a mismatched fixture, and the `--help` text.
+
+### Plan 125 single palette surface review (2026-09-18)
+
+The Plan 125 review ran the same two layers. The deterministic layer is
+`design-artifacts/tools/capture-lane-palette.mjs` (291 checks) against the DEV
+fixture route with the palette's picker stages seeded
+(`?fixture=command-centre&stage=providers|auth|secret|url|oauth|models|sessions`,
+rows mirroring `src/server/agent_picker.rs`): it asserts the per-mode sheet,
+prompt and foot verb, the halo's normalized box-shadow shape, the 420 px cap with
+internal scrolling, and the `secret` stage's privacy (shielded field, composer
+disabled, no plaintext in rendered text or a non-shielded attribute, AT-SPI value
+masked). The live layer is `test-plan/artifacts/125-palette/` — launch log,
+accessibility dumps, geometry and halo pixel measurements, the corrected
+lane-hidden state, and `rail-independence.ax.txt`.
+
+Findings recorded there: the sheet is the composer field's own width (1124 px at
+1500 px; 676 px narrow) with a 6 px gap, the veil covers sidebar/pane/rail while
+the lane, composer, and status bar stay undimmed (the lane's strip had to become
+opaque — defect D8), the halo is additive on both sides with no dark band, and
+toggling the lane no longer collapses the inspector rail (defect D9, found while
+executing the manual test plan and fixed in `frontend/src/shell/layout-state.ts`).
+One deviation stays open: the lane still reaches the workspace sidebar's column
+(module 13 S47 / defect D7). Typing a query, `Enter`/`Alt+↵`/`Esc`, and row
+activation remain `UNRESOLVED` live for the host-ceiling reasons above.
+
+## Related
+
+- [Design Artifact Gate](design-artifact-gate.md) — the prototype/approved-artifact contract and the prototype-set + component-conformance tools
+- [Launcher Landing Surface](launcher-landing-surface.md) — the surface the `ui-review-launcher` fixture captures
+- [docs/development/launch-and-gui-smoke.md](../../development/launch-and-gui-smoke.md) — harness reference (fixture/state/capture table, `WINDOW_WIDTH`/`WINDOW_HEIGHT` constants, UNRESOLVED semantics)
+- [docs/development/ui-observability.md](../../development/ui-observability.md) — observability entry point
+- [Masonry Shell Runtime](../archive/masonry-shell.md) — shell/chrome hosting the states the harness captures
+- [Pane Document Views](../archive/pane-document-views.md) — welcome entry state and completion projection
+- [Command Centre Surface (Centered Origin)](centered-command-centre-surface.md) — why the centered modal is gone (the harness captures the composer palette)
+- [test-plan/index.md](../../../test-plan/index.md) — manual step IDs per state (L12–L14, F32–F37, E16–E21, K69–K72, Q11–Q14, S33–S35)

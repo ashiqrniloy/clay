@@ -1,0 +1,36 @@
+/**
+ * Clay component registry (React renderer).
+ *
+ * Single import surface for cataloged components; see
+ * `.agents/skills/clay-execution/references/components.md` and the React mapping in
+ * `docs/development/react-ui-catalog-mapping.md`. Components are composable,
+ * token-styled, and state-complete; packages never see these names.
+ */
+export { ClayButton, type ButtonVariant } from "./button";
+export { ClayText, type TextVariant, type FontRole } from "./text";
+export { ClayTextField, type ValidationState } from "./text-field";
+export {
+  ClayDropdown,
+  ClayList,
+  ClayCollapse,
+  type DropdownOption,
+  type ListItem,
+} from "./controls";
+export { ClayModal } from "./modal";
+export {
+  ClayTabStrip,
+  ClayTabStrip as ClayTabBar,
+  type TabItem,
+  type ClayTabStripProps,
+} from "./tab-strip";
+export { ClayBadge, ClayKbd, ClayDivider } from "./chrome";
+export { ClayIcon, useIconGeometry, type ClayIconProps } from "./icon";
+export { ClayTooltip, type ClayTooltipProps } from "./tooltip";
+export { ClayIconButton, type ClayIconButtonProps } from "./button";
+export {
+  recipeAttributes,
+  type ComponentKind,
+  type SlotName,
+  type VariantName,
+  type RecipeAttributes,
+} from "./recipe-attributes";

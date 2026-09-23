@@ -1,0 +1,29 @@
+== A1 node --check examples/init.js
+node:internal/modules/cjs/loader:1520
+  throw err;
+  ^
+
+Error: Cannot find module '/home/arn/Projects/clay/examples/init.js'
+    at node:internal/modules/cjs/loader:1517:15
+    at node:internal/main/check_syntax:33:20 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+
+Node.js v24.19.0
+
+== A2 section 12 exports
+716://     (`agent.compact`, `agent.knowledgeSetOptions`, `agent.searchSessions`,
+717://     `agent.setFullAutonomy`, `agent.resumeRun`, `agent.sessionTree`). They
+733:// // two truncated turns) — not the OM agent.compact threshold (decision
+
+== A3 docs + inventory cross-check
+40:`compact` is the runtime-backed public API for **Compact Agent Session**. It forwards a compaction request for one live agent session to the clay-agent daemon, which resolves the named strategy (or `agent.setRunOptions` `compaction`, default `llm`) and appends a compaction entry to the persisted session. Authority: `user-intent-forwarding`. Runtime path: `server-first-rpc-forwarding`. Compaction is a background/programmatic control and never runs in editor input, client paint/layout, or ordinary edit acknowledgement hot paths.
+51:await compact({ sessionId, strategy: "default" });
+59:const result = await compact({ sessionId: "s1", strategy: "llm" });
+3575:custom_properties = ["compactAfterTokens:number=80000"]
+3805:custom_properties = ["maxInputTokens:number=null", "maxOutputTokens:number=null", "maxTurns:number=null", "maxToolRounds:number=null", "maxToolCalls:number=null", "maxWallTimeMs:number=null", "compactAfterTokens:number=800000", "compaction:string=llm"]
+3621:custom_properties = ["default:boolean=false"]
+
+== A4 no credential option / secret-shaped strings in examples/
+(no uncommented credential option expected)

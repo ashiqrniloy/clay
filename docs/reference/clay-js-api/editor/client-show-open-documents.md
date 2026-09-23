@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientShowOpenDocuments
 js_facade: runtime/js/editor.js::clientShowOpenDocuments
-backing_rust: src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu; src/editor/document_session.rs::DocumentSessionStore; src/masonry_pane_document.rs::PaneDocumentView::activate_document; src/main.rs::Driver (cross-pane aggregation and ActivateDocumentInPane routing)
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientShowOpenDocuments
@@ -43,7 +43,7 @@ Opening a second file through the normal `DocumentOpened` path retains the previ
 
 ## When to use
 
-Use this API when a user wants a bindable chord that opens the open-documents switcher in `~/.config/clay/init.js`.
+Use this API when a user wants a bindable chord that opens the open-documents switcher in `~/.clay/init.js`.
 
 ## JavaScript usage
 
@@ -57,7 +57,7 @@ bindKey("Ctrl+Shift+E", clientShowOpenDocuments(), { scope: "editor" });
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientShowOpenDocuments } from "clay:editor";
 import { bindKey } from "clay:keybindings";
 import { serverListDocuments } from "clay:documents";
@@ -99,8 +99,8 @@ Use `editor.clientShowOpenDocuments` only as a documented command ID for `bindKe
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientShowOpenDocuments`
-- Pane menu: `src/masonry_pane_document.rs::PaneDocumentView::show_open_documents_menu`
-- Activate path: `src/masonry_pane_document.rs::PaneDocumentView::activate_document` (own pane); `src/main.rs::Driver` cross-pane aggregation and `ActivateDocumentInPane` routing
+- Pane menu: `src/client_commands.rs::EditorClientCommand (client-local; React command surface)`
+- Activate path: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React workspace controller, frontend/src/shell/workspace-controller.ts)` (own pane); `src/client_commands.rs` (client command routing) cross-pane aggregation and `ActivateDocumentInPane` routing
 - Session store: `src/editor/document_session.rs::DocumentSessionStore`
 - Keybinding allowlist: `src/server/ops/keybindings.rs`
 

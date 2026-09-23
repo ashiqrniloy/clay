@@ -1,0 +1,4 @@
+role=entry name='Document editor' ifaces=Text,Action,Component chars=2765 caret=6 states=editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible extents=270,160,916x1818036
+head: 'fnzzzzpub fn'
+popup/panel rows after Empty trigger: 0 []
+blocking dialogs: []

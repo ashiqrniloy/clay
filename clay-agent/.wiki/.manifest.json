@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "profile": "hybrid",
+  "wikiRoot": ".wiki",
+  "rawRoots": [
+    "."
+  ],
+  "sourceFileHashes": {},
+  "entities": {}
+}

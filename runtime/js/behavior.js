@@ -67,7 +67,9 @@ export function buildCodeEditingManifest(options) {
         // (modes.rs) owns field-by-field parsing and fallback, so unknown or
         // malformed values never reach the client.
         ...(isPlainObject(options.movement) ? { movement: options.movement } : {}),
-        ...(isPlainObject(options.caretStyle) ? { caretStyle: options.caretStyle } : {})
+        ...(isPlainObject(options.caretStyle) ? { caretStyle: options.caretStyle } : {}),
+        ...(isPlainObject(options.chrome) ? { chrome: options.chrome } : {}),
+        ...(isPlainObject(options.layout) ? { layout: options.layout } : {})
     };
 }
 

@@ -45,6 +45,12 @@ pub(super) fn op_clay_theme_set_typography(
         .map_err(|_| JsErrorBox::generic("theme.invalid_typography: failed to serialize result"))
 }
 
+pub(crate) fn validate_typography_request(value: &Value) -> Result<(), String> {
+    parse_typography(value)
+        .map(|_| ())
+        .map_err(|_| "theme.invalid_typography: invalid complete typography request".to_string())
+}
+
 fn parse_typography(value: &Value) -> Result<ActiveTypography, JsErrorBox> {
     let object = value.as_object().ok_or_else(invalid_typography)?;
     // The three profiles are always required; `hierarchy` is optional. Reject any

@@ -1,0 +1,5 @@
+editors: initial=1 after=1
+palette open (Commands nodes): 2
+palette rows after filter: 202
+file-browser nodes: initial=1 after=0
+editor chars: initial=443 after=243

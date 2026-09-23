@@ -2,13 +2,13 @@
 
 ## Source
 
-- `src/server/workspace.rs`
+- `src/server/workspace/mod.rs`
 - `src/server/ops/workspace.rs`
 - `src/server/ops/commands.rs`
 - `runtime/js/workspace.js`
 - `runtime/js/commands.js`
 - `src/shell/file_browser.rs`
-- `src/server/connection.rs`
+- `src/server/connection/mod.rs`
 - `src/server/command_execution.rs`
 - `src/masonry_sdui.rs`
 - `src/masonry_editor.rs`
@@ -26,7 +26,7 @@ The file browser is not a package widget. Packages may call documented Clay JS f
 - `WorkspaceState` owns root discovery, root deduplication, explicit user grants, single-file grants, bounded directory listing, ignore filtering, traversal checks, diagnostics, and cancellation token checks.
 - `src/server/ops/workspace.rs` exposes runtime ops behind `runtime/js/workspace.js` facades: `serverAddWorkspaceRoot`, `serverDiscoverWorkspaceRootForPath`, `serverListDirectory`, `serverCreateListingCancelToken`, and `serverCancelListing`.
 - `src/shell/file_browser.rs` builds Clay-owned UI state from a `WorkspaceState` snapshot and converts it to an inert `SduiTree` plus `TransientMenuSession` data.
-- `src/server/connection.rs` sends the bound tab's file-browser SDUI snapshot after `New`/`Reclaim`; the default snapshot is an editor-only inert tree, and `workspace.toggleFileBrowser` switches the calling tab between that tree and the bounded file-browser tree. Directory navigation results are converted into refreshed snapshots without showing the tree while that tab is hidden.
+- `src/server/connection/mod.rs` sends the bound tab's file-browser SDUI snapshot after `New`/`Reclaim`; the default snapshot is an editor-only inert tree, and `workspace.toggleFileBrowser` switches the calling tab between that tree and the bounded file-browser tree. Directory navigation results are converted into refreshed snapshots without showing the tree while that tab is hidden.
 - `src/server/command_execution.rs` owns built-in workspace commands: `workspace.openFile`, `workspace.openFuzzyFile`, `workspace.openDirectory`, `workspace.revealInTree`, and `workspace.toggleFileBrowser`.
 
 ## How It Works
@@ -55,7 +55,7 @@ Cancellation uses server-owned token IDs backed by a process-local registry. `se
 
 `FileBrowserState::from_workspace` picks a visible workspace root at the root directory; `FileBrowserState::from_workspace_at` lists a root-relative current directory. Both ask `WorkspaceState::list_directory` for a bounded depth-1 snapshot and store normalized `FileBrowserEntry` values with the actual `WorkspaceRootId`, relative path, display label, kind, child count, and diagnostics.
 
-`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Panel`/`Stack` with a workspace header and `List` items, plus the normal `EditorView` in a row. The header is `Workspace · {display_name} · {display_path}` and appends the existing `Workspace · … · {relative_directory}` navigation suffix below the root. `hidden_sdui_tree` composes only the editor view, so the client releases the left slot without adding a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `workspace.openFile`; directory rows carry the same bounded root-relative arguments for `workspace.openDirectory`; non-root directories include a `../` parent row. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
+`FileBrowserState::to_sdui_tree` composes existing SDUI primitives: a left `Stack` (workspace header label and `List` items — deliberately **not** a `Panel`, so the host's left slot paints the sidebar as one flush canvas zone with a single hairline edge, `DESIGN.md` §6/§12), plus the normal `EditorView` in a row. The header is `Workspace · {display_name}` and appends only the sanitized workspace-relative directory (`Workspace · … · {relative_directory}`) below the root; absolute root paths never enter shell-visible labels. `hidden_sdui_tree` composes only the editor view, so the client releases the left slot without adding a native `FileTreeWidget` or file-browser branch in Masonry. File rows carry `workspaceRootId` and `relativePath` for `workspace.openFile`; directory rows carry the same bounded root-relative arguments for `workspace.openDirectory`; non-root directories include a `../` parent row. `sanitize_browser_label` strips control characters, bounds visible labels to the shared 64-character display-name ceiling, and falls back to `untitled`; raw relative paths remain typed action data and are revalidated by `WorkspaceState` on open. A row's `SduiListItem.id` and `SduiActionSource::ListItem.item_id` are the same display-row identity (for example `main.rs` inside `src/`); the root-relative path (`src/main.rs`) lives only in the typed `relativePath` action argument and is revalidated by `WorkspaceState` on open.
 
 `FileBrowserState::fuzzy_session` builds a bottom `TransientMenuSession` by scoring the same bounded entries locally with the shared bounded fuzzy subsequence matcher (`src/shell/fuzzy.rs`, [Fuzzy Matching](fuzzy-matching.md); at most `MAX_FUZZY_ITEMS` results, deterministic ordering). Items route to `workspace.openFuzzyFile`; there is no separate fuzzy-open primitive or package-provided picker implementation.
 
@@ -68,7 +68,7 @@ Open commands accept either `{ workspaceRootId, relativePath }` or `{ absolutePa
 - In-root opens call `WorkspaceState::open_existing_file`.
 - Out-of-root explicit picks call `WorkspaceState::open_selected_file`, creating a single-file grant only after file/type/UTF-8 validation.
 
-The result is `WorkspaceActionResult::Opened(OpenDocumentSnapshot)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, text }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
+The result is `WorkspaceActionResult::Opened(OpenDocumentHead)`. The connection handler maps that to `ServerMessage::DocumentOpened { metadata, head }`, then runs the same `open_document_followup_messages` path as `OpenDocument` and selected-file opens so behavior manifests, mode activation, and decoration sets are consistent across open origins.
 
 `workspace.revealInTree` validates a real open `documentId` through `WorkspaceState::document_metadata` before returning `WorkspaceActionResult::Revealed`. `workspace.toggleFileBrowser` returns `WorkspaceActionResult::Toggled`; the bound connection flips `TabServerState.workspace_pane_visible` and publishes the matching visible or editor-only `SduiSnapshot`. Visibility is per tab, hidden by default, and not a new configuration setting.
 
@@ -98,12 +98,20 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 ## Primitive Coverage
 
 - Primitive/category: `WorkspaceRootDiscovery`, `BoundedFileListService`, Clay-owned file-browser composition, workspace command execution.
-- Rust owners: `src/server/workspace.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
+- Rust owners: `src/server/workspace/mod.rs`, `src/shell/file_browser.rs`, `src/server/command_execution.rs`.
 - Ops/facades: `op_clay_workspace_*`, `op_clay_commands_execute_command`, `runtime/js/workspace.js`, `runtime/js/commands.js`.
 - Public docs: `docs/reference/clay-js-api/workspace/`, `docs/reference/clay-js-api/commands/server-execute-command.md`, `server-open-file.md`, `server-open-directory.md`, `server-reveal-in-tree.md`, and `docs/development/launch-and-gui-smoke.md#end-to-end-file-browser-workflow-smoke`.
 - Hot-path policy: discovery/listing/opening are server/runtime work; typing, local paint, layout, scroll, and package JavaScript hot paths do not list directories or scan workspaces.
 - Client-local scroll: `src/masonry_sdui.rs::SduiNativeState` keeps a vertical `scroll_offset` (pixels) for the Clay-owned left file-browser panel. `scrolls_point(size, point)` routes `PointerEvent::Scroll` to the file browser only when the pointer is inside the left panel; otherwise `src/masonry_editor.rs::on_pointer_event` scrolls the editor as before. `scroll_vertical_pixels`/`scroll_lines` treat positive deltas as scrolling down (revealing later rows), matching the editor scroll convention. The offset clamps to `[0, max_scroll]` where `max_scroll = (content_height - viewport_height).max(0)`, measured during paint with a `push_clip_layer` over the sidebar so scrolled-out rows never paint over the editor. Scrolling reveals only rows already present in the bounded snapshot and never relists directories, calls the server, runs package JavaScript, or enqueues workspace actions. The offset resets to zero whenever a new `SduiSnapshot` or `SduiTreeUpdate` is applied.
 - Package rule: packages consume documented facades and inert commands; they do not contribute roots, marker tables, ignore rules, native widgets, or raw path passthrough.
+
+## Plan 088 shell-boundary hardening
+
+The browser header no longer carries `root_display_path`; only a sanitized workspace name and, when navigating below the root, a sanitized relative-directory suffix are visible. `FileBrowserState` retains the authorized `WorkspaceRootId` and typed relative paths for command routing, but those values are not copied into titles, tab labels, or accessibility names. The hidden editor-only tree removes the Clay-owned left slot; the visible tree reserves it through the normal `PaneSlotLayout` path.
+
+This is a display-boundary rule, not a filesystem-authority shortcut: `workspace.openFile`, `workspace.openDirectory`, and reveal/open follow-ups still canonicalize and revalidate the root-relative path in `WorkspaceState`. File browser scroll/filter work remains client-local over the bounded listing snapshot; no paint/layout path lists directories or reads the filesystem.
+
+Checks: `src/shell/file_browser.rs` tree/header/action tests; `src/driver/reconcile.rs::tab_card_display_name_never_falls_back_to_an_absolute_path`; `src/masonry_sdui.rs::hidden_workspace_browser_reclaims_left_slot`, `scrolls_point_routes_scroll_to_file_browser_only_inside_left_pane`, and responsive sidebar tests; `tests/manual_smoke_docs.rs` file-browser fixture contract.
 
 ## Invariants and Constraints
 
@@ -117,10 +125,10 @@ await serverOpenFile({ workspaceRootId: rootId, relativePath: page.entries[0].re
 
 ## Tests
 
-- `src/server/workspace.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only and root-relative path ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
-- `src/shell/fuzzy.rs`: shared bounded fuzzy subsequence scorer (`fuzzy_score`/`fuzzy_score_fields`) used by `fuzzy_session` (Phase 24.2), SDUI tree shape, workspace name+full-path header, editor-only hidden tree, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, command IDs, and list action opening through the workspace API.
+- `src/server/workspace/mod.rs`: root discovery, explicit grants, root deduplication, bounded directory listing, `*` backtracking/`?`/Unicode/directory-only and root-relative path ignore rules, unsupported-rule and oversized-input fail-closed pages, traversal rejection, cancellation, child counts, and diagnostics.
+- `src/shell/fuzzy.rs` / `src/shell/file_browser.rs`: shared bounded fuzzy subsequence scorer (`fuzzy_score`/`fuzzy_score_fields`) used by `fuzzy_session` (Phase 24.2), SDUI tree shape, sanitized workspace-name/relative-directory header, editor-only hidden tree, current-directory parent row, row/action source identity for nested files, directory-row navigation command IDs, command IDs, and list action opening through the workspace API.
 - `src/server/command_execution.rs`: workspace open/directory-navigation/reveal/toggle execution, selected-file grants, missing arguments, and save-related command absence.
-- `src/server/connection.rs`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot`; deferred-handshake/toggle coverage proves the initial editor-only snapshot and later visible tree; `file_browser_open_uses_generic_open_document_followups` opens as client 99 and proves that same client can immediately submit an accepted edit with the returned lease.
+- `src/server/connection/tests/`: `workspace_directory_action_sends_refreshed_file_browser_snapshot` verifies directory navigation returns a refreshed `SduiSnapshot`; deferred-handshake/toggle coverage proves the initial editor-only snapshot and later visible tree; `file_browser_open_uses_generic_open_document_followups` opens as client 99 and proves that same client can immediately submit an accepted edit with the returned lease.
 - `src/masonry_sdui.rs`: `file_browser_scroll_reveals_later_rows_without_relisting`, `file_browser_scrolled_action_hits_visible_row`, and `scrolls_point_routes_scroll_to_file_browser_only_inside_left_pane` verify client-local file-browser scroll, scrolled action hit testing, and the scroll-routing boundary.
 - `tests/clay_js_api_inventory.rs`, `tests/clay_js_doc_registry.rs`, `tests/clay_js_facade_layout.rs`: public API docs/facades/registry coverage.
 - `tests/manual_smoke_docs.rs::end_to_end_file_browser_workflow_smoke_has_runnable_fixture_contract` and `tests/fixtures/configuration/file-browser-workflow/init.js`: Linux manual smoke documentation for launch, selected-folder grant, directory navigation, Rust/TypeScript/JavaScript package activation, and copy-selection clipboard behavior.
@@ -142,7 +150,7 @@ cargo test --test protocol clay_js_facade_layout:: --quiet
 - [Command Registry](command-registry.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Path Browser](path-browser.md) — Phase 24.3 built-in browse listing lives beside the workspace listing and refreshes this browser on workspace open
-- [Masonry Shell Runtime](masonry-shell.md)
+- [Masonry Shell Runtime](../archive/masonry-shell.md)
 - [Configuration Runtime](configuration-runtime.md)
-- [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](phase18.12-workspace-discovery-primitive-review.md)
+- [Phase 18.12 Workspace Discovery and File Browser Foundation Primitive Review](../archive/phase18.12-workspace-discovery-primitive-review.md)
 - `plans/040-Phase18.12-Workspace-Discovery-and-File-Browser-Foundation.md`

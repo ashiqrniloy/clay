@@ -1,0 +1,13 @@
+
+(process:2910299): dbind-WARNING **: 23:15:34.285: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-M4EPV3/socket: No such file or directory
+
+(process:2910299): dbind-WARNING **: 23:15:34.285: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-MHPRV3/socket: No such file or directory
+
+(process:2910299): dbind-WARNING **: 23:15:34.285: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-3FSRV3/socket: No such file or directory
+
+(process:2910299): dbind-WARNING **: 23:15:34.288: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-1JXRV3/socket: No such file or directory
+/tmp/clay-ui-review.PRrz9o/atspi_probe.py:201: DeprecationWarning: Atspi.Action.get_action_name is deprecated
+  candidate = clean(Atspi.Action.get_action_name(node, index)).lower()
+FAIL step 3: no node matched role~'button' name~'open coding agent' (found 0, wanted index 0)
+OK step 1: click 'Coding Agent ~/.clay/agents/coding-agent 0 skills' via ''
+OK step 2: wait 600ms

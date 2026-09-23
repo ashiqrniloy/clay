@@ -1,23 +1,8 @@
-import { decodeUtf8, encodeUtf8, utf8ByteLength } from "./utf8.js";
+import { encodeUtf8, utf8ByteLength } from "./utf8.js";
 export const POSITION_ENCODINGS = new Set(["utf-8", "utf-16", "utf-32"]);
 
 function requireEncoding(encoding) {
   if (!POSITION_ENCODINGS.has(encoding)) throw new Error(`lsp.invalid_encoding: ${encoding}`);
-}
-
-function requireByteBoundary(bytes, offset) {
-  if (!Number.isInteger(offset) || offset < 0 || offset > bytes.length) {
-    throw new Error("lsp.invalid_position: byte offset is outside document");
-  }
-  if (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80) {
-    throw new Error("lsp.invalid_position: byte offset splits a UTF-8 code point");
-  }
-}
-
-function units(text, encoding) {
-  if (encoding === "utf-8") return utf8ByteLength(text);
-  if (encoding === "utf-16") return text.length;
-  return [...text].length;
 }
 
 function stringIndexForUnits(text, count, encoding) {
@@ -106,7 +91,210 @@ export function fileUriToRelative(uri, rootPath) {
   return normalizeRelativePath(path.slice(prefix.length));
 }
 
+const CHUNK_LINES = 64;
+
+// Deterministic xorshift32 priorities keep the treap shape stable for a given
+// edit sequence (same PRNG as frontend/src/editor/position-index.ts).
+let priorityState = 0x9e3779b9;
+
+function nextPriority() {
+  let value = priorityState;
+  value ^= (value << 13) >>> 0;
+  value ^= value >>> 17;
+  value ^= (value << 5) >>> 0;
+  priorityState = value;
+  return value || 1;
+}
+
+/** UTF-8 bytes of one line including its phantom trailing newline. Also
+ * rejects unpaired surrogates exactly like `encodeUtf8` does. */
+function lineByteWidth(line) {
+  let width = 1;
+  for (let at = 0; at < line.length; at += 1) {
+    const code = line.codePointAt(at);
+    if (code >= 0xd800 && code <= 0xdfff) throw new Error("lsp.invalid_utf8: unpaired surrogate");
+    if (code > 0xffff) at += 1;
+    width += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+  }
+  return width;
+}
+
+function makeLeaf(texts) {
+  const l16 = new Uint32Array(texts.length);
+  const l8 = new Uint32Array(texts.length);
+  let w16 = 0;
+  let w8 = 0;
+  for (let index = 0; index < texts.length; index += 1) {
+    l16[index] = texts[index].length + 1;
+    l8[index] = lineByteWidth(texts[index]);
+    w16 += l16[index];
+    w8 += l8[index];
+  }
+  return { kind: "leaf", lines: texts.length, w16, w8, prio: nextPriority(), texts, l16, l8 };
+}
+
+function makeBranch(left, right) {
+  return {
+    kind: "branch",
+    lines: left.lines + right.lines,
+    w16: left.w16 + right.w16,
+    w8: left.w8 + right.w8,
+    prio: left.prio >= right.prio ? left.prio : right.prio,
+    left,
+    right,
+  };
+}
+
+/** Treap merge; every line in `a` precedes every line in `b`. */
+function join(a, b) {
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a.prio >= b.prio) {
+    return a.kind === "leaf" ? makeBranch(a, b) : makeBranch(a.left, join(a.right, b));
+  }
+  return b.kind === "leaf" ? makeBranch(a, b) : makeBranch(join(a, b.left), b.right);
+}
+
+/** Treap split: first `count` lines to the left result. */
+function split(node, count) {
+  if (node === null || count <= 0) return [null, node];
+  if (count >= node.lines) return [node, null];
+  if (node.kind === "leaf") {
+    return [makeLeaf(node.texts.slice(0, count)), makeLeaf(node.texts.slice(count))];
+  }
+  if (count < node.left.lines) {
+    const [head, tail] = split(node.left, count);
+    return [head, join(tail, node.right)];
+  }
+  if (count > node.left.lines) {
+    const [head, tail] = split(node.right, count - node.left.lines);
+    return [join(node.left, head), tail];
+  }
+  return [node.left, node.right];
+}
+
+function buildTree(texts) {
+  let root = null;
+  for (let start = 0; start < texts.length; start += CHUNK_LINES) {
+    root = join(root, makeLeaf(texts.slice(start, start + CHUNK_LINES)));
+  }
+  return root;
+}
+
+/** Replaces tree lines `[start, start + count)` with `texts`. */
+function replaceRange(root, start, count, texts) {
+  const [head, rest] = split(root, start);
+  const [, tail] = split(rest, count);
+  return join(join(head, buildTree(texts)), tail);
+}
+
+function locateLine(root, line) {
+  let node = root;
+  let remaining = line;
+  let start8 = 0;
+  let start16 = 0;
+  while (node.kind === "branch") {
+    const left = node.left;
+    if (remaining < left.lines) {
+      node = left;
+      continue;
+    }
+    remaining -= left.lines;
+    start8 += left.w8;
+    start16 += left.w16;
+    node = node.right;
+  }
+  if (remaining < 0 || remaining >= node.lines) throw new Error("lsp.invalid_position: line is outside document");
+  for (let index = 0; index < remaining; index += 1) {
+    start8 += node.l8[index];
+    start16 += node.l16[index];
+  }
+  return { line, start8, start16, w8: node.l8[remaining], w16: node.l16[remaining], text: node.texts[remaining] };
+}
+
+function locateByte(root, offset) {
+  let node = root;
+  let line = 0;
+  let start8 = 0;
+  let start16 = 0;
+  let remaining = offset;
+  while (node.kind === "branch") {
+    const left = node.left;
+    if (remaining < left.w8) {
+      node = left;
+      continue;
+    }
+    remaining -= left.w8;
+    line += left.lines;
+    start8 += left.w8;
+    start16 += left.w16;
+    node = node.right;
+  }
+  for (let index = 0; index < node.lines; index += 1) {
+    if (remaining < node.l8[index]) {
+      return {
+        line: line + index,
+        start8,
+        start16,
+        w8: node.l8[index],
+        w16: node.l16[index],
+        text: node.texts[index],
+        intra8: remaining,
+      };
+    }
+    remaining -= node.l8[index];
+    start8 += node.l8[index];
+    start16 += node.l16[index];
+  }
+  throw new Error("lsp.invalid_position: byte offset is outside document");
+}
+
+function collectLines(node, lines) {
+  if (node.kind === "branch") {
+    collectLines(node.left, lines);
+    collectLines(node.right, lines);
+    return lines;
+  }
+  for (const text of node.texts) lines.push(text);
+  return lines;
+}
+
+/** Line text without a trailing CR (its convertible content). */
+function strippedLine(text) {
+  return text.length > 0 && text.charCodeAt(text.length - 1) === 13 ? text.slice(0, -1) : text;
+}
+
+/** Walks `content` up to line-relative byte `intra8`.
+ *
+ * Returns `{ char16, scalars }`, or `null` when `intra8` points into the
+ * stripped line ending (CR/LF). Throws when the byte splits a code point.
+ *
+ * ponytail: a line longer than one scan walks its whole length per
+ * conversion, as the baseline did; port the frontend's scan blocks if a
+ * 1 MiB single line ever becomes hot.
+ */
+function scanLine(content, intra8) {
+  let seen8 = 0;
+  let char16 = 0;
+  let scalars = 0;
+  while (char16 < content.length) {
+    if (seen8 === intra8) return { char16, scalars };
+    const code = content.codePointAt(char16);
+    const width16 = code > 0xffff ? 2 : 1;
+    const width8 = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+    if (seen8 + width8 > intra8) throw new Error("lsp.invalid_position: byte offset splits a UTF-8 code point");
+    seen8 += width8;
+    char16 += width16;
+    scalars += 1;
+  }
+  return seen8 === intra8 ? { char16, scalars } : null;
+}
+
 export class VersionedDocument {
+  #root = null;
+  #text = null;
+  #bytes = null;
+
   constructor(text, version, encoding = "utf-16") {
     requireEncoding(encoding);
     this.encoding = encoding;
@@ -117,45 +305,67 @@ export class VersionedDocument {
     if (typeof text !== "string" || !Number.isInteger(version) || version < 0) {
       throw new Error("lsp.invalid_document: text and non-negative integer version are required");
     }
-    this.text = text;
+    this.#text = text;
+    this.#bytes = null;
     this.version = version;
-    this.bytes = encodeUtf8(text);
-    this.lineStarts = [0];
-    for (let index = 0; index < this.bytes.length; index += 1) {
-      if (this.bytes[index] === 10) this.lineStarts.push(index + 1);
+    this.#root = buildTree(text.split("\n"));
+  }
+
+  get text() {
+    if (this.#text === null) this.#text = collectLines(this.#root, []).join("\n");
+    return this.#text;
+  }
+
+  get bytes() {
+    if (this.#bytes === null) this.#bytes = encodeUtf8(this.text);
+    return this.#bytes;
+  }
+
+  // UTF-8 byte length without materializing the whole byte array (the
+  // viewport/range bounds adapters need on every refresh).
+  get byteLength() {
+    return this.#root.w8 - 1;
+  }
+
+  #locate(offset) {
+    if (!Number.isInteger(offset) || offset < 0 || offset > this.byteLength) {
+      throw new Error("lsp.invalid_position: byte offset is outside document");
     }
+    const located = locateByte(this.#root, offset);
+    const content = strippedLine(located.text);
+    return { ...located, scanned: scanLine(content, located.intra8) };
+  }
+
+  #character(located) {
+    if (this.encoding === "utf-8") return located.intra8;
+    if (this.encoding === "utf-16") return located.scanned.char16;
+    return located.scanned.scalars;
   }
 
   #lineBounds(line) {
-    if (!Number.isInteger(line) || line < 0 || line >= this.lineStarts.length) {
+    if (!Number.isInteger(line) || line < 0) {
       throw new Error("lsp.invalid_position: line is outside document");
     }
-    const start = this.lineStarts[line];
-    let end = line + 1 < this.lineStarts.length ? this.lineStarts[line + 1] - 1 : this.bytes.length;
-    if (end > start && this.bytes[end - 1] === 13) end -= 1;
-    return { start, end };
+    const located = locateLine(this.#root, line);
+    const content = strippedLine(located.text);
+    return {
+      start: located.start8,
+      end: located.start8 + located.w8 - 1 - (located.text.length - content.length),
+      text: content,
+    };
   }
 
   byteToPosition(offset) {
-    requireByteBoundary(this.bytes, offset);
-    let low = 0;
-    let high = this.lineStarts.length;
-    while (low + 1 < high) {
-      const middle = (low + high) >> 1;
-      if (this.lineStarts[middle] <= offset) low = middle;
-      else high = middle;
-    }
-    const { start, end } = this.#lineBounds(low);
-    if (offset > end) throw new Error("lsp.invalid_position: byte offset points into line ending");
-    return { line: low, character: units(decodeUtf8(this.bytes.subarray(start, offset)), this.encoding) };
+    const located = this.#locate(offset);
+    if (located.scanned === null) throw new Error("lsp.invalid_position: byte offset points into line ending");
+    return { line: located.line, character: this.#character(located) };
   }
 
   positionToByte(position) {
     if (position === null || typeof position !== "object") throw new Error("lsp.invalid_position: position object required");
-    const { start, end } = this.#lineBounds(position.line);
-    const line = decodeUtf8(this.bytes.subarray(start, end));
-    const stringIndex = stringIndexForUnits(line, position.character, this.encoding);
-    return start + utf8ByteLength(line.slice(0, stringIndex));
+    const { start, text } = this.#lineBounds(position.line);
+    const stringIndex = stringIndexForUnits(text, position.character, this.encoding);
+    return start + utf8ByteLength(text.slice(0, stringIndex));
   }
 
   rangeToBytes(range) {
@@ -170,16 +380,22 @@ export class VersionedDocument {
     if (baseVersion !== this.version || !Number.isInteger(version) || version <= baseVersion) {
       throw new Error("lsp.stale_document: change versions are not ordered");
     }
-    requireByteBoundary(this.bytes, byteStart);
-    requireByteBoundary(this.bytes, byteEnd);
+    const start = this.#locate(byteStart);
+    const end = this.#locate(byteEnd);
     if (byteStart > byteEnd || typeof text !== "string") throw new Error("lsp.invalid_change: invalid byte range or text");
-    const range = { start: this.byteToPosition(byteStart), end: this.byteToPosition(byteEnd) };
-    const inserted = encodeUtf8(text);
-    const next = new Uint8Array(byteStart + inserted.length + this.bytes.length - byteEnd);
-    next.set(this.bytes.subarray(0, byteStart));
-    next.set(inserted, byteStart);
-    next.set(this.bytes.subarray(byteEnd), byteStart + inserted.length);
-    this.reset(decodeUtf8(next), version);
+    if (start.scanned === null || end.scanned === null) {
+      throw new Error("lsp.invalid_position: byte offset points into line ending");
+    }
+    const range = {
+      start: { line: start.line, character: this.#character(start) },
+      end: { line: end.line, character: this.#character(end) },
+    };
+    const prefix = start.text.slice(0, start.scanned.char16);
+    const suffix = end.text.slice(end.scanned.char16);
+    this.#root = replaceRange(this.#root, start.line, end.line - start.line + 1, (prefix + text + suffix).split("\n"));
+    this.#text = null;
+    this.#bytes = null;
+    this.version = version;
     return range;
   }
 }

@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientAddCursor
 js_facade: runtime/js/editor.js::clientAddCursor
-backing_rust: src/editor/surface.rs::EditorSurface::add_cursor_line
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_add_cursor
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_add_cursor
 name: clientAddCursor
@@ -20,6 +20,10 @@ custom_properties:
     type: enum
     default: none
     description: Where the new caret is added relative to the primary (below, above).
+  - name: documentId
+    type: string
+    default: optional
+    description: Reserved surface target; the client applies the command to the focused editor.
 security: Changes only transient client selection state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientAddCursor` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, multi-cursor, selection]
@@ -37,7 +41,7 @@ Add a collapsed caret one line below or above the primary caret at the same colu
 
 ## Description
 
-`clientAddCursor` is the public API for **Add Cursor** (Plan 071 task 9, VSCode `insertCursorBelow`/`insertCursorAbove`). The `op_clay_editor_add_cursor` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`editor.clientAddCursor.below` or `.above`). Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched in `EditorWidget`). The new caret is placed at the same scalar column on the target line, clamped to the line end, and becomes the primary. A caret is never stacked twice on one line.
+`clientAddCursor` is the public API for **Add Cursor** (Plan 071 task 9, VSCode `insertCursorBelow`/`insertCursorAbove`). The `op_clay_editor_add_cursor` deno op validates the `direction` argument (deny-by-default enum) and returns the direction-specific command descriptor (`editor.clientAddCursor.below` or `.above`). Key-driven execution is served client-local by those command IDs (allowlisted, routed `ClientUiCommand`, dispatched client-local by the React/CodeMirror controller). The new caret is placed at the same scalar column on the target line, clamped to the line end, and becomes the primary. A caret is never stacked twice on one line.
 
 Authority: `client-local-ui-state`. Runtime path: `client-local-hot-path`.
 
@@ -61,6 +65,7 @@ clientAddCursor({ direction: "above" });
 
 ## Options
 
+- `documentId` (`string`, optional): Reserved surface target; the client applies the command to the focused editor.
 - `direction` (`enum`): `below` | `above`.
 
 ## Key bindings
@@ -69,11 +74,12 @@ Default key bindings:
 
 - `Ctrl+Alt+Down` (add cursor below), `Ctrl+Alt+Up` (add cursor above)
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js` using the direction-specific command IDs (`editor.clientAddCursor.below`, `editor.clientAddCursor.above`).
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js` using the direction-specific command IDs (`editor.clientAddCursor.below`, `editor.clientAddCursor.above`).
 
 ## Custom properties
 
 - `direction` (`enum`): Where the new caret is added relative to the primary (see Options).
+- `documentId`: Reserved surface target; the client applies the command to the focused editor.
 
 ## Return and async behavior
 
@@ -99,8 +105,8 @@ Use `editor.clientAddCursor` when the user asks for add-cursor multi-editing thr
 
 - JS facade: `runtime/js/editor.js::clientAddCursor`
 - Deno op: `src/server/ops/editor.rs::op_clay_editor_add_cursor`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::add_cursor_line`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

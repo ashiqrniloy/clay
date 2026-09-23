@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientScrollTo
 js_facade: runtime/js/editor.js::clientScrollTo
-backing_rust: src/editor/viewport.rs::Viewport::scroll_lines
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_editor_scroll_to
 deno_op_path: src/server/ops/editor.rs::op_clay_editor_scroll_to
 name: clientScrollTo
@@ -28,6 +28,10 @@ custom_properties:
     type: boolean
     default: false
     description: Behavior-changing setting `revealCursor` for this API.
+  - name: documentId
+    type: string
+    default: required
+    description: Target editor/document surface.
 security: Changes only client viewport/visual scroll state; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.clientScrollTo` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [editor, js-api, scrolling]
@@ -80,13 +84,14 @@ Default key bindings:
 
 - `PointerScroll`
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js`.
 
 ## Custom properties
 
 - `line` (`number`, default `none`): Behavior-changing setting `line` for this API.
 - `column` (`number`, default `none`): Behavior-changing setting `column` for this API.
 - `revealCursor` (`boolean`, default `false`): Behavior-changing setting `revealCursor` for this API.
+- `documentId`: Target editor/document surface.
 
 ## Return and async behavior
 
@@ -114,8 +119,8 @@ Use `editor.clientScrollTo` when the user asks for scroll editor through the Cla
 
 - JS facade: `runtime/js/editor.js::clientScrollTo`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_scroll_to` (`op_clay_editor_scroll_to`)
-- Backing Rust/current owner: `src/editor/viewport.rs::Viewport::scroll_lines`
-- Current implementation audit path: `src/editor/surface.rs::EditorSurface::scroll_lines; src/editor/surface.rs::EditorSurface::scroll_vertical_pixels`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Current implementation audit path: `src/client_commands.rs::EditorClientCommand`
 
 ## Lookup metadata
 

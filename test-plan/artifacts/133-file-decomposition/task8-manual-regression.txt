@@ -1,0 +1,93 @@
+Plan 133 task 8 — regression-only manual pass (automated companions)
+tree: HEAD 40022f6 + plan 133 tasks 1-7 (git status: plans/index/tests modified, theme/, artifacts untracked)
+host: CachyOS, rustc 1.98.1, no WebKitGTK (desktop launch impossible), no input-synthesis backend for the desktop
+
+=== cargo test --lib shell::theme
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 1391 filtered out; finished in 0.00s
+=== cargo test --lib server::ui
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 1396 filtered out; finished in 0.00s
+=== cargo test --lib str_enum
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1418 filtered out; finished in 0.00s
+=== cargo test --lib packages::
+test packages::record::tests::diagnostic_error_sizes_remain_under_large_err_threshold ... ok
+test packages::self_update::tests::failed_channel_command_is_an_error ... ok
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 1337 filtered out; finished in 0.04s
+=== cargo test --test presentation
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+=== cargo test --test protocol
+test clay_js_doc_registry::invalid_init_typography_reports_actionable_validation_error ... ok
+test package_loading_docs::package_document_contract_errors_name_path_and_field ... ok
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.03s
+=== cargo test --test runtime
+test large_document::oversize_and_binary_files_refuse_with_visible_errors ... ok
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.79s
+=== cargo test --test security
+test language_server_authority::unexpected_child_exit_produces_typed_sanitized_error ... ok
+test language_server_authority::read_timeout_produces_typed_error_and_session_remains_stoppable ... ok
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+
+=== server launch smoke (module 01 L-series class, server half) — PASS live
+command : HOME=/tmp/clay133/home XDG_RUNTIME_DIR=/tmp/clay133/run \
+          ./target/debug/clay server /tmp/clay133/clay.sock --config-fixture ui-review-default
+log     : clay server listening on /tmp/clay133/clay.sock
+socket  : srw------- (mode 700) /tmp/clay133/clay.sock
+state   : server process alive after bind; killed cleanly; no configuration diagnostics
+note    : isolated root removed after the run.
+
+=== blockers (recorded, not false passes)
+- Desktop GUI steps NOT RUN: no WebKitGTK 4.1 on this host (pkg-config entries
+  javascriptcoregtk-4.1 / webkit2gtk-4.1 absent AND no runtime library in
+  ldconfig), no passwordless sudo to install; `clay-desktop` cannot be built or
+  launched. Standing input-synthesis ceiling also applies. No plan-133 defect.
+- Frontend suites NOT RUN: plan 133 touched no frontend source and
+  frontend/node_modules is absent on this host.
+
+=== totals
+targeted: 29 + 24 + 2 + 83 + 62 + 227 + 75 + 152 = 654 passed, 0 failed
+root gate (task 7 log, unchanged tree): 1944 passed / 0 failed / 1 ignored
+
+=== RE-RUN 2026-09-22 19:2x — WebKitGTK 4.1 installed (2.52.6), desktop blockers cleared
+
+full gate : scripts/check.sh full -> EXIT 0, "full check PASSED"
+            audit/fmt/check/clippy(-D warnings)/test/bench-compile all green;
+            root 1944 passed / 1 ignored; desktop-clippy + desktop-test
+            (32+0+2+1+4+16 = 55 passed); bindings "webview bindings up to date".
+            Log: task8-check-full-desktop.log
+build     : target/debug/clay (cargo build --bins), target/debug/clay-desktop
+            (cargo build --bins -p clay-desktop); frontend/dist built with
+            `npm ci` + `npm run build` (tsc -b && vite build).
+
+live GUI  : scripts/capture-ui-review.sh (xdg-desktop-portal screenshot, AT-SPI
+            dump, isolated mode-700 root + private socket) — 4 fixtures PASS:
+
+| fixture | status / viewport | what it verifies (plan 133 surface) |
+|---|---|---|
+| live/ui-review-default | PASS 1906x1099 | module 01 launch gate: shell, Workspace·workspace file browser, empty-tab "Start with a file or folder" + Open File/Open Folder, right sidebar, composer; no configuration diagnostics |
+| live/ui-review-design-system | PASS 1906x1099 | module 15 + module 09 SDUI/package-UI path: shipped @clay/design-instrument active with @clay/theme-gruvbox-material-dark; "Design system review" panel, "Primary action" button, "Server-driven items" list with Enabled/Disabled rows, editor pane; AT-SPI landmark/button/listbox/listitem nodes present |
+| live/ui-review-design-system-light | PASS 1906x1099 | module 15 UI-DS-15 cross-theme invariant: same layout/geometry under @clay/theme-gruvbox-material-light, all roles recolored with no stale color |
+| live/ui-review-large-typography | PASS 1906x1099 | module 07/15 user-owned typography: enlarged UI text (outline rows, status bar, landing heading/buttons) renders from the resolved typography tokens |
+
+each capture: screenshot.png (host bar excluded? crop = Clay AT-SPI frame),
+accessibility.txt, metadata.txt, server.diagnostics.txt, review.status=PASS.
+Server diagnostics per capture: agent_registration_lines=22,
+configuration_failed_lines=0.
+
+frontend  : `npm ci` + `npm test` -> 51 files / 497 tests PASS (after fixing the
+            stale guard path below); `npm run build` (tsc -b && vite build) PASS;
+            `npm run check:budget` shell 178.6/180 kB gzip, total 403.5/404 kB.
+
+FINDING (fixed): `frontend/src/test/core-baseline-hierarchy.test.ts` still read
+`src/protocol/mod.rs` for `FontProfile::DEFAULT` / `impl Default for
+ActiveTypography`; plan 133 task 2 moved that contract to
+`src/protocol/typography.rs`, so the slice was empty and the test failed
+(`expected '' to contain 'title: 15.0 / 13.0'`). The frontend suite is not part
+of `scripts/check.sh`, which is why the Rust gate did not catch it. Fixed by
+pointing the guard at `src/protocol/typography.rs` (values unchanged); suite
+green after the fix, typecheck + prettier clean.
+
+FINDING (fixed, docs): the plan-133 task-2 protocol split also left two live
+"Source of truth: default_keymaps() in src/protocol/mod.rs" comment pointers
+stale — `default_keymaps()` now lives in `src/protocol/behavior.rs`.
+Retargeted in `examples/config/init.js` (the canonical user config) and its
+`tests/fixtures/configuration/plan080-manual/init.js` copy; `cargo test --test
+protocol` 227 and `cargo test --test presentation` 62 green afterwards.

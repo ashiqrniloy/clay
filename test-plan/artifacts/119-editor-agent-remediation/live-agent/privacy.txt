@@ -1,0 +1,1 @@
+The portal screenshot was visually inspected, then deleted. Its status bar showed the isolated temporary review-root path. Retained evidence is the redacted AT-SPI tree, the drive transcript, bounded server diagnostics, and metadata.

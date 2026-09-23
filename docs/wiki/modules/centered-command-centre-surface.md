@@ -1,106 +1,98 @@
-# Centered Command Centre Surface (Phase 24.4)
+# Retired Centered Command Centre Surface
 
-## Scope
+## Status
 
-Phase 24.4 changes only presentation, accessibility, and input containment for
-Clay's built-in Command Centre command/path sessions. Command execution,
-filesystem browsing, fuzzy matching, keybindings, package APIs, and authority
-remain unchanged.
+Plan 124 re-anchored the command/path sessions to a composer-width bottom sheet;
+**Plan 125 finished the retirement**: every transient Clay session — the command
+catalogue, the Path Browser, and the Agent Picker's list/provider/auth/credential/
+URL/OAuth stages — is now one session rendered by one sheet, so the window-centered
+projection, its `CommandCentre.tsx` renderer, its CSS, and
+`PackageOverlayAnchor::Centered` are gone. This page is the removal record: it
+explains what was there, what replaced it, and what still exists on the wire so
+old code and review records stay searchable. Current behavior lives in
+[Control Center](control-center.md),
+[React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md),
+and [Transient Menu Round Trip](transient-menu-round-trip.md).
 
-## Flow
+## Historical implementation
 
-1. `ControlCenter::session` and `PathBrowserSession::menu_session` set
-   `TransientMenuOrigin::Centered`.
-2. The origin round-trips through `TransientMenuOriginData` and protocol
-   snapshots (`src/shell/transient_menu.rs`, `src/protocol/menu.rs`).
-3. `TransientPackageOverlay::from_menu_session` maps the origin to the
-   internal `PackageOverlayAnchor::Centered`, adds sanitized menu labels,
-   selected state, and a bounded result-count string.
-4. `SduiNativeState` separates centered overlays from pane-local overlays.
-   `EditorWidget` keeps the centered menu in server-owned menu state for input,
-   while `Driver` owns only the optional window-layer `WidgetId`.
-5. `EditorWidget::reconcile_centered_overlay_layer` mounts or reuses one
-   `PackageOverlayHost::new_centered()` with `RenderRoot::add_layer` at the
-   window origin. Query and selection snapshots reconcile that host in place;
-   close, tab changes, disconnect, registry removal, and runtime replacement
-   remove it idempotently.
+Phase 24.4 rendered server-owned command and path sessions through
+`TransientMenuOrigin::Centered`, a Masonry `PackageOverlayHost` on the window
+layer. The host supplied a modal dialog, menu rows, a bounded polite result
+count, scrim containment, focus restoration, and inert session intents. The
+server still owned query, selection, activation, path canonicalization, and
+permissions; the centered renderer never granted package authority. The native
+renderer was removed during the Tauri/React cutover, and its React successor
+(`frontend/src/command-centre/CommandCentre.tsx`, a plain-text modal) served the
+non-command origins until Plan 125.
 
-Only the active tab's centered menu is mounted. Completion, context-menu,
-menu-bar, and package overlays stay on their existing pane-local host.
+## What survives, and why
 
-## Geometry and paint
+- **Wire compatibility.** `TransientMenuOriginData::Centered` is still a decoded
+  variant so a snapshot from an older daemon (or an old test fixture) does not
+  fail to parse. No constructor emits it, and
+  `src/shell/package_ui.rs` maps it to `PackageOverlayAnchor::Bottom`, so an old
+  origin renders as the bottom sheet rather than resurrecting a modal.
+- **Package anchor parsing.** `PackageOverlayAnchor::parse("centered")` keeps
+  returning `WorkingArea`: package manifests that spelled it still load, and the
+  package contract stays closed to window-level anchors.
+- **`TransientMenuOrigin::Centered`** remains a Rust enum variant with the same
+  fail-closed mapping (see [Slot-Aware Package UI](slot-aware-package-ui.md)); the
+  client no longer has a render branch for it.
 
-`PackageOverlayHost::layout` derives the full window rectangle from its parent
-size and resolves `dimension.overlay.centered.width` from the cached
-`ResolvedUiTheme`. Width clamps to the window; the existing bounded transient
-height and `spacing.panel` inset remain in use. Centered paint calls the generic
-`paint_scrim` primitive once over the window rectangle, then paints the existing
-`paint_tooltip_shell` chrome and retained component children.
+## Current replacement
 
-The scrim uses `surface.scrim` plus `opacity.scrim`. Defaults are black, 0.5,
-and 640 logical pixels. No backdrop blur, offscreen texture, shader, or filter
-pass exists. Theme values resolve at install/reload, not during paint/layout.
+Everything the centered sheet did is now a stage of the composer's `/` palette:
 
-## Accessibility and input
+- `WorkspacePanes` selects the `CommandPalette`-origin snapshot from the tab
+  runtime and renders the single modal veil as a working-area grid item
+  (`grid-area: 1 / 1 / -1 / -1`, z-index 40) over the panes and the inspector
+  rail; the lane stays interactive at z-index 41 and its strip is opaque, so the
+  veil neither dims it nor shows through it.
+- `CommandPalette` is a child of the lane composer's `ClayTextField` `menu` slot:
+  exactly the field's width, 6px above it, capped at `min(52vh, 420px)`, no focus
+  ring of its own (the composer field is the focus boundary), and the plan-125
+  **halo** instead of a drop shadow.
+- The server owns the stages. Protocol v32 adds the bounded `mode`
+  (`catalogue`, `path`, `picker`, `secret`, `url`, `oauth`) to
+  `TransientMenuSnapshotData`; `Esc`/`Alt+←`/backspace ascend a picker flow
+  (closing at its flow entry via `MenuEdit { close }`), `Alt+↵` runs a row's
+  declared secondary action, and the `secret` stage draws its own shielded field
+  while the composer is disabled, so a credential never enters the persisted
+  composer draft.
+- `Ctrl+X Ctrl+O` (and the titlebar Control Center trigger, and typing `/`)
+  opens the catalogue; `Ctrl+X Ctrl+P` toggles the per-tab agent lane;
+  `Ctrl+X Ctrl+F` opens path mode. Hiding the lane removes the palette and the
+  veil together, which is the fix for the former orphaned-scrim defect.
 
-The centered root host reports a named modal `Role::Dialog`. Its hosted region
-reports `Role::Menu`, `Role::MenuItem` rows, and one `Role::Status` result-count
-node with `Live::Polite`. Count grammar is `0 results`, `1 result`, or `{n}
-results`. Menu item nodes use retained-region-derived namespaced IDs, AccessKit
-selected state, and the existing selected-label suffix. The status ID remains
-stable across selection/query snapshots; only a count change changes its label.
-Prompt and item text pass existing accessibility bounds/sanitization.
+## Boundaries and tests
 
-Masonry focus remains on the originating pane. While a server-owned centered
-menu is active, `PaneDocumentView` consumes every keyboard event, clipboard
-paste, and IME event before editor routing. Recognized keys enqueue existing
-menu intents; unsupported keys and queue failures are still consumed. The
-centered root host swallows pointer-down events and restores/retains the
-originating focus target, so scrim clicks cannot mutate the document.
+The palette remains a display projection. Packages cannot request the palette
+sheet or its veil/halo, open or drive menu sessions, intercept their input,
+receive raw paths, or obtain Tauri APIs. Commands still pass through the server's
+validated registry/executor, and path activation resolves only from installed
+canonical entries.
 
-## Package and authority boundary
+The retirement is pinned by
+`src/server/menu_sessions.rs::no_session_constructor_produces_the_retired_centered_origin`,
+`src/server/agent_picker.rs::every_picker_stage_is_a_palette_session_with_its_mode`,
+and the frontend suites that assert no window sheet renders for a centered
+origin (`frontend/src/shell/{shell-chords,WorkspacePanes}.test.tsx`,
+`frontend/src/test/overlay-composition.test.ts`). Current coverage is otherwise
+`frontend/src/command-centre/CommandPalette.test.tsx`,
+`frontend/src/coding-agent/Composer.test.tsx`, and the server menu/control-center
+suites. Live evidence: `test-plan/artifacts/124-agent-lane/` (Plan 124) and
+`test-plan/artifacts/125-palette/` (Plan 125, including the retired-anchor and
+veil/halo measurements).
 
-`PackageOverlayAnchor::Centered` is Clay-internal. `parse("centered")` falls
-back to the normal package anchor, and the package JS `OverlayAnchor` surface
-remains `working-area | active-pane | main | pointer`. Packages cannot request
-the built-in centered layer, paint its scrim, open/drive server menu sessions,
-intercept menu input, or obtain browse authority.
+## Related
 
-The snapshots remain inert display data. Path activation continues through the
-server-owned `PathBrowserSession` and existing grant conversion rules.
-
-## Tests and extension guidance
-
-Focused implementation coverage lives beside the code:
-
-- `src/masonry_package_region.rs`: full-window scrim ordering, geometry clamp,
-  modal shield, retained host reuse, and menu accessibility.
-- `src/masonry_editor.rs`: local-host filtering, root-layer lifecycle, stable
-  dialog/menu/status tree, pointer containment, and count/status identity.
-- `src/masonry_pane_document.rs`: modal queue-failure/modifier containment.
-- `tests/ui_primitive_conformance.rs`: token-driven single scrim/no-blur guard.
-- `tests/suites/editor.rs` via `editor_performance_invariants`: hot-path policy.
-
-Run focused checks with:
-
-```bash
-cargo test --lib centered_layer_reconciles_in_place_and_removes_idempotently
-cargo test --lib masonry_package_region::tests::centered_overlay_host_clamps_width_and_reuses_layer_on_resize
-cargo test --test editor editor_performance_invariants
-cargo test --test protocol primitives_docs
-```
-
-Future built-in transient menus should reuse `TransientMenuSession`, the
-origin/protocol projection, `PackageOverlayHost`, and the existing accessibility
-shape. Add a new origin only with an explicit authority/lifecycle decision;
-do not add another command-centre renderer or a package-facing centered anchor.
-
-## Related pages
-
+- [React Command Centre and Desktop Workflows](react-command-centre-desktop-workflows.md)
+- [Control Center](control-center.md)
 - [Transient Menu Session](transient-menu-session.md)
 - [Transient Menu Round Trip](transient-menu-round-trip.md)
-- [Masonry Shell Runtime](masonry-shell.md)
-- [SDUI / Package-UI Retained Masonry Reconciliation](masonry-sdui-region.md)
-- [Accessibility contract](../../development/accessibility.md)
-- [Performance workflow](../../development/performance.md)
-- [UI Chrome Primitives](../../reference/primitives/ui-chrome-primitives.md)
+- [Slot-Aware Package UI](slot-aware-package-ui.md)
+- [React Shell](react-shell.md)
+- [Design Artifact Gate](design-artifact-gate.md)
+- `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`,
+  `plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`

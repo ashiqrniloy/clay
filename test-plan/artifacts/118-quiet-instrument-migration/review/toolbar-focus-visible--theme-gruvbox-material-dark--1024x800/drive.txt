@@ -1,0 +1,10 @@
+
+(process:2517951): dbind-WARNING **: 21:05:08.848: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-M4EPV3/socket: No such file or directory
+
+(process:2517951): dbind-WARNING **: 21:05:08.848: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-MHPRV3/socket: No such file or directory
+
+(process:2517951): dbind-WARNING **: 21:05:08.848: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-3FSRV3/socket: No such file or directory
+
+(process:2517951): dbind-WARNING **: 21:05:08.853: AT-SPI: Unable to open bus connection: Failed to connect to socket /run/user/1000/at-spi2-1JXRV3/socket: No such file or directory
+OK step 1: focus 'Palette'
+OK step 2: wait 600ms

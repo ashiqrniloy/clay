@@ -1,0 +1,361 @@
+{
+  "matrix": [
+    {
+      "width": "1500",
+      "theme": "gruvbox-material-dark",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 781.6,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1500",
+      "theme": "gruvbox-material-light",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 781.6,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1500",
+      "theme": "modus-operandi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 781.6,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1500",
+      "theme": "modus-vivendi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 781.6,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1024",
+      "theme": "gruvbox-material-dark",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 312,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 584,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1024",
+      "theme": "gruvbox-material-light",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 312,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 584,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1024",
+      "theme": "modus-operandi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 312,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 584,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "1024",
+      "theme": "modus-vivendi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 312,
+        "pos": "static",
+        "border": "1px"
+      },
+      "canvas": 584,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "960",
+      "theme": "gruvbox-material-dark",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "fixed",
+        "border": "1px"
+      },
+      "canvas": 708,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "960",
+      "theme": "gruvbox-material-light",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "fixed",
+        "border": "1px"
+      },
+      "canvas": 708,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "960",
+      "theme": "modus-operandi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "fixed",
+        "border": "1px"
+      },
+      "canvas": 708,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    },
+    {
+      "width": "960",
+      "theme": "modus-vivendi",
+      "overflow": 0,
+      "titlebar": 40,
+      "status": 28,
+      "statusMono": "ui-monospace, monospace",
+      "rail": {
+        "w": 340,
+        "pos": "fixed",
+        "border": "1px"
+      },
+      "canvas": 708,
+      "canvasMax": "none",
+      "sidebarFlat": true,
+      "hints": [
+        "paletteCtrlXP",
+        "filesCtrlB",
+        "hide outlineCtrlI"
+      ],
+      "railEntries": 3,
+      "facts": [
+        "notes.md",
+        "v1",
+        "clean",
+        "3",
+        "43"
+      ]
+    }
+  ],
+  "probes": {
+    "railBefore": true,
+    "railAfterButton": false,
+    "editorAfterCollapse": 781.6,
+    "railAfterStatusHint": true,
+    "openStrip": true,
+    "openStripFocus": "Open relative path",
+    "activeEntry": "-,true,-"
+  }
+}

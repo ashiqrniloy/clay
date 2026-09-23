@@ -1,0 +1,218 @@
+[
+  {
+    "fixture": "controls",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "controls__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "controls",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "controls__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "controls",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "controls__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "controls",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "controls__core__modus-operandi.png"
+  },
+  {
+    "fixture": "controls",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "controls__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "controls",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "controls__glass__modus-operandi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "splits__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "splits__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "splits__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "splits__core__modus-operandi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "splits__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "splits",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "splits__glass__modus-operandi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "chat__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "chat__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "chat__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "chat__core__modus-operandi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "chat__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "chat",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "chat__glass__modus-operandi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "command-centre__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "command-centre__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "command-centre__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "command-centre__core__modus-operandi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "command-centre__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "command-centre",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "command-centre__glass__modus-operandi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "settings__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "settings__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "settings__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "settings__core__modus-operandi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "settings__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "settings",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "settings__glass__modus-operandi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "core",
+    "theme": "modus-vivendi",
+    "file": "package-ui__core__modus-vivendi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "neobrutal",
+    "theme": "modus-vivendi",
+    "file": "package-ui__neobrutal__modus-vivendi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "glass",
+    "theme": "modus-vivendi",
+    "file": "package-ui__glass__modus-vivendi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "core",
+    "theme": "modus-operandi",
+    "file": "package-ui__core__modus-operandi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "neobrutal",
+    "theme": "modus-operandi",
+    "file": "package-ui__neobrutal__modus-operandi.png"
+  },
+  {
+    "fixture": "package-ui",
+    "style": "glass",
+    "theme": "modus-operandi",
+    "file": "package-ui__glass__modus-operandi.png"
+  }
+]

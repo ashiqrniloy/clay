@@ -1,0 +1,2 @@
+UNRESOLVED
+reason=drive step failed: FAIL step 3: type failed: atspi_error: No such interface “org.a11y.atspi.EditableText” on object at path /org/a11y/atspi/accessible/eb33b1ee_b1ad_4ba2_860d_c4e6548c19de (1)

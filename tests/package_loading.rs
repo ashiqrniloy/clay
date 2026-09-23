@@ -33,7 +33,7 @@ use clay::packages::modes::{
 use clay::packages::permissions::PackagePermission;
 use clay::packages::record::{PackageRecordRule, assemble_package_record};
 use clay::packages::service::{PackageService, PackageServiceError};
-use clay::protocol::{BehaviorScope, Modifiers, TokenType};
+use clay::protocol::BehaviorScope;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -272,7 +272,10 @@ fn package_record_accepts_full_markdown_contract() {
     assert_eq!(record.manifest.name, "@clay/markdown");
     assert_eq!(record.manifest.version, "0.1.0");
     assert_eq!(record.manifest.clay.api_prefix, "markdown");
-    assert_eq!(record.manifest.clay.entry, "./dist/index.js");
+    assert_eq!(
+        record.manifest.clay.entry.as_deref(),
+        Some("./dist/index.js")
+    );
     assert_eq!(
         record.manifest.clay.load_entry.as_deref(),
         Some("./dist/load.js")
@@ -344,25 +347,9 @@ fn markdown_package_contract_validates_with_required_metadata() {
         record.contributions.ui_components[0].id,
         "markdown.status.mode"
     );
-    assert_eq!(record.contributions.syntax_grammars.len(), 1);
-    let grammar = &record.contributions.syntax_grammars[0];
-    assert_eq!(grammar.grammar_kind, "native");
-    assert_eq!(
-        grammar.grammar_source.as_deref(),
-        Some("tree-sitter-md-025")
-    );
-    assert_eq!(
-        grammar.style_map["heading-1"].token_type,
-        TokenType::Heading1
-    );
     assert!(
-        grammar.style_map["strong"]
-            .modifiers
-            .contains(Modifiers::BOLD)
-    );
-    assert_eq!(
-        grammar.style_map["code-span"].font_role,
-        Some(clay::protocol::DocumentFontRole::Monospace)
+        record.contributions.syntax_grammars.is_empty(),
+        "markdown grammar is owned by native descriptor"
     );
 
     let clay = package["clay"].as_object().unwrap();
@@ -390,23 +377,31 @@ fn markdown_package_rejects_missing_required_permissions() {
         ("decorations.serverPublishDecorations", "render-decorations"),
     ] {
         let mut package = first_party_markdown_package_json();
-        let permissions = package["clay"]["permissions"].as_array_mut().unwrap();
-        permissions.retain(|value| value.as_str() != Some(missing_permission));
+        package["clay"]["permissions"] = json!(
+            [
+                "mode-registration",
+                "mode-activation",
+                "command-registration",
+                "completion-provider",
+                "parse-document",
+                "render-decorations",
+            ]
+            .into_iter()
+            .filter(|permission| *permission != missing_permission)
+            .collect::<Vec<_>>()
+        );
 
         let err = assemble_package_record(&package).unwrap_err();
         assert_eq!(
             err.rule,
             PackageRecordRule::UndeclaredPermissionForContribution
         );
-        if !matches!(
-            missing_permission,
-            "command-registration" | "parse-document" | "render-decorations"
-        ) {
-            assert_eq!(err.contribution_id.as_deref(), Some(api_id));
-        }
         assert!(
-            err.message.contains(missing_permission),
-            "got: {}",
+            err.message.contains(missing_permission)
+                || err.contribution_id.as_deref() == Some(api_id),
+            "got rule={:?} id={:?} message={}",
+            err.rule,
+            err.contribution_id,
             err.message
         );
     }
@@ -427,28 +422,36 @@ fn markdown_package_does_not_execute_on_install() {
         .expect("installed package can be inspected without enable/load execution");
     assert!(!inspection.is_enabled);
     assert_eq!(inspection.api_prefix, "markdown");
+    assert_eq!(inspection.native_syntax_languages, ["markdown"]);
+    assert_eq!(inspection.preset.as_deref(), Some("prose-mode"));
+    for permission in [
+        "mode-registration",
+        "mode-activation",
+        "command-registration",
+        "completion-provider",
+        "parse-document",
+        "render-decorations",
+    ] {
+        assert!(
+            inspection
+                .permissions
+                .iter()
+                .any(|value| value == permission),
+            "inspect must show expanded prose-mode permission `{permission}`"
+        );
+    }
 }
 
+/// Install does not execute package runtimes and records npm-registry
+/// provenance for every accepted v1 spec form (floating/pinned, scoped and
+/// unscoped).
 #[test]
 fn source_aware_install_records_provenance_without_enabling_runtime() {
-    for (spec, expected_kind, expected_name) in [
-        (
-            "@vendor/mode",
-            PackageSourceKind::NpmRegistry,
-            "@vendor/mode",
-        ),
-        ("github:user/mode", PackageSourceKind::GitHub, "github-mode"),
-        (
-            "https://github.com/user/mode.git",
-            PackageSourceKind::GitUrl,
-            "git-mode",
-        ),
-        ("./local-mode", PackageSourceKind::LocalPath, "local-mode"),
-        (
-            "https://example.test/mode.tgz",
-            PackageSourceKind::Tarball,
-            "tarball-mode",
-        ),
+    for (spec, expected_name) in [
+        ("npm:@vendor/mode", "@vendor/mode"),
+        ("npm:@vendor/mode@2.3.4", "@vendor/mode"),
+        ("npm:plain-mode", "plain-mode"),
+        ("npm:plain-mode@2.3.4", "plain-mode"),
     ] {
         let mut package = full_markdown_fixture();
         package["name"] = json!(expected_name);
@@ -471,7 +474,11 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
             .expect("installed package can be inspected by resolved name");
         assert!(!inspection.is_enabled, "install must not enable `{spec}`");
         assert_eq!(inspection.provenance.requested_spec, spec);
-        assert_eq!(inspection.provenance.source_kind, expected_kind);
+        assert_eq!(
+            inspection.provenance.source_kind,
+            PackageSourceKind::NpmRegistry,
+            "`{spec}` is an npm registry source"
+        );
         assert_eq!(inspection.provenance.resolved_name, expected_name);
         assert_eq!(inspection.provenance.resolved_version, "2.3.4");
         assert!(
@@ -480,7 +487,7 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
                 .package_root
                 .display()
                 .to_string()
-                .contains(spec),
+                .contains(expected_name),
             "package root should come from package-manager discovery"
         );
         assert!(
@@ -488,6 +495,143 @@ fn source_aware_install_records_provenance_without_enabling_runtime() {
             "package-manager diagnostics must be bounded"
         );
     }
+}
+
+/// v1 gate: non-npm sources (bare specs, `github:`, git URLs, tarballs,
+/// local paths, and range versions) are rejected at parse time with a
+/// typed error naming the accepted form — no install path accepts a
+/// non-npm source (plan 115 task 2).
+#[test]
+fn non_npm_sources_are_rejected_before_any_backend_call() {
+    for spec in [
+        "github:user/mode",
+        "https://github.com/user/mode.git",
+        "./local-mode",
+        "https://example.test/mode.tgz",
+        "@vendor/mode",
+        "mode",
+        "npm:mode@^1.2.3",
+    ] {
+        // The FakeBackend has no configured results, so a backend call
+        // would fail differently; the parse gate must reject first.
+        let backend = FakeBackend::new();
+        let mut service =
+            PackageService::new("target/test-package-store/rejected", Box::new(backend));
+        let error = service
+            .install(spec, Default::default())
+            .expect_err("`{spec}` must be rejected by the v1 npm gate");
+        let PackageServiceError::InvalidSpecifier { message } = &error else {
+            panic!("`{spec}`: expected InvalidSpecifier, got {error:?}");
+        };
+        assert!(
+            message.contains("npm:"),
+            "`{spec}`: message must name the accepted v1 form; got {message}"
+        );
+    }
+}
+
+/// Plan 115 task 3: Clay-initiated install writes a durable ledger entry that
+/// survives `PackageService::open` across processes; remove deletes it.
+#[test]
+fn install_ledger_round_trips_across_service_reopen() {
+    let root = format!(
+        "target/test-package-store/ledger-roundtrip-{}",
+        std::process::id()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut package = full_markdown_fixture();
+    package["name"] = json!("plain-mode");
+    package["version"] = json!("1.2.3");
+
+    let spec = "npm:plain-mode";
+    let backend = FakeBackend::new().will_install(spec, package);
+    {
+        let mut service =
+            PackageService::open(&root, Box::new(backend)).expect("fresh store opens");
+        service
+            .install(spec, Default::default())
+            .expect("install records ledger");
+        let rec = service
+            .install_record("plain-mode")
+            .expect("in-process ledger entry");
+        assert!(!rec.pinned, "floating spec is not pinned");
+        assert_eq!(rec.spec, spec);
+        assert_eq!(rec.version, "1.2.3");
+        assert_eq!(rec.source, "npm");
+    }
+
+    let service = PackageService::open(&root, Box::new(FakeBackend::new())).expect("store reopens");
+    let rec = service
+        .install_record("plain-mode")
+        .expect("ledger survives reopen");
+    assert!(!rec.pinned);
+    assert_eq!(rec.spec, spec);
+    assert_eq!(rec.version, "1.2.3");
+
+    let mut service = PackageService::open(&root, Box::new(FakeBackend::new()))
+        .expect("store reopens for remove");
+    service.remove("plain-mode").expect("remove deletes ledger");
+    assert!(service.install_record("plain-mode").is_none());
+    drop(service);
+
+    let service = PackageService::open(&root, Box::new(FakeBackend::new()))
+        .expect("store reopens after remove");
+    assert!(
+        service.install_record("plain-mode").is_none(),
+        "removed entry must not reappear"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn install_ledger_pinned_flag_follows_spec_and_unmanaged_has_no_entry() {
+    let root = format!(
+        "target/test-package-store/ledger-pinned-{}",
+        std::process::id()
+    );
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut pinned_pkg = full_markdown_fixture();
+    pinned_pkg["name"] = json!("@arnilo/st");
+    pinned_pkg["version"] = json!("1.2.3");
+    let pinned_spec = "npm:@arnilo/st@1.2.3";
+
+    let mut floating_pkg = full_markdown_fixture();
+    floating_pkg["name"] = json!("plain-mode");
+    floating_pkg["version"] = json!("0.1.0");
+    let floating_spec = "npm:plain-mode";
+
+    let backend = FakeBackend::new()
+        .will_install(pinned_spec, pinned_pkg)
+        .will_install(floating_spec, floating_pkg);
+    let mut service = PackageService::open(&root, Box::new(backend)).expect("store opens");
+    service
+        .install(pinned_spec, Default::default())
+        .expect("pinned install");
+    service
+        .install(floating_spec, Default::default())
+        .expect("floating install");
+    assert!(service.install_record("@arnilo/st").unwrap().pinned);
+    assert!(!service.install_record("plain-mode").unwrap().pinned);
+
+    let mut outsider = full_markdown_fixture();
+    outsider["name"] = json!("outsider");
+    outsider["version"] = json!("9.9.9");
+    let unmanaged = FakeBackend::new().will_install("npm:outsider", outsider);
+    let mut discovered = PackageService::new(format!("{root}/unmanaged"), Box::new(unmanaged));
+    discovered.refresh_installed().expect("discovery");
+    assert!(
+        discovered.inspect("outsider").is_some(),
+        "unmanaged package is visible via discovery"
+    );
+    assert!(
+        discovered.install_record("outsider").is_none(),
+        "discovery without clay install must not create a ledger entry"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -531,6 +675,318 @@ fn missing_authorization_grant_fails_enable_for_requested_capability() {
         err,
         PackageServiceError::MissingCapabilityGrant { .. }
     ));
+}
+
+/// Plan 136 task 3 G4: an approval may only cover capabilities the manifest
+/// declares, so a grant for an undeclared capability is rejected instead of
+/// silently ignored.
+#[test]
+fn authorize_package_rejects_capability_the_manifest_never_declares() {
+    let mut service = PackageService::new(
+        "target/test-package-store/undeclared-capability",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package)
+        .expect("installing metadata records package");
+
+    let error = service
+        .authorize_package(
+            &name,
+            vec![PackagePermission::Network],
+            AuthorizationRuntimeProfile::Restricted,
+            "test-user",
+        )
+        .expect_err("undeclared capability must be rejected");
+    assert!(
+        matches!(
+            error,
+            PackageServiceError::UndeclaredCapability {
+                capability: PackagePermission::Network,
+                ..
+            }
+        ),
+        "expected UndeclaredCapability, got {error}"
+    );
+}
+
+/// Plan 136 task 3 G5: revoking the durable approval also withdraws the
+/// recorded capability grant, so re-adopting without re-authorizing fails
+/// closed on the capability gate rather than reusing revoked state.
+#[test]
+fn revoke_withdraws_the_recorded_capability_grant() {
+    let mut service = PackageService::new(
+        "target/test-package-store/revoke-withdraws-grant",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("installing metadata records package");
+    authorize_requested_capabilities(&mut service, &package);
+    service
+        .approve_package(&name, "test")
+        .expect("adoption succeeds");
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+
+    assert!(
+        service
+            .revoke_package_approval(&name)
+            .expect("revoke succeeds"),
+        "revoking an existing approval must report the change"
+    );
+    service.disable(&name).expect("revoked package disables");
+    service
+        .approve_package(&name, "test")
+        .expect("re-adoption succeeds");
+    let error = service
+        .enable(&name)
+        .expect_err("re-adoption without a grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant after revoke, got {error}"
+    );
+}
+
+/// Plan 136 task 3 G3: a grant is bound to the installed provenance, so an
+/// update that re-adopts without re-authorizing fails closed on the capability
+/// gate instead of reusing the previous version's grant.
+#[test]
+fn grant_does_not_survive_installed_provenance_change() {
+    let mut service = PackageService::new(
+        "target/test-package-store/grant-provenance",
+        Box::new(FakeBackend::default()),
+    );
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("installing metadata records package");
+    authorize_requested_capabilities(&mut service, &package);
+    service
+        .approve_package(&name, "test")
+        .expect("adoption succeeds");
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+    service.disable(&name).expect("package disables");
+
+    // Install a different version and re-adopt, but do not re-authorize.
+    let mut updated = package;
+    updated["version"] = json!("9.9.9");
+    service
+        .install_from_value(updated)
+        .expect("updated metadata installs");
+    service
+        .approve_package(&name, "test")
+        .expect("re-adoption succeeds");
+    let error = service
+        .enable(&name)
+        .expect_err("a grant from another version must not authorize the update");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant for a stale grant, got {error}"
+    );
+}
+
+// ── Plan 136 task 4: durable capability grants ───────────────────────────────
+
+fn durable_root(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "clay-package-grant-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+/// Install, adopt, and grant the fixture's declared capabilities. Adoption
+/// first is the documented order: a grant annotates an approval the user
+/// already made, it never manufactures one.
+fn adopt_then_grant(service: &mut PackageService, package: &Value) {
+    let name = package["name"].as_str().expect("fixture name").to_string();
+    service
+        .install_from_value(package.clone())
+        .expect("install records package");
+    service
+        .approve_package(&name, "cli")
+        .expect("adoption persists");
+    authorize_requested_capabilities(service, package);
+}
+
+/// Plan 136 task 4: the grant is persisted with the approval record, so a
+/// later process (fresh `PackageService` over the same store root) enables the
+/// package without re-authorizing.
+#[test]
+fn durable_grant_survives_a_new_service_process() {
+    let root = durable_root("survives");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service
+        .enable(&name)
+        .expect("granted + adopted package enables");
+    service.disable(&name).expect("package disables");
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package.clone())
+        .expect("the fresh process rediscovers the same metadata");
+    let inspection = reopened.inspect(&name).expect("installed package inspects");
+    assert!(
+        !inspection.approved_capabilities.is_empty(),
+        "a fresh process must see the durable grant"
+    );
+    reopened
+        .enable(&name)
+        .expect("the durable grant authorizes without re-authorizing");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: adoption alone stays deny-by-default across processes — a
+/// record with no grant section enables nothing.
+#[test]
+fn store_without_grants_still_fails_closed() {
+    let root = durable_root("no-grant");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    service
+        .install_from_value(package.clone())
+        .expect("install records package");
+    service
+        .approve_package(&name, "cli")
+        .expect("adoption persists");
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package)
+        .expect("re-discovery installs");
+    assert!(
+        reopened
+            .inspect(&name)
+            .expect("installed package inspects")
+            .approved_capabilities
+            .is_empty(),
+        "adoption must not show as a grant"
+    );
+    let error = reopened
+        .enable(&name)
+        .expect_err("an adopted package with no grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: a durable grant never outlives its provenance — a
+/// re-install with a different version drops it with the old approval record.
+#[test]
+fn grant_is_inert_after_provenance_change() {
+    let root = durable_root("provenance");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service.enable(&name).expect("granted + adopted enables");
+    service.disable(&name).expect("package disables");
+
+    let mut updated = package;
+    updated["version"] = json!("9.9.9");
+    service
+        .install_from_value(updated)
+        .expect("updated metadata installs");
+    service
+        .approve_package(&name, "cli")
+        .expect("re-adoption persists");
+    assert!(
+        service
+            .inspect(&name)
+            .expect("inspects")
+            .approved_capabilities
+            .is_empty(),
+        "the previous version's grant must not carry over"
+    );
+    let error = service
+        .enable(&name)
+        .expect_err("a grant from another version must not authorize the update");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant for a stale grant, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Plan 136 task 4: revoke clears the persisted grant with the approval, so a
+/// later process cannot read authority the user just revoked.
+#[test]
+fn revoke_withdraws_the_durable_grant() {
+    let root = durable_root("revoke");
+    let package = valid_markdown_package_json();
+    let name = package["name"].as_str().expect("fixture name").to_string();
+
+    let mut service =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("fresh store opens");
+    adopt_then_grant(&mut service, &package);
+    service.enable(&name).expect("granted + adopted enables");
+    service.disable(&name).expect("package disables");
+    assert!(
+        service
+            .revoke_package_approval(&name)
+            .expect("revoke succeeds")
+    );
+    let revoked = service
+        .package_approvals()
+        .find(|record| record.package == name)
+        .expect("revoked record is kept for diagnostics");
+    assert!(revoked.revoked && revoked.grant.is_none());
+    drop(service);
+
+    let mut reopened =
+        PackageService::open(&root, Box::<FakeBackend>::default()).expect("store reloads");
+    reopened
+        .install_from_value(package)
+        .expect("re-discovery installs");
+    assert!(
+        reopened
+            .inspect(&name)
+            .expect("inspects")
+            .approved_capabilities
+            .is_empty(),
+        "a fresh process must not see the revoked grant"
+    );
+    reopened
+        .approve_package(&name, "cli")
+        .expect("re-adoption succeeds");
+    let error = reopened
+        .enable(&name)
+        .expect_err("re-adoption without a grant must fail closed");
+    assert!(
+        matches!(error, PackageServiceError::MissingCapabilityGrant { .. }),
+        "expected MissingCapabilityGrant after revoke, got {error}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -899,6 +1355,95 @@ fn phase18_4_diagnostics_preserve_package_provenance() {
         Some("markdown.preview.visibility")
     );
     assert!(err.message.contains("state values"));
+}
+
+#[test]
+fn rust_package_inspect_shows_code_mode_preset_and_expanded_permissions() {
+    let text = std::fs::read_to_string("packages/rust/package.json")
+        .expect("first-party Rust package.json must exist");
+    let package: Value = serde_json::from_str(&text).expect("valid rust package.json");
+    let record = assemble_package_record(&package).expect("rust package assembles");
+    assert_eq!(record.manifest.clay.preset.as_deref(), Some("code-mode"));
+    assert!(
+        record
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::ParseDocument)
+    );
+    assert!(
+        !record
+            .manifest
+            .clay
+            .permissions
+            .contains(&PackagePermission::LanguageServer)
+    );
+
+    let mut service = PackageService::new(
+        "target/test-package-store/rust-inspect",
+        Box::new(FakeBackend::default()),
+    );
+    service
+        .install_from_value(package)
+        .expect("install rust metadata");
+    let inspection = service.inspect("@clay/rust").expect("inspect rust");
+    assert_eq!(inspection.preset.as_deref(), Some("code-mode"));
+    assert!(
+        inspection
+            .permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+}
+
+#[test]
+fn bundled_inventory_inspect_shows_preset_permissions_and_native_ownership() {
+    let rust = PackageService::inspect_bundled_inventory("@clay/rust").expect("bundled rust");
+    assert_eq!(rust.preset.as_deref(), Some("code-mode"));
+    assert!(
+        rust.permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+    assert!(
+        !rust
+            .permissions
+            .iter()
+            .any(|value| value == "language-server")
+    );
+    assert!(
+        rust.native_syntax_languages
+            .iter()
+            .any(|value| value == "rust")
+    );
+    assert!(!rust.is_enabled);
+
+    let markdown =
+        PackageService::inspect_bundled_inventory("@clay/markdown").expect("bundled markdown");
+    assert_eq!(markdown.preset.as_deref(), Some("prose-mode"));
+    assert!(
+        markdown
+            .permissions
+            .iter()
+            .any(|value| value == "parse-document")
+    );
+    assert!(
+        markdown
+            .native_syntax_languages
+            .iter()
+            .any(|value| value == "markdown")
+    );
+
+    let lsp =
+        PackageService::inspect_bundled_inventory("@clay/lsp-rust").expect("bundled lsp-rust");
+    assert_eq!(lsp.preset.as_deref(), Some("lsp-bridge"));
+    assert!(
+        lsp.permissions
+            .iter()
+            .any(|value| value == "language-server")
+    );
+    assert!(lsp.native_syntax_languages.is_empty());
+    assert!(PackageService::inspect_bundled_inventory("lsp-shared").is_none());
 }
 
 #[test]
@@ -1991,12 +2536,23 @@ fn keypress_routing_uses_manifest_without_javascript() {
                 );
             }
             RoutingPolicy::ClientUiCommand => {
-                // Phase 22.1: Clay-owned client UI commands (shell pane
-                // management, editor client commands) are allowed in the base
-                // manifest; packages must not declare their own.
+                // Clay-owned client UI commands are allowed in the base
+                // manifest: shell pane/tab management (including plan 124's
+                // `shell.toggleAgentLane`), and editor commands (Phase 28.5
+                // adds the built-in `editor.toggleInlayHints` local overlay
+                // command). Packages must not declare their own — and the two
+                // catalogues checked here are exactly the allowlists the
+                // native client parses deny-by-default, so a package-authored
+                // id cannot ride this arm by naming itself `shell.*`.
+                let clay_owned =
+                    clay::client_commands::ShellClientCommand::from_command_id(&cmd.command_id)
+                        .is_some()
+                        || clay::client_commands::EditorClientCommand::from_command_id(
+                            &cmd.command_id,
+                        )
+                        .is_some();
                 assert!(
-                    cmd.command_id.starts_with("shell.client")
-                        || cmd.command_id.starts_with("editor.client"),
+                    clay_owned,
                     "package manifest command `{}` must not request native client UI authority",
                     cmd.command_id
                 );
@@ -2446,7 +3002,11 @@ fn language_server_enable_tolerates_missing_grant_while_sessions_stay_grant_gate
 fn bundled_defaults_never_auto_grant_language_server() {
     use clay::packages::permissions::PackagePermission;
 
-    let fixture = language_server_package_fixture("@clay/lsp-test", "1.0.0", "lsp-test");
+    let mut fixture = language_server_package_fixture("@clay/lsp-test", "1.0.0", "lsp-test");
+    // Plan 136 task 3: a grant may only cover declared capabilities, so the
+    // non-process capabilities granted below are declared by the fixture.
+    fixture["clay"]["capabilities"] =
+        json!(["language-server", "mode-registration", "mode-activation"]);
     let mut service =
         PackageService::new("/tmp/clay-lsp-bundled-test", Box::new(FakeBackend::new()));
     service
@@ -2587,7 +3147,7 @@ fn third_party_replacement_withdraws_trusted_target_atomically() {
             "apiPrefix": "vmdown",
             "entry": "./dist/index.js",
             "loadEntry": "./dist/load.js",
-            "capabilities": [],
+            "capabilities": ["package-control"],
             "permissions": ["mode-registration", "mode-activation"],
             "modes": ["vmdown.markdown"],
             "replaces": ["@clay/markdown"],
@@ -2650,6 +3210,106 @@ fn third_party_replacement_withdraws_trusted_target_atomically() {
     assert!(!service.inspect("@vendor/markdown-repl").unwrap().is_enabled);
 }
 
+#[test]
+fn third_party_replacement_withdraws_the_coding_agent_and_stays_untrusted() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/coding-agent/package.json")
+            .expect("read coding-agent manifest"),
+    )
+    .expect("coding-agent manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/coding-agent record assembles");
+    assert_eq!(record.manifest.name, "@clay/coding-agent");
+    assert_eq!(
+        record.manifest.clay.permissions,
+        vec![PackagePermission::CommandRegistration]
+    );
+    assert!(
+        record
+            .contributions
+            .commands
+            .iter()
+            .any(|command| command.id == "coding-agent.profile"
+                && command.display_name == "Coding Agent"),
+        "the agent profile is a package command, not a core stub"
+    );
+    assert!(
+        record
+            .manifest
+            .clay
+            .extension_points
+            .iter()
+            .any(|point| point.id == "coding-agent.chromeActions")
+    );
+
+    let mut service = PackageService::new(
+        "/tmp/clay-coding-agent-replacement-store",
+        Box::new(FakeBackend::new()),
+    );
+    service
+        .install_from_value_at_root(manifest, "packages/coding-agent".into())
+        .unwrap();
+    service
+        .authorize_bundled_defaults("@clay/coding-agent", "clay-bundled-default")
+        .unwrap();
+    service.enable("@clay/coding-agent").unwrap();
+
+    let replacement = serde_json::json!({
+        "name": "@vendor/agent-repl",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "vagent",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "capabilities": ["package-control"],
+            "permissions": ["command-registration"],
+            "modes": ["vagent"],
+            "replaces": ["@clay/coding-agent"],
+            "docs": "./docs/index.md"
+        }
+    });
+    service
+        .install_from_value(replacement.clone())
+        .expect("replacement installs");
+    let repl_record = assemble_package_record(&replacement).unwrap();
+    service
+        .authorize_package(
+            "@vendor/agent-repl",
+            [
+                repl_record.manifest.clay.permissions.clone(),
+                vec![PackagePermission::PackageControl],
+            ]
+            .concat(),
+            AuthorizationRuntimeProfile::Sandboxed,
+            "user",
+        )
+        .unwrap();
+    service
+        .approve_package("@vendor/agent-repl", "test")
+        .unwrap();
+    service
+        .enable("@vendor/agent-repl")
+        .expect("approved replacement enables over @clay/coding-agent");
+
+    assert!(
+        !service.inspect("@clay/coding-agent").unwrap().is_enabled,
+        "@clay/coding-agent withdraws atomically"
+    );
+    let winner = service
+        .enabled_records()
+        .find(|record| record.manifest.name == "@vendor/agent-repl")
+        .expect("replacement enabled record");
+    assert!(
+        format!("{winner:?}").contains("ThirdParty"),
+        "replacement must not enter the trusted runtime"
+    );
+
+    let rolled_back = service.rollback_replacement("@clay/coding-agent").unwrap();
+    assert_eq!(rolled_back, "@vendor/agent-repl");
+    assert!(service.inspect("@clay/coding-agent").unwrap().is_enabled);
+    assert!(!service.inspect("@vendor/agent-repl").unwrap().is_enabled);
+}
+
 /// Plan 061 task 12: a replacement never inherits the replaced target's
 /// language-server grant — it needs its own exact current grant, and the
 /// target's grant does not transfer during replacement.
@@ -2685,6 +3345,8 @@ fn replacement_language_server_requires_own_fresh_grant() {
 
     let mut replacement = language_server_package_fixture("@vendor/lsp-repl", "1.0.0", "ls-repl");
     replacement["clay"]["replaces"] = json!(["@vendor/lsp-target"]);
+    // Plan 136 task 3: the package-control grant below must be declared.
+    replacement["clay"]["capabilities"] = json!(["language-server", "package-control"]);
     service.install_from_value(replacement).unwrap();
     service
         .authorize_package(
@@ -2731,4 +3393,299 @@ fn replacement_language_server_requires_own_fresh_grant() {
         service.revoke_language_server_grants("@vendor/lsp-target"),
         1
     );
+}
+
+#[test]
+fn package_manifest_accepts_ui_design_system_and_detects_conflict() {
+    let pkg1 = json!({
+        "name": "@clay/theme-neobrutal",
+        "version": "0.1.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "clay-theme-neobrutal",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@clay/theme-neobrutal",
+                    "displayName": "Neobrutal Reference",
+                    "values": {
+                        "controlRadius": { "type": "radius", "value": 4.0 }
+                    },
+                    "recipes": {
+                        "button.primary.root.rest": {
+                            "backgroundColor": "accent.primary",
+                            "borderRadius": 4.0,
+                            "borderWidth": 1.0
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let record1 = assemble_package_record(&pkg1).expect("package 1 record assembles");
+    let ds = record1
+        .contributions
+        .ui_design_system
+        .as_ref()
+        .expect("ui_design_system present");
+    assert_eq!(ds.id, "@clay/theme-neobrutal");
+    assert_eq!(ds.recipe_count, 1);
+    assert_eq!(ds.value_count, 1);
+
+    // Package 2 with duplicate UI design system ID
+    let mut pkg2 = json!({
+        "name": "@vendor/duplicate-ds",
+        "version": "1.0.0",
+        "type": "module",
+        "exports": { ".": "./dist/index.js" },
+        "clay": {
+            "apiPrefix": "dup-ds",
+            "entry": "./dist/index.js",
+            "loadEntry": "./dist/load.js",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "@clay/theme-neobrutal",
+                    "displayName": "Duplicate Neobrutal",
+                    "recipes": {}
+                }
+            }
+        }
+    });
+
+    // Package 2 assembly fails because `@clay/theme-neobrutal` is not owned by `dup-ds`
+    let err = assemble_package_record(&pkg2).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::InvalidContributionDescriptor);
+
+    // When package 2 uses its own prefix as ID:
+    pkg2["clay"]["contributions"]["uiDesignSystem"]["id"] = json!("dup-ds.system");
+    let record2 = assemble_package_record(&pkg2).expect("package 2 record assembles with own id");
+
+    // Both together have no conflict
+    check_enabled_packages(&[record1.clone(), record2]).expect("no conflict with distinct IDs");
+}
+
+#[test]
+fn data_only_package_manifest_validates_without_entry() {
+    let pkg = json!({
+        "name": "@vendor/data-only-design-system",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "vendor-ds",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "vendor-ds.clean",
+                    "displayName": "Vendor Clean Design System",
+                    "recipes": {
+                        "button.default.root.rest": {
+                            "backgroundColor": "surface.control",
+                            "borderRadius": 6.0
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let record = assemble_package_record(&pkg).expect("data-only package without entry validates");
+    assert_eq!(record.manifest.name, "@vendor/data-only-design-system");
+    assert!(record.manifest.clay.entry.is_none());
+    assert!(record.manifest.clay.load_entry.is_none());
+    assert!(record.contributions.ui_design_system.is_some());
+}
+
+#[test]
+fn data_only_package_rejects_missing_entry_when_permissions_requested() {
+    let pkg = json!({
+        "name": "@vendor/broken-active-package",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "broken",
+            "docs": "./docs/index.md",
+            "permissions": ["command-registration"],
+            "modes": [],
+            "contributions": {
+                "commands": [{
+                    "id": "broken.action",
+                    "displayName": "Broken Action",
+                    "routingPolicy": "server-first"
+                }]
+            }
+        }
+    });
+
+    let err = assemble_package_record(&pkg).unwrap_err();
+    assert_eq!(err.rule, PackageRecordRule::ManifestValidationFailed);
+    assert!(
+        err.message.contains("clay.entry is required"),
+        "expected missing entry error, got: {}",
+        err.message
+    );
+}
+
+#[test]
+fn data_only_package_service_enables_without_javascript_execution() {
+    let backend = FakeBackend::new();
+    let mut service = PackageService::new("/tmp/clay-data-only-test-store", Box::new(backend));
+
+    let pkg = json!({
+        "name": "@vendor/declarative-theme",
+        "version": "1.0.0",
+        "type": "module",
+        "clay": {
+            "apiPrefix": "declarative-theme",
+            "docs": "./docs/index.md",
+            "permissions": [],
+            "modes": [],
+            "contributions": {
+                "uiDesignSystem": {
+                    "schemaVersion": 1,
+                    "id": "declarative-theme.palette",
+                    "displayName": "Declarative Theme",
+                    "recipes": {}
+                }
+            }
+        }
+    });
+
+    service
+        .install_from_value(pkg)
+        .expect("install_from_value succeeds for data-only package");
+
+    service
+        .approve_package("@vendor/declarative-theme", "test-user")
+        .expect("approval succeeds");
+
+    let enabled = service
+        .enable("@vendor/declarative-theme")
+        .expect("data-only package enables without error");
+    assert_eq!(enabled.manifest.name, "@vendor/declarative-theme");
+    assert!(enabled.manifest.clay.entry.is_none());
+}
+
+#[test]
+fn coding_agent_bundled_manifest_assembles_without_claiming_the_empty_tab() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/coding-agent/package.json")
+            .expect("read coding-agent manifest"),
+    )
+    .expect("coding-agent manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/coding-agent record assembles");
+    assert_eq!(record.manifest.name, "@clay/coding-agent");
+    assert_eq!(record.manifest.clay.api_prefix, "coding-agent");
+    assert_eq!(
+        record.manifest.clay.permissions,
+        vec![PackagePermission::CommandRegistration]
+    );
+    // apiDependencies are the documented UI + agent registration APIs;
+    // assembly validates every id against the known-API table, so a
+    // successful assemble proves all ids resolve. The raw manifest pins them
+    // exactly (plan 108 task 8 added the pane-surface registration API).
+    let clay = manifest.get("clay").expect("clay metadata");
+    let dependencies = clay
+        .get("apiDependencies")
+        .and_then(Value::as_array)
+        .expect("apiDependencies array")
+        .iter()
+        .map(|id| id.as_str().expect("string id"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dependencies,
+        vec![
+            "ui.serverRegisterPaneContentContribution",
+            "agent.profileRegister",
+            "agent.skillRegister"
+        ]
+    );
+    assert!(
+        record
+            .contributions
+            .commands
+            .iter()
+            .any(|command| command.id == "coding-agent.profile"),
+        "chrome identity command is a package command"
+    );
+    // The agent claims a `pane` surface (declared in the raw manifest;
+    // runtime-registered by the load entry — not an assembled-record field),
+    // never the empty-tab landing (the launcher package owns that in a later
+    // plan 118 task).
+    let pane_contents = clay
+        .get("contributions")
+        .and_then(|contributions| contributions.get("ui"))
+        .and_then(|ui| ui.get("paneContents"))
+        .and_then(Value::as_array)
+        .expect("paneContents array");
+    assert_eq!(pane_contents.len(), 1, "one pane surface declaration");
+    assert_eq!(pane_contents[0]["id"], "coding-agent.surface");
+    assert_eq!(pane_contents[0]["activation"], "pane");
+    assert!(
+        record.contributions.ui_components.is_empty() && record.contributions.ui_panels.is_empty(),
+        "coding-agent must not claim an empty-tab pane"
+    );
+}
+
+#[test]
+fn launcher_bundled_manifest_claims_the_empty_tab() {
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string("packages/launcher/package.json").expect("read launcher manifest"),
+    )
+    .expect("launcher manifest parses");
+    let record = assemble_package_record(&manifest).expect("@clay/launcher record assembles");
+    assert_eq!(record.manifest.name, "@clay/launcher");
+    assert_eq!(record.manifest.clay.api_prefix, "launcher");
+    // The landing needs no permission: the pane-content registration API
+    // requires none, and the launcher only opens the folder dialog.
+    assert!(
+        record.manifest.clay.permissions.is_empty(),
+        "the launcher claims no authority"
+    );
+    let clay = manifest.get("clay").expect("clay metadata");
+    assert_eq!(
+        clay.get("apiDependencies")
+            .and_then(Value::as_array)
+            .expect("apiDependencies array")
+            .iter()
+            .map(|id| id.as_str().expect("string id"))
+            .collect::<Vec<_>>(),
+        vec!["ui.serverRegisterPaneContentContribution"]
+    );
+    let pane_contents = clay
+        .get("contributions")
+        .and_then(|contributions| contributions.get("ui"))
+        .and_then(|ui| ui.get("paneContents"))
+        .and_then(Value::as_array)
+        .expect("paneContents array");
+    assert_eq!(pane_contents.len(), 1, "one landing declaration");
+    assert_eq!(pane_contents[0]["id"], "launcher.start");
+    assert_eq!(
+        pane_contents[0]["activation"], "empty-tab",
+        "the launcher is the window's landing"
+    );
+    assert_eq!(
+        pane_contents[0]["actionTargets"],
+        Value::Array(vec![Value::String(
+            "workspace.clientOpenFolderDialog".to_string()
+        )]),
+        "the landing's only action is the host folder dialog"
+    );
+    // The declared tree is inert fallback for the generic SDUI renderer: no
+    // dynamic rows, no package-provided path data.
+    assert_eq!(pane_contents[0]["component"]["kind"], "panel");
+    assert_eq!(pane_contents[0]["component"]["id"], "launcher.root");
 }

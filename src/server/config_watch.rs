@@ -68,11 +68,14 @@ pub(crate) async fn watch_configuration_root_with_intervals<F, Fut>(
             continue;
         };
         reload().await;
-        // ponytail: preferences.json persistence may cause one idempotent extra
-        // reload; add a server-side write-suppression window only if measured.
-        baseline = scan_configuration_root(&root)
-            .await
-            .unwrap_or(stable_snapshot);
+        // Keep the pre-reload stable snapshot as the baseline instead of
+        // adopting a post-reload scan: a change that arrives while the reload
+        // runs (for example the recovery write after a failed reload) must
+        // re-trigger the next poll, never be absorbed. Reloads themselves do
+        // not write watched files — preferences.json is written only by the
+        // settings command handlers before they reload — so a post-reload
+        // difference is a genuine external change.
+        baseline = stable_snapshot;
     }
 }
 
@@ -259,6 +262,50 @@ mod tests {
 
         watcher.abort();
         assert_eq!(reloads.load(Ordering::Relaxed), 3);
+        remove_root(&root);
+    }
+
+    #[tokio::test]
+    async fn watcher_reloads_for_a_change_that_lands_during_a_reload() {
+        // A change arriving while a reload is in flight must not be absorbed
+        // into the post-reload baseline: the watcher re-detects it and reloads
+        // again (regression for the failed-then-recovered configuration
+        // watcher test, where the recovery write landed mid-reload and the
+        // generation never advanced).
+        let root = temp_root("during-reload");
+        fs::write(root.join("init.js"), "one").expect("write init");
+        let reloads = Arc::new(AtomicUsize::new(0));
+        let reloads_for_task = Arc::clone(&reloads);
+        let root_for_task = root.clone();
+        let watcher = tokio::spawn(watch_configuration_root_with_intervals(
+            root.clone(),
+            move || {
+                let reloads = Arc::clone(&reloads_for_task);
+                let root = root_for_task.clone();
+                async move {
+                    let count = reloads.fetch_add(1, Ordering::Relaxed) + 1;
+                    if count == 1 {
+                        // Simulate an external write landing while the first
+                        // reload runs.
+                        time::sleep(Duration::from_millis(50)).await;
+                        fs::write(root.join("init.js"), "two").expect("write during reload");
+                    }
+                }
+            },
+            Duration::from_millis(10),
+            Duration::from_millis(15),
+        ));
+
+        time::sleep(Duration::from_millis(35)).await;
+        fs::write(root.join("init.js"), "one").expect("touch init");
+        time::sleep(Duration::from_millis(200)).await;
+
+        watcher.abort();
+        assert_eq!(
+            reloads.load(Ordering::Relaxed),
+            2,
+            "the change written during the first reload must trigger a second reload"
+        );
         remove_root(&root);
     }
 }

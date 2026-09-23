@@ -1,0 +1,18 @@
+{
+  "name": "@arnilo/clay",
+  "version": "0.1.0",
+  "description": "Clay coding assistant — npm wrapper that execs the native clay binary from an optional platform package",
+  "license": "UNLICENSED",
+  "bin": {
+    "clay": "bin/clay.js"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "scripts": {},
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {}
+}

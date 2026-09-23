@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:documents"
 js_export: serverListDocuments
 js_facade: runtime/js/documents.js::serverListDocuments
-backing_rust: src/server/workspace.rs::WorkspaceState::list_documents
+backing_rust: src/server/workspace/mod.rs::WorkspaceState::list_documents
 deno_op: op_clay_documents_list_documents
 deno_op_path: src/server/ops/documents.rs::op_clay_documents_list_documents
 name: serverListDocuments
@@ -62,7 +62,7 @@ No options.
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `documents.serverListDocuments` in `~/.config/clay/init.js` once configuration execution exists.
+No default key binding is assigned. Users may bind a key to `documents.serverListDocuments` in `~/.clay/init.js` once configuration execution exists.
 
 ## Custom properties
 
@@ -96,8 +96,8 @@ Use `documents.serverListDocuments` only through the documented Clay JS facade. 
 
 - JS facade: `runtime/js/documents.js::serverListDocuments`
 - Deno op: `src/server/ops/documents.rs::op_clay_documents_list_documents` (`op_clay_documents_list_documents`)
-- Backing Rust/current owner: `src/server/workspace.rs::WorkspaceState::list_documents`
-- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection.rs`, and `src/server/workspace.rs`
+- Backing Rust/current owner: `src/server/workspace/mod.rs::WorkspaceState::list_documents`
+- Current implementation audit path: `src/protocol/mod.rs`, `src/server/connection/mod.rs`, and `src/server/workspace/mod.rs`
 
 ## Lookup metadata
 

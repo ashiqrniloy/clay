@@ -4,259 +4,240 @@ Apply these requirements only when creating or updating plan documents for the C
 
 ## Primitive-First Mode and Package Task
 
-Each Clay phase plan that implements or materially changes an editor mode, language mode, first-party JS package, package runtime capability, or reusable editor capability must include a separate primitive-review task before package/mode implementation tasks.
+Each Clay phase plan that implements or materially changes an editor mode, language mode, first-party JS package, package runtime capability, or reusable editor capability must include a separate primitive-review task before package/mode implementation tasks. The task should require:
 
-The task should require:
+- Read existing primitive reference docs and wiki pages before designing package behavior: `docs/reference/primitives/index.md`, `docs/reference/primitives/registry.md`, relevant strategy docs, `docs/wiki/modules/primitive-architecture.md`, and relevant primitive/module wiki pages.
+- Inventory existing Rust-side primitives (document classification, major-mode activation, commands/key routing, inert text transforms, parse handlers, decoration transport, SDUI, configuration, folding, completions, diagnostics, other current surfaces); state what the new package/mode achieves with them before proposing new Rust code.
+- New Rust primitives only when needed, generic/reusable across future modes — never named or shaped around one language (Markdown, Python).
+- Build JS package functionality on those primitives; no mode-specific Rust server/client branches, parser logic, renderer callbacks, or package-specific client behavior.
+- Documentation and tests keep every new/changed primitive recorded in reference docs, wiki pages, wiki index navigation, and deterministic primitive-documentation checks.
 
-- Read existing primitive reference docs and implementation wiki pages before designing package behavior: `docs/reference/primitives/index.md`, `docs/reference/primitives/registry.md`, relevant strategy docs, `docs/wiki/modules/primitive-architecture.md`, and relevant primitive/module wiki pages.
-- Inventory existing Rust-side primitives such as document classification, major-mode activation, commands/key routing, inert text transforms, parse handlers, decoration transport, SDUI, configuration, folding, completions, diagnostics, or other current surfaces.
-- State what the new package/mode can achieve with existing primitives before proposing new Rust code.
-- Plan new Rust primitives only when needed, and require them to be generic/reusable across future modes instead of named or shaped around a single language such as Markdown or Python.
-- Build JS package functionality on top of those primitives; do not add mode-specific Rust server/client branches, parser logic, renderer callbacks, or package-specific client behavior.
-- Add documentation and tests that keep every new/changed primitive recorded in reference docs, code wiki pages, wiki index navigation, and deterministic primitive-documentation checks.
-
-Recommended task title:
-
-```markdown
-- [ ] Review existing editor primitives and plan generic primitive gaps before package work
-```
-
-Place this task after entry-gate/baseline tasks and before implementation or cleanup tasks that depend on the primitive assessment.
-
-Decision source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
+Recommended title: `- [ ] Review existing editor primitives and plan generic primitive gaps before package work` — placed after entry-gate/baseline tasks, before dependent implementation/cleanup tasks. Decision source: `decision-logs/2026-06-04-1923-replace-markdown-parser-with-markdown-it-and-primitive-first-mode-planning.md`.
 
 ## Package Runtime Trust-Domain Task
 
-Each Clay plan that adds or materially changes package execution, package loading, first-party packages, package extension points, package graph relations, or package-facing ops must include acceptance criteria and/or a dedicated task that preserves the two runtime trust domains.
+Each Clay plan that adds or materially changes package execution, package loading, first-party packages, package extension points, package graph relations, or package-facing ops must include acceptance criteria and/or a dedicated task preserving the two runtime trust domains. It must require:
 
-The task should require:
-
-- Trusted runtime classification comes from Clay's compiled bundled inventory and exact provenance/integrity, never `@clay/*` naming or normal user promotion.
+- Trusted runtime classification comes from Clay's compiled bundled inventory and exact provenance/integrity — never `@clay/*` naming or normal user promotion.
 - The adopted-package runtime installs only documented public package ops and narrow host state; Clay-internal ops and trusted module roots are absent.
 - Cross-domain communication uses typed, bounded, inert Rust-mediated values with generation, payload, timeout, provenance, and revocation checks; no V8 objects/functions/globals/modules cross domains.
-- Third-party changes to first-party behavior require both a first-party-declared extension point and explicit user approval. Replacement preserves third-party provenance and never moves replacement code into the trusted runtime.
+- Third-party changes to first-party behavior require both a first-party-declared extension point and explicit user approval; replacement preserves third-party provenance and never moves replacement code into the trusted runtime.
 - Tests prove cross-domain internal-op/module denial, stale-generation rejection, adoption/revocation, replacement rollback, and the documented lack of hostile isolation among third-party packages.
 
 Decision source: `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`.
 
 ## Package Default Loading Task
 
-Each Clay phase plan that implements or materially changes a JS package, package runtime capability, editor mode package, package loader, or package configuration surface must include acceptance criteria and/or a dedicated task for the package's end-user `init.js` loading experience.
+Each Clay phase plan that implements or materially changes a JS package, package runtime capability, editor mode package, package loader, or package configuration surface must include acceptance criteria and/or a dedicated task for the end-user `init.js` loading experience. It must require:
 
-The task should require:
+- The package is explicitly loaded from `~/.clay/init.js`; packages never become behavior-changing defaults silently. Preferred setup: one-line explicit load (`loadPackage("@clay/markdown")` or equivalent).
+- Normal package defaults work after the one-line load without copied manifests, low-level facade plumbing, manual primitive registration, test-only SDUI, or representative decoration publication in user config.
+- Customization may use documented Clay/package JS APIs but stays optional for common use unless a package has a documented reason.
+- If one-line default loading is impossible, the plan identifies the generic Clay primitive/API gap and documents longer setup as temporary fallback/limitation, not preferred convention.
+- Tests and docs cover both the default load path and any supported customization path.
 
-- The package is explicitly loaded from `~/.config/clay/init.js`; packages should not become behavior-changing defaults silently.
-- The preferred default setup is a one-line explicit load command, such as `loadPackage("@clay/markdown")` or the implemented equivalent.
-- Normal package defaults should work after the one-line load command without requiring copied package manifests, low-level Clay facade plumbing, manual primitive registration, test-only SDUI, or representative decoration publication in user config.
-- Package/mode customization may be exposed through documented Clay/package JS APIs, but customization is optional for common use unless a specific package has a documented reason.
-- If one-line default loading is not currently possible, the plan must identify the generic Clay primitive/API gap and document any longer setup as a temporary fallback or limitation, not as the preferred convention.
-- Tests and docs should cover both the default package-load path and any supported customization path.
-
-Recommended task title when a separate task is useful:
-
-```markdown
-- [ ] Define and verify the package default init.js loading experience
-```
-
-Place this task after the primitive-review task and before broad implementation cleanup tasks, or fold the requirements into package implementation tasks when the phase is small.
-
-Decision source: `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`.
+Recommended title when a separate task helps: `- [ ] Define and verify the package default init.js loading experience` — after the primitive-review task, before broad cleanup (fold into package tasks for small phases). Decision source: `decision-logs/2026-06-09-0219-explicit-init-js-package-loading-with-one-line-defaults.md`.
 
 ## External Process Authority Task
 
-Each Clay plan that introduces or materially changes a package-triggered external process must include an authority-decision task before implementation. The task must require:
+Each Clay plan that introduces or materially changes a package-triggered external process must include an authority-decision task before implementation, requiring:
 
-- A dedicated deny-by-default capability and explicit user approval bound to package provenance, a fixed contribution, canonical executable/literal argv, explicit inherited-environment names, and known workspace roots.
-- No implicit grant from package load, bundled/first-party trust, `shell`, or `filesystem`; no runtime-selected executable, arguments, cwd, shell, or unrestricted environment.
+- A dedicated deny-by-default capability and explicit user approval bound to package provenance, a fixed contribution, canonical executable/literal argv, explicit inherited-environment names, and known workspace roots. No implicit grant from package load, bundled/first-party trust, `shell`, or `filesystem`; no runtime-selected executable, arguments, cwd, shell, or unrestricted environment.
 - Bounded asynchronous I/O, timeout/concurrency budgets, sanitized diagnostics, revocation/reload/root-removal/runtime-replacement cleanup, and no process work in editor hot paths.
-- Truthful containment language: cwd/root grants constrain Clay's API and audit record, not same-user OS filesystem/network/process access. Do not call the child sandboxed or workspace/filesystem confined without separately approved OS enforcement.
+- Truthful containment language: cwd/root grants constrain Clay's API and audit record, not same-user OS filesystem/network/process access; never call the child sandboxed or workspace/filesystem confined without separately approved OS enforcement.
 - Realistic alternatives, explicit user approval, a decision log, reusable project-pattern updates, and deny/revocation/lifecycle tests before process code starts.
 
 Decision source: `decision-logs/2026-07-14-2023-language-server-package-authority.md`.
 
 ## Package-Provided Grammar Task
 
-Each Clay phase plan that implements or materially changes syntax highlighting, language grammar support, Tree-sitter integration, language packages, or language-mode expansion must include acceptance criteria and/or a dedicated task for package-provided grammar contributions.
+Each Clay phase plan that implements or materially changes syntax highlighting, language grammar support, Tree-sitter integration, language packages, or language-mode expansion must include acceptance criteria and/or a dedicated task for package-provided grammar contributions, requiring:
 
-The task should require:
-
-- Syntax grammar support is expressed through generic package primitives, not hard-coded Rust branches for Rust, TypeScript, JavaScript, or any later language.
-- `@clay/rust`, `@clay/typescript`, and `@clay/javascript` start as grammar-only packages when first introduced: grammar/query assets, language metadata, style-token mapping, docs, tests, and provenance, with no full mode behavior until a later expansion phase.
-- Active syntax grammar remains separate from active major mode so grammar packages can attach highlighting to `core.code`/`core.text` fallback modes.
+- Grammar support through generic package primitives — no hard-coded Rust branches for Rust, TypeScript, JavaScript, or any later language.
+- `@clay/rust`, `@clay/typescript`, `@clay/javascript` start grammar-only (grammar/query assets, language metadata, style-token mapping, docs, tests, provenance) until a later expansion phase.
+- Active syntax grammar stays separate from active major mode so grammar packages attach highlighting to `core.code`/`core.text` fallback modes.
 - Arbitrary third-party grammar/native artifact loading is out of scope unless a dedicated security/trust decision approves integrity, sandboxing, and user authorization rules.
-- Tests cover package-provided grammar resolution, disabled/invalid package fallback, query/decoration payload bounds, no client-side JavaScript or parser code in paint/text hot paths, and no language-specific Rust server/client branches.
+- Tests cover package grammar resolution, disabled/invalid package fallback, query/decoration payload bounds, no client-side JavaScript or parser code in paint/text hot paths, no language-specific Rust branches.
 
-Recommended task title when a separate task is useful:
-
-```markdown
-- [ ] Review package-provided grammar primitives before language package work
-```
-
-Decision source: `decision-logs/2026-06-29-2006-package-provided-grammar-and-capability-phases.md`.
+Recommended title when a separate task helps: `- [ ] Review package-provided grammar primitives before language package work`. Decision source: `decision-logs/2026-06-29-2006-package-provided-grammar-and-capability-phases.md`.
 
 ## Package UI/Layout and Authoring Documentation Task
 
-Each Clay phase plan that implements or materially changes package UI, mode UI, SDUI, layout, pane/window behavior, component primitives, input routing, package actions, package state/data, styling/theme tokens, or package configuration must include acceptance criteria and/or a dedicated task for the package authoring contract.
+Each Clay phase plan that implements or materially changes package UI, mode UI, SDUI, layout, pane/window behavior, component primitives, input routing, package actions, package state/data, styling/theme tokens, or package configuration must include acceptance criteria and/or a dedicated task for the package authoring contract, requiring:
 
-The task should require:
-
-- Clay remains the owner of the working area, pane/split tree, fixed pane slots, component catalog, action routing, theme/style token model, and native Masonry widget implementation.
-- Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; they must not directly create Masonry widgets, mutate native layout, provide raw CSS, run client-side JavaScript, or call raw `Deno.core.ops`.
-- Any new UI/layout primitive is generic and reusable across packages/modes, not Markdown-specific or package-specific Rust branching.
+- Clay owns the working area, pane/split tree, fixed pane slots, React component registry, action routing, theme/style token model, and Tauri/webview security boundary.
+- Packages declare inert UI/layout/input/action/data/style contributions through documented Clay/package JS APIs; no host-layout mutation, uncontrolled host CSS, direct Tauri IPC, or raw `Deno.core.ops`. First-party trusted UI modules may be compiled into the frontend; arbitrary third-party custom UI requires an isolated surface.
+- Empty/new-tab `main` is a package pane-content contribution (one winner); core fallback is Open File / Open Folder only. No product-named pane kinds (`Agent`) or irreplaceable native landings — agent profiles register via first-party packages (`loadPackage`), not compiled stubs.
+- New UI/layout primitives are generic and reusable across packages/modes, never package-specific Rust branching.
 - Fixed vs transient panel behavior, slot ownership, package/user override precedence, action routing, focus/input routing, and style token mapping are documented and tested when introduced or changed.
-- `docs/reference/packages/creating-packages.md` is updated in the same phase with implemented APIs, examples, limitations, migration notes, permissions, testing guidance, and any temporary fallback paths.
+- `docs/reference/packages/creating-packages.md` is updated in the same phase: implemented APIs, examples, limitations, migration notes, permissions, testing guidance, temporary fallbacks.
 
-Recommended task title when a separate task is useful:
-
-```markdown
-- [ ] Update the package UI/layout authoring contract and package guide
-```
-
-Place this task near package UI/layout implementation tasks and before final documentation/wiki verification.
-
-Decision source: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`.
+Recommended title when a separate task helps: `- [ ] Update the package UI/layout authoring contract and package guide` — near package UI/layout implementation, before final documentation/wiki verification. Decision sources: `decision-logs/2026-06-09-1431-clay-owned-shell-layout-and-package-ui-contribution-model.md`, `decision-logs/2026-08-21-2152-product-surfaces-are-replaceable-packages.md`.
 
 ## Clay JS API Task
 
-Each Clay plan document must include a separate task near the end of the plan to create or verify Clay JavaScript APIs for public programmatic behavior and Rust public functions introduced or changed by the plan.
-
-The task should require:
+Each Clay plan document must include a separate task near the end to create or verify Clay JavaScript APIs for public programmatic behavior and Rust public functions introduced or changed by the plan. The task should require:
 
 - Review the phase implementation and propose the Clay JS APIs needed for extensibility, configuration, customization, user search/help, key binding, AI-agent discovery, and future public programmatic use.
-- Follow the dotted-ID naming convention: core Clay command/API/option IDs are bare `<domain>.<name>` (e.g. `shell.clientClosePane`, `editor.clientUndo`, `runtime.reloadConfiguration`) and must never use the retired `clay.<domain>.*` spelling; package-owned IDs always start with the package's own `apiPrefix` (`<package>.<name>`); new core domains must be added to `RESERVED_CORE_API_DOMAINS` in `src/packages/manifest.rs`. `clay:` import specifiers and `package.json` `clay.*` manifest key paths are exempt. See `.agents/skills/project-patterns/references/clay-js-api-naming.md`.
-- Inventory all server-side Rust public functions introduced or changed by the plan.
-- For each server-side Rust public function that is a public programmatic capability, expose it through an explicit `deno_core` op wrapper and stable Clay JS/TS facade API.
-- Do not expose arbitrary Rust public functions directly to JavaScript.
-- Do not make raw `Deno.core.ops.op_*` calls the user-facing API.
-- If a server-side function should not be exposed to JavaScript, make it private or `pub(crate)` instead of public.
-- Add or update Markdown documentation for every Clay JS API with: stable ID, searchable user-facing name, default key bindings or an empty key binding list, custom properties for behavior-changing settings, what it does, why/when to use it, JavaScript usage, code example, configuration/options, return/async behavior, errors, permissions/security notes, backing Rust path, op wrapper, JS facade path, and lookup tags.
-- Link every Clay JS API doc from the master Markdown documentation index.
-- Update the generated documentation registry using the project command when docs change.
+- Follow the dotted-ID naming convention: core IDs are bare `<domain>.<name>` (e.g. `shell.clientClosePane`, `editor.clientUndo`, `runtime.reloadConfiguration`), never the retired `clay.<domain>.*`; package-owned IDs start with the package's `apiPrefix`; new core domains go into `RESERVED_CORE_API_DOMAINS` in `src/packages/manifest.rs`. `clay:` import specifiers and `package.json` `clay.*` manifest key paths are exempt. See `.agents/skills/clay-execution/references/js-api.md`.
+- Inventory all server-side Rust public functions introduced or changed; expose each public programmatic capability through an explicit `deno_core` op wrapper and stable Clay JS/TS facade; never expose arbitrary Rust public functions directly to JavaScript or make raw `Deno.core.ops.op_*` calls the user-facing API. If a function should not be exposed, make it private or `pub(crate)`.
+- Add or update Markdown docs for every Clay JS API: stable ID, searchable user-facing name, default key bindings or an empty list, custom properties for behavior-changing settings, what/why/when, JavaScript usage, example, configuration/options, return/async behavior, errors, permissions/security notes, backing Rust path, op wrapper, JS facade path, lookup tags; link from the master docs index; update the generated registry when docs change.
 - Ensure `cargo test` fails when a required Clay JS API, Markdown doc, master-index link, generated registry entry, key binding/custom property field, or lookup entry is missing/stale.
 
-Recommended task title:
-
-```markdown
-- [ ] Create or verify Clay JS APIs for public programmatic surfaces
-```
-
-Place this task after implementation/verification tasks and before the final project-wiki task when both are present.
-
-Decision sources:
-
-- `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`
-- `decision-logs/2026-05-08-1840-clay-js-api-discovery-keybindings-custom-properties.md`
+Recommended title: `- [ ] Create or verify Clay JS APIs for public programmatic surfaces` — after implementation/verification, before the final wiki task. Decision sources: `decision-logs/2026-05-08-1509-clay-js-api-facade-for-rust-functions.md`, `decision-logs/2026-05-08-1840-clay-js-api-discovery-keybindings-custom-properties.md`.
 
 ## Clay Configuration Task
 
-Each Clay plan document that adds or changes user-visible behavior, commands, key bindings, customization, extension points, server APIs, protocol capabilities, or public programmatic surfaces must include a separate configuration task.
+Each Clay plan document that adds or changes user-visible behavior, commands, key bindings, customization, extension points, server APIs, protocol capabilities, or public programmatic surfaces must include a separate configuration task, requiring:
 
-The task should require:
+- Review the phase implementation and propose configuration APIs for extensibility, customization, key binding, user/agent discovery; treat every configuration option as a Clay JS API, not an undocumented key.
+- `~/.clay/init.js` is the user configuration entry point; `init.js` may load other local configuration files for modular configuration when implemented.
+- Add or update Clay JS API docs for configuration APIs (user-facing name, key bindings, custom properties, examples, permissions/security notes, lookup tags); link from `docs/index.md`; update generated registry artifacts.
+- Add tests/coverage gates that fail for undocumented configuration APIs or behavior-changing settings missing from `custom_properties`.
+- Preserve security boundaries: configuration never implicitly grants filesystem, network, shell, extension loading, AI mutation, or workspace authority.
 
-- Review the phase implementation and propose configuration APIs needed for extensibility, customization, key binding, and user/agent discovery.
-- Treat every configuration option as a Clay JS API, not as an undocumented configuration key.
-- Use `~/.config/clay/init.js` as the user configuration entry point.
-- Allow `init.js` to load other local configuration files for modular configuration when configuration loading is implemented.
-- Add or update Clay JS API docs for configuration APIs, including user-facing name, key bindings, custom properties, examples, permissions/security notes, and lookup tags.
-- Link configuration API docs from `docs/index.md` and update generated registry artifacts.
-- Add tests or coverage gates that fail for undocumented configuration APIs or behavior-changing settings missing from `custom_properties`.
-- Preserve security boundaries: configuration must not implicitly grant filesystem, network, shell, extension loading, AI mutation, or workspace authority.
-
-Recommended task title:
-
-```markdown
-- [ ] Create or verify Clay configuration APIs
-```
-
-Place this task near the Clay JS API task and before the final project-wiki task when present.
-
-Decision source: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`.
+Recommended title: `- [ ] Create or verify Clay configuration APIs` — near the Clay JS API task, before the final wiki task. Decision source: `decision-logs/2026-05-08-1841-configuration-through-init-js-and-clay-js-apis.md`.
 
 ## Example Configuration Maintenance Task
 
-Each Clay plan document that introduces or materially changes a user-facing configuration surface — new `init.js`-callable Clay JS APIs, new options/custom properties on existing configuration APIs, new first-party packages users should load, new bindable command IDs, new theme/appearance/typography/caret/ligature options, or new trust-boundary declarations users must write (e.g. `clay.editorControl`) — must include a dedicated task that updates the canonical example configuration.
+Each Clay plan that introduces or materially changes a user-facing configuration surface — new `init.js`-callable APIs, new options/custom properties, new first-party packages users should load, new bindable command IDs, new theme/appearance/typography/caret/ligature options, or new trust-boundary declarations users must write (e.g. `clay.editorControl`) — must include a dedicated task updating the canonical example configuration. The task should require:
 
-The task should require:
+- Update `examples/config/init.js` so it stays comprehensive: every supported configuration surface appears exactly once, in its section, with all documented options annotated in comments and the same documentation style (section comment on purpose/ownership, every option name/type/default/allowed value, commented example for non-default variants).
+- Keep the file valid JavaScript (`node --check examples/config/init.js`); the active (uncommented) part stays safe to copy verbatim — heavy or environment-specific setup (LSP grants, optional packages, behavior overrides) stays commented with instructions.
+- Preserve documented ordering constraints (e.g. `authorizeLanguageServer` before the first `loadPackage`) and the planned-but-not-callable section when a facade is promoted from planned to implemented.
+- Cross-check the example against the Clay JS API docs and `api-inventory.toml` custom properties for touched APIs: option names, enums, and defaults must match validated server-side parsers, not prose.
 
-- Update `examples/init.js`, the canonical example configuration users copy to `~/.config/clay/init.js`. It must stay comprehensive: every supported configuration surface appears exactly once, in its section, with all documented options annotated in comments.
-- Add the new option/API with the same documentation style: section comment explaining purpose and ownership, every option name/type/default/allowed value, and a commented example for non-default variants.
-- Keep the file valid JavaScript (`node --check examples/init.js`) and keep the active (uncommented) part safe to copy verbatim: heavy or environment-specific setup (LSP grants, optional packages, behavior overrides) stays commented with instructions.
-- Preserve the documented ordering constraints (e.g. `authorizeLanguageServer` before the first `loadPackage`) and the planned-but-not-callable section at the end when a facade is promoted from planned to implemented.
-- Cross-check the example against the Clay JS API docs and `api-inventory.toml` custom properties for the touched APIs; option names, enums, and defaults must match the validated server-side parsers, not prose.
+Recommended title: `- [ ] Update the canonical example configuration (examples/config/init.js)` — next to the Clay Configuration task, before the final wiki task. Decision source: user instruction 2026-08-03 (canonical example config + per-plan maintenance duty).
 
-Recommended task title:
+## Example Configuration Live Launch-Test Task
 
-```markdown
-- [ ] Update the canonical example configuration (examples/init.js)
-```
+Each Clay plan that includes an Example Configuration Maintenance Task must also include a separate task that launch-tests the real app against a copy of the canonical example config — updating the file without running the app is not sufficient. The task should require:
 
-Place this task next to the Clay Configuration task and before the final project-wiki task when present.
+- Copy `examples/config/init.js` (plus `examples/config/packages/` when present) to an isolated scratch config root (e.g. temp `HOME`/`.clay`); never launch against the developer's real profile.
+- Launch a real Linux GUI build (server + client) with that config and verify healthy startup: client reaches Connected, configuration evaluation commits a generation with no `configuration failed` diagnostics, shell responds to interaction (open a pane, run a command, open a menu).
+- Exercise the surfaces the plan changed as loaded from the example config: theme/appearance/typography apply visually, `bindKey` commands fire, `loadPackage`'d packages register contributions (profiles, commands, language modes), new option values take effect. Verify design-system/theme selections render as the selected system (e.g. `setDesignSystem("@clay/design-instrument")` shows Quiet Instrument recipes — 1px hairlines, 8px control radii, no hard shadows — not the previously active system; a failed activation silently falls back and users report it as "the wrong design system").
+- Record the launch command, scratch config path, and observed results in the task evidence. A broken or degraded app under the example config is a product defect (or an explicitly prioritized follow-up), never a docs-only fix.
+- If a headless/sandboxed environment blocks the GUI launch, record the blocker, run the strongest available automated check (start the server against the copied config, assert the runtime generation commits without diagnostics), and leave live interactive acceptance unresolved rather than claiming it passed.
 
-Decision source: user instruction 2026-08-03 (canonical `examples/init.js` + per-plan maintenance duty).
+Recommended title: `- [ ] Launch-test the app with the canonical example config` — immediately after the maintenance task, before the manual-test-plan task; both belong to the configuration-change phase so drift is caught in-phase. Decision source: user instruction 2026-09-07 (plan 109 review found the app broken under a copied example config that had never been launch-tested).
 
 ## Manual Test Plan Task
 
-Each Clay plan document that changes user-visible behavior — editor features, UI, rendering, configuration, keybindings, packages/modes, file workflows, protocol/IPC behavior, or platform behavior — must include a dedicated task that runs and maintains the manual test plan in `test-plan/`.
+Each Clay plan document that changes user-visible behavior — editor features, UI, rendering, configuration, keybindings, packages/modes, file workflows, protocol/IPC, platform behavior — must include a dedicated task running and maintaining the manual test plan in `test-plan/`. The task should require:
 
-The task should require:
-
-- Identify which `test-plan/` module files the change affects (module map and coverage matrix live in `test-plan/index.md`) and execute the relevant steps on a real Linux build, recording pass/fail against the numbered steps.
-- Add new numbered steps (module + step IDs) to the affected module file(s) for any new user-visible behavior the plan ships, with expected results, negative checks, and known ceilings.
-- Update `test-plan/index.md` when a new module file is added, when the coverage matrix changes, or when a deep-reference doc moves.
-- If the change cannot be tested manually (pure internal refactor, automated-only surface), the task records that explicitly with the reason instead of being silently dropped.
+- Identify affected `test-plan/` module files (module map and coverage matrix in `test-plan/index.md`) and execute relevant steps on a real Linux build, recording pass/fail against the numbered steps.
+- Add new numbered steps (module + step IDs) for any new user-visible behavior, with expected results, negative checks, and known ceilings; update `test-plan/index.md` when a module file is added, the coverage matrix changes, or a deep-reference doc moves.
+- If the change cannot be tested manually (pure internal refactor, automated-only surface), record that explicitly with the reason instead of silently dropping the task.
 - Never weaken or delete existing steps to make a failing check pass; a failing step is a defect or a documented known ceiling (in the file's ceilings section), decided explicitly.
-- Cross-link new module steps to the deep-reference docs under `docs/development/` where they exist instead of duplicating them.
+- Cross-link new module steps to deep-reference docs under `docs/development/` where they exist instead of duplicating them.
 
-Recommended task title:
+Recommended title: `- [ ] Execute and update the manual test plan (test-plan/)` — after implementation/verification (feature must be buildable), before the final wiki task. Decision source: user instruction 2026-08-04 (test-plan/ folder + per-plan manual verification duty).
 
-```markdown
-- [ ] Execute and update the manual test plan (test-plan/)
-```
+## UI Prototype and Explicit User Approval Task
 
-Place this task after implementation/verification tasks (the feature must be buildable) and before the final project-wiki task when present.
+Every Clay plan that changes app UI — components, panels, overlays, pop-ups, dropdowns, menus, text inputs, layout, page/IA structure, theme values, design tokens, typography, icon geometry, or the design-system package data that feeds them — must include two dedicated, ordered tasks before the first implementation task: a prototype task and a freeze/approval task. Decision source: user instruction 2026-09-11 (update `create-plan` to mandate HTML prototypes and user approval for any future UI work, artifacts stored in `design-artifacts/`, strictly followed during development, differentiated between prototypes and approved designs).
 
-Decision source: user instruction 2026-08-04 (test-plan/ folder + per-plan manual verification duty).
+**Prototype task** — `- [ ] Build the HTML prototype for <surface> in design-artifacts/prototypes/<slug>/`. It must require:
+
+- One self-contained HTML artifact per in-scope surface (or a shared language stylesheet plus per-surface pages), openable with `file://` and no build step, checked into `design-artifacts/prototypes/<slug>/` with a `README.md` stating scope, variants, coverage, and how to open it.
+- Rendering against the **four shipped content themes** (`@clay/theme-modus-operandi`, `@clay/theme-modus-vivendi`, `@clay/theme-gruvbox-material-dark`, `@clay/theme-gruvbox-material-light`) using their real values plus the proposed theme-level additions; a theme switcher is expected so approval covers every theme, not one.
+- Every cataloged component kind and internal surface in scope, in every state that can ship: `rest`, `hover`, `active`, `focus`, `selected`, `disabled`, `invalid`, plus empty/loading/error/recovery where applicable; narrow and wide window layouts when layout can change; real repository content instead of placeholder text where data exists.
+- Reuse of the catalog vocabulary (`component.variant.slot.state`, kind names, token names) so approval maps 1:1 onto catalog entries; a prototype that needs a catalog addition names it explicitly in the task evidence.
+- Verification evidence recorded in the task: the artifact paths, the screenshots (path + state + theme + width) or the exact blocker, zero console/script errors, no horizontal overflow or clipping at the tested widths, and a keyboard-only pass over the prototype's interactive controls.
+- Explicit statement that the prototype has no authority: it may be replaced, and no implementation task may cite it as the reference.
+- Prototype scope can be trimmed only when an approved artifact already exists for that exact surface and state set; the task then records the approved path and its coverage instead of rebuilding — an implementation task that needs a state the approved artifact does not show stops and requests a prototype.
+
+Recommended title: `- [ ] Build the HTML prototype for <surface> in design-artifacts/prototypes/<slug>/` — after entry-gate/baseline tasks and after the UI catalog review, before any implementation task.
+
+Landing and IA baseline (do not re-plan it): the launcher is the landing surface (a fresh window and every empty tab), a tab is one workspace plus one agent with two views switched from tab chrome, the agent view's title is the agent-type picker, and its Files tab is the session's file history — `DESIGN.md` §12, approved set `design-artifacts/approved/quiet-instrument-migration/`, decision source `decision-logs/2026-09-11-2331-workspace-agent-tab-model-and-launcher-landing.md`. A plan that touches the shell, tabs, the landing, or the agent surface reads §12 first and cannot introduce a second landing.
+
+**Freeze/approval task** — `- [ ] Obtain explicit user approval and freeze design-artifacts/approved/<slug>/`. It must require:
+
+- The prototype is presented to the user with the choices that need a decision (variant, density, IA, state treatment) called out; approval is a real user statement, never inferred from silence or from the agent's own review.
+- On approval, the chosen files are copied into `design-artifacts/approved/<slug>/` with a `README.md` recording: approval date, the approving user statement (quoted), chosen variant, requested changes, superseded variants, the exact surface/state/theme/width coverage, and the path of every artifact that is now binding.
+- Losing variants stay under `design-artifacts/prototypes/` for history and are marked as not approved; they are never referenced as authority.
+- Approved artifacts are append-only. A later change is a new variant directory plus a new approval, never an in-place edit.
+- The task cannot be closed by the agent alone: without the user's explicit approval the task stays unchecked and blocks dependent implementation tasks.
+- Deviation policy: any later implementation deviation from the approved artifact is either fixed to match or re-approved through this loop with the reason recorded (defect, accessibility failure, or missing feasibility), plus a decision-log entry when the change alters the approved language.
+
+Recommended title: `- [ ] Obtain explicit user approval and freeze design-artifacts/approved/<slug>/` — immediately after the prototype task, before the first implementation task. Both tasks belong to the design phase of the plan.
+
+**Booking rules that make the gate real:**
+
+- Implementation tasks list the approved artifact path in `Approach -> Documentation Reviewed` and in `References`, and their acceptance criteria include matching it.
+- The mandatory visual/accessibility review task compares the running app against the approved artifact and reports per-surface deviations (see below).
+- `design-artifacts/` is tracked in git: a binding artifact that exists only on one machine is not a reference. Generated snapshots (workspace data) are regenerated by a checked-in script, never hand-edited.
+- `design-artifacts/README.md` is the contract page: what prototypes are, what approved artifacts are, which is normative, and the update loop.
 
 ## Clay UI Primitives-First Task
 
-Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout) must route through UI skill selection and reuse the established UI catalog before proposing new UI code.
+Each Clay plan that touches the app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, layout) routes UI skill loading through `.agents/skills/clay-execution/` before proposing new UI code. The plan should require:
 
-The plan should require:
-
-- Run `npx ui-skills start` before UI design or implementation tasks and load the smallest useful UI skill set (prefer 1, max 3).
-- Load the `clay-ui` skill (`.agents/skills/clay-ui/`) and read its `references/components.md` and `references/tokens.md` before writing UI tasks. Read `docs/reference/ui-components.md` for the navigation/contract entry point that links the catalog, token tables, chrome primitives, package authoring guide, and Phase 20.7 conformance rules.
-- Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in the task's `Options Considered`.
-- New components, primitives, tokens, or layout rules must be generic and reusable across packages, token-driven (no raw colors, CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled).
-- Component kinds, style variables, and token names are additive-only so existing packages keep working.
-- Keep the catalog current: the plan must include updating `.agents/skills/clay-ui/references/components.md` / `references/tokens.md` and `docs/reference/packages/creating-packages.md` for any UI surface change. Documentation drift across the catalog, `creating-packages.md`, `docs/reference/ui-components.md`, and `docs/index.md` fails `cargo test` (Phase 20.8).
+- Before reviewing, designing, or implementing each UI task, read [`DESIGN.md`](../../../../DESIGN.md) (normative design language, values, per-surface recipes, retired patterns, review checklist), `.agents/skills/clay-execution/references/ui.md` (distilled binding rules, design-skill routing, shell layout model, client architecture) plus `references/components.md` and `references/tokens.md` (the catalogs) and list them under every UI task's `Approach -> Documentation Reviewed`; plan-level mention alone is insufficient. Substantial new-surface design tasks additionally load the four project-local design skills (`impeccable`, `full-output-enforcement`, `high-end-visual-design`, `design-taste-frontend`). Read `docs/reference/ui-components.md` as the navigation/contract entry point.
+- Conform to the Quiet Instrument language in `DESIGN.md`: 1px hairline zoning, radii from the 5/8/12/16/pill ladder, elevation only on transient surfaces, accent only for state, mono for data, and none of the retired patterns in `DESIGN.md` §14. Aesthetic changes to the language itself are `DESIGN.md` edits plus design-system package data, never host CSS or component rewrites.
+- Reconcile conflicting aesthetic guidance through the user brief, Clay product identity, accessibility, security, authority, catalog compatibility, and typed token ownership; adapt marketing-page guidance to Clay's Operate-mode desktop UI instead of forcing AIDA, hero sections, hardcoded palettes/fonts, or decorative motion.
+- Reuse cataloged components, primitives, style variables, and theme tokens first; a custom component outside the catalog requires explicit justification in `Options Considered`.
+- New components, primitives, tokens, or layout rules are generic and reusable across packages, token-driven (no raw colors, uncontrolled package CSS, concrete font families, or point sizes), and state-complete (hover/active/focus/disabled). Target web components consume host-generated CSS custom properties with the same semantic token ownership. Component kinds, style variables, and token names are additive-only so existing packages keep working.
+- Keep the catalog current: update `.agents/skills/clay-execution/references/components.md` / `references/tokens.md` and `docs/reference/packages/creating-packages.md` for any UI surface change. Documentation drift across the catalog, `creating-packages.md`, `docs/reference/ui-components.md`, and `docs/index.md` fails `cargo test` (Phase 20.8).
 - Preserve the shell layout contract: `main` slot plus optional `left`/`right`/`top`/`bottom` fixed panels whose sizes remain user-configurable (min/max/collapse/resize).
+- Apply `.agents/skills/clay-execution/references/ui.md` (Client Architecture) and `references/packages.md` (Authority Boundaries) to all client/migration plans: separate server authority, CodeMirror-local typing, narrow Tauri capabilities, stable-ID React reconciliation, no permanent dual client.
 
-Recommended task title:
+Recommended title: `- [ ] Review Clay UI catalog and plan primitive/component reuse before UI work` — after entry-gate/baseline tasks, before UI implementation tasks.
 
-```markdown
-- [ ] Review Clay UI catalog and plan primitive/component reuse before UI work
-```
+## UI Design-System Package Task
 
-Place this task after entry-gate/baseline tasks and before UI implementation tasks.
+Each Clay plan that adds or changes UI design-system packages, component recipes, design-system selection, or recipe-driven component styling must preserve the approved typed recipe boundary. The task should require:
+
+- Keep content themes, user-owned typography, and UI design systems as separate configuration and invalidation layers; preserve `theme.setTheme`/`theme.setTypography` compatibility.
+- Content themes stay the sole normal-rendering color authority. Recipes may map component slots/states to semantic active-theme color roles and apply typed opacity/effects, but must reject palettes, literals, and package-owned color values; browser/OS system colors are reserved for forced-colors mode.
+- Design systems are versioned, inert `clay.contributions` data mapping host-owned component kinds, semantic slots, variants, and interaction states to typed non-color visual recipe properties and semantic theme-color-role references.
+- Reject raw CSS, selectors, JSX, scripts, renderer callbacks, URLs, literal colors, color aliases/palettes, arbitrary transforms/filters, and direct Tauri APIs. React Aria and Clay retain behavior, focus, accessibility semantics, and DOM ownership.
+- Validate exact package provenance, current generation, schema version, property/token types, color-role references, bounds, recipe completeness, contrast across representative themes, reduced-motion/transparency fallbacks, and revocation before atomic install.
+- Keep component kinds, slots, recipe properties, tokens, and style variables additive and versioned; existing fixed non-color recipes remain fallback until migration completes; fallback colors always resolve through active-theme roles.
+- Include conformance fixtures for every shipped first-party design system across at least two materially different content themes, and delete the fixtures/harness states of any package the plan removes in the same phase; the abstraction is incomplete if any of them requires host component source changes or declares a concrete color. Quiet Instrument's package profile, values, and per-surface recipes are specified in `DESIGN.md` §4/§11/§16.
+- Apply `.agents/skills/clay-execution/references/config.md` (UI Design-System Packages) and route UI skills through `.agents/skills/clay-execution/references/ui.md` (distilled rules; four design skills load only for substantial new-surface design tasks). New or changed appearance must conform to [`DESIGN.md`](../../../../DESIGN.md) — the Quiet Instrument language and its values/recipes are the target profile of any design-system package work.
+
+Recommended title: `- [ ] Review and implement the typed UI design-system recipe boundary`. Decision source: `decision-logs/2026-08-28-2234-package-defined-ui-design-systems.md`.
 
 ## Mandatory UI Visual and Accessibility Review Task
 
-Each Clay plan that touches app UI must include one post-implementation task that reviews the implemented interface visually and through accessibility tooling before final API/documentation/wiki work.
+Each Clay plan that touches app UI must include one post-implementation task reviewing the implemented interface visually and through accessibility tooling before final API/documentation/wiki work. The task must require:
 
-The task must require:
+- Launch a real Linux GUI build using representative data and exercise every changed state: default, interactive/focus, empty/error/loading/recovery when applicable, plus narrow and wide window layouts when layout is affected.
+- Take and inspect screenshots for each exercised state; store review evidence under a clearly named artifact path and record the path and findings in the task completion evidence.
+- When `computer-use-linux` is available, call `get_app_state` before UI interaction, inspect its accessibility tree, and verify keyboard-only flow, focus visibility/order, role/name/state exposure, modal containment, and announcements for changed controls; prefer semantic selectors and re-check state after each interaction.
+- If GUI launch, screenshots, or computer use are unavailable, state the exact blocker, preserve automated structural/accessibility checks, and leave manual visual/a11y acceptance unresolved rather than claiming it passed.
+- Treat a screenshot or accessibility failure as a product defect or an explicitly prioritized follow-up; never replace it with source inspection alone.
 
-- Launch a real Linux GUI build using representative data and exercise every changed state: default, interactive/focus, empty/error/loading/recovery states when applicable, plus narrow and wide window layouts when layout is affected.
-- Take and inspect screenshots for each exercised state. Store review evidence under a clearly named review artifact path, and record the path and findings in the task completion evidence.
-- When `computer-use-linux` is available, call `get_app_state` before UI interaction, inspect its accessibility tree, and verify keyboard-only flow, focus visibility/order, role/name/state exposure, modal containment, and announcements for changed controls. Prefer semantic selectors; re-check state after each interaction.
-- If GUI launch, screenshot capture, or computer use is unavailable, state the exact blocker, preserve automated structural/accessibility checks, and leave manual visual/a11y acceptance unresolved rather than claiming it passed.
-- Treat a screenshot or accessibility failure as a product defect or an explicitly prioritized follow-up; do not replace it with source inspection alone.
+Recommended title: `- [ ] Perform visual screenshot and accessibility review of changed UI` — after UI implementation and automated verification, before Clay JS API/configuration/manual-test-plan/wiki finalization. The task must also compare the running UI against the plan's approved artifacts under `design-artifacts/approved/<slug>/` surface by surface and record every deviation (geometry, material, state, spacing, typography role, IA position) with its disposition: fixed to match, or explicitly re-approved. A deviation that is neither fixed nor re-approved fails the review. Decision source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`; approved-artifact conformance per user instruction 2026-09-11.
 
-Recommended task title:
+## Final Code Wiki Task
+
+Each Clay plan whose wiki workflow applies (per `.agents/skills/clay-execution/references/docs-as-code.md`) includes exactly one final wiki task after implementation, verification, API/documentation maintenance, and project-specific maintenance tasks. The task must require:
+
+- Update the code wiki after all implementation tasks complete, or explicitly verify it is unchanged for non-code work; updates add no runtime work and document performance-relevant implementation details the plan changed.
+- Wiki pages explain what changed code does, how it works, invariants/tradeoffs, source/test paths, and examples where useful, linked from the master wiki index (`docs/wiki/index.md`); completed-phase review records go to `docs/wiki/archive/`, never `modules/`.
+- Wiki pages document touched security boundaries, permissions, validation, secrets handling, or external authority without exposing secrets.
+- Update once after tests pass (not per-task), using the `docs-as-code.md` wiki workflow, quality bar, and archive policy; edit `docs/wiki/index.md` navigation plus the relevant `docs/wiki/**` pages.
+
+Template:
 
 ```markdown
-- [ ] Perform visual screenshot and accessibility review of changed UI
+- [ ] Update or verify the code wiki after implementation
+  - Acceptance Criteria:
+    - Functional: The project code wiki is updated after all implementation tasks are complete, or explicitly verified as unchanged for non-code work.
+    - Performance: Wiki updates add no runtime work and document performance-relevant implementation details changed by the plan.
+    - Code Quality: Wiki pages explain what changed code does, how it works, invariants/tradeoffs, source/test paths, examples where useful, and links from the master wiki index.
+    - Security: Wiki pages document touched security boundaries, permissions, validation, secrets handling, or external authority without exposing secrets.
+  - Approach:
+    - Documentation Reviewed:
+      - `.agents/skills/clay-execution/references/docs-as-code.md`: wiki workflow, quality bar, and archive policy.
+    - Options Considered:
+      - Update after each task: more granular, but noisy and likely to churn.
+      - Update once after tests pass: keeps docs aligned with final code. (Chosen.)
+    - Files to Create/Edit:
+      - `docs/wiki/index.md`: navigation links for changed implementation areas.
+      - `docs/wiki/**`: implementation wiki pages for changed code.
+  - Test Cases to Write:
+    - Manual wiki review: the master index links relevant pages and updated pages explain what changed implementation does and how it works.
 ```
-
-Place this task after UI implementation and automated verification, before Clay JS API/configuration/manual-test-plan/wiki finalization.
-
-Decision source: `decision-logs/2026-08-14-0200-mandatory-ui-visual-and-accessibility-review.md`.

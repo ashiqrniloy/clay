@@ -17,7 +17,7 @@ Every Clay JS API distinguishes four naming layers:
 - `id`: the globally namespaced stable registry identifier, such as `editor.serverInsertText`.
 - `user_facing_name`: the English help/search label, such as `Insert Text`.
 
-Clay-owned callable exports should be flat, lower camel case, behavior-oriented names. Do not repeat `clay`, the module/domain name, raw Rust paths, or raw `op_*` names in callable exports when the surrounding module and registry metadata already provide that context. For Clay-owned editor-core APIs, include `server*` or `client*` authority prefixes when the API touches document state, UI state, or behavior state. Pure-JS package APIs must begin with the package name or registered package prefix. See `.agents/skills/project-patterns/references/clay-js-api-naming.md` for the reusable project pattern.
+Clay-owned callable exports should be flat, lower camel case, behavior-oriented names. Do not repeat `clay`, the module/domain name, raw Rust paths, or raw `op_*` names in callable exports when the surrounding module and registry metadata already provide that context. For Clay-owned editor-core APIs, include `server*` or `client*` authority prefixes when the API touches document state, UI state, or behavior state. Pure-JS package APIs must begin with the package name or registered package prefix. See `.agents/skills/clay-execution/references/js-api.md` for the reusable project pattern.
 
 ## Master Index Requirement
 
@@ -150,7 +150,7 @@ await serverInsertText({
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `editor.serverInsertText` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `editor.serverInsertText` in `~/.clay/init.js`.
 
 ## Custom properties
 

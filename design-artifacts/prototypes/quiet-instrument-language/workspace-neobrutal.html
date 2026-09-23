@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Clay — Workspace · design proposal A (neobrutal rebuilt)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400..600&display=swap">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-neobrutal.css">
+<style>
+/* ---------------------------------------------------------------------------
+   Screen 1 · Workspace — neobrutal component language.
+
+   Layout: titlebar / (sidebar + main) / statusbar, exactly the shipped shells,
+   but the editor area is reorganised into three tight rows:
+     docbar   — identity + document state + document actions (one line)
+     openbar  — the relative-path open control (one line, on demand)
+     editor   — number gutter + markdown source, still editable
+   --------------------------------------------------------------------------- */
+
+/* ---------- document bar ------------------------------------------------ */
+
+.docbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--c-line);
+  background: var(--c-bg);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.crumb { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.crumb-icon { display: grid; place-items: center; width: 20px; height: 20px; background: var(--c-accent); color: var(--c-accent-fg); flex: none; }
+.crumb-name { font: 500 var(--fs-md) / 1 var(--font-mono); letter-spacing: -0.01em; }
+.crumb-path { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+
+.badges { display: flex; align-items: center; gap: 5px; }
+.docbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+/* ---------- open bar --------------------------------------------------- */
+
+.openbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--c-line);
+  background: var(--c-surface-2);
+  min-width: 0;
+}
+
+.openbar .field { max-width: 380px; }
+.openbar-note { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+.openbar-note[data-tone='err'] { color: var(--c-err); }
+.openbar-note[data-tone='ok'] { color: var(--c-ok); }
+
+/* ---------- editor ----------------------------------------------------- */
+
+.editor {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: var(--c-surface);
+}
+
+.gutter {
+  border-right: 1px solid var(--c-line);
+  padding: 12px 0 40vh;
+  overflow: hidden;
+  text-align: right;
+  background: var(--c-surface-2);
+  user-select: none;
+}
+
+.gln {
+  display: block;
+  padding-right: 10px;
+  font: 400 var(--fs-xs) / 1.65 var(--font-mono);
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.gln[data-current='true'] { background: var(--c-accent); color: var(--c-accent-fg); }
+
+.doc {
+  margin: 0;
+  padding: 12px 22px 40vh 16px;
+  overflow: auto;
+  font: 400 var(--fs-md) / 1.65 var(--font-mono);
+  color: var(--c-text);
+  outline: none;
+  caret-color: var(--c-caret);
+  tab-size: 2;
+  min-width: 0;
+}
+
+.doc .ln { display: block; white-space: pre-wrap; min-height: calc(1em * 1.65); border-left: 2px solid transparent; margin-left: -8px; padding-left: 6px; }
+.doc .ln:hover { background: var(--c-hover); }
+.doc .ln[data-current='true'] { background: var(--c-sel); border-left-color: var(--c-accent); }
+
+.md-blank { color: transparent; }
+.md-mark { color: var(--c-text-3); }
+.md-ts { color: var(--c-text-3); }
+
+.md-h1 { color: var(--c-doc-h1); font-weight: 600; }
+.md-h2 { color: var(--c-doc-h2); font-weight: 600; }
+.md-h3 { color: var(--c-doc-h3); font-weight: 600; }
+.md-h4 { color: var(--c-doc-h4); font-weight: 600; }
+.md-h5, .md-h6 { color: var(--c-text); font-weight: 600; }
+
+.md-code { background: var(--c-code-bg); color: var(--c-code-span); }
+.md-link { color: var(--c-link); text-decoration: underline; text-underline-offset: 2px; }
+.md-url { color: var(--c-text-3); text-decoration: none; }
+.md-strong { font-weight: 600; }
+.md-li, .md-quote { color: var(--c-list); }
+.md-quote { background: var(--c-quote-bg); }
+
+/* ---------- sidebar foot ---------------------------------------------- */
+
+.side-foot { justify-content: space-between; flex-wrap: wrap; }
+.side-foot .hint { font: 400 var(--fs-xs) / 1 var(--font-mono); padding: 2px 4px; border: 0; background: transparent; }
+
+/* ---------- theme popover swatches ------------------------------------ */
+
+.theme-item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.theme-item .kbd { margin-left: 0; }
+.theme-item .theme-mode { font: 400 10px/1 var(--font-mono); color: var(--c-text-3); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ---------- editor empty state ---------------------------------------- */
+
+.editor[data-empty='true'] .gutter { opacity: 0.35; }
+.editor[data-empty='true'] .doc { display: grid; place-items: center; }
+</style>
+</head>
+<body>
+
+<div class="desk">
+  <div class="win" role="application" aria-label="Clay workspace">
+
+    <!-- ================= titlebar ================= -->
+    <header class="titlebar">
+      <span class="tb-brand">Clay</span>
+      <div class="tb-tabs" role="tablist" aria-label="Workspace tabs">
+        <button class="tb-tab" role="tab" aria-selected="true" data-active="true">Workspace</button>
+      </div>
+      <span class="tb-spacer"></span>
+      <nav class="tb-actions" aria-label="Application controls">
+
+        <span class="popwrap">
+          <button class="tb-btn" type="button" data-popover-toggle="theme" data-theme-trigger="true"
+                  data-shortcut="alt+t" aria-haspopup="menu" aria-expanded="false"
+                  title="Theme (Alt T)">
+            <span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span data-theme-label>Modus Operandi</span>
+            <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">T</kbd>
+          </button>
+          <div class="popover popover--wide" data-popover="theme" role="menu" aria-label="Content theme">
+            <div class="pop-head">
+              <span class="label">Content theme</span>
+              <span class="panel-sub">color only — geometry stays</span>
+            </div>
+            <div class="pop-body" id="theme-list"><!-- theme items injected by page script --></div>
+            <p class="pop-note">Also on <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">1</kbd>–<kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">6</kbd> · cycle <kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">`</kbd></p>
+          </div>
+        </span>
+
+        <button class="tb-btn" type="button" data-open="palette" title="Command palette">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+          <span>Palette</span>
+          <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">K</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-open="shortcuts" data-shortcut="shift+?" title="Keyboard map (?)">
+          <span>Keys</span>
+          <kbd class="kbd kbd--sm">?</kbd>
+        </button>
+
+        <button class="tb-btn" type="button" data-toggle="sidebar" aria-expanded="true" data-shortcut="mod+b" title="Toggle sidebar">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16"/><path d="M9 4v16"/></svg>
+          <span data-sidebar-toggle-label>Hide sidebar</span>
+        </button>
+
+        <div class="win-btns">
+          <button class="win-btn" type="button" title="Minimise window" aria-label="Minimise window">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 12h14"/></svg>
+          </button>
+          <button class="win-btn" type="button" title="Maximise window" aria-label="Maximise window">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="5" width="14" height="14"/></svg>
+          </button>
+          <button class="win-btn win-btn--close" type="button" title="Close window" aria-label="Close window">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+      </nav>
+    </header>
+
+    <!-- ================= app body ================= -->
+    <div class="app" data-app data-sidebar="expanded">
+
+      <!-- ---------- sidebar ---------- -->
+      <aside class="side" data-focus-zone=".side" aria-label="Workspace files">
+        <div class="side-head">
+          <h2 class="side-title">
+            Workspace
+            <button class="btn btn--ghost btn--icon" type="button" data-toggle="sidebar" title="Hide sidebar" aria-label="Hide sidebar">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M15 5 8 12l7 7"/></svg>
+            </button>
+          </h2>
+          <p class="side-kicker">Workspace · clay</p>
+        </div>
+
+        <div class="side-tools">
+          <label class="field">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+            <input type="search" data-filter-for="files" placeholder="Filter files" aria-label="Filter files" autocomplete="off" spellcheck="false">
+            <kbd class="kbd kbd--sm kbd--flat">/</kbd>
+          </label>
+        </div>
+
+        <div class="side-body">
+          <nav class="tree" data-tree="files" role="tree" aria-label="Workspace file tree" id="file-tree">
+            <!-- rows injected by page script from the single tree model below -->
+          </nav>
+        </div>
+
+        <div class="side-foot">
+          <span class="label" data-filter-count></span>
+          <span class="hint"><kbd class="kbd kbd--sm">↑↓</kbd> move</span>
+          <span class="hint"><kbd class="kbd kbd--sm">↵</kbd> open</span>
+          <span class="hint"><kbd class="kbd kbd--sm">/</kbd> filter</span>
+        </div>
+      </aside>
+
+      <!-- ---------- main ---------- -->
+      <main class="pane" data-focus-zone=".main">
+        <div class="main" style="display:flex; flex-direction:column; min-height:0; flex:1;">
+
+          <div class="docbar">
+            <div class="crumb">
+              <span class="crumb-icon" aria-hidden="true">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>
+              </span>
+              <span class="crumb-name" data-doc-name>VENT.md</span>
+              <span class="crumb-path" data-doc-path>clay/VENT.md</span>
+            </div>
+
+            <div class="badges" aria-label="Document state">
+              <span class="badge" data-doc-version>v1</span>
+              <span class="badge badge--clean" data-doc-state><span class="dot dot--ok" data-doc-dot></span><span data-doc-state-text>clean</span></span>
+              <span class="badge" data-doc-mode><span class="dot"></span>editable</span>
+            </div>
+
+            <div class="docbar-actions">
+              <button class="btn btn--icon" type="button" data-action="undo" data-shortcut="mod+z" title="Undo" aria-label="Undo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" aria-hidden="true"><path d="M4 9h11a5 5 0 0 1 0 10h-6"/><path d="M8 5 4 9l4 4"/></svg>
+              </button>
+              <button class="btn btn--icon" type="button" data-action="redo" data-shortcut="mod+shift+z" title="Redo" aria-label="Redo" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="square" aria-hidden="true"><path d="M20 9H9a5 5 0 0 0 0 10h6"/><path d="m16 5 4 4-4 4"/></svg>
+              </button>
+              <button class="btn btn--primary" type="button" data-action="save" data-shortcut="mod+s" title="Save">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M5 5h11l3 3v11H5z"/><path d="M9 5v5h6V5"/><path d="M9 19v-5h6v5"/></svg>
+                Save
+                <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">S</kbd>
+              </button>
+              <button class="btn btn--icon btn--danger" type="button" data-action="close" data-shortcut="mod+w" title="Close file" aria-label="Close file">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="openbar">
+            <span class="label">Open path</span>
+            <label class="field">
+              <span class="mono faint" aria-hidden="true">./</span>
+              <input type="text" id="open-path" placeholder="relative/path" aria-label="Open relative path" autocomplete="off" spellcheck="false">
+            </label>
+            <button class="btn" type="button" data-action="open-path" disabled>Open</button>
+            <button class="btn btn--ghost" type="button" data-action="open-focus" data-shortcut="mod+o" title="Focus the open-path field" aria-label="Focus the open-path field">
+              <kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">O</kbd>
+            </button>
+            <span class="openbar-note" role="status" data-open-note>relative to /workspace · tab completes</span>
+          </div>
+
+          <div class="editor" data-editor>
+            <div class="gutter" data-gutter aria-hidden="true"></div>
+            <article class="doc" data-canvas aria-label="VENT.md source"></article>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ================= statusbar ================= -->
+    <footer class="statusbar">
+      <span class="status-seg"><span class="dot dot--ok"></span>/workspace</span>
+      <span class="status-seg status-seg--muted">Connected</span>
+      <span class="status-seg status-seg--muted" data-doc-stat></span>
+      <span class="status-hints">
+        <button class="status-key" type="button" data-open="palette"><kbd class="kbd kbd--sm" data-kbd-mod>⌘</kbd><kbd class="kbd kbd--sm">K</kbd> palette</button>
+        <button class="status-key" type="button" data-action="filter-focus"><kbd class="kbd kbd--sm">/</kbd> filter</button>
+        <button class="status-key" type="button" data-cycle-theme><kbd class="kbd kbd--sm" data-kbd-alt>⌥</kbd><kbd class="kbd kbd--sm">`</kbd> theme</button>
+        <button class="status-key" type="button" data-open="shortcuts"><kbd class="kbd kbd--sm">?</kbd> keys</button>
+      </span>
+    </footer>
+  </div>
+</div>
+
+<!-- ================= overlays ================= -->
+
+<section class="overlay" data-overlay="palette" role="dialog" aria-label="Command palette">
+  <div class="sheet palette">
+    <header class="sheet-head">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+      <input class="pal-input" data-pal-input placeholder="Files, actions, themes…" aria-label="Search commands" autofocus style="flex:1; border:0; background:transparent; font:400 13px/1.4 var(--font-ui);">
+      <div class="seg" role="group" aria-label="Scope">
+        <button class="seg-item" type="button" data-pal-scope-btn="all" data-active="true">All</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Files">Files</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="Document">Document</button>
+        <button class="seg-item" type="button" data-pal-scope-btn="View">View</button>
+      </div>
+    </header>
+    <div class="pal-list" data-pal-list role="listbox" aria-label="Commands"></div>
+    <p class="pal-empty" data-pal-empty hidden>No command matches. <kbd class="kbd kbd--sm">Esc</kbd> to dismiss.</p>
+    <footer class="pal-foot">
+      <span>scope: <strong data-pal-scope>All commands</strong></span>
+      <span class="spacer"></span>
+      <span data-pal-count>0 results</span>
+      <span class="hint"><kbd class="kbd kbd--sm">↑↓</kbd> navigate</span>
+      <span class="hint"><kbd class="kbd kbd--sm">↵</kbd> run</span>
+      <span class="hint"><kbd class="kbd kbd--sm">Esc</kbd> close</span>
+    </footer>
+  </div>
+</section>
+
+<section class="overlay overlay--center" data-overlay="shortcuts" role="dialog" aria-label="Keyboard map">
+  <div class="sheet sheet--wide">
+    <header class="sheet-head">
+      <span class="label">Keyboard map</span>
+      <span class="spacer"></span>
+      <span class="panel-sub">every action on this screen has a key</span>
+      <button class="btn btn--icon btn--ghost" type="button" data-close="shortcuts" aria-label="Close">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </header>
+    <div class="sheet-body">
+      <div class="keys">
+        <div class="key-group">
+          <h3>Global</h3>
+          <div class="key-row"><span class="key-desc">Command palette</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Keyboard map</span><span class="key-combo"><kbd class="kbd">?</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Toggle sidebar</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">B</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Theme menu</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">T</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Theme 1–6</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">1..6</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Cycle theme</span><span class="key-combo"><kbd class="kbd" data-kbd-alt>⌥</kbd><kbd class="kbd">`</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Document</h3>
+          <div class="key-row"><span class="key-desc">Save</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">S</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Undo / redo</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">Z</kbd> <kbd class="kbd" data-kbd-shift>⇧</kbd><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">Z</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Open path field</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">O</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Close file</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">W</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Dismiss / clear</span><span class="key-combo"><kbd class="kbd">Esc</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>File tree</h3>
+          <div class="key-row"><span class="key-desc">Move</span><span class="key-combo"><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Expand / collapse</span><span class="key-combo"><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Open file</span><span class="key-combo"><kbd class="kbd">↵</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Filter files</span><span class="key-combo"><kbd class="kbd">/</kbd></span></div>
+          <div class="key-row"><span class="key-desc">First / last row</span><span class="key-combo"><kbd class="kbd">Home</kbd><kbd class="kbd">End</kbd></span></div>
+        </div>
+        <div class="key-group">
+          <h3>Editor</h3>
+          <div class="key-row"><span class="key-desc">Indent selection</span><span class="key-combo"><kbd class="kbd">Tab</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Jump to line (palette)</span><span class="key-combo"><kbd class="kbd" data-kbd-mod>⌘</kbd><kbd class="kbd">K</kbd><kbd class="kbd">:</kbd></span></div>
+          <div class="key-row"><span class="key-desc">Save on focus loss</span><span class="key-combo"><kbd class="kbd kbd--flat">setting</kbd></span></div>
+        </div>
+      </div>
+    </div>
+    <footer class="sheet-foot">
+      <span class="panel-sub">Modifier shown for this platform: <strong data-kbd-platform>⌘</strong></span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-close="shortcuts">Close</button>
+    </footer>
+  </div>
+</section>
+
+
+<script type="text/markdown" data-file="README.md">
+# Clay
+
+Clay is a client/server code editor. See [Clay documentation](docs/index.md) and the [launch guide](docs/development/launch-and-gui-smoke.md).
+
+## Run from a source checkout
+
+```bash
+cd frontend && npm ci && npm run build
+cd .. && cargo build -p clay -p clay-desktop
+cargo run
+```
+
+`cargo run` builds only the `clay` launcher. It reuses sibling
+`clay-desktop`/`clay-server` executables, and the desktop embeds
+`frontend/dist`; run the build steps above after source changes so the GUI and
+server are not stale. Bare `cargo run` then replaces the default-endpoint
+server and opens the desktop.
+
+## Fully restart the server on Linux
+
+Use Clay's restart command. It stops only the default server, starts a fresh background server, waits for readiness, then exits without opening another GUI:
+
+```bash
+clay restart
+</script>
+
+<script type="text/markdown" data-file="AGENTS.md">
+<!-- context7 -->
+Use the `ctx7` CLI to fetch current documentation whenever the user asks about a library, framework, SDK, API, CLI tool, or cloud service -- even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer -- your training data may not reflect recent changes. Prefer this over web search for library docs.
+
+Do not use for: refactoring, writing scripts from scratch, debugging business logic, code review, or general programming concepts.
+
+## Steps
+
+1. Resolve library: `npx ctx7@latest library <name> "<user's question>"` — use the official library name with proper punctuation (e.g., "Next.js" not "nextjs", "Customer.io" not "customerio", "Three.js" not "threejs")
+2. Pick the best match (ID format: `/org/project`) by: exact name match, description relevance, code snippet count, source reputation (High/Medium preferred), and benchmark score (higher is better). If results don't look right, try alternate names or queries (e.g., "next.js" not "nextjs", or rephrase the question)
+3. Fetch docs: `npx ctx7@latest docs <libraryId> "<user's question>"`
+4. Answer using the fetched documentation
+
+You MUST call `library` first to get a valid ID unless the user provides one directly in `/org/project` format. Use the user's full question as the query -- specific and detailed queries return better results than vague single words. Do not run more than 3 commands per question. Do not include sensitive information (API keys, passwords, credentials) in queries.
+
+For version-specific docs, use `/org/project/version` from the `library` output (e.g., `/vercel/next.js/v14.3.0`).
+
+For Rust libraries/crates used by the current project, also verify the version-exact local crate documentation with Cargo. Use commands such as `cargo metadata --format-version 1`, `cargo tree -i <crate>`, and `cargo doc -p <crate> --no-deps` (use a separate `CARGO_TARGET_DIR` if needed to avoid target-directory locks). Prefer the locally resolved crate version's rustdoc/source under the Cargo registry for exact API signatures and examples, and use ctx7 as supplementary current/background documentation rather than the sole source for Rust crate APIs.
+
+If a command fails with a quota error, inform the user and suggest `npx ctx7@latest login` or setting `CONTEXT7_API_KEY` env var for higher limits. Do not silently fall back to training data.
+<!-- context7 -->
+
+<!-- platform-validation -->
+</script>
+
+<script type="text/markdown" data-file="DESIGN.md">
+# Clay Design System & UI Architecture
+
+## 1. Overview & Core Philosophy
+
+Clay is an engineering-first desktop editor built for density, precision, and tactile responsiveness. The UI architecture enforces a strict separation between **Content Themes** (which own color) and **UI Design Systems** (which own geometry, materials, and motion).
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Active Content Theme                   │
+│        (Sole Normal-Rendering Color Authority)          │
+│            e.g. Gruvbox, Modus, Tokyo Night             │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             │ injects var(--clay-*)
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                 Active UI Design System                 │
+│        (Geometry, Materials, Motion & Token Maps)       │
+│           e.g. Neobrutal (Default), Glass, Core         │
+└────────────────────────────┬────────────────────────────┘
+                             │
+                             │ injects var(--clay-ds-*)
+                             ▼
+┌─────────────────────────────────────────────────────────┐
+│                     Clay UI Shell                       │
+│  (15 Component Kinds, 35 Recipe Surfaces, Landmarks)    │
+└─────────────────────────────────────────────────────────┘
+```
+
+Surface counts are mechanical: `ComponentKind` (`src/shell/components.rs`)
+</script>
+
+<script type="text/markdown" data-file="PRODUCT.md">
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Users
+
+- **Primary:** Software engineers, systems programmers, technical writers, and power users who spend long continuous editing sessions working with codebases, text documents, and configuration files.
+- **Secondary:** Package authors extending Clay with language modes, formatters, analyzers, themes, and UI contributions.
+
+## Product Purpose
+
+Clay is a high-performance, hackable desktop text and code editor combining Emacs-grade user configurability, sub-millisecond local input latency, and a safe, modern, accessible architecture.
+
+Success means users can operate without cognitive distraction for hours, configure every aspect of their workflow via `~/.clay/init.js` and typed Clay JS APIs, and install third-party packages without compromising renderer security or editor performance.
+
+## Positioning
+
+Unlike Electron-based editors that incur high memory footprint and open-ended DOM mutation, and unlike traditional terminal editors that lack native accessible GUI primitives, Clay pairs a dedicated high-performance Rust core server with a sandboxed Tauri v2 + React/CodeMirror client.
+
+Extensibility is achieved through inert declarative manifests and typed IPC APIs rather than arbitrary in-process JavaScript execution in the UI render thread.
+</script>
+
+<script type="text/markdown" data-file="Cargo.toml">
+[package]
+name = "clay"
+version = "0.1.0"
+edition = "2024"
+default-run = "clay"
+autotests = false
+
+[workspace]
+members = ["src-tauri"]
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.debugging]
+inherits = "test"
+debug = 2
+
+[dependencies]
+crop = "0.4.3"
+deno_core = "0.400.0"
+deno_error = "=0.7.1"
+</script>
+
+<script type="text/markdown" data-file=".gitignore">
+/target
+node_modules/
+/packages/markdown/node_modules/
+/code-reviews
+/frontend/dist/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+</script>
+
+<script type="text/markdown" data-file="build.rs">
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+fn main() {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("windows")
+            .join("no-uac.manifest");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg-bin=update-doc-registry=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-bin=update-doc-registry=/MANIFESTINPUT:{}",
+</script>
+
+<script src="workspace-data.js"></script>
+<script src="ds.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------------- workspace model ---------------------------------- */
+
+  var WORKSPACE = window.CLAY_WORKSPACE;
+  var sources = WORKSPACE.sources;
+
+  ClayDS.renderTree(document.getElementById('file-tree'), WORKSPACE.tree, {
+    selected: 'VENT.md',
+    sources: sources
+  });
+
+  function knownPaths() { return WORKSPACE.files; }
+
+  /* ---------------- editor ------------------------------------------- */
+
+  var editor = ClayDS.createEditor({
+    canvas: document.querySelector('[data-canvas]'),
+    gutter: document.querySelector('[data-gutter]'),
+    value: sources['VENT.md'] || '# VENT\n',
+    label: 'VENT.md source'
+  });
+
+  var docName = document.querySelector('[data-doc-name]');
+  var docPath = document.querySelector('[data-doc-path]');
+  var docState = document.querySelector('[data-doc-state]');
+  var docStateText = document.querySelector('[data-doc-state-text]');
+  var docStat = document.querySelector('[data-doc-stat]');
+  var currentFile = 'VENT.md';
+  var versions = { 'VENT.md': 1 };
+
+  function stat() {
+    var text = editor.value;
+    var words = text.split(/\s+/).filter(Boolean).length;
+    var entries = (text.match(/^##\s/gm) || []).length;
+    docStat.textContent = words + ' words · ' + entries + ' entries · markdown';
+  }
+
+  function paintState() {
+    var dirty = editor.dirty;
+    docStateText.textContent = dirty ? 'modified' : 'clean';
+    docState.className = 'badge ' + (dirty ? 'badge--dirty' : 'badge--clean');
+    var dot = docState.querySelector('.dot');
+    dot.className = 'dot ' + (dirty ? 'dot--warn' : 'dot--ok');
+    stat();
+  }
+
+  function openFile(id, opts) {
+    opts = opts || {};
+    var name = id.split('/').filter(Boolean).pop();
+    var text = sources[id];
+    var missing = !text;
+    if (id !== currentFile) {
+      if (editor.dirty && !opts.force) {
+        ClayDS.toast('Save ' + currentFile + ' before switching', { kbd: ClayDS.key('mod+s'), tone: 'warn' });
+        return false;
+      }
+      currentFile = id;
+      editor.setValue(missing ? '# ' + name + '\n\nContent for ' + id + ' is not bundled in this design artifact.\n\n' : text, { saved: true });
+      versions[id] = versions[id] || 1;
+      docName.textContent = name;
+      docPath.textContent = 'clay/' + id;
+    }
+    document.querySelectorAll('[data-tree-item]').forEach(function (row) {
+      var on = row.dataset.id === id;
+      row.setAttribute('aria-selected', on ? 'true' : 'false');
+      row.dataset.active = on ? 'true' : 'false';
+      if (on && row.tabIndex !== 0) {
+        document.querySelectorAll('[data-tree-item]').forEach(function (r) { r.tabIndex = -1; });
+        row.tabIndex = 0;
+      }
+    });
+    document.querySelector('[data-doc-version]').textContent = 'v' + versions[id];
+    paintState();
+    ClayDS.announce('Opened ' + id);
+    if (!opts.quiet) ClayDS.toast('Opened ' + name, { tone: 'quiet', ms: 1400 });
+    return true;
+  }
+
+  document.addEventListener('clay:file', function (event) { openFile(event.detail.id); });
+  document.addEventListener('clay:editor', function (event) {
+    paintState();
+    document.querySelector('[data-action="undo"]').disabled = !event.detail.canUndo;
+    document.querySelector('[data-action="redo"]').disabled = !event.detail.canRedo;
+  });
+
+  /* ---------------- docbar + open bar actions ------------------------ */
+
+  document.querySelector('[data-action="save"]').addEventListener('click', function () {
+    editor.save();
+    paintState();
+    ClayDS.toast('Saved ' + currentFile, { kbd: ClayDS.key('mod+s') });
+  });
+
+  document.querySelector('[data-action="undo"]').addEventListener('click', function () {
+    if (editor.undo()) ClayDS.toast('Undo', { tone: 'quiet', ms: 1100 });
+  });
+  document.querySelector('[data-action="redo"]').addEventListener('click', function () {
+    if (editor.redo()) ClayDS.toast('Redo', { tone: 'quiet', ms: 1100 });
+  });
+
+  document.querySelector('[data-action="close"]').addEventListener('click', function () {
+    if (editor.dirty) {
+      ClayDS.toast('Unsaved changes in ' + currentFile, { kbd: ClayDS.key('mod+s'), tone: 'warn' });
+      return;
+    }
+    document.querySelectorAll('[data-tree-item]').forEach(function (row) {
+      row.setAttribute('aria-selected', 'false');
+      row.dataset.active = 'false';
+    });
+    editor.setValue('# No file open\n\nPress ' + ClayDS.key('mod+k') + ' → “Open file”, or type a workspace-relative path in the Open path field.\n', { saved: true });
+    currentFile = 'untitled';
+    docName.textContent = 'No file open';
+    docPath.textContent = 'clay';
+    document.querySelector('[data-doc-version]').textContent = '—';
+    paintState();
+    ClayDS.toast('Closed ' + 'file', { kbd: ClayDS.key('mod+w') });
+  });
+
+  var pathInput = document.getElementById('open-path');
+  var pathButton = document.querySelector('[data-action="open-path"]');
+  var pathNote = document.querySelector('[data-open-note]');
+
+  function normalize(value) {
+    return value.trim().replace(/^\.\//, '').replace(/^\/workspace\//, '');
+  }
+
+  pathInput.addEventListener('input', function () {
+    pathButton.disabled = !pathInput.value.trim();
+    pathNote.dataset.tone = '';
+    pathNote.textContent = 'relative to /workspace · tab completes';
+  });
+
+  pathInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      var prefix = normalize(pathInput.value).toLowerCase();
+      var match = knownPaths().filter(function (p) { return p.toLowerCase().indexOf(prefix) === 0; })[0];
+      if (match) {
+        pathInput.value = match;
+        pathInput.dispatchEvent(new Event('input'));
+      }
+    }
+  });
+
+  function runOpen() {
+    var wanted = normalize(pathInput.value);
+    if (!wanted) return;
+    var hit = knownPaths().filter(function (p) { return p.toLowerCase() === wanted.toLowerCase(); })[0];
+    if (!hit) {
+      pathNote.dataset.tone = 'err';
+      pathNote.textContent = 'not in workspace: ' + wanted;
+      ClayDS.announce('Path not in workspace');
+      return;
+    }
+    if (openFile(hit)) {
+      pathNote.dataset.tone = 'ok';
+      pathNote.textContent = 'opened ' + hit;
+    }
+  }
+
+  pathButton.addEventListener('click', runOpen);
+  pathInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') { event.preventDefault(); runOpen(); }
+  });
+
+  document.querySelector('[data-action="open-focus"]').addEventListener('click', function () {
+    pathInput.focus();
+    pathInput.select();
+    ClayDS.flash(pathInput.closest('.field'));
+  });
+
+  document.querySelector('[data-action="filter-focus"]').addEventListener('click', function () {
+    var input = document.querySelector('[data-filter-for="files"]');
+    input.focus();
+    input.select();
+    ClayDS.flash(input.closest('.field'));
+  });
+
+  /* ---------------- theme menu --------------------------------------- */
+
+  var themeList = document.getElementById('theme-list');
+  ClayDS.themes.forEach(function (theme, index) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pop-item theme-item';
+    btn.setAttribute('role', 'menuitemradio');
+    btn.dataset.setTheme = theme.id;
+    btn.setAttribute('aria-checked', 'false');
+    btn.innerHTML = '<span class="swatch" aria-hidden="true" data-theme="' + theme.id + '"><i></i><i></i><i></i></span>'
+      + '<span>' + theme.label + '</span>'
+      + '<span class="theme-mode">' + theme.mode + '</span>';
+    var kbd = document.createElement('kbd');
+    kbd.className = 'kbd kbd--sm';
+    kbd.textContent = '⌥' + (index + 1);
+    btn.appendChild(kbd);
+    themeList.appendChild(btn);
+  });
+
+  /* ---------------- palette commands --------------------------------- */
+
+  function fileCommands() {
+    return knownPaths().map(function (path) {
+      return {
+        id: 'file:' + path,
+        title: path,
+        group: 'Files',
+        keywords: path.replace(/\//g, ' '),
+        hint: sources[path] ? '↵' : '',
+        meta: sources[path] ? '' : 'not bundled',
+        run: function () { openFile(path); }
+      };
+    });
+  }
+
+  function actionCommands() {
+    return [
+      { id: 'act:save', title: 'Save file', group: 'Document', hint: ClayDS.key('mod+s'), keywords: 'write', run: function () { document.querySelector('[data-action="save"]').click(); } },
+      { id: 'act:undo', title: 'Undo edit', group: 'Document', hint: ClayDS.key('mod+z'), run: function () { document.querySelector('[data-action="undo"]').click(); } },
+      { id: 'act:redo', title: 'Redo edit', group: 'Document', hint: ClayDS.key('mod+shift+z'), run: function () { document.querySelector('[data-action="redo"]').click(); } },
+      { id: 'act:close', title: 'Close file', group: 'Document', hint: ClayDS.key('mod+w'), run: function () { document.querySelector('[data-action="close"]').click(); } },
+      { id: 'act:open-path', title: 'Open relative path…', group: 'Document', hint: ClayDS.key('mod+o'), keywords: 'file open', run: function () { document.querySelector('[data-action="open-focus"]').click(); } },
+      { id: 'act:filter', title: 'Filter file tree', group: 'View', hint: '/', keywords: 'search tree find', run: function () { document.querySelector('[data-action="filter-focus"]').click(); } },
+      { id: 'act:sidebar', title: 'Toggle sidebar', group: 'View', hint: ClayDS.key('mod+b'), run: function () { ClayDS.toggleSidebar(); } },
+      { id: 'act:keys', title: 'Keyboard map', group: 'View', hint: '?', run: function () { ClayDS.openOverlay('shortcuts'); } },
+      { id: 'act:density', title: 'Toggle row density', group: 'View', keywords: 'compact comfortable', run: function () {
+          ClayDS.setDensity(document.documentElement.dataset.density === 'compact' ? 'comfortable' : 'compact');
+        } }
+    ];
+  }
+
+  function outlineCommands() {
+    return editor.outline().filter(function (item) { return item.level === 2; }).map(function (item) {
+      return {
+        id: 'out:' + item.line,
+        title: item.stamp ? item.stamp + '  ' + item.title.replace(/^\d{2}-\d{2}-\d{2} \d{2}:\d{2}\s*—\s*/, '') : item.title,
+        group: 'Document',
+        meta: 'line ' + (item.line + 1),
+        keywords: item.title,
+        run: function () { editor.gotoLine(item.line); }
+      };
+    });
+  }
+
+  function themeCommands() {
+    return ClayDS.themes.map(function (theme) {
+      return {
+        id: 'theme:' + theme.id,
+        title: 'Theme: ' + theme.label,
+        group: 'View',
+        meta: theme.mode,
+        keywords: 'color appearance',
+        run: function () { ClayDS.setTheme(theme.id); }
+      };
+    });
+  }
+
+  ClayDS.setCommands(fileCommands().concat(outlineCommands(), actionCommands(), themeCommands()));
+
+  /* ---------------- boot -------------------------------------------- */
+
+  document.querySelector('[data-kbd-platform]').textContent = ClayDS.mod;
+
+  document.querySelectorAll('[data-cycle-theme]').forEach(function (node) {
+    node.addEventListener('click', function () { ClayDS.cycleTheme(1); });
+  });
+
+  // '/' focuses the filter from anywhere except a typing surface
+  document.addEventListener('keydown', function (event) {
+    var typing = document.activeElement && (document.activeElement.isContentEditable || /^(input|textarea)$/i.test(document.activeElement.tagName));
+    if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey) {
+      event.preventDefault();
+      document.querySelector('[data-action="filter-focus"]').click();
+    }
+  });
+
+  openFile('VENT.md', { quiet: true });
+  paintState();
+})();
+</script>
+</body>
+</html>

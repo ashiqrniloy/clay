@@ -40,8 +40,8 @@ custom_properties:
     type: string[]
     default: []
     description: Package-prefixed command IDs that panel components may emit as inert action intents.
-security: Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
-agent_guidance: Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, Masonry APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.
+security: Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
+agent_guidance: Use `ui.serverRegisterPanelContribution` for inert fixed package panels only; do not invent raw ops, native widget handles, client APIs, raw CSS, client-side JavaScript hooks, or hidden layout configuration keys.
 lookup_tags: [ui, package-ui, panel, slot-layout, clay-js-api, phase18.3, runtime-backed]
 app_visible: true
 help_visible: true
@@ -59,7 +59,7 @@ Register a package-prefixed fixed panel contribution for a Clay pane slot throug
 
 `serverRegisterPanelContribution` accepts an already validated package manifest and a declarative fixed panel contribution. Clay validates the package prefix, fixed slot, default visibility, bounded component tree, action targets, duplicate IDs, duplicate exclusive slot claims, and package provenance before storing the panel in the server-owned package UI registry.
 
-Accepted declarations become inert shell/runtime state. The Rust client composes fixed panels through Clay-owned `PaneSlotLayout` geometry and native Masonry rendering; package JavaScript, raw CSS, raw ops, renderer callbacks, and package-owned widgets never enter Masonry paint, layout, pointer, scroll, keypress, or text-event handlers.
+Accepted declarations become inert shell/runtime state. The Rust client composes fixed panels through Clay-owned `PaneSlotLayout` geometry and React/CodeMirror rendering; package JavaScript, raw CSS, raw ops, renderer callbacks, and package-owned widgets never enter client paint, layout, pointer, scroll, keypress, or text-event handlers.
 
 ## When to use
 
@@ -132,7 +132,7 @@ No default key binding is assigned. Packages should register commands and key bi
 
 Returns a JSON-serializable registration result synchronously in the constrained server runtime. The result includes `registered`, `id`, `slot`, `defaultVisibility`, `componentId`, `actionTargets`, `estimatedPayloadBytes`, and `provenance` fields.
 
-Registration is intended for package load, configuration, or explicit UI update work only. Masonry hot paths read already-installed inert state.
+Registration is intended for package load, configuration, or explicit UI update work only. client hot paths read already-installed inert state.
 
 ## Errors
 
@@ -142,20 +142,20 @@ Fails with actionable Clay diagnostics when the manifest is invalid, the ID is n
 
 No additional permission is required for inert panel metadata. Target commands still require their own command registration and permission checks before actions can run.
 
-Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
+Validates package-prefixed panel IDs, supported slots, bounded component payloads, registered action targets, provenance, and conflicts; does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, unregistered action authority, or external authority.
 
 Schema metadata records authority requirements only; it does not grant permissions, execute scripts, load extensions, inspect user files, access the network, or expose runtime user content.
 
 ## Agent guidance
 
-Use `ui.serverRegisterPanelContribution` when the user asks for a public Clay JS API for package fixed panels. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, Masonry widget construction, raw CSS, renderer callbacks, hidden JSON/TOML keys, or client-side JavaScript execution.
+Use `ui.serverRegisterPanelContribution` when the user asks for a public Clay JS API for package fixed panels. Avoid direct Rust calls, raw `Deno.core.ops`, protocol DTO construction, client widget construction, raw CSS, renderer callbacks, hidden JSON/TOML keys, or client-side JavaScript execution.
 
 ## Backing implementation
 
 - JS facade: `runtime/js/ui.js::serverRegisterPanelContribution`
 - Deno op: `src/server/ops/ui.rs::op_clay_ui_register_panel_contribution` (`op_clay_ui_register_panel_contribution`)
 - Backing Rust/current owner: `src/server/ui.rs::PackageUiRegistry::register_panel`
-- Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `src/masonry_sdui.rs::SduiNativeState`
+- Runtime composition path: `src/shell/package_ui.rs::PackageUiRuntimeState`; `frontend/src/sdui/renderer.tsx (React SDUI host renders validated sdui trees; no native state)`
 
 ## Lookup metadata
 

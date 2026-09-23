@@ -160,11 +160,13 @@ labels, a `TabList`/`Tab` tree for the tab bar (module 14), and one polite
 `Status` live-region node announcing pane/tab actions exactly once per user
 action. Deep reference:
 `docs/development/accessibility.md` (roles/names table, announcement
-strings, sanitization budgets). Automated equivalents: the shell's
-structural a11y tests (`cargo test --lib accessibility` in
-`src/masonry_shell.rs`) build the exact `TreeUpdate` and assert every role,
-name, and announcement string below — a screen reader is not required for
-the tree shape, only for the human hearing check.
+strings, sanitization budgets). Automated equivalents: the React shell
+landmark/role/live-region assertions (`frontend/src/test/shell.test.tsx`)
+and React Aria's focus/split-pane semantics — a screen reader is not
+required for the tree shape, only for the human hearing check. Note: on the
+current WebKitGTK stack static text inside live regions is not exposed via
+AT-SPI accessible names or the Text interface, so announcements must be
+verified with a screen reader, not an AT-SPI name dump.
 
 | # | Action | Expected |
 |---|--------|----------|
@@ -200,12 +202,44 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 | S31 | Fresh launch WITHOUT the alias bindings (or with the lines commented), press `Ctrl+Shift+Right` | NO-OP — the aliases ship with no default chords; nothing binds, nothing splits, no diagnostic |
 | S32 | Replace the string forms with the facade helpers: `import { clientSplitPaneRight, clientSplitPaneDown } from "clay:shell"; bindKey("Ctrl+Shift+Right", clientSplitPaneRight(), { scope: "global" }); bindKey("Ctrl+Shift+Down", clientSplitPaneDown(), { scope: "global" });`, reload | Same behavior as S29 — the helpers return the alias command IDs |
 
+## Plan 087 completion-in-split steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S33 | Open a document in pane 1, split vertically (`Ctrl+\`), trigger completion in pane 1 | Completion popup anchors to pane 1's caret and stays inside pane 1's rect; the split divider/pane 2 are unaffected |
+| S34 | Move focus to pane 2 (click / `Ctrl+Alt+Arrow`), trigger completion there | Popup re-anchors to pane 2's caret; only the active pane's caret is used (`completion_anchor` comes from the active pane) |
+| S35 | Close the last pane's document, then close the pane | The pane returns to the empty-tab landing — the bundled launcher when its package is loaded, else the Clay-owned `Start with a file or folder` card (plan 118 Part D, module [01](01-launch-and-connection.md) L12/L12a); splitting again from the landing yields a normal editable pane |
+
+## Plan 088 responsive split/pane steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S36 | Compare a narrow working area and a wide working area with the workspace browser visible | Browser/sidebar yields before the main editor becomes unusable; split ratios and pane hosts stay inside the working-area frame |
+| S37 | Repeat S1–S18 with large UI typography | Tab/status/pane labels, dividers, focus ring, and hit targets remain in bounds; fixed slots do not cover editor content |
+| S38 | Run the representative 2× logical-window layout checks | Pane hosts and tab bar use logical bounds; no physical-pixel overflow or duplicate scale compensation occurs |
+| S39 | Split a document pane and trigger completion in each focused pane | Completion anchors to the active pane caret and is clipped inside that pane; inactive pane content/focus is unchanged |
+| S40 | Inspect split/pane accessibility after focus, split, move, close, and placeholder transitions | Pane roles/names, active-pane state, focus ring, and one-per-action announcements stay synchronized; sanitized names contain no host paths |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S36/S37 | PASS structural / NOT RUN visually | Responsive layout tests cover 320/900/1200 widths and 12/24/96 UI sizes; current host cannot resize/focus the Clay window for a live narrow/wide pass |
+| S38 | PASS structural | `high_dpi_layout_uses_logical_window_bounds` passes; production visual 2× capture is unavailable because the review host window is fixed and targeted resize is disabled |
+| S39 | UNRESOLVED live / PASS structural | Completion pane-anchor/clamp tests pass; interactive split/completion keyboard delivery remains blocked. Retained Plan 087 split evidence is comparison-only |
+| S40 | PASS structural / partial live | Shell/pane AccessKit tests pass and current welcome tree is clean; live multi-pane focus/announcement re-run is blocked by window targeting and the host has no screen reader |
+
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — S1/S3/S23/S24:** the real AT-SPI tree showed restored two-pane geometry and numbered pane labels; activating `Split Pane Vertical` through Control Center produced a third placeholder and `Split pane vertically` in the stable live announcement node. No malformed tree occurred.
 - **PASS — S5:** clean `Ctrl+Alt+W` removed one pane, left the survivor filling the working area, kept client/server alive, and exposed `Closed pane; 1 pane remains` once.
 - **FAIL/BLOCKER — D10/S5 dirty-close variant:** a dirty active pane close crashed the client in `accesskit_consumer` with `Focused ID #4 is not in the node list`; server survived. See `code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`. This needs a follow-up focus/a11y update fix before dirty-pane close can be called green.
 - **PASS — security/labels:** pane names and announcements used sanitized basenames/action text; no absolute workspace path or document contents appeared in the pane/status labels. Isolated HOME/XDG roots were used.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — S35 (welcome return):** closing the last pane's document resets the pane to the Clay-owned welcome state (`close_pane` clears sessions, reapplies the default surface, sets `welcome_visible`); the welcome surface is also the state shown on fresh empty-tab launches (module 01 L12) and was verified live this session.
+- **BLOCKED by host — S33/S34 (completion in split panes):** this session's portal keyboard delivery could not drive the multi-stroke/split chords reliably, so live split+completion was not re-run; the split surface itself passed in plan 086 task 11 (S1/S3/S23/S24 above) and completion-in-pane anchoring is covered by automated tests (`completion_menu_observation_uses_caret_bounded_geometry`, `completion_overlay_clamps_above_or_below_caret_inside_main_rect`). Not a false pass.
 
 ## Negative checks
 
@@ -239,12 +273,9 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 - **Window-scoped chrome**: SDUI sidebars and package panels/overlays are
   connection-wide chrome, not per-pane; they do not move or duplicate when
   panes split (packages cannot contribute per-pane chrome yet).
-- **No topology/document persistence**: pane trees and per-pane document
-  layout reset on restart; persistence arrives with Phase 22.5 (layout.json
-  extension).
-- **Persistence restored (22.5)**: pane trees, ratios, user-modified slots,
-  and per-pane documents now survive restart per tab (`layout.json` v2,
-  module 14 S22/T41); unsaved edits and caret/viewport positions still do
+- **Persistence scope**: pane trees, ratios, user-modified slots, and
+  per-pane documents survive restart per tab through `layout.json` v2
+  (module 14 S22/T41); unsaved edits and caret/viewport positions still do
   not (module 14 ceilings).
 - **Global bindings need editor focus**: `Global`-context chords route through
   the focused pane's editor key path; with a placeholder pane active (no
@@ -265,3 +296,167 @@ bindKey("Ctrl+Shift+Down", "shell.clientSplitPaneDown", { scope: "global" });
 - **Open-documents switcher follows pane focus**: `clientShowOpenDocuments`
   opens on the focused pane; cross-pane entries switch the owning pane instead
   of creating local duplicates (22.2 semantics).
+
+## Plan 089 validation steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| S41 | Run `CLAY_LIVE_WINDOW_SMOKE=1 cargo test --test security live_atspi_smoke::live_multi_window_scale_smoke -- --ignored --exact --test-threads=1` on a Wayland host with AT-SPI prereqs | Two real Clay client processes launch; AT-SPI exposes two distinct frames (PID-separated); both frames have positive physical bounds with scale factors between 0.5 and 4.0 |
+| S42 | Inspect the responsive narrow/wide captures (`code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/responsive/`) | Narrow (500 px) and wide (1200 px) captures show the welcome card, status bar, and pane hosts within bounds; the narrow welcome shortcut text adapts to card width |
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S36–S38 | PASS structural + partial live | Responsive layout tests pass; Plan 089 visual review captured narrow (500 px) and wide (1200 px) states with PASS artifacts showing the welcome card and status bar within bounds |
+| S39 | PASS structural | Completion pane-anchor/clamp tests pass; live split+completion is covered by the completion capture (module 04 E22 Plan 089 record) |
+| S40 | PASS structural + partial live | Shell/pane AccessKit tests pass; Plan 089 focus repair fix (`request_welcome_render`, focus-on-remove) ensures the welcome status and pane focus stay synchronized after connection events and pane removal |
+| S41 | PASS live | `CLAY_LIVE_WINDOW_SMOKE=1` multi-window smoke test launched two real Clay clients; AT-SPI exposed two PID-separated frames with positive bounds and scale factors within 0.5–4.0 |
+| S42 | PASS | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/responsive/` shows narrow and wide captures with the welcome card, status bar, and pane hosts within bounds |
+
+## Phase 26 dirty-pane close fix and per-pane chrome steps
+
+Deep references: `docs/development/accessibility.md` (focus/consumer tree),
+`docs/reference/primitives/rendering-strategy.md` (chrome axis),
+`docs/reference/packages/creating-packages.md` (editorRules.chrome).
+Background: Plan 086 task 11 recorded a BLOCKER — closing a dirty active
+pane crashed the client in `accesskit_consumer` (`Focused ID #4 is not in
+the node list`; crash log
+`code-reviews/screenshots/2026-08-14-plan086-a11y/manual-dirty-pane-close-crash.log`).
+Phase 26.7 fixed the root cause (stashed-widget early return in the
+accessibility pass + focus clamp + layout invalidation on document open).
+
+| # | Action | Expected |
+|---|--------|----------|
+| S43 | Repeat the Plan 086 crash sequence: open a document in a pane, type to make it dirty, `Ctrl+Alt+W` | NO crash — the save-conflict menu appears on that pane; the client and server stay alive; the accessibility consumer tree keeps a live focus at every step (menu shown, `FileOperationFailed DirtyDocument`, discard, close) |
+| S44 | From the S43 state, discard and close the pane | Pane closes; the survivor fills the working area; focus moves to a live node; no orphaned focus ID in the AT tree |
+| S45 | 2 panes, code document in one, markdown in the other | Chrome follows each pane's document mode: gutter/active-line/indent guides/bracket match in the code pane, none in the prose pane; chrome is per-pane, never cross-pane bleed |
+| S46 | Split a code pane and scroll the gutter side | Gutter digits stay right-aligned and clipped to the pane; the active-line wash tracks the caret line in the focused pane only |
+
+Negative: closing a dirty pane never loses edits (D10–D12 unchanged); the
+last pane is never closed (S6 unchanged); chrome grants no authority and is
+not SDUI — packages contribute chrome only as inert manifest data.
+
+## Phase 26 Linux execution record (2026-08-19)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| S43/S44 | PASS automated regression; live partial | `dirty_focused_pane_menu_and_discard_keep_consumer_focus_live` exercises the exact crash path (dirty pane → save-conflict menu via `apply_menu_sync` → `FileOperationFailed DirtyDocument` → discard → close) asserting the consumer focus stays live at every step; `dirty_pane_close_rejection_and_discarded_removal_keep_focus_consumer_safe` covers the rejection path. The Plan 086 crash log is superseded — the panic no longer reproduces in the automated suite. Live attempt (2026-08-19): a real Clay instance with an open document accepted typed input (doc v2, dirty) and stayed alive with an intact AT-SPI tree; the `Ctrl+Alt+W` chord itself is host-blocked (portal delivers single keys only — review-log V9), so the live menu path was not re-driven |
+| S45/S46 | PASS live (single-pane) / structural (multi-pane) | `code-reviews/screenshots/2026-08-18-phase26-review/rust-*` (chrome on) vs `markdown-*` (chrome off) show per-mode chrome; per-pane chrome isolation is covered by the pane-scoped paint tests (`pane_paint_baselines`, per-pane decoration aggregate guard) |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Two-pane composition | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/splits/fixture-*` shows editor and welcome pane within bounds at wide/narrow sizes |
+| Real split/tab tree | PASS AT-SPI structure | `tabs-splits/accessibility.txt` exposes Pane 1 editor, separator, Pane 2 Empty tab and named actions |
+| Split resize/focus keyboard flow | UNRESOLVED live; PASS structural | Host cannot safely target the Tauri window or deliver chords; split-tree and workspace-controller tests pass |
+| Path-label safety | PASS | Split fixture now shows sanitized `ws` basename rather than `/tmp/ws`; editor regression test covers the root cause |
+
+## Plan 099 four-pane routing steps
+
+| # | Action | Expected |
+|---|---|---|
+| D20 | Split a 1 MiB fixture to four panes and repeat a short type/scroll pass in each | Each pane applies only its own current viewport patch; aggregate work is linear in visible panes, no duplicate document owner appears, and no long task exceeds 50 ms. |
+| D21 | Open different generated files from each focused pane, then repeat a duplicate-open and cross-pane switch | Open replies, text, decorations, and dirty state route to the requesting/owning pane only; duplicate opens focus the existing owner instead of creating a second session. |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| D20 | UNRESOLVED live; retained PASS evidence | No keyboard input reached the WebKit view. Final-build four-pane screenshot is under `code-reviews/screenshots/2026-08-28-plan099-editor-performance/editor-dark-four-pane/`; linear per-pane invariants remain automated. |
+| D21 | UNRESOLVED live; PASS automated companion | No pane/file interaction was drivable; workspace-controller routing and per-pane isolation tests remain green. |
+
+## Plan 103 Split Tree Recipe & Design-System Cross-Reference (2026-08-30)
+
+Pane split tree panes, resize handles, and separator borders consume `--clay-ds-pane-split-tree-*` recipe variables. Drag/keyboard split geometry and ratios remain host-managed by `react-resizable-panels`. Design systems cannot alter split ratios or pane containment. See [Module 15](15-ui-design-systems.md) for full design-system switching checks.
+
+
+## Plan 105 Linux execution record (2026-09-01)
+
+No split/pane behavior change by design (connection-family extraction and
+test-module moves only). Split/pane isolation suites green in the full branch
+runs (lib 1,164 + protocol 201 + runtime 71 + security 134 + presentation 40,
+2026-08-31 task 6 verification). D20/D21 interactive passes remain
+UNRESOLVED: same no-input-backend host ceiling (`doctor`
+`can_send_development_input=false`, 2026-09-01); retained Plan 099 four-pane
+artifacts and the 2026-08-24 parity AT-SPI split records remain the live
+evidence. Launch-gate capture: `code-reviews/screenshots/2026-09-01-plan105-manual/default/`
+(module 01 record).
+
+## Plan 118 execution record (2026-09-13)
+
+Plan 118 Part D changed only what the empty pane *renders* (a package
+contribution instead of the Clay-owned card); splits, ratios, focus and
+per-pane documents are untouched. Artifacts:
+`test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| S35 (landing return) | PASS structural / UNRESOLVED interactive | `close_pane` still resets the pane to the empty tab, and `frontend/src/shell/WorkspacePanes.test.tsx` pins both landing resolutions (launcher contribution vs core fallback); the live close chord stays input-blocked on this host |
+| S36–S42 regression class | PASS live (static) | `core-fallback/` and `launcher-landing/` captures show panes, sidebar and outline rail in bounds at the harness window with the shipped shell geometry (40px titlebar / 28px status bar); interactive resize/split legs remain UNRESOLVED as recorded above |
+
+No existing step was deleted or weakened; S35's expected result was rewritten
+for the shipped landing.
+
+## Plan 124 steps (lane chrome + palette in the working area, 2026-09-17)
+
+**Plan 125 supersession (2026-09-18).** S47 and S48 keep their subjects (lane
+chrome geometry, sheet + veil placement) but not their old answer about width:
+plan 124 made the lane a **full-content-width** strip, and plan 125 reversed
+that — the lane is the **view pane's** chrome, the sidebar and the inspector
+rail run the working area's full height, and the palette sheet is the composer
+box's width. S47 is amended below and S50 is the new rail/lane independence
+check; the plan-124 numbers (`lane 26,946 1280x200`, rails ending at the lane's
+top edge) describe the superseded layout.
+
+Deep references: `DESIGN.md` §12 (shell layout), `plans/124-Persistent-Agent-Lane-and-Slash-Command-Palette.md`,
+`plans/125-Composer-Palette-Stage-Flows-and-Centered-Sheet-Retirement.md`.
+
+| # | Action | Expected |
+|---|--------|----------|
+| S47 | Open the workspace view and measure the shell bands (window edges, sidebar, rail, lane, status bar); repeat with the lane hidden | The lane is the **view pane's** chrome strip (plan 125): the sidebar and the inspector rail keep the working area's full height and the lane never covers the sidebar's column. Automation pins it: `frontend/src/test/workspace-composition.test.tsx` (three tracks — files rail · pane · inspector rail — with every grid item placed explicitly; both rails `grid-row: 1 / -1`; the lane in the pane's column and row 2), `frontend/src/shell/WorkspacePanes.test.tsx` (the sidebar region renders in the shell's own rail, exactly once) and `design-artifacts/tools/capture-sidebar.mjs` (rail bottom == working-area bottom; lane.x == rail.right; lane.right == inspector.x). **Plan 125 defect D7 is fixed (2026-09-18, "plan 126" rail work):** the workspace sidebar is the shell's own left rail now — the lane starts at its inner edge, not at the window's, and the sidebar's own content runs through the lane's row to the status bar. See the execution record below for the measured numbers. |
+| S48 | With two or more panes open (and again with the rail visible), open the palette and hide the lane | Exactly one sheet appears — anchored to the lane composer, the lane's inner width rather than one pane — and exactly one veil dims **every** pane and the rail (live: pane/rail ratio 0.88, lane 1.00); the sheet never reaches into the rail column (live `44…1168` against a rail starting at `1186`). No per-pane duplicate surface; closing the sheet (or hiding the lane: plan-124 defect D6) removes the veil in one step and pane interaction resumes. Automated: `workspace-composition.test.tsx` (veil is a grid item spanning `1 / -1`, lane z=41 > veil z=40), `CommandPalette.test.tsx` |
+| S49 | In a split layout with focus in a non-first pane, use the shell chords: `Ctrl+X Ctrl+P` (lane), `Ctrl+X Ctrl+O` (palette), `Ctrl+\`/direction splits, `Ctrl+B`, `Ctrl+I` | Shell chords act on the active tab/pane regardless of which pane holds focus; the lane/palette chords never reach the editor, and split/pane chords keep working while the lane is hidden. Pane focus policy and split aliases are unaffected by the lane's presence. Automated: shell-chord routing tests, `frontend/src/shell/workspace-commands.ts` command tests |
+| S50 | Toggle the lane (`Ctrl+X Ctrl+P` / the status-bar hint) with the rail visible, then toggle the rail (`Ctrl+I` / the titlebar button), then restore both | The three surfaces are independent: hiding the lane leaves the sidebar and inspector rail exactly where they are (live post-fix: `Document outline 1186,110 340x1036` unchanged, `Pane 1` still ending at `1186`, hints `lane Ctrl X P` + `hide outline Ctrl I`), and hiding the rail leaves the lane's visibility alone (`lane` hint unchanged). Both directions are pinned by `frontend/src/shell/layout-state.test.ts` (one store per surface — plan 125 defect D9) and covered by `workspace-composition.test.tsx`. |
+
+## Plan 124 execution record (Linux, 2026-09-17)
+
+Live pass on the canonical example config (isolated root, fresh build),
+window-cropped captures + AT-SPI, plus the automated suites.
+
+| Step | Result | Evidence |
+|---|---|---|
+| S47 | PASS live | AT-SPI extents: `footer Agent lane` at `26,946 1280x200`; inspector `landmark Document outline` at `966,110 340x836` → bottom `946` == the lane's top edge; the lane's width equals the window content width. Visual: `test-plan/artifacts/124-agent-lane/01-rest.png` (sidebar and rail both stop at the lane). Plan 124 task 9 measured the same geometry after the fix (lane 1160 px → 1500 px, rails re-ended). |
+| S48 | PASS live (single pane + rail) + automated (multi-pane) | Live: palette open → pane/rail means 40.0 → 35.3/35.6 (ratio 0.88) with the lane band 1.00; lane hidden with the sheet open → 0 dialog nodes, 0 lane nodes and pane/rail back to 1.00/0.99 (D6 fix). Multi-pane duplicate-surface behavior is pinned by `workspace-composition.test.tsx` + `CommandPalette.test.tsx`. |
+| S49 | PASS automated / NOT RUN live | Chord routing is pinned by the shell-chord matcher tests and the command catalogue tests; chords could not be delivered to the live window on this host (standing ceiling, module 10 K-series), and the live lane/palette routes were driven through the status-bar hints that call the same commands. Split/pane chords were not re-run in this instance. |
+
+## Plan 125 execution record (Linux, 2026-09-18)
+
+Live on a fresh build with the canonical config (isolated root) plus the repo
+capture harness (`scripts/capture-ui-review.sh --fixture ui-review-workspace
+--size 1500x950 --drive …`), evidence in `test-plan/artifacts/125-palette/`
+(states `01…05`, `04a` = the pre-fix rail collapse, `rail-independence.ax.txt`).
+
+| Step | Result | Evidence |
+|---|---|---|
+| S47 (lane confined to the view pane) | **PASS live (2026-09-18, after defect D7 was fixed)** | Fix: the SDUI tree's `dimension.sidebar.default` region is host-placed — `frontend/src/shell/WorkspacePanes.tsx` renders it in the shell's `.side` rail, and the pane's tree is rendered without it — so the working-area grid is three tracks (files rail · pane · inspector rail) with both rails at `grid-row: 1 / -1`. Live at 1500×950: `footer Agent lane 270,946 916x200` → x `270…1186`, i.e. the lane starts at the sidebar's inner edge and ends at the inspector's left edge (plan 125's D7 run measured `26,946 1160x200`, which covered the sidebar column); `landmark Document outline 1186,110 340x1036` → bottom `1146` == the lane's bottom == the working area's content bottom; the sidebar's own content now runs *through* the lane's row (list box `26,194 243x919`, foot `26,1113 243x10`, hints to `1146`) instead of ending at the lane's top hairline. Deterministic layer (`capture-sidebar.mjs`, 3/3 widths): 1500 → rail `0,40 244x882`, lane `244…1160`, inspector `1160…1500`; 1024 → rail `224`, lane `224…712`, inspector `712…1024`; 900 → both rails `position: fixed` drawers and the lane `0…900` (the pane's full width, DESIGN §12). Evidence: `code-reviews/screenshots/2026-09-18-plan126-rails/review-log.md` (+ `report.json`), `test-plan/artifacts/126-rails/live-1500/`. |
+| S48 (sheet + veil, one surface) | PASS live (1500 px and narrow) | Live: one sheet at the lane's inner width (`44,531 1124x420` at 1500 px content; 6 px gap; 420 px cap) and one veil over panes + rail (pane −4.7, rail −5.0 luminance; lane/composer/status bar 0.0), never reaching the rail column (`1168 < 1186`). Hiding the lane with the sheet open removed sheet **and** veil (`04-lane-hidden-palette-gone.png`, 0 `Commands` nodes). Multi-pane duplicate-surface behavior stays automated. |
+| S49 (shell chords in splits) | PASS automated / NOT RUN live | Chord routing and command catalogue tests (unchanged since plan 124); the live lane/palette legs were driven through the status-bar hints that run the same commands (standing host ceiling: no input synthesis). |
+| S50 (rail/lane independence) | PASS live (post-fix) + PASS automated | Pre-fix live: clicking `hide lane` also collapsed the inspector rail (`04a-lane-hidden-rail-collapsed.png`: `Pane 1` grew into the rail column, the `Hide outline` button and the `Document outline` landmark disappeared) — root cause: the three visibility stores shared one `visibleByTab` map and one listener set (**defect D9**), fixed in `frontend/src/shell/layout-state.ts` and pinned by `frontend/src/shell/layout-state.test.ts`. Post-fix live: hiding the lane leaves `Document outline 966,110 340x1036` intact and hiding the rail leaves the `lane` hint untouched (`rail-independence.ax.txt`); the corrected state was re-captured with the repo harness (`04-lane-hidden-palette-gone.png` + `04-metadata.txt`, PASS, viewport 1500x1104). |
+
+## Plan 126 execution record (rail fix closing plan 125's D7, Linux, 2026-09-18)
+
+The user's decision on D7 ("the lane strip should not span the sidebars … the
+left and right side bar should take the full height of the window and agent lane
+should be only spanning the middle part") was implemented as the shell placing
+the SDUI tree's token-sized workspace-sidebar region in its own left rail
+(`frontend/src/shell/WorkspacePanes.tsx`, `frontend/src/sdui/renderer.tsx`), so
+the working area is three tracks with both rails at full height (DESIGN.md §12,
+the approved drawing). S47 was re-run and passes; see the amended S47 row above.
+
+Evidence: `code-reviews/screenshots/2026-09-18-plan126-rails/review-log.md` and
+`report.json` (deterministic geometry at 1500/1024/900),
+`test-plan/artifacts/126-rails/live-1500/` (+ `live-1024/`, `live-900/`, both
+recorded with the host's narrow-capture ceiling). Automated: 497 frontend tests
+(`workspace-composition.test.tsx`, `WorkspacePanes.test.tsx`).

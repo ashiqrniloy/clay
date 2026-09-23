@@ -1,0 +1,10 @@
+fixture=ui-review-completion
+window_logical_size=900x600
+ipc=private-unix-socket
+config=private-mode-700
+screenshot=xdg-desktop-portal
+accessibility=python3-gi-atspi
+state=opened-document-completion
+window_backend=x11
+completion_items=16
+completion_popup=480x340 logical px

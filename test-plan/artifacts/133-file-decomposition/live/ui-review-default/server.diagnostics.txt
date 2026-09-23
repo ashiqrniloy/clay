@@ -1,0 +1,3 @@
+clay server listening on <isolated-root>/review.sock
+agent_registration_lines=0
+configuration_failed_lines=0

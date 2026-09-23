@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:editor"
 js_export: clientRemoveSelection
 js_facade: runtime/js/editor.js::clientRemoveSelection
-backing_rust: src/editor/surface.rs::EditorSurface::remove_selection
+backing_rust: src/client_commands.rs::EditorClientCommand
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientRemoveSelection
@@ -33,7 +33,7 @@ Remove the primary selection, keeping the rest.
 
 ## Description
 
-`clientRemoveSelection` returns the stable bindable command ID `editor.clientRemoveSelection` for **Remove Selection** (Plan 071 task 9). Helix remove_primary_selection semantics: the primary is dropped and a remaining selection becomes primary; a no-op for a single selection. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local in `EditorWidget`; it is client-local view state and grants no authority.
+`clientRemoveSelection` returns the stable bindable command ID `editor.clientRemoveSelection` for **Remove Selection** (Plan 071 task 9). Helix remove_primary_selection semantics: the primary is dropped and a remaining selection becomes primary; a no-op for a single selection. The command is allowlisted, routed `ClientUiCommand`, and dispatched client-local by the React/CodeMirror controller; it is client-local view state and grants no authority.
 
 ## When to use
 
@@ -61,7 +61,7 @@ None. The facade takes no arguments and returns the stable command ID string.
 
 Default key bindings: none (bindable via `bindKey`).
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js`.
 
 ## Custom properties
 
@@ -90,8 +90,8 @@ Use `editor.clientRemoveSelection` when the user asks for Remove Selection throu
 ## Backing implementation
 
 - JS facade: `runtime/js/editor.js::clientRemoveSelection`
-- Backing Rust/current owner: `src/editor/surface.rs::EditorSurface::remove_selection`
-- Key-driven dispatch: `src/masonry_editor.rs::EditorWidget::apply_editor_client_command`
+- Backing Rust/current owner: `src/client_commands.rs::EditorClientCommand`
+- Key-driven dispatch: `src/client_commands.rs::EditorClientCommand (client-local; executed by the React/CodeMirror controller, frontend/src/editor/extensions/controller.ts)`
 
 ## Lookup metadata
 

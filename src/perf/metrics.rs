@@ -1,16 +1,48 @@
+use crate::lock_util::LockOrRecover;
+
 use std::{
+    collections::BTreeMap,
     env,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
 /// Environment variable that enables Clay's internal developer performance recorder.
 pub const PERF_PROFILE_ENV: &str = "CLAY_PERF_PROFILE";
+/// Directory that receives per-process performance summaries at exit when set
+/// by the editor performance harness. Unset in production.
+pub const PERF_REPORT_DIR_ENV: &str = "CLAY_PERF_REPORT_DIR";
 /// Developer CLI flag accepted by smoke/client/server workflows to enable profiling.
 pub const PERF_PROFILE_FLAG: &str = "--profile-perf";
+/// Schema version for content-free cross-process performance traces.
+pub const PERF_TRACE_SCHEMA_VERSION: u32 = 1;
 /// Maximum retained developer metric snapshots per recorder.
 pub const PERF_SNAPSHOT_CAPACITY: usize = 4_096;
+
+pub const EDITOR_OPEN: &str = "editor.open";
+pub const EDITOR_READY: &str = "editor.ready";
+pub const BROWSER_INPUT: &str = "browser.input";
+pub const CODEMIRROR_UPDATE: &str = "codemirror.update";
+pub const EDITOR_TYPING: &str = "editor.typing";
+pub const BROWSER_VIEWPORT: &str = "browser.viewport";
+pub const EDITOR_SCROLL: &str = "editor.scroll";
+pub const EDITOR_SYNTAX_FRESH: &str = "editor.syntax_fresh";
+pub const REACT_COMMIT: &str = "react.commit";
+pub const EDITOR_COMPARTMENT_RECONFIGURE: &str = "editor.compartment_reconfigure";
+pub const EDITOR_LONG_TASK: &str = "editor.long_task";
+pub const BRIDGE_ENQUEUE: &str = "bridge.enqueue";
+pub const BRIDGE_CLIENT_DELIVERY: &str = "bridge.client_delivery";
+pub const BRIDGE_SERVER_DELIVERY: &str = "bridge.server_delivery";
+pub const BRIDGE_FORWARDER_DELIVERY: &str = "bridge.forwarder_delivery";
+pub const BRIDGE_PATCH_DELIVERY: &str = "bridge.patch_delivery";
+pub const EDITOR_PATCH_APPLY: &str = "editor.patch_apply";
+pub const EDITOR_PAINT_ADJACENT: &str = "editor.paint_adjacent";
+pub const SERVER_RECEIVE: &str = "server.receive";
+pub const SERVER_EDIT_ACK: &str = "server.edit_ack";
+pub const SYNTAX_QUEUE: &str = "syntax.queue";
+pub const SYNTAX_START: &str = "syntax.start";
+pub const SYNTAX_END: &str = "syntax.end";
 
 pub const SYNTAX_LOGICAL_WORK_ITEMS: &str = "syntax.parse.logical_work_items";
 pub const SYNTAX_PARSE_INVOCATIONS: &str = "syntax.parse.invocations";
@@ -21,6 +53,70 @@ pub const SYNTAX_QUERY_BYTES: &str = "syntax.query.bytes";
 pub const SYNTAX_DECORATION_CHUNKS: &str = "syntax.decoration.chunks";
 pub const SYNTAX_CANCELLED_SUPERSEDED: &str = "syntax.parse.cancelled_superseded";
 pub const SYNTAX_EDIT_TO_PUBLISH: &str = "syntax.edit_to_publish";
+/// Plan 136 task 7: per-(domain, lane) JS runtime lane metric names.
+///
+/// Indexed `[domain][lane]`: domain 0 is the trusted runtime, domain 1 the
+/// third-party runtime; lane 0 is `general`, lane 1 `latency` (matching
+/// `RuntimeLane as usize` and `JS_RUNTIME_LANES_PER_DOMAIN`). The names are
+/// static strings because `PerfSummary` aggregates by name only, so a
+/// formatted name could not be recorded at all.
+///
+/// All five are recorded once at report time (`ClayJsRuntimeService::
+/// record_lane_metrics`), not per command, so lane occupancy costs the
+/// recorder's 4096-snapshot budget nothing while a lane is under load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct JsRuntimeLaneMetrics {
+    /// Commands this lane's worker took off its mailbox and ran.
+    pub dispatched: &'static str,
+    /// Commands still waiting in the lane's supersedable backlog.
+    pub pending: &'static str,
+    /// High-water mark of that backlog since the lane's mailbox was created.
+    pub peak_pending: &'static str,
+    /// Undelivered commands a newer request for the same work key replaced.
+    pub superseded: &'static str,
+    /// Undelivered commands dropped because the backlog was at capacity.
+    pub evicted: &'static str,
+}
+
+/// See [`JsRuntimeLaneMetrics`]. `js_runtime.command.superseded`/`.evicted`
+/// (plan 127) are the same counts without the lane key; these names replace
+/// them, so a measurement can say which lane absorbed the work.
+pub(crate) const JS_RUNTIME_LANE_METRICS: [[JsRuntimeLaneMetrics;
+    crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN];
+    2] = [
+    [
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.trusted.general.dispatched",
+            pending: "js_runtime.lane.trusted.general.pending",
+            peak_pending: "js_runtime.lane.trusted.general.peak_pending",
+            superseded: "js_runtime.lane.trusted.general.superseded",
+            evicted: "js_runtime.lane.trusted.general.evicted",
+        },
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.trusted.latency.dispatched",
+            pending: "js_runtime.lane.trusted.latency.pending",
+            peak_pending: "js_runtime.lane.trusted.latency.peak_pending",
+            superseded: "js_runtime.lane.trusted.latency.superseded",
+            evicted: "js_runtime.lane.trusted.latency.evicted",
+        },
+    ],
+    [
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.third_party.general.dispatched",
+            pending: "js_runtime.lane.third_party.general.pending",
+            peak_pending: "js_runtime.lane.third_party.general.peak_pending",
+            superseded: "js_runtime.lane.third_party.general.superseded",
+            evicted: "js_runtime.lane.third_party.general.evicted",
+        },
+        JsRuntimeLaneMetrics {
+            dispatched: "js_runtime.lane.third_party.latency.dispatched",
+            pending: "js_runtime.lane.third_party.latency.pending",
+            peak_pending: "js_runtime.lane.third_party.latency.peak_pending",
+            superseded: "js_runtime.lane.third_party.latency.superseded",
+            evicted: "js_runtime.lane.third_party.latency.evicted",
+        },
+    ],
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PerfConfig {
@@ -64,10 +160,12 @@ pub enum MetricValue {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MetricMetadata {
+    pub trace_id: Option<crate::protocol::PerformanceTraceId>,
     pub document_id: Option<u64>,
     pub client_id: Option<u64>,
     pub transaction_id: Option<u64>,
     pub version: Option<u64>,
+    pub byte_count: Option<u64>,
     pub sanitized_path: Option<String>,
 }
 
@@ -80,6 +178,16 @@ impl MetricMetadata {
         }
     }
 
+    pub fn with_trace_id(mut self, trace_id: Option<crate::protocol::PerformanceTraceId>) -> Self {
+        self.trace_id = trace_id;
+        self
+    }
+
+    pub fn with_byte_count(mut self, byte_count: u64) -> Self {
+        self.byte_count = Some(byte_count);
+        self
+    }
+
     pub fn transaction(
         document_id: u64,
         client_id: u64,
@@ -87,6 +195,7 @@ impl MetricMetadata {
         version: u64,
     ) -> Self {
         Self {
+            trace_id: Some(transaction_id),
             document_id: Some(document_id),
             client_id: Some(client_id),
             transaction_id: Some(transaction_id),
@@ -110,16 +219,63 @@ pub struct MetricSnapshot {
     pub metadata: MetricMetadata,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricSummary {
+    pub count: u64,
+    /// Summed `Counter`/`Bytes` amounts, or the last `Gauge` value (0 for
+    /// duration-only names). Report-time metrics (plan 136 task 7 lane
+    /// occupancy) are recorded once per name, so their amount — not the
+    /// snapshot count — is the measurement.
+    pub total: u64,
+    pub duration_samples: u64,
+    pub p50_nanos: u128,
+    pub p95_nanos: u128,
+    pub max_nanos: u128,
+    #[serde(skip)]
+    durations: Vec<u128>,
+}
+
+impl MetricSummary {
+    fn finish(&mut self) {
+        self.duration_samples = self.durations.len() as u64;
+        if self.durations.is_empty() {
+            return;
+        }
+        self.durations.sort_unstable();
+        self.p50_nanos = percentile(&self.durations, 50);
+        self.p95_nanos = percentile(&self.durations, 95);
+        self.max_nanos = *self.durations.last().expect("duration is non-empty");
+        self.durations.clear();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerfSummary {
+    pub schema_version: u32,
+    pub enabled: bool,
+    pub retained_events: usize,
+    pub dropped_events: u64,
+    pub metrics: BTreeMap<String, MetricSummary>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PerfRecorder {
-    inner: Option<Arc<Mutex<Vec<MetricSnapshot>>>>,
+    inner: Option<Arc<Mutex<PerfBuffer>>>,
+}
+
+#[derive(Debug, Default)]
+struct PerfBuffer {
+    snapshots: Vec<MetricSnapshot>,
+    dropped: u64,
 }
 
 impl PerfRecorder {
     pub fn from_config(config: PerfConfig) -> Self {
         if config.is_enabled() {
             Self {
-                inner: Some(Arc::new(Mutex::new(Vec::new()))),
+                inner: Some(Arc::new(Mutex::new(PerfBuffer::default()))),
             }
         } else {
             Self::noop()
@@ -202,14 +358,50 @@ impl PerfRecorder {
     pub fn snapshots(&self) -> Vec<MetricSnapshot> {
         self.inner
             .as_ref()
-            .map(|inner| inner.lock().expect("perf recorder poisoned").clone())
+            .map(|inner| inner.lock_or_recover().snapshots.clone())
             .unwrap_or_default()
+    }
+
+    pub fn dropped_snapshots(&self) -> u64 {
+        self.inner
+            .as_ref()
+            .map(|inner| inner.lock_or_recover().dropped)
+            .unwrap_or_default()
+    }
+
+    pub fn summary(&self) -> PerfSummary {
+        let snapshots = self.snapshots();
+        let mut metrics: BTreeMap<String, MetricSummary> = BTreeMap::new();
+        for snapshot in &snapshots {
+            let summary = metrics.entry(snapshot.name.to_string()).or_default();
+            summary.count += 1;
+            match &snapshot.value {
+                MetricValue::Duration { nanos } => summary.durations.push(*nanos),
+                MetricValue::Counter { amount } => {
+                    summary.total = summary.total.saturating_add(*amount);
+                }
+                MetricValue::Gauge { value } => summary.total = *value,
+                MetricValue::Bytes { bytes } => {
+                    summary.total = summary.total.saturating_add(*bytes);
+                }
+            }
+        }
+        for summary in metrics.values_mut() {
+            summary.finish();
+        }
+        PerfSummary {
+            schema_version: PERF_TRACE_SCHEMA_VERSION,
+            enabled: self.is_enabled(),
+            retained_events: snapshots.len(),
+            dropped_events: self.dropped_snapshots(),
+            metrics,
+        }
     }
 
     fn record(&self, name: &'static str, value: MetricValue, metadata: MetricMetadata) {
         if let Some(inner) = &self.inner {
             push_snapshot(
-                &mut inner.lock().expect("perf recorder poisoned"),
+                &mut inner.lock_or_recover(),
                 MetricSnapshot {
                     name,
                     value,
@@ -231,7 +423,7 @@ pub struct PerfScope {
     name: &'static str,
     start: Option<Instant>,
     metadata: MetricMetadata,
-    inner: Option<Arc<Mutex<Vec<MetricSnapshot>>>>,
+    inner: Option<Arc<Mutex<PerfBuffer>>>,
 }
 
 impl PerfScope {
@@ -240,10 +432,12 @@ impl PerfScope {
             name: "",
             start: None,
             metadata: MetricMetadata {
+                trace_id: None,
                 document_id: None,
                 client_id: None,
                 transaction_id: None,
                 version: None,
+                byte_count: None,
                 sanitized_path: None,
             },
             inner: None,
@@ -254,7 +448,7 @@ impl PerfScope {
         let elapsed = self.start.take().map(|start| start.elapsed());
         if let (Some(duration), Some(inner)) = (elapsed, &self.inner) {
             push_snapshot(
-                &mut inner.lock().expect("perf recorder poisoned"),
+                &mut inner.lock_or_recover(),
                 MetricSnapshot {
                     name: self.name,
                     value: MetricValue::Duration {
@@ -277,7 +471,7 @@ impl Drop for PerfScope {
             return;
         };
         push_snapshot(
-            &mut inner.lock().expect("perf recorder poisoned"),
+            &mut inner.lock_or_recover(),
             MetricSnapshot {
                 name: self.name,
                 value: MetricValue::Duration {
@@ -289,10 +483,17 @@ impl Drop for PerfScope {
     }
 }
 
-fn push_snapshot(snapshots: &mut Vec<MetricSnapshot>, snapshot: MetricSnapshot) {
-    if snapshots.len() < PERF_SNAPSHOT_CAPACITY {
-        snapshots.push(snapshot);
+fn push_snapshot(buffer: &mut PerfBuffer, snapshot: MetricSnapshot) {
+    if buffer.snapshots.len() < PERF_SNAPSHOT_CAPACITY {
+        buffer.snapshots.push(snapshot);
+    } else {
+        buffer.dropped = buffer.dropped.saturating_add(1);
     }
+}
+
+fn percentile(sorted: &[u128], percentile: usize) -> u128 {
+    let index = (sorted.len() * percentile).div_ceil(100).saturating_sub(1);
+    sorted[index.min(sorted.len() - 1)]
 }
 
 static GLOBAL_RECORDER: OnceLock<PerfRecorder> = OnceLock::new();
@@ -305,6 +506,40 @@ pub fn global_recorder() -> PerfRecorder {
     GLOBAL_RECORDER
         .get_or_init(|| PerfRecorder::from_config(PerfConfig::from_env()))
         .clone()
+}
+
+/// Writes this process's sanitized performance summary under
+/// [`PERF_REPORT_DIR_ENV`] as `<label>-perf-summary.json` (atomic rename).
+/// Returns the written path, or `None` when the harness environment is unset
+/// (the production default) or the label is empty after sanitization.
+pub fn write_perf_report(label: &str) -> Option<PathBuf> {
+    let dir = PathBuf::from(env::var_os(PERF_REPORT_DIR_ENV)?);
+    let slug = sanitize_report_label(label)?;
+    let json = serde_json::to_vec(&global_recorder().summary()).ok()?;
+    write_report_file(&dir, &format!("{slug}-perf-summary.json"), &json)
+}
+
+/// Reduces a harness label to `[A-Za-z0-9-]`; `None` when nothing survives.
+pub fn sanitize_report_label(label: &str) -> Option<String> {
+    let slug: String = label
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if slug.is_empty() { None } else { Some(slug) }
+}
+
+fn write_report_file(dir: &Path, file_name: &str, bytes: &[u8]) -> Option<PathBuf> {
+    let path = dir.join(file_name);
+    let tmp = dir.join(format!("{file_name}.tmp"));
+    std::fs::write(&tmp, bytes).ok()?;
+    std::fs::rename(&tmp, &path).ok()?;
+    Some(path)
 }
 
 pub fn sanitize_path(path: &Path) -> String {
@@ -347,6 +582,35 @@ mod tests {
     }
 
     #[test]
+    fn write_perf_report_sanitizes_labels_and_requires_env() {
+        let dir = env::temp_dir().join("clay-perf-report-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        // SAFETY: single-threaded env mutation inside this test process scope.
+        unsafe { env::set_var(PERF_REPORT_DIR_ENV, &dir) };
+        let written = write_perf_report("run/1").expect("report written");
+        assert!(
+            written
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("run-1-")
+        );
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&written).unwrap()).unwrap();
+        assert_eq!(
+            parsed["schemaVersion"],
+            serde_json::json!(PERF_TRACE_SCHEMA_VERSION)
+        );
+        // SAFETY: same single-threaded scope as above.
+        unsafe { env::remove_var(PERF_REPORT_DIR_ENV) };
+        assert!(write_perf_report("run").is_none());
+        let slug = sanitize_report_label("reference/host run").unwrap();
+        assert!(slug.contains('-'));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn perf_snapshot_sanitizes_paths_and_content() {
         let recorder = PerfRecorder::for_test(true);
         recorder.record_with_metadata(
@@ -373,5 +637,36 @@ mod tests {
             let _scope = recorder.scope("editor.visible_extraction");
         }
         assert_eq!(recorder.snapshots()[0].name, "editor.visible_extraction");
+    }
+
+    #[test]
+    fn summary_reports_duration_percentiles_and_counts() {
+        let recorder = PerfRecorder::for_test(true);
+        for nanos in [1, 2, 3, 4, 5] {
+            recorder.record_with_metadata(
+                EDITOR_PAINT_ADJACENT,
+                MetricValue::Duration { nanos },
+                MetricMetadata::default().with_trace_id(Some(7)),
+            );
+        }
+        let summary = recorder.summary();
+        let metric = summary
+            .metrics
+            .get(EDITOR_PAINT_ADJACENT)
+            .expect("metric summary");
+        assert_eq!(metric.count, 5);
+        assert_eq!(metric.p50_nanos, 3);
+        assert_eq!(metric.p95_nanos, 5);
+        assert_eq!(metric.max_nanos, 5);
+    }
+
+    #[test]
+    fn capacity_drops_events_without_growing_buffer() {
+        let recorder = PerfRecorder::for_test(true);
+        for _ in 0..=PERF_SNAPSHOT_CAPACITY {
+            recorder.record_counter(SERVER_RECEIVE, 1);
+        }
+        assert_eq!(recorder.snapshots().len(), PERF_SNAPSHOT_CAPACITY);
+        assert_eq!(recorder.dropped_snapshots(), 1);
     }
 }

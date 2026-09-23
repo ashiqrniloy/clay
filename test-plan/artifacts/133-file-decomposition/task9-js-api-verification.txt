@@ -1,0 +1,27 @@
+Plan 133 task 9 — Clay JS API verification (verify-only)
+baseline: 6ee3b4c (pre-plan-133); tree: 40022f6 + tasks 7-8 uncommitted
+
+OK JS API artifacts unchanged vs 6ee3b4c: runtime/js, docs/reference/clay-js-api, docs/generated, docs/index.md, frontend/src/bridge, src-tauri/bindings
+OK op wrappers: only task-6 arm merges changed (src/server/ops/modes.rs, src/server/ops/packages.rs)
+OK src/server/ops/ui.rs byte-identical (ui.* op wiring untouched)
+OK UiContributionRule unchanged (17 variants)
+OK all 21 closed-choice messages recompose byte-for-byte from CHOICE_FIELDS/VALID_*; the other 39 baseline diagnostics are unchanged literals
+OK moved tests assert all 21 full message strings
+
+all JS API surface checks passed
+
+=== guard suites ===
+$ cargo test --lib server::ui
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 1396 filtered out; finished in 0.00s
+$ cargo test --lib str_enum
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1418 filtered out; finished in 0.00s
+$ cargo test --test protocol
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.41s
+$ cargo test --test presentation
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+$ cargo test --test security
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.50s
+
+=== doc registry regeneration (must be a byte-identical no-op) ===
+updated /home/arn/Projects/clay/docs/generated/clay-js-api-registry.json
+no diffs after regeneration (checked-in registries current)

@@ -32,8 +32,8 @@ custom_properties:
     type: enum
     default: user-config
     description: One of `user-config`, `active-major-mode`, `compatible-minor-mode`, `global-package`, or `package-default`.
-hot_path_policy: Evaluated during configuration/package update work only; Masonry hot paths read already-validated inert state.
-security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct Masonry widgets, native widget handles, raw CSS, or renderer callbacks.
+hot_path_policy: Evaluated during configuration/package update work only; client hot paths read already-validated inert state.
+security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden layout keys, direct client widgets, native widget handles, raw CSS, or renderer callbacks.
 agent_guidance: Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.
 lookup_tags: [ui, package-ui, layout-overrides, configuration, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
@@ -96,11 +96,11 @@ Throws `ui.layout_override_failed` for hidden target IDs, unsupported properties
 
 ## Permissions and security
 
-Requires: `package-configuration`. server-side validation is required before any layout override is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, renderer callbacks, or hidden layout-key authority.
+Requires: `package-configuration`. server-side validation is required before any layout override is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, renderer callbacks, or hidden layout-key authority.
 
 ## Agent guidance
 
-Use documented typed overrides only. Do not add Masonry-specific or package-specific Rust branches.
+Use documented typed overrides only. Do not add renderer-specific or package-specific Rust branches.
 
 ## Backing implementation
 

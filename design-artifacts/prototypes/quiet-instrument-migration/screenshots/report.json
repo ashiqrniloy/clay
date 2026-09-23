@@ -1,0 +1,3303 @@
+{
+ "chrome": "/home/arn/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome",
+ "pages": [
+  "start",
+  "component-catalog",
+  "shell",
+  "workspace",
+  "agent-landing",
+  "settings",
+  "agent-settings",
+  "command-centre",
+  "package-workspace",
+  "overlays",
+  "themes"
+ ],
+ "themes": [
+  "modus-operandi",
+  "modus-vivendi",
+  "gruvbox-material-dark",
+  "gruvbox-material-light"
+ ],
+ "widths": [
+  "1500x950",
+  "1024x800"
+ ],
+ "runs": 112,
+ "shots": 79,
+ "failures": [],
+ "results": [
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "start__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "workspace",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-vivendi__1500x950__workspace.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "workspace",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-light__1500x950__workspace.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "agent",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-vivendi__1500x950__agent.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "agent",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-light__1500x950__agent.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "both",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-vivendi__1500x950__both.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "both",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-light__1500x950__both.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    },
+    {
+     "what": "the workspace filter narrows the recents",
+     "before": 3,
+     "after": 1,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "first-run",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__modus-vivendi__1500x950__first-run.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "start",
+   "state": "first-run",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "start__gruvbox-material-light__1500x950__first-run.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "picking a workspace row makes the tab openable",
+     "before": "disabled",
+     "after": "Open clay",
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "component-catalog__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "component-catalog__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "component-catalog__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "component-catalog__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "component-catalog",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "component-catalog__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "shell__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "shell__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "shell__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "shell__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "shell",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "shell__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "workspace__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "workspace__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "workspace__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "workspace__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "workspace",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "workspace__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [
+    {
+     "what": "the tree filter narrows the file list",
+     "before": 99,
+     "after": 3,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-operandi__1500x950__landing.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__landing.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-dark__1500x950__landing.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__landing.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "landing",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "agent-landing__gruvbox-material-light__1024x800__landing.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "running",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__running.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "running",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__running.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "error",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__error.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "error",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__error.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "resumed",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__resumed.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "resumed",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__resumed.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "empty-session",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__empty-session.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "empty-session",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__empty-session.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "disconnected",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__modus-vivendi__1500x950__disconnected.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-landing",
+   "state": "disconnected",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-landing__gruvbox-material-light__1500x950__disconnected.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 99,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "settings__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "settings__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "settings__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "settings__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "settings",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "settings__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__modus-operandi__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__modus-vivendi__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__gruvbox-material-dark__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__gruvbox-material-light__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "rest",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "agent-settings__gruvbox-material-light__1024x800__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "empty",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__modus-vivendi__1500x950__empty.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "empty",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__gruvbox-material-light__1500x950__empty.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "error",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__modus-vivendi__1500x950__error.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "agent-settings",
+   "state": "error",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "agent-settings__gruvbox-material-light__1500x950__error.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [
+    {
+     "name": "skills/clay-execution/SKILL.md",
+     "printed": "4.6 kB",
+     "disk": "4.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-decision-log/SKILL.md",
+     "printed": "4.9 kB",
+     "disk": "4.9 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/create-plan/SKILL.md",
+     "printed": "7.6 kB",
+     "disk": "7.6 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/design-taste-frontend/SKILL.md",
+     "printed": "85.2 kB",
+     "disk": "85.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/find-docs/SKILL.md",
+     "printed": "6.2 kB",
+     "disk": "6.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/full-output-enforcement/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/high-end-visual-design/SKILL.md",
+     "printed": "10.3 kB",
+     "disk": "10.3 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/impeccable/SKILL.md",
+     "printed": "10.8 kB",
+     "disk": "10.8 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/karpathy-guidelines/SKILL.md",
+     "printed": "2.5 kB",
+     "disk": "2.5 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-async-patterns/SKILL.md",
+     "printed": "12.1 kB",
+     "disk": "12.1 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/rust-best-practices/SKILL.md",
+     "printed": "4.2 kB",
+     "disk": "4.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/skill-creator/SKILL.md",
+     "printed": "18.2 kB",
+     "disk": "18.2 kB",
+     "ok": true
+    },
+    {
+     "name": "skills/typescript-advanced-types/SKILL.md",
+     "printed": "7.8 kB",
+     "disk": "7.8 kB",
+     "ok": true
+    }
+   ],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "command-centre__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "command-centre__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "command-centre__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "command-centre__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "command-centre",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "command-centre__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [
+    {
+     "what": "a query with no match reveals the empty state",
+     "before": false,
+     "after": true,
+     "ok": true
+    }
+   ],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "package-workspace__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "package-workspace__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "package-workspace__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "package-workspace__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "package-workspace",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "package-workspace__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__modus-operandi__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__modus-vivendi__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__gruvbox-material-dark__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__gruvbox-material-light__1500x950__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "rest",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "overlays__gruvbox-material-light__1024x800__rest.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "reduced-transparency",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__modus-vivendi__1500x950__reduced-transparency.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "overlays",
+   "state": "reduced-transparency",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "overlays__gruvbox-material-light__1500x950__reduced-transparency.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1500,
+   "height": 950,
+   "shot": "themes__modus-operandi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "modus-operandi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#ffffff",
+   "accent": "#0031a9",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1500,
+   "height": 950,
+   "shot": "themes__modus-vivendi__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "modus-vivendi",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#000000",
+   "accent": "#2fafff",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1500,
+   "height": 950,
+   "shot": "themes__gruvbox-material-dark__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "gruvbox-material-dark",
+   "width": 1024,
+   "height": 800,
+   "shot": null,
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#282828",
+   "accent": "#7daea3",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1500,
+   "height": 950,
+   "shot": "themes__gruvbox-material-light__1500x950__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  },
+  {
+   "page": "themes",
+   "state": "default",
+   "theme": "gruvbox-material-light",
+   "width": 1024,
+   "height": 800,
+   "shot": "themes__gruvbox-material-light__1024x800__default.png",
+   "errors": 0,
+   "remote": 0,
+   "overflow": 0,
+   "clipped": 0,
+   "canvas": "#fbf1c7",
+   "accent": "#076678",
+   "treeRows": 0,
+   "behaviour": [],
+   "honesty": [],
+   "problems": []
+  }
+ ]
+}

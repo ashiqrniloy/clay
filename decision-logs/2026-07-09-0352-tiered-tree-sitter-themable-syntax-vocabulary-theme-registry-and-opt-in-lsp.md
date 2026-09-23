@@ -93,7 +93,7 @@ New axes considered in this decision:
 - `src/protocol/completion.rs` — `CompletionItem{label, insert_text, detail, commit_characters, provenance}` (adds snippet kind).
 - `src/protocol/mod.rs` — `RuntimeDiagnostic{severity, code, message}` document-level only; `DiagnosticSpan{range, severity, code, message, source}` is the NEW range-diagnostic primitive.
 - `src/packages/record.rs` — `ThemeTokenContributionDescriptor{token, token_type, fallback}` (extended from SDUI to text rendering); `SyntaxGrammarContributionDescriptor`.
-- `src/server/syntax.rs` — `TreeSitterSyntaxHandler` (test-only today) becomes the Tier 1 production handler shape.
+- `src/server/syntax/mod.rs` — `TreeSitterSyntaxHandler` (test-only today) becomes the Tier 1 production handler shape.
 - `packages/{rust,typescript,javascript,markdown}/package.json` — declare `tree-sitter-wasm` grammars, `highlights.scm` queries, `styleMap` (now mapping to vocabulary tokens).
 - `roadmap.md` Phases 18.15–18.21 — implement this decision (vocabulary+theme, tiered engine, range diagnostics, first-party language packages, completion extensions, LSP primitives+authority, LSP bridge packages).
 - `.agents/skills/project-patterns/references/language-capability-sequencing.md` — revised to reflect the tiered engine (native Tier 1 + web-tree-sitter Tier 2 + JS Tier 3).

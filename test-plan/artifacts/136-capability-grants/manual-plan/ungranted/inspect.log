@@ -1,0 +1,10 @@
+Package:     @fixture/lane
+Version:     0.1.0
+API prefix:  lane
+Status:      installed
+Modes:       []
+Permissions: ["completion-provider", "mode-registration", "parse-document"]
+Commands:    0
+Config keys: 0
+Adoption:    approved
+Ungranted:   completion-provider, mode-registration, parse-document (declared, not granted)

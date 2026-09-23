@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use crate::server::language_server::{LanguageServerError, LanguageServerSpawn};
 
 use super::{ClayOpState, packages::ensure_package_installed_locked};
+use crate::lock_util::LockOrRecover;
 
 #[op2]
 #[string]
@@ -39,10 +40,7 @@ pub(super) async fn op_clay_language_server_authorize(
     ensure_authorization_open(&clay_state)?;
 
     let (resolved_name, descriptor) = {
-        let mut service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let mut service = clay_state.package_service().lock_or_recover();
         let (resolved_name, _, _) = ensure_package_installed_locked(&mut service, package)?;
         let (_, installed) = service
             .installed_package_for_specifier(&resolved_name)
@@ -92,8 +90,7 @@ pub(super) async fn op_clay_language_server_authorize(
     ensure_authorization_open(&clay_state)?;
     let grant = clay_state
         .package_service()
-        .lock()
-        .expect("package service mutex poisoned")
+        .lock_or_recover()
         .authorize_language_server(
             &resolved_name,
             contribution,
@@ -221,10 +218,7 @@ pub(super) async fn op_clay_language_server_start_session(
 
     let clay_state = state.borrow().borrow::<Arc<ClayOpState>>().clone();
     let (spawn, service) = {
-        let mut service = clay_state
-            .package_service()
-            .lock()
-            .expect("package service mutex poisoned");
+        let mut service = clay_state.package_service().lock_or_recover();
         let (resolved_name, _, _) = ensure_package_installed_locked(&mut service, &package)?;
         let grant = service
             .language_server_grant(&resolved_name, contribution)
@@ -636,10 +630,7 @@ fn require_current_fingerprint(
     package: &str,
     contribution: &str,
 ) -> Result<u64, JsErrorBox> {
-    let service = clay_state
-        .package_service()
-        .lock()
-        .expect("package service mutex poisoned");
+    let service = clay_state.package_service().lock_or_recover();
     let grant = service
         .language_server_grant(package, contribution)
         .ok_or_else(|| {

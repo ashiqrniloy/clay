@@ -112,7 +112,10 @@ export function buildMarkdownPreviewStatusTree(claySdui, options = {}) {
     defineLabel({ id: "markdown.policy-status", text: `Highlighting: ${model.status.highlightingState}` }),
     defineLabel({
       id: "markdown.preview-status",
-      text: model.previewEnabled ? "Preview: decorated editor" : "Preview: hidden"
+      text: model.previewEnabled ? "Preview: decorated editor" : "Preview: hidden",
+      // State-truthful: the icon rides the actual preview state, and the
+      // label text stands alone when the key resolves to no geometry.
+      icon: model.previewEnabled ? "preview.toggle" : null
     })
   ];
 
@@ -132,6 +135,7 @@ export function buildMarkdownPreviewStatusTree(claySdui, options = {}) {
               defineButton({
                 id: "markdown.toggle-preview",
                 label: "Toggle Preview",
+                icon: "preview.toggle",
                 action: { commandId: "markdown.togglePreview" }
               }),
               defineList({

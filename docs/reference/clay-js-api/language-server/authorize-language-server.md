@@ -28,7 +28,7 @@ custom_properties:
     type: array<number|string>
     default: required
     description: Known directory workspace-root ids the session may bind to.
-hot_path_policy: Evaluated during configuration root evaluation only (init.js); never executed during typing, parsing, Masonry layout, or paint hot paths. First loadPackage call seals authority mutation for the runtime generation.
+hot_path_policy: Evaluated during configuration root evaluation only (init.js); never executed during typing, parsing, client layout, or paint hot paths. First loadPackage call seals authority mutation for the runtime generation.
 security: deny-by-default; never auto-authorized for bundled packages; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, client-side JavaScript; binds exact package provenance, contribution fingerprint, canonical executable, inherited-environment declaration, and approved directory roots; starts no process at grant time; grant evaluation happens before any package code executes; loaded package code cannot self-grant even though it can import the same facade.
 agent_guidance: Use only for documented language-server contributions. Never expose hidden env vars, JSON/TOML keys, shell strings, or unvalidated executables.
 lookup_tags: [configuration, language-server, grant, init-js, phase18.20, runtime-backed, deny-by-default]
@@ -42,7 +42,7 @@ async: true
 
 ## Summary
 
-`authorizeLanguageServer` records one fixed language-server contribution grant from `~/.config/clay/init.js`. The grant binds exact package provenance, contribution descriptor fingerprint, resolved canonical executable path, declared inheritance environment, and current directory workspace roots.
+`authorizeLanguageServer` records one fixed language-server contribution grant from `~/.clay/init.js`. The grant binds exact package provenance, contribution descriptor fingerprint, resolved canonical executable path, declared inheritance environment, and current directory workspace roots.
 
 ## Description
 
@@ -54,7 +54,7 @@ The grant layer starts **no process**. A process spawns only later when `startLa
 
 ## When to use
 
-Use this API from `~/.config/clay/init.js` before any `loadPackage` call to authorize a language-server bridge package. Never call from loaded package code — the grant seal enforced at first `loadPackage` will reject the call.
+Use this API from `~/.clay/init.js` before any `loadPackage` call to authorize a language-server bridge package. Never call from loaded package code — the grant seal enforced at first `loadPackage` will reject the call.
 
 ## JavaScript usage
 
@@ -65,7 +65,7 @@ import { authorizeLanguageServer } from "clay:language-server";
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { authorizeLanguageServer } from "clay:language-server";
 import { loadPackage } from "clay:packages";
 

@@ -3,24 +3,29 @@
 ## Source
 
 - `packages/lsp-shared/framing.js` — Content-Length frame encode/decode (1 MiB frame, 8 KiB header)
-- `packages/lsp-shared/positions.js` — `VersionedDocument` with UTF-8/UTF-16/UTF-32 encoding, byte-to-position conversion
+- `packages/lsp-shared/positions.js` — `VersionedDocument`: incremental UTF-16↔UTF-8 line index (chunked treap) over UTF-8/UTF-16/UTF-32 positions
 - `packages/lsp-shared/mapping.js` — LSP responses → Clay vocabulary (semantic tokens, diagnostics, completions, hover, definitions, code actions, signature help) with payload budgets
 - `packages/lsp-shared/client.js` — `LspClient` session lifecycle, initialize handshake, document sync, server request allowlist
 - `packages/lsp-shared/utf8.js` — Pure-JS UTF-8 codec (`encodeUtf8`/`decodeUtf8`/`utf8ByteLength`; no TextEncoder/TextDecoder)
-- `packages/lsp-shared/typescript-language-server.js` — Shared canonical bridge factory for TypeScript/JavaScript
+- `packages/lsp-shared/bridge.js` — `createLspBridge` factory (capabilities, document tracking, push/pull diagnostics, refresh)
+- `packages/lsp-shared/typescript-language-server.js` — TypeScript/JavaScript wrapper around `createLspBridge`
 - `packages/lsp-rust/{package.json,dist/index.js,dist/load.js,dist/server.js}`
 - `packages/lsp-typescript/{package.json,dist/index.js,dist/load.js,dist/server.js}`
 - `packages/lsp-javascript/{package.json,dist/index.js,dist/load.js,dist/server.js}`
 - `packages/lsp-markdown/{package.json,dist/index.js,dist/load.js,dist/server.js}`
-- `scripts/update-first-party-lsp-shared.mjs` — deterministic copy distributor with freshness check
-- `src/server/document_analysis.rs` — generic document-analysis worker lifecycle
+- `src/packages/bundled-inventory.toml` — `lsp-shared` helper + export map
+- `src/server/document_analysis.rs` — generic document-analysis worker lifecycle and workspace-context routing
+- `src/server/connection/documents.rs` — tab workspace handoff into analysis workers
+- `src/server/js_runtime/{mod.rs,worker.rs}` — domain-runtime analyzer invocation and context installation
 - `src/server/ops/document_analysis.rs` — `register_document_analyzer` deno op
 - `src/server/language_server.rs` — lossless `sendBytes`/`readBytes` ops
-- `src/server/js_runtime.rs` — `op_clay_language_server_send_bytes`/`read_bytes`, worker invocation
-- `src/packages/record.rs` — `validate_api_dependency_permissions` allowlist
+- `src/server/js_runtime/mod.rs` — `op_clay_language_server_send_bytes`/`read_bytes`, worker invocation
+- `src/packages/record/mod.rs` — `validate_api_dependency_permissions` allowlist
 - `src/perf/budgets.rs` — all Phase 18.21 typed budget constants
 - `tests/fixtures/lsp/fake-server/{profiles,session,server,matrix.test,mjs}` — generic deterministic fake LSP harness
 - `tests/lsp_bridge.rs` — shared adapter freshness, package manifests, fake-server matrix
+- `packages/lsp-shared/adapter.test.mjs` — host-stamped language-server session options plus the incremental position-index invariants (edit cost, round-trip oracle, CRLF/multibyte, long line)
+- `packages/lsp-rust/rust-package.test.mjs` — bounded decoration viewport regression
 - `tests/lsp_real_servers.rs` — environment-gated real-server smoke
 - `tests/language_server_authority.rs` — session cap, revoke, byte-op limits, process lifecycle
 - `tests/performance_protocol.rs` — typed budget lock assertions
@@ -47,7 +52,7 @@ Each package declares an explicit fixed `language-server` capability contributio
 
 ## Shared LSP 3.17 Adapter (`packages/lsp-shared/`)
 
-One canonical adapter ships in `packages/lsp-shared/` and is deterministically copied into each language package's `dist/shared/` directory by `scripts/update-first-party-lsp-shared.mjs`. Packages import these copies; no package imports from another package's directory.
+One canonical adapter ships in `packages/lsp-shared/`. First-party bridges import it through trusted inventory specifiers (`lsp-shared/client.js` and siblings). The helper is not `loadPackage`-able; third-party runtimes cannot resolve those specifiers.
 
 ### `framing.js`
 
@@ -62,12 +67,56 @@ Bounded Content-Length frame encode/decode with hard limits:
 
 ### `positions.js`
 
-`VersionedDocument` with UTF-8/UTF-16/UTF-32 position encoding:
-- `applyByteChange(byteOffset, oldEnd, newText)` → updates cached encoder output
-- `byteOffsetToPosition(byteOffset)` → `{line, character}` in negotiated encoding
-- `positionToByteRange(position)` → `{byteStart, byteEnd}` in UTF-8
-- `normalizeRoot(path)` → rejects backslash, double-slash, dot/dotdot segments, query, hash, and percent-encoded slashes
-- `isInRoot(uri, root)` → validates file URI containment within canonical root
+`VersionedDocument` keeps document lines in an **implicit treap of 64-line
+chunks** (`CHUNK_LINES`), so an incremental edit costs O(log lines) tree work
+instead of a full re-encode. Each leaf stores its line texts with per-line widths
+(UTF-16 units, UTF-8 bytes) and subtree totals `lines`/`w16`/`w8`; `join`/`split`
+rebuild only the nodes on the touched paths and share the untouched subtrees with
+the previous root, and `replaceRange(start, count, texts)` (split, split, join,
+join) is the only structural edit. Priorities come from the same deterministic
+xorshift32 PRNG as `frontend/src/editor/position-index.ts`, so one edit sequence
+always produces the same tree shape.
+
+Invariants:
+- **Every line carries a phantom trailing `\n`** in the width aggregates, so the
+document's UTF-8 length is the root's `w8 − 1`: `get byteLength` is O(1) and
+needs no scan.
+- Line content excludes that newline, and a trailing CR is stripped before
+conversion (`strippedLine`); `#lineBounds(line).end` subtracts the stripped bytes,
+which is what keeps LSP CRLF positions on the right offsets.
+- Unpaired surrogates are rejected while a leaf is built
+(`lsp.invalid_utf8: unpaired surrogate`), so the tree can never hold text that
+`encodeUtf8` refuses.
+- Each edit produces a new root that shares untouched subtrees with the previous
+one; no version history is retained, so a reader sees either the pre-edit or the
+post-edit tree.
+
+API:
+- `constructor(text, version, encoding)` / `reset(text, version)` — full sync
+(`didOpen`, full-content `didChange`); rebuilds the tree from `text.split("\n")`.
+- `applyByteChange({ baseVersion, version, byteStart, byteEnd, text })` —
+incremental sync; returns the affected `{start, end}` position range in the
+negotiated encoding and rejects unordered or stale versions
+(`lsp.stale_document`).
+- `byteToPosition(offset)` / `positionToByte(position)` / `rangeToBytes(range)` —
+offset↔position conversion in the negotiated encoding (UTF-8 reports bytes,
+UTF-16 code units, UTF-32 scalars).
+- `get text` / `get bytes` — lazy O(n) materialization out of the tree; callers
+that need only the size use `get byteLength` (O(1)). Reading `bytes.length`
+forces a whole-document UTF-8 re-encode, which is why the viewport and refresh
+paths use `byteLength`.
+- Module helpers: `rootPathToFileUri`, `pathToFileUri`, `fileUriToRelative`
+(canonical-root containment, `lsp.out_of_root`) and `POSITION_ENCODINGS`.
+
+Costs and errors: `locateByte` descends by `w8` totals and then scans one line's
+code points (`scanLine`), so a conversion is O(log lines + line bytes) with no
+document-wide work; it rejects an offset that splits a UTF-8 code point or lands
+inside a line ending. `applyByteChange` is therefore O(log lines + edited line +
+inserted lines) — measured flat in document size at 0.014–0.021 ms/edit across
+64 KiB/256 KiB/1 MiB/8 MiB (`code-reviews/2026-09-19-plan128-task3/`). A single
+multi-megabyte line still costs an O(line) scan: the frontend's scan blocks were
+not ported, the code carries a `ponytail:` note, and
+`long_single_line_does_not_regress` bounds it.
 
 ### `mapping.js`
 
@@ -116,7 +165,7 @@ The generic document-analysis coordinator is the Rust-side lifecycle for all fou
 - Max 4 workers globally (`DOCUMENT_ANALYSIS_MAX_WORKERS`), each with 32 synchronized documents and 8 MiB retained text.
 - Worker identity: `WorkerKey { package_name, contribution, workspace_root_id, generation }`.
 - Graceful shutdown: 2-second drain then kill within 5 seconds.
-- Workers are dedicated `JsRuntime` instances sharing `ClayOpState` via `Arc<Mutex<PackageService>>` with `language_server_authority_sealed: true`.
+- Workers are bounded mailbox routes through the owning persistent domain `JsRuntime`; document-analysis invocations share that runtime and its `ClayOpState`/`PackageService`, with `language_server_authority_sealed: true`.
 - `cancel_package`, `cancel_root`, and `cancel_generation` lifecycle hooks remove worker routes and shut down matching workers.
 
 ### Input mailbox
@@ -134,15 +183,41 @@ The generic document-analysis coordinator is the Rust-side lifecycle for all fou
 
 ### Integration points
 
-- `CompletionRequest` in `connection.rs` attempts dynamic provider resolution first (matching package prefix and trigger characters), falls back to static completion.
+- `CompletionRequest` in `connection/mod.rs` attempts dynamic provider resolution first (matching package prefix and trigger characters), falls back to static completion.
 - `LanguageIntelligenceRequest` routes through `worker_for_document` to registered analyzer handlers.
 - `EditAck` calls `document_changed` on both `CompletionCoordinator` and `LanguageIntelligenceCoordinator` to abort stale in-flight work.
 - `IpcServer::reload_runtime_generation` opens refreshed documents through `document_analysis.open_document`.
+
+## Analyzer workspace context and GUI follow-up (2026-08-21)
+
+A document analyzer is invoked from a connection-owned tab workspace, not the
+empty default workspace used to create persistent JavaScript domain workers.
+`DocumentAnalysisCoordinator` retains that workspace on the per-root worker;
+`RuntimeCommand::DocumentAnalysis` carries it into `run_runtime_worker`, which
+calls `ClayOpState::set_runtime_context` before package code runs. This keeps
+`startLanguageServerSession({ contribution, workspaceRootId })` bound to the
+current canonical root and exact grant. The package cannot supply a package
+name to bypass host provenance.
+
+The GUI regression chain also exposed a shared adapter contract bug: the
+facade rejects the old caller-supplied `package` field, and the adapter must read
+`VersionedDocument.byteLength`, not `bytes.length` — the array accessor forces a
+whole-document re-encode. Both are covered by the package adapter tests. (Plan
+128 added the O(1) `byteLength` accessor; before it, every refresh paid the
+re-encode.) `scripts/capture-ui-review.sh --fixture ui-review-rust` keeps
+XDG config/data/socket state private while allowing host `HOME` only so the
+fixed `rustup` descriptor can find its installed toolchain. The 2026-08-21
+run reached the Rust bridge with no `analysis.worker_failed` and emitted an
+inlay decoration set; visible/toggled-off screenshots remain explicitly
+`UNRESOLVED` because rust-analyzer's first response was empty during warm-up
+and this Wayland host has no keyboard input backend. Evidence stays under
+`code-reviews/screenshots/2026-08-20-phase28.7-followups/`.
 
 ## Four Package Policies
 
 ### `@clay/lsp-rust` (rust-analyzer)
 
+- **Factory**: `createLspBridge({ languageId: "rust", diagnostics: "pull", features: ["completion", "hover", "definition", "codeAction", "signatureHelp", "inlayHint"] })`. `inlayHint` opts into the refresh-time decoration path; it is not a `languageIntelligenceProviders.features` value.
 - **Launch**: `rustup run stable rust-analyzer` (rustup proxy, not bare `rust-analyzer` — the binary is a rustup proxy that loses argv[0] dispatch).
 - **Sync**: incremental (`textDocumentSyncKind.Incremental`).
 - **Semantic tokens**: full + delta (`semanticTokens/full` + `semanticTokens/full/delta`).
@@ -153,7 +228,7 @@ The generic document-analysis coordinator is the Rust-side lifecycle for all fou
 
 ### `@clay/lsp-typescript` and `@clay/lsp-javascript` (typescript-language-server)
 
-- **Shared factory**: `packages/lsp-shared/typescript-language-server.js` is imported by both packages; they differ only in `apiPrefix`, contribution ID, language IDs, and completion trigger characters.
+- **Shared factory**: both packages wrap `createLspBridge` via `lsp-shared/typescript-language-server.js`; they differ only in `apiPrefix`, contribution ID, language IDs, and completion trigger characters.
 - **Launch**: `typescript-language-server --stdio`; TypeScript 5.9.3 globally installed alongside (TypeScript 7.x removed `tsserver.js`).
 - **Sync**: incremental.
 - **Semantic tokens**: full-only (no delta).
@@ -164,6 +239,7 @@ The generic document-analysis coordinator is the Rust-side lifecycle for all fou
 
 ### `@clay/lsp-markdown` (Marksman)
 
+- **Factory**: `createLspBridge({ languageIdsByExtension, diagnostics: "push", features without signatureHelp })`.
 - **Launch**: `marksman server` (the `server` subcommand is required).
 - **Sync**: full document only (change:1, openClose:true). Marksman does not advertise incremental sync.
 - **Semantic tokens**: full-only (no delta). Legend has 3 tokenTypes (`class`, `class`, `enumMember`).
@@ -179,7 +255,9 @@ All four packages share the same manifest structure:
 - `capabilities: ["language-server"]` (not `permissions` — language-server is a prohibited authority that cannot be requested by default).
 - Fixed `executable`, literal `args`, and explicit `inheritEnvironment` (empty array for all four).
 - `completion-provider` permission with `runtimeBridge: true`, `priority: 100`, `exclusive: false`, and `exportName: "provideCompletion"`.
-- `languageIntelligenceProviders` with mode-scoped features matching what each server advertises.
+- `languageIntelligenceProviders` with mode-scoped features matching what each server advertises; inlay hints stay outside this closed intelligence-feature enum.
+- `createLspBridge` features are opt-in. When `inlayHint` is present, the bridge advertises `textDocument.inlayHint`, requests bounded hints during refresh, maps Parameter/Type hints to Before/After decoration overlays, and publishes a separate `inlayHint` decoration set.
+- The bridge calls `startLanguageServerSession` with only `{ contribution, workspaceRootId }`; the host-stamped executing package owns package identity. Decoration viewports use the shared O(1) `VersionedDocument.byteLength` byte count (`bytes.length` would re-encode the document on every refresh).
 - API prefix (`apiPrefix`) must match all contribution IDs (e.g., `lsp-rust` prefix → `lsp-rust.server`, `lsp-rust.bridge`).
 
 ## Security Boundary
@@ -188,7 +266,8 @@ All four packages share the same manifest structure:
 - Grant-before-load: `authorizeLanguageServer` must be called during configuration evaluation and sealed before package code executes. No bundled/implicit grant.
 - Byte bounds: send/read operations enforce `LANGUAGE_SERVER_MESSAGE_BUDGET_BYTES` (1 MiB); oversize frames are rejected before reaching the child.
 - Malformed framing: `FrameDecoder` rejects invalid Content-Length, non-ASCII headers, truncated frames, and non-JSON-RPC objects.
-- External URI denial: file URIs outside the approved workspace root are rejected by `isInRoot`.
+- External URI denial: file URIs outside the approved workspace root are rejected by `fileUriToRelative` (`lsp.out_of_root`), which also rejects non-`file:` schemes, credentials, ports, queries, fragments, and percent-encoded path separators.
+- Position index scope: `positions.js` processes host-provided document text only — no paths, network, or package-supplied offsets bypass validation. It rejects unpaired surrogates at ingest and edit time (so a package cannot make the bridge emit malformed UTF-8 offsets) and range-checks every offset against the document's byte length.
 - Inert workspace edits: `codeActionsToClay` already filters items with `.edit`; no mutating operations reach the editor.
 - Containment language: all four package docs repeat the trusted-subprocess model (same-user OS authority, not OS sandboxing).
 
@@ -230,15 +309,25 @@ Base packages remain usable without bridge grants. Removing a bridge `loadPackag
 - `tests/lsp_real_servers.rs` — runs per-server Node smoke tests; skips with reason when binary unavailable
 - Each bridge has a `*-real-smoke.test.mjs` with document fixtures, polling loops, and clean shutdown
 
+### Shared adapter position index (`packages/lsp-shared/adapter.test.mjs`)
+
+- `position_roundtrip_after_incremental_edits` — randomized edit driver compares every line and offset against a naive line-table oracle in all three encodings, and asserts `byteLength` equals the materialized `bytes` length
+- `crlf_and_multibyte_lines_track` — CRLF and multi-byte/astral lines keep conversions and boundary errors exact
+- `edit_cost_flat_in_document_size` — median edit time at 1 MiB must stay within a small constant factor of 64 KiB
+- `long_single_line_does_not_regress` — a 1 MiB single-line document converts inside a fixed budget
+- Parity with the pre-plan-128 full-rebuild implementation (identical results and error messages across 25 seeds × 60 edits × 3 encodings) plus adapter-level edit+refresh timings: `code-reviews/2026-09-19-plan128-task3/`
+
 ### Package integration tests
 
 - `*-package.test.mjs` — 3 tests per package covering manifest, feature mapping, error/identity rejection
 - `tests/lsp_bridge.rs` — Rust-side manifest validation and fixture loading
-- `src/server/js_runtime.rs` — grant-before-load, registration, and controlled-module bridge invocation
+- `src/server/js_runtime/mod.rs` — grant-before-load, registration, controlled-module bridge invocation, and analyzer workspace context
+- `src/server/document_analysis.rs` — analyzer workspace/session lifecycle regression
 - `tests/completion_provider.rs` — priority 100 non-exclusive merge, `serverDisableCompletion` override
 - `tests/range_diagnostics.rs` — diagnostic composition (Tree-sitter recovery suppression)
 - `tests/language_server_authority.rs` — lossless bytes, session cap, revoke, process lifecycle
 - `tests/editor_performance_invariants.rs` — worker capacity constants, no LSP wire types in hot paths
+- `scripts/capture-ui-review.sh --fixture ui-review-rust` — GUI worker/inlay evidence with explicit unresolved host blockers
 - `tests/performance_protocol.rs` — 20 typed budget lock assertions
 
 ## Primitive Coverage
@@ -248,16 +337,17 @@ Base packages remain usable without bridge grants. Removing a bridge `loadPackag
 | `LanguageServerSession` (lossless bytes) | Opaque child stdin/stdout | `src/server/language_server.rs`, `src/server/ops/language_server.rs` |
 | `DocumentAnalysisCoordinator` | Worker lifecycle, input/output channels, document sync | `src/server/document_analysis.rs` |
 | `DocumentAnalyzerRegistration` | Package-owned analyzer identity and handler | `src/server/ops/document_analysis.rs` |
-| `CompletionCoordinator` (dynamic adapter) | LSP completion routed through analyzer worker | `src/server/completion.rs`, `src/server/connection.rs` |
+| `CompletionCoordinator` (dynamic adapter) | LSP completion routed through analyzer worker | `src/server/completion.rs`, `src/server/connection/mod.rs` |
 | `LanguageIntelligenceCoordinator` | Hover, definition, code action, signature help | `src/server/language_intelligence.rs` |
-| `DecorationSet` (Semantic) | Semantic token publication | `src/protocol/decorations.rs`, `src/server/decorations.rs` |
+| `DecorationSet` (Semantic/Link/InlayHint) | Semantic tokens, typed link targets, and bounded inlay overlay labels | `src/protocol/decorations.rs`, `src/server/decorations.rs`, `src/masonry_pane_document.rs` |
 | `DiagnosticSet` (source-keyed) | LSP diagnostic publication | `src/protocol/diagnostics.rs`, `src/server/diagnostics.rs` |
 | `CompletionResultSet` | LSP completion items | `src/protocol/completion.rs` |
 | `LspClient` / shared adapter | All LSP wire protocol | `packages/lsp-shared/{framing,positions,mapping,client}.js` |
 
 ## Related
 
-- [Phase 18.21 LSP Bridge Primitive Review](phase18.21-lsp-bridge-primitive-review.md)
+- [Frontend Edit Synchronization](../flows/frontend-edit-synchronization.md) — the CodeMirror-side `position-index.ts` this treap mirrors
+- [Phase 18.21 LSP Bridge Primitive Review](../archive/phase18.21-lsp-bridge-primitive-review.md)
 - [Language Intelligence](language-intelligence.md)
 - [Language Server Process Service](language-server-process-service.md)
 - [Embedded JavaScript Runtime](embedded-js-runtime.md)

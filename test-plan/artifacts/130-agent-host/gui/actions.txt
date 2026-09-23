@@ -1,0 +1,19 @@
+== 01 rest
+resume:0 lane:1
+refusing to capture: compositor bounds (632, 39, 1280, 1151) are not inside Clay's AT-SPI frame (0, 0, 1332, 1203); the crop would come from an unrelated window
+== 02 palette
+action press on 'palette Ctrl\nX\nO' -> True
+resume:1
+refusing to capture: compositor bounds (632, 39, 1280, 1151) are not inside Clay's AT-SPI frame (0, 0, 1332, 1203); the crop would come from an unrelated window
+== 03 session scope
+action press on 'Session' -> True
+rows:16
+refusing to capture: compositor bounds (-325, 39, 1280, 1151) are not inside Clay's AT-SPI frame (0, 0, 1332, 1203); the crop would come from an unrelated window
+== 04 hide lane
+action press on 'lane Ctrl\nX\nP' -> True
+lane:0
+refusing to capture: compositor bounds (1845, 39, 1280, 1151) are not inside Clay's AT-SPI frame (0, 0, 1332, 1203); the crop would come from an unrelated window
+== 05 restore lane
+action press on 'hide lane Ctrl\nX\nP' -> True
+lane:1
+refusing to capture: compositor bounds (1845, 39, 1280, 1151) are not inside Clay's AT-SPI frame (0, 0, 1332, 1203); the crop would come from an unrelated window

@@ -5,24 +5,30 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 ## Documentation Contract
 
 - [Clay JS API Markdown Schema](reference/clay-js-api/schema.md) — required frontmatter and body sections for public Clay JavaScript/TypeScript API documentation.
-- [Clay Configuration System](reference/clay-js-api/configuration.md) — `~/.config/clay/init.js`, modular user configuration, key bindings, and configuration as documented Clay JS APIs.
+- [Clay Configuration System](reference/clay-js-api/configuration.md) — `~/.clay/init.js`, modular user configuration, key bindings, and configuration as documented Clay JS APIs.
+- [Canonical Starter Configuration](../examples/config/README.md) — what a new user copies into `~/.clay/`: `init.js`, package loading, and the coding agent's declarative config (`agents/coding-agent/skills.json`, `mcp.json`, `SYSTEM.md`, seeded skills, `tool-caps.json`).
 - [Clay JS API Current Functionality Inventory](reference/clay-js-api/inventory.md) — Phase 7 public/internal API authority and runtime-path classifications.
 
 ## Developer Guides
 
-- [Clay Primitives Reference](reference/primitives/index.md) — Phase 16 primitives navigation index, prioritized backlog, Phase 17 prerequisite checklist, and Phase 18.16 tiered syntax-engine contract.
+- [Clay Primitives Reference](reference/primitives/index.md) — primitive navigation index, Plan 099 incremental position/atomic viewport/syntax-session contracts, and Phase 18.16 tiered syntax-engine contract.
 - [Existing Primitive Audit](reference/primitives/audit.md) — Phase 16 static audit of behavior manifest, SDUI, configuration, file/workspace, document, and observability primitives.
-- [Primitive Registry Schema](reference/primitives/registry.md) — Phase 16 primitive category taxonomy, registry schema, Clay JS API shape stubs, security boundaries, and advisory primitive budgets.
+- [Primitive Registry Schema](reference/primitives/registry.md) — primitive category taxonomy, current internal editor-performance rows, Clay JS API shape stubs, security boundaries, and payload/queue budgets.
 - [Documentation Validation Contracts](reference/documentation-contracts.json) — machine-readable primitive/package document inventory and narrow security-marker set used by generic non-mutating validators.
 - [Rendering Customization Strategy](reference/primitives/rendering-strategy.md) — Phase 16 inert rendering declarations, decoration update shape, SDUI reuse, client rendering attachment points, budgets, and security boundaries.
-- [Clay Shell and Package UI/Layout Strategy](reference/primitives/shell-layout-strategy.md) — Phase 18.1/18.2 shell vocabulary and runtime status, Phase 18.3 runtime-backed slot-aware package UI contribution contract, working area and pane/slot layout model, package UI/state/style contract, and Masonry implementation boundary.
-- [UI Components, Tokens, and Conformance](reference/ui-components.md) — navigation and contract entry for Clay's reusable UI surface: links the component catalog, token catalog, chrome primitives, package authoring guide, Phase 20.7 conformance rules, and the create-plan UI requirements.
+- [Clay Shell and Package UI/Layout Strategy](reference/primitives/shell-layout-strategy.md) — Phase 18.1/18.2 shell vocabulary and runtime status, Phase 18.3 runtime-backed slot-aware package UI contribution contract, working area and pane/slot layout model, package UI/state/style contract, and the Tauri/React client implementation boundary.
+- [Clay Design System — Quiet Instrument](../DESIGN.md) — normative design language and interaction specification: laws, values, geometry, materials, motion, typography, state language, per-surface component recipes, shell composition, accessibility invariants, retired patterns, review checklist, and the design-system implementation profile.
+- [UI Components, Tokens, and Conformance](reference/ui-components.md) — navigation and contract entry for Clay's reusable UI surface: links the design system specification, component catalog, token catalog, chrome primitives, package authoring guide, Phase 20.7 conformance rules, the create-plan UI requirements, and the plan 124 agent-lane and composer `/` palette boundary extended by plan 125 (the composer palette is the only transient selection surface since plan 125, which retired the window-centered sheet and gave the palette's pickers a shielded secret stage).
+- [UI Design Systems](reference/ui-design-systems.md) — public specification for typed UI design-system recipe architecture, contribution schema, fallback rules, accessibility invariants, the shipped design system (`@clay/design-instrument`, with the `@clay/core` baseline), the composited contrast gate, and programmatic activation (Plans 101–104, 118).
+- [UI Design System Visual Direction Contract](development/ui-design-system-visual-direction.md) — approved direction contract (Quiet Instrument), system comparison grammar, accessibility gates, and migration traceability.
+- [Icon Packs](reference/icon-packs.md) — public specification for bounded icon-pack contributions: semantic key set, geometry schema and budgets, activation/lifecycle states, fallback rules, accessibility invariants, and security validation (Plan 112).
+- [UI Design System Recipe Matrix](development/ui-design-system-recipe-matrix.md) — complete component, slot, state, property, and fallback matrix for package-contributed UI design systems (Plan 101).
 - [UI Chrome Primitives](reference/primitives/ui-chrome-primitives.md) — Phase 20.2 native chrome primitive layer, token-driven design, interaction states, accessibility roles, routing, conformance contract, and package authoring contract.
-- [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — cancellable server-side parse tasks, tiered syntax engines, non-blocking open, viewport-prioritized results, diagnostics, budgets, and security boundaries.
+- [Incremental Parse and Background Parse Update Strategy](reference/primitives/parse-update-strategy.md) — bounded per-document syntax sessions, tiered syntax engines, non-blocking open, atomic viewport patches, diagnostics, budgets, and security boundaries.
 - [Markdown Mode POC Requirements](reference/primitives/markdown-mode-requirements.md) — Phase 16 Markdown mode Phase 18 readiness checklist, primitive prerequisite map, performance targets, API stubs, and first-party package security scope.
 - [Package Primitive Security and Provenance Requirements](reference/primitives/package-security.md) — Phase 16 package primitive prefix, permission, validation, conflict, prohibited-authority, and provenance model.
 - [Phase 17 Package Loading Runtime Facades](reference/primitives/package-loading.md) — package load/runtime boundaries, conflict handling, runtime facade wiring, hot-path policy, and Phase 18 decoration/parse handoff.
-- [Creating Clay Packages](reference/packages/creating-packages.md) — package authoring guide covering manifests, explicit loading, tiered syntax engines, UI/layout, components, input, actions, logic, data/state, configuration, styling/theme tokens, permissions, documentation, tests, and current/planned shell architecture.
+- [Creating Clay Packages](reference/packages/creating-packages.md) — package authoring guide covering manifests, explicit loading, tiered syntax engines, Plan 099 performance boundaries, UI/layout (including the Plan 124 agent-lane and composer `/` palette contract and the Plan 125 single-surface picker/halo contract), components, input, actions, logic, data/state, configuration, styling/theme tokens, permissions, documentation, tests, and current/planned shell architecture.
 - [@clay/markdown Package](reference/packages/markdown.md) — first-party Markdown full-mode package: Tier 1 native grammar, vocabulary styleMap, behavior manifest, base completion provider, and runtime boundary.
 - [@clay/rust Package](reference/packages/rust.md) — first-party Rust full-mode package: Tier 1 native grammar, vocabulary styleMap, behavior manifest, base completion provider, and runtime boundary.
 - [@clay/typescript Package](reference/packages/typescript.md) — first-party TypeScript full-mode package: Tier 1 native grammar, vocabulary styleMap, behavior manifest, base completion provider, and runtime boundary.
@@ -33,8 +39,9 @@ This is the master Markdown index for Clay's public, programmatic documentation.
 - [Range Diagnostics](reference/primitives/diagnostics.md) — Phase 18.17 byte-range diagnostic primitive for explicit analyzers, theme-owned squiggles, and future LSP bridges; Tree-sitter highlighting has no diagnostic authority.
 - [Language Intelligence and LSP 3.17 Bridge Contract](reference/primitives/language-intelligence.md) — Phase 18.20 analyzer-neutral intelligence primitives, `language-server` authority, and the LSP 3.17 → Clay mapping contract for Phase 18.21 bridge packages.
 - [Launch and GUI Smoke Validation](development/launch-and-gui-smoke.md) — command-first `cargo run`, tiered syntax-engine smoke, `smoke-gui`, foreground server/client, GUI status, and local IPC validation.
+- [Distribution](development/distribution.md) — `@arnilo/clay` npm wrapper, curl installer, channel marker contract, publish dry-run verification, and rollback.
 - [File Open, Save, and Reload Workflow](development/file-open-save-reload-workflow.md) — selected-file and workspace open, server-first save/reload, dirty-state tracking, conflict recovery menus, multi-document sessions, capability tokens, platform support matrices, and manual smoke steps.
-- [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixture generation, Criterion baseline commands, Phase 14 budgets/guardrails, opt-in profiling hooks, and validation commands.
+- [Performance Fixtures and Baseline Workflow](development/performance.md) — deterministic large-file fixtures, Plan 099 traces/matrix, incremental editor bounds, Criterion baselines, opt-in profiling, and validation commands.
 - [UI Observability and SDUI Structural Regression](development/ui-observability.md) — headless SDUI structural regression coverage, status observability, window-driver smoke relationship, and deferred GPU-backed pixel snapshot path.
 - [Windows MSVC Development](development/windows.md) — Rust MSVC setup, Windows local named-pipe IPC notes, and validation commands.
 - [Accessibility (Phase 22.6)](development/accessibility.md) — window-model accessibility contract: roles/names for the tab bar, tab cards, and panes; polite screen-reader announcements; sanitization budgets; verification and known ceilings.
@@ -55,6 +62,7 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterCommand](reference/clay-js-api/commands/server-register-command.md) — `commands.serverRegisterCommand`
 - [serverRevealInTree](reference/clay-js-api/commands/server-reveal-in-tree.md) — `commands.serverRevealInTree`
 - [serverPublishDecorations](reference/clay-js-api/decorations/server-publish-decorations.md) — `decorations.serverPublishDecorations`
+- [serverPublishFoldingRanges](reference/clay-js-api/folding/server-publish-folding-ranges.md) — `folding.serverPublishFoldingRanges`
 - [serverPublishDiagnostics](reference/clay-js-api/diagnostics/server-publish-diagnostics.md) — `diagnostics.serverPublishDiagnostics`
 - [getConfigurationState](reference/clay-js-api/configuration/get-configuration-state.md) — `configuration.getConfigurationState`
 - [loadConfigurationModule](reference/clay-js-api/configuration/load-configuration-module.md) — `configuration.loadConfigurationModule`
@@ -74,9 +82,15 @@ The generated documentation registry must read this section as the explicit incl
 - [clientShowOpenDocuments](reference/clay-js-api/editor/client-show-open-documents.md) — `editor.clientShowOpenDocuments`
 - [clientRequestResync](reference/clay-js-api/editor/client-request-resync.md) — `editor.clientRequestResync`
 - [clientDismissRecovery](reference/clay-js-api/editor/client-dismiss-recovery.md) — `editor.clientDismissRecovery`
+- [toggleComment](reference/clay-js-api/editor/toggle-comment.md) — `editor.toggleComment`
+- [toggleListMarker](reference/clay-js-api/editor/toggle-list-marker.md) — `editor.toggleListMarker`
+- [rotateHeading](reference/clay-js-api/editor/rotate-heading.md) — `editor.rotateHeading`
+- [clientToggleFold](reference/clay-js-api/editor/client-toggle-fold.md) — `editor.clientToggleFold`
+- [toggleInlayHints](reference/clay-js-api/editor/toggle-inlay-hints.md) — `editor.toggleInlayHints`
 - [clientMoveCursor](reference/clay-js-api/editor/client-move-cursor.md) — `editor.clientMoveCursor`
 - [clientScrollTo](reference/clay-js-api/editor/client-scroll-to.md) — `editor.clientScrollTo`
 - [clientSetCursorStyle](reference/clay-js-api/editor/client-set-cursor-style.md) — `editor.clientSetCursorStyle`
+- [clientSetEditorLayout](reference/clay-js-api/editor/client-set-editor-layout.md) — `editor.clientSetEditorLayout`
 - [clientSetSelection](reference/clay-js-api/editor/client-set-selection.md) — `editor.clientSetSelection`
 - [clientSetViewport](reference/clay-js-api/editor/client-set-viewport.md) — `editor.clientSetViewport`
 - [clientAddCursor](reference/clay-js-api/editor/client-add-cursor.md) — `editor.clientAddCursor`
@@ -117,6 +131,7 @@ The generated documentation registry must read this section as the explicit incl
 - [clientTabMoveRight](reference/clay-js-api/shell/client-tab-move-right.md) — `shell.clientTabMoveRight`
 - [clientTabActivate](reference/clay-js-api/shell/client-tab-activate.md) — `shell.clientTabActivate`
 - [clientTabMoveTo](reference/clay-js-api/shell/client-tab-move-to.md) — `shell.clientTabMoveTo`
+- [toggleAgentLane](reference/clay-js-api/shell/toggle-agent-lane.md) — `shell.toggleAgentLane`
 - [serverListGitStatuses](reference/clay-js-api/git/server-list-git-statuses.md) — `git.serverListGitStatuses`
 - [serverRefreshGitStatus](reference/clay-js-api/git/server-refresh-git-status.md) — `git.serverRefreshGitStatus`
 - [bindKey](reference/clay-js-api/keybindings/bind-key.md) — `keybindings.bindKey`
@@ -127,12 +142,16 @@ The generated documentation registry must read this section as the explicit incl
 - [serverRegisterModePattern](reference/clay-js-api/modes/server-register-mode-pattern.md) — `modes.serverRegisterModePattern`
 - [serverLoadPackage](reference/clay-js-api/packages/server-load-package.md) — `packages.serverLoadPackage`
 - [loadPackage](reference/clay-js-api/packages/load-package.md) — `packages.loadPackage`
+- [authorize](reference/clay-js-api/packages/authorize.md) — `packages.authorize`
 - [serverRegisterParseHandler](reference/clay-js-api/parse/server-register-parse-handler.md) — `parse.serverRegisterParseHandler`
 - [serverRegisterSyntaxGrammar](reference/clay-js-api/syntax/server-register-syntax-grammar.md) — `syntax.serverRegisterSyntaxGrammar`
 - [setSyntaxEnginePreference](reference/clay-js-api/syntax/set-syntax-engine-preference.md) — `syntax.setSyntaxEnginePreference`
 - [setTheme](reference/clay-js-api/theme/set-theme.md) — `theme.setTheme`
 - [setAppearance](reference/clay-js-api/theme/set-appearance.md) — `theme.setAppearance`
 - [setTypography](reference/clay-js-api/theme/set-typography.md) — `theme.setTypography`
+- [setDesignSystem](reference/clay-js-api/theme/set-design-system.md) — `theme.setDesignSystem`
+- [setIconPack](reference/clay-js-api/theme/set-icon-pack.md) — `theme.setIconPack`
+- [settings.setDesignSystem](reference/clay-js-api/settings/set-design-system.md) — `settings.setDesignSystem`
 - [completionTriggerCharactersFromEditorRules](reference/clay-js-api/completion/completion-trigger-characters-from-editor-rules.md) — `completion.completionTriggerCharactersFromEditorRules`
 - [serverListCompletionProvidersForTrigger](reference/clay-js-api/completion/server-list-completion-providers-for-trigger.md) — `completion.serverListCompletionProvidersForTrigger`
 - [serverDisableCompletion](reference/clay-js-api/completion/server-disable-completion.md) — `completion.serverDisableCompletion`
@@ -161,6 +180,17 @@ The generated documentation registry must read this section as the explicit incl
 - [defineStack](reference/clay-js-api/sdui/define-stack.md) — `sdui.defineStack`
 - [publishTree](reference/clay-js-api/sdui/publish-tree.md) — `sdui.publishTree`
 - [clientOpenFolderDialog](reference/clay-js-api/workspace/client-open-folder-dialog.md) — `workspace.clientOpenFolderDialog`
+- [compact](reference/clay-js-api/agent/compact.md) — `agent.compact`
+- [searchSessions](reference/clay-js-api/agent/search-sessions.md) — `agent.searchSessions`
+- [setFullAutonomy](reference/clay-js-api/agent/set-full-autonomy.md) — `agent.setFullAutonomy`
+- [resumeRun](reference/clay-js-api/agent/resume-run.md) — `agent.resumeRun`
+- [sessionTree](reference/clay-js-api/agent/session-tree.md) — `agent.sessionTree`
+- [profileRegister](reference/clay-js-api/agent/profile-register.md) — `agent.profileRegister`
+- [skillRegister](reference/clay-js-api/agent/skill-register.md) — `agent.skillRegister`
+- [commandRegister](reference/clay-js-api/agent/command-register.md) — `agent.commandRegister`
+- [commandDispatch](reference/clay-js-api/agent/command-dispatch.md) — `agent.commandDispatch`
+- [knowledgeSetOptions](reference/clay-js-api/agent/knowledge-set-options.md) — `agent.knowledgeSetOptions`
+- [setRunOptions](reference/clay-js-api/agent/set-run-options.md) — `agent.setRunOptions`
 - [serverAddWorkspaceRoot](reference/clay-js-api/workspace/server-add-workspace-root.md) — `workspace.serverAddWorkspaceRoot`
 - [serverCancelListing](reference/clay-js-api/workspace/server-cancel-listing.md) — `workspace.serverCancelListing`
 - [serverCreateListingCancelToken](reference/clay-js-api/workspace/server-create-listing-cancel-token.md) — `workspace.serverCreateListingCancelToken`

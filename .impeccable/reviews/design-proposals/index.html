@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clay UI Design Proposals — 5 Directions</title>
+<style>
+/* ============ base reset ============ */
+*{box-sizing:border-box;margin:0;padding:0}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input{font:inherit}
+::selection{background:var(--acc);color:var(--acc-ink)}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ============ proposal token sets ============ */
+/* 1 — Blueprint Utilitarian (legible neobrutal) */
+[data-style="blueprint"][data-mode="dark"]{--bg:#101014;--sur:#17171d;--sur2:#1f1f27;--ink:#f2f0e9;--mut:#9895a6;--brd:#f2f0e9;--brd-soft:#3a3944;--acc:#7c6fff;--acc-ink:#0e0c1a;--ok:#3ecf8e;--warn:#ffd23f;--err:#ff5d5d;--bw:2px;--r:0px;--r-lg:0px;--sh:4px 4px 0 var(--ink);--sh-sm:2px 2px 0 var(--ink);--ui:"Avenir Next","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--ls:.02em;--chrome:700}
+[data-style="blueprint"][data-mode="light"]{--bg:#f1eee6;--sur:#faf8f2;--sur2:#e7e3d8;--ink:#161320;--mut:#6d6a7a;--brd:#161320;--brd-soft:#c9c4b6;--acc:#5b45ff;--acc-ink:#ffffff;--ok:#0c7a4d;--warn:#8a6100;--err:#b3261e;--bw:2px;--r:0px;--r-lg:0px;--sh:4px 4px 0 var(--ink);--sh-sm:2px 2px 0 var(--ink);--ui:"Avenir Next","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--ls:.02em;--chrome:700}
+/* 2 — Graphite Precision (modern minimal pro-tool) */
+[data-style="graphite"][data-mode="dark"]{--bg:#0b0d10;--sur:#12151a;--sur2:#1a1e25;--ink:#e8ebf0;--mut:#8b93a1;--brd:#2a313c;--brd-soft:#20262e;--acc:#58a6ff;--acc-ink:#04101f;--ok:#3fb950;--warn:#d29922;--err:#f85149;--bw:1px;--r:6px;--r-lg:10px;--sh:0 1px 2px rgba(0,0,0,.5),0 8px 24px -12px rgba(0,0,0,.6);--sh-sm:0 1px 2px rgba(0,0,0,.4);--ui:-apple-system,"SF Pro Text","Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:0em;--chrome:600}
+[data-style="graphite"][data-mode="light"]{--bg:#f6f7f9;--sur:#ffffff;--sur2:#eceef2;--ink:#1a202c;--mut:#5c6675;--brd:#d8dde5;--brd-soft:#e7ebf0;--acc:#0969da;--acc-ink:#ffffff;--ok:#1a7f37;--warn:#9a6700;--err:#cf222e;--bw:1px;--r:6px;--r-lg:10px;--sh:0 1px 2px rgba(16,24,40,.08),0 8px 24px -12px rgba(16,24,40,.16);--sh-sm:0 1px 2px rgba(16,24,40,.08);--ui:-apple-system,"SF Pro Text","Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:0em;--chrome:600}
+/* 3 — Terminal Phosphor (restrained CRT soul) */
+[data-style="phosphor"][data-mode="dark"]{--bg:#090d0a;--sur:#0e1410;--sur2:#15201a;--ink:#d5ead8;--mut:#7d947f;--brd:#24382a;--brd-soft:#182619;--acc:#3dff8c;--acc-ink:#03140a;--ok:#3dff8c;--warn:#ffc857;--err:#ff6b6b;--bw:1px;--r:2px;--r-lg:4px;--sh:0 0 0 1px var(--brd-soft),0 0 12px -6px rgba(61,255,140,.25);--sh-sm:0 0 8px -4px rgba(61,255,140,.2);--ui:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--mono:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--ls:.08em;--chrome:600}
+[data-style="phosphor"][data-mode="light"]{--bg:#f1f5f0;--sur:#fbfdfb;--sur2:#e2eae1;--ink:#122016;--mut:#5a6f5e;--brd:#9db8a0;--brd-soft:#d3e0d3;--acc:#0a7a3d;--acc-ink:#ffffff;--ok:#0a7a3d;--warn:#8a6100;--err:#b3261e;--bw:1px;--r:2px;--r-lg:4px;--sh:0 1px 0 rgba(18,32,22,.12);--sh-sm:0 1px 0 rgba(18,32,22,.1);--ui:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--mono:ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,monospace;--ls:.08em;--chrome:600}
+/* 4 — Warm Analog (the "clay" material identity) */
+[data-style="analog"][data-mode="dark"]{--bg:#181210;--sur:#211a16;--sur2:#2b221c;--ink:#f0e4d6;--mut:#a08d7c;--brd:#3d3128;--brd-soft:#2e251f;--acc:#e07a52;--acc-ink:#201009;--ok:#7fbf7f;--warn:#e0b354;--err:#e06c6c;--bw:1px;--r:10px;--r-lg:14px;--sh:0 2px 10px -2px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,235,210,.05);--sh-sm:0 1px 4px rgba(0,0,0,.4);--ui:"Avenir Next","Seravek","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:.01em;--chrome:600}
+[data-style="analog"][data-mode="light"]{--bg:#f4ede3;--sur:#fdf9f2;--sur2:#ece2d3;--ink:#2b2118;--mut:#7d6c5c;--brd:#ddcfbc;--brd-soft:#e9dfd0;--acc:#c0562f;--acc-ink:#fff8f2;--ok:#3e7c4f;--warn:#8a6100;--err:#a63a2b;--bw:1px;--r:10px;--r-lg:14px;--sh:0 2px 10px -2px rgba(93,64,35,.18),inset 0 1px 0 #fff;--sh-sm:0 1px 4px rgba(93,64,35,.14);--ui:"Avenir Next","Seravek","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:.01em;--chrome:600}
+/* 5 — Glass Cockpit (matte instruments, glass only on overlays) */
+[data-style="cockpit"][data-mode="dark"]{--bg:#0d1117;--sur:#131a22;--sur2:#1a232e;--ink:#dbe7f4;--mut:#7f92a6;--brd:#243447;--brd-soft:#1b2735;--acc:#35d0ba;--acc-ink:#03201c;--ok:#35d0ba;--warn:#e3b341;--err:#f47067;--bw:1px;--r:8px;--r-lg:12px;--sh:0 1px 0 rgba(255,255,255,.03) inset,0 4px 16px -8px rgba(0,0,0,.6);--sh-sm:0 1px 2px rgba(0,0,0,.4);--ui:-apple-system,"SF Pro Text","Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:.04em;--chrome:600}
+[data-style="cockpit"][data-mode="light"]{--bg:#e9eef4;--sur:#f7fafc;--sur2:#dde5ee;--ink:#16222e;--mut:#5a6b7d;--brd:#c2cfdd;--brd-soft:#d8e1eb;--acc:#0d8f7f;--acc-ink:#ffffff;--ok:#0d8f7f;--warn:#8a6100;--err:#c0392b;--bw:1px;--r:8px;--r-lg:12px;--sh:0 1px 2px rgba(22,34,46,.1);--sh-sm:0 1px 2px rgba(22,34,46,.08);--ui:-apple-system,"SF Pro Text","Inter","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,monospace;--ls:.04em;--chrome:600}
+
+/* ============ page chrome (harness, not part of proposals) ============ */
+body{background:#08080a;color:#e8e8ea;font:14px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif;padding:20px;min-height:100vh}
+.harness{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.hbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hbar .pbtn{padding:7px 14px;border:1px solid #333;border-radius:8px;color:#aaa;font-weight:600;font-size:13px}
+.hbar .pbtn[aria-pressed="true"]{background:#e8e8ea;color:#111;border-color:#e8e8ea}
+.hbar .spacer{flex:1}
+.desc{border:1px solid #26262a;border-radius:10px;padding:14px 18px;background:#0d0d10;color:#c8c8cc;font-size:13px}
+.desc h2{color:#fff;font-size:16px;margin-bottom:4px}
+.desc .tags{display:flex;gap:6px;margin:6px 0 8px;flex-wrap:wrap}
+.desc .tag{border:1px solid #333;border-radius:99px;padding:1px 10px;font-size:11px;color:#9a9aa0}
+.desc b{color:#eee}
+.desc .cols{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-top:6px}
+@media(max-width:900px){.desc .cols{grid-template-columns:1fr}}
+
+/* ============ the sample shell ============ */
+.shell{background:var(--bg);color:var(--ink);font-family:var(--ui);border:var(--bw) solid var(--brd);border-radius:var(--r-lg);box-shadow:var(--sh);overflow:hidden;display:flex;flex-direction:column;height:640px;transition:background .18s,color .18s}
+.shell .label{font-weight:var(--chrome);letter-spacing:var(--ls);font-size:11px;color:var(--mut);text-transform:uppercase}
+[data-style="phosphor"] .shell .label{text-transform:uppercase}
+/* tab bar */
+.tabbar{display:flex;align-items:stretch;background:var(--sur);border-bottom:var(--bw) solid var(--brd-soft);min-height:40px}
+.brand{display:flex;align-items:center;padding:0 14px;font-weight:800;letter-spacing:var(--ls);font-size:12px;border-right:var(--bw) solid var(--brd-soft)}
+.brand i{width:8px;height:8px;background:var(--acc);display:inline-block;margin-right:8px;border-radius:calc(var(--r) * .5)}
+.tab{display:flex;align-items:center;gap:8px;padding:0 16px;font-size:12.5px;color:var(--mut);border-right:var(--bw) solid var(--brd-soft);font-family:var(--mono)}
+.tab.on{background:var(--bg);color:var(--ink);box-shadow:inset 0 2px 0 var(--acc)}
+[data-style="blueprint"] .tab.on{box-shadow:inset 0 -3px 0 var(--acc)}
+.tab .dot{width:6px;height:6px;border-radius:50%;background:var(--warn)}
+/* body */
+.body{flex:1;display:grid;grid-template-columns:200px 1fr 300px;min-height:0}
+@media(max-width:980px){.body{grid-template-columns:160px 1fr}.agent{display:none}}
+/* sidebar */
+.side{background:var(--sur);border-right:var(--bw) solid var(--brd-soft);padding:12px 8px;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.side .label{padding:0 8px 8px}
+.row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:var(--r);font-size:12.5px;font-family:var(--mono);color:var(--mut);border:var(--bw) solid transparent}
+.row:hover{background:var(--sur2);color:var(--ink)}
+.row.sel{background:var(--sur2);color:var(--ink);border-color:var(--brd)}
+[data-style="blueprint"] .row.sel{border-color:var(--ink);box-shadow:var(--sh-sm)}
+.row .g{color:var(--ok);font-style:normal}
+/* editor */
+.ed{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.edbar{display:flex;gap:6px;align-items:center;padding:8px 12px;border-bottom:var(--bw) solid var(--brd-soft);background:var(--sur)}
+.btn{padding:5px 12px;border:var(--bw) solid var(--brd);border-radius:var(--r);background:var(--sur2);color:var(--ink);font-weight:var(--chrome);font-size:12px;letter-spacing:var(--ls);box-shadow:var(--sh-sm);transition:transform .1s,box-shadow .1s}
+.btn:hover{transform:translate(-1px,-1px)}
+.btn:active{transform:translate(1px,1px);box-shadow:none}
+[data-style="graphite"] .btn,[data-style="analog"] .btn,[data-style="cockpit"] .btn{border-color:var(--brd);box-shadow:var(--sh-sm);font-weight:600}
+[data-style="graphite"] .btn:hover,[data-style="analog"] .btn:hover,[data-style="cockpit"] .btn:hover{transform:none;filter:brightness(1.08)}
+.btn.pri{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+[data-style="blueprint"] .btn.pri{border-color:var(--ink)}
+.btn.mut{background:transparent;color:var(--mut);border-color:var(--brd-soft)}
+.btn.dan{background:transparent;color:var(--err);border-color:var(--err)}
+.code{flex:1;padding:14px 0;font:12.5px/1.7 var(--mono);overflow:hidden;counter-reset:ln}
+.code .ln{display:flex;padding:0 14px}
+.code .ln::before{counter-increment:ln;content:counter(ln);width:2.2em;flex:none;color:var(--mut);opacity:.6;text-align:right;margin-right:1.2em}
+.kw{color:var(--acc)} .fn{color:var(--warn)} .st{color:var(--ok)} .cm{color:var(--mut);font-style:italic} .ty{color:var(--err)}
+[data-style="phosphor"] .kw{font-weight:700}
+.caret{display:inline-block;width:2px;height:1.1em;background:var(--acc);vertical-align:text-bottom;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+/* agent panel */
+.agent{border-left:var(--bw) solid var(--brd-soft);background:var(--sur);display:flex;flex-direction:column;min-height:0}
+.agent .head{padding:10px 12px;border-bottom:var(--bw) solid var(--brd-soft);display:flex;align-items:center;gap:8px}
+.agent .head .live{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.msgs{flex:1;padding:12px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.msg{border:var(--bw) solid var(--brd-soft);border-radius:var(--r);padding:8px 10px;font-size:12.5px;background:var(--bg)}
+.msg.user{border-color:var(--acc);box-shadow:var(--sh-sm)}
+.msg .who{display:block;margin-bottom:4px}
+.chip{display:inline-flex;align-items:center;gap:6px;margin-top:6px;padding:2px 8px;border:var(--bw) solid var(--brd-soft);border-radius:var(--r);font:11px var(--mono);color:var(--mut);background:var(--sur2)}
+.chip .ok{color:var(--ok)}
+.composer{padding:10px;border-top:var(--bw) solid var(--brd-soft);display:flex;gap:8px}
+.input{flex:1;background:var(--bg);border:var(--bw) solid var(--brd);border-radius:var(--r);padding:7px 10px;color:var(--ink);font-size:12.5px}
+.input::placeholder{color:var(--mut)}
+.input:focus{outline:2px solid var(--acc);outline-offset:0}
+[data-style="blueprint"] .input:focus{outline-offset:2px}
+/* status bar */
+.status{display:flex;align-items:center;gap:14px;padding:0 12px;min-height:30px;background:var(--sur);border-top:var(--bw) solid var(--brd-soft);font:11px var(--mono);letter-spacing:var(--ls);color:var(--mut)}
+.status .acc{color:var(--acc)}
+[data-style="cockpit"] .status{background:repeating-linear-gradient(90deg,transparent 0 7px,var(--brd-soft) 7px 8px) border-box,var(--sur);background-clip:padding-box}
+[data-style="cockpit"][data-mode] .status{background:var(--sur);position:relative}
+[data-style="cockpit"] .status::before{content:"";position:absolute;inset:0 0 auto 0;height:4px;background:repeating-linear-gradient(90deg,var(--brd) 0 1px,transparent 1px 8px);opacity:.7}
+.badge{padding:1px 8px;border:var(--bw) solid var(--brd);border-radius:var(--r);font:11px var(--mono);background:var(--sur2);color:var(--ink)}
+kbd{font:11px var(--mono);border:var(--bw) solid var(--brd);border-radius:var(--r);padding:1px 6px;background:var(--sur2);box-shadow:var(--sh-sm)}
+/* palette overlay: glass treatment lives HERE only (cockpit) */
+.scrim{position:fixed;inset:0;background:rgba(4,6,10,.55);display:flex;justify-content:center;padding-top:12vh;z-index:9}
+.scrim[hidden]{display:none}
+.palette{width:560px;max-width:92vw;height:min(360px,60vh);background:var(--sur);border:var(--bw) solid var(--brd);border-radius:var(--r-lg);box-shadow:var(--sh);display:flex;flex-direction:column;overflow:hidden}
+[data-style="cockpit"] .palette{background:color-mix(in srgb,var(--sur) 72%,transparent);backdrop-filter:blur(16px) saturate(1.3);border-color:color-mix(in srgb,var(--ink) 18%,transparent)}
+.palette .pin{padding:12px 14px;border-bottom:var(--bw) solid var(--brd-soft);font:13px var(--mono);color:var(--ink);display:flex;gap:10px}
+.palette .pin .p{color:var(--acc)}
+.prow{padding:9px 14px;display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--mut);border-left:3px solid transparent}
+.prow.sel{background:var(--sur2);color:var(--ink);border-left-color:var(--acc)}
+.prow .src{font:10.5px var(--mono);color:var(--mut)}
+</style>
+</head>
+<body data-style="blueprint" data-mode="dark">
+<div class="harness">
+  <div class="hbar" role="toolbar" aria-label="Proposal switcher">
+    <button class="pbtn" data-p="blueprint" aria-pressed="true">1 · Blueprint Utilitarian</button>
+    <button class="pbtn" data-p="graphite" aria-pressed="false">2 · Graphite Precision</button>
+    <button class="pbtn" data-p="phosphor" aria-pressed="false">3 · Terminal Phosphor</button>
+    <button class="pbtn" data-p="analog" aria-pressed="false">4 · Warm Analog</button>
+    <button class="pbtn" data-p="cockpit" aria-pressed="false">5 · Glass Cockpit</button>
+    <span class="spacer"></span>
+    <button class="pbtn" id="modeBtn" aria-pressed="false">Light mode</button>
+    <button class="pbtn" id="palBtn">⌘K palette</button>
+  </div>
+  <div class="desc" id="desc"></div>
+
+  <div class="shell" aria-label="Clay sample shell">
+    <div class="tabbar">
+      <span class="brand"><i></i>CLAY</span>
+      <span class="tab on">agent.rs <span class="dot" title="unsaved"></span></span>
+      <span class="tab">notes.md</span>
+      <span class="tab">+</span>
+    </div>
+    <div class="body">
+      <nav class="side" aria-label="Workspace">
+        <span class="label">Workspace</span>
+        <span class="row sel"><i class="g">⌄</i>src</span>
+        <span class="row" style="padding-left:22px">agent.rs</span>
+        <span class="row" style="padding-left:22px">main.rs</span>
+        <span class="row"><i class="g">⌄</i>packages</span>
+        <span class="row" style="padding-left:22px">markdown/</span>
+        <span class="row">Cargo.toml</span>
+      </nav>
+      <main class="ed">
+        <div class="edbar">
+          <button class="btn pri">Save</button>
+          <button class="btn">Reload</button>
+          <button class="btn mut">Close</button>
+          <button class="btn dan">Discard</button>
+          <span style="flex:1"></span>
+          <span class="badge">rust</span> <kbd>⌘S</kbd>
+        </div>
+        <div class="code">
+          <div class="ln"><span><span class="cm">// agent host: prism bridge</span></span></div>
+          <div class="ln"><span><span class="kw">pub fn</span> <span class="fn">spawn_agent</span>(cfg: <span class="ty">AgentConfig</span>) -&gt; <span class="ty">Result</span>&lt;<span class="ty">Handle</span>&gt; {</span></div>
+          <div class="ln"><span>&nbsp;&nbsp;<span class="kw">let</span> bridge = <span class="ty">Prism</span>::<span class="fn">connect</span>(cfg.endpoint)?;</span></div>
+          <div class="ln"><span>&nbsp;&nbsp;bridge.<span class="fn">send</span>(<span class="st">"review plan 110"</span>).<span class="kw">await</span>?;</span></div>
+          <div class="ln"><span>&nbsp;&nbsp;<span class="ty">Ok</span>(bridge.<span class="fn">into_handle</span>())<span class="caret"></span></span></div>
+          <div class="ln"><span>}</span></div>
+        </div>
+      </main>
+      <aside class="agent" aria-label="Coding agent">
+        <div class="head"><span class="live"></span><span class="label">Coding agent</span></div>
+        <div class="msgs">
+          <div class="msg user"><span class="who label">You</span>Review plan 110 and check drift tests.</div>
+          <div class="msg"><span class="who label">Agent</span>Reading <b>plans/110</b>… found 16 tasks. Running consumption gate.<br>
+            <span class="chip"><span class="ok">✓</span> grep · 12 matches</span> <span class="chip"><span class="ok">✓</span> cargo test · 214 passed</span>
+          </div>
+        </div>
+        <div class="composer"><input class="input" placeholder="Ask the agent…" aria-label="Agent message"><button class="btn pri">Send</button></div>
+      </aside>
+    </div>
+    <div class="status">
+      <span class="acc">⬢ main</span><span>rust-analyzer ✓</span><span>ln 4, col 22</span><span style="flex:1"></span><span>UTF-8</span><span>spaces:4</span>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="palette" role="dialog" aria-label="Command centre">
+    <div class="pin"><span class="p">&gt;</span> design system</div>
+    <div class="prow sel">Set design system → Blueprint Utilitarian <span class="src">@clay/settings</span></div>
+    <div class="prow">Set design system → Graphite Precision <span class="src">@clay/settings</span></div>
+    <div class="prow">Reload configuration <span class="src">core · ⌘⇧R</span></div>
+    <div class="prow">Refresh Git status <span class="src">@clay/git · ⌃G</span></div>
+  </div>
+</div>
+
+<script>
+const D={
+blueprint:{n:"1 · Blueprint Utilitarian — legible neobrutalism",t:["0px radius","2px ink borders","hard 4px offset shadows","solid fills","100ms ease-out"],
+fit:"Direct evolution of the approved Clay direction doc and your chosen neobrutal path. Ink-on-paper contrast makes structure unmistakable; every affordance is a drawn object. Most distinctive of the five — nothing else on the market looks like this.",
+risk:"Loud by nature; needs discipline (one accent, generous whitespace) to stay professional. Worst case if done half-way: 'wireframe with shadows'.",
+th:"Dark: near-black indigo + warm off-white ink + ultraviolet accent (your current #7c6fff). Light: warm paper + black ink. Shadows/borders use the ink role, so it works on any content theme."},
+graphite:{n:"2 · Graphite Precision — modern minimal pro-tool",t:["6px radius","1px hairlines","layered grey elevation","soft shadows","quiet motion"],
+fit:"The language users already trust from Linear/Raycast/VS Code-adjacent tools. Zero learning cost, excellent long-session calm, safest choice for broad adoption and light-mode parity.",
+risk:"Zero distinctiveness — Clay becomes 'another dark IDE'. Differentiation must come from the agent panel and information design, not chrome."},
+phosphor:{n:"3 · Terminal Phosphor — restrained CRT soul",t:["2px radius","monospace chrome labels","uppercase tracked labels","phosphor accent only","glow on status/accent"],
+fit:"Clay is a text engine with a coding agent at its heart; this makes the terminal lineage the identity. Body text stays neutral for readability; phosphor appears only in accents, caret, status. Unforgettable demo, honest to the product.",
+risk:"Monospace chrome costs horizontal space and can feel costumey in light mode. Narrow audience appeal vs graphite."},
+analog:{n:"4 · Warm Analog — the 'clay' material identity",t:["10–14px radius","cream/espresso surfaces","terracotta accent","soft warm shadows","tactile, friendly"],
+fit:"Leans into the product name: clay as material — warm, tactile, human. Pairs beautifully with the AI-companion positioning (friendly agent, approachable tool). Best light mode of the five.",
+risk:"Reads 'consumer app', not 'professional editor'; risks undercutting seriousness for power users. Dark mode is the weaker half."},
+cockpit:{n:"5 · Glass Cockpit — matte instruments, glass only on overlays",t:["8px radius","matte layered blues","teal instrument accent","tick-mark status bar","blur restricted to palette/modals"],
+fit:"Positions Clay as the AI-native flight deck: dense, precise, instrumented. Glass appears only where it earns its cost (command centre, modals) — editor and lists stay matte, preserving the performance invariant. Tick marks and tabular numerals give a precision feel.",
+risk:"Closest to existing graphite-family tools; teal-on-navy is a familiar sci-fi trope. Blur fallbacks needed for reduced-transparency."}};
+const body=document.body;
+function setP(p){body.dataset.style=p;document.querySelectorAll('.pbtn[data-p]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.p===p));
+const d=D[p];desc.innerHTML=`<h2>${d.n}</h2><div class="tags">${d.t.map(x=>`<span class="tag">${x}</span>`).join('')}</div>
+<div class="cols"><div><b>Fit for Clay:</b> ${d.fit}</div><div><b>Risk:</b> ${d.risk}<br><b>Theme pairing:</b> ${d.th}</div></div>`;}
+document.querySelectorAll('.pbtn[data-p]').forEach(b=>b.onclick=()=>setP(b.dataset.p));
+modeBtn.onclick=()=>{const l=body.dataset.mode==='light';body.dataset.mode=l?'dark':'light';modeBtn.textContent=l?'Light mode':'Dark mode';modeBtn.setAttribute('aria-pressed',String(!l));};
+palBtn.onclick=()=>scrim.hidden=!scrim.hidden;
+scrim.onclick=e=>{if(e.target===scrim)scrim.hidden=true};
+addEventListener('keydown',e=>{if(e.key==='Escape')scrim.hidden=true;if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();scrim.hidden=!scrim.hidden}});
+setP('blueprint');
+</script>
+</body>
+</html>

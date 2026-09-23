@@ -28,11 +28,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 use crate::{
     packages::{permissions::PackagePermission, record::PackageRecord},
-    perf::budgets::{COMPLETION_RESULT_MAX_ITEMS, COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES},
+    perf::budgets::{
+        COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES, COMPLETION_RESULT_MAX_ITEMS,
+        COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES,
+    },
     protocol::{
         BehaviorVersion, ClientId, CompletionItem, CompletionItemTextFormat, CompletionStatus,
         DocumentId, DocumentVersion,
@@ -181,11 +185,26 @@ fn buffer_word_result(
     let prefix = window_text_range(&window, replacement_range)
         .filter(|prefix| !prefix.is_empty())
         .unwrap_or("");
-    let words = if prefix.is_empty() {
-        BTreeSet::new()
+    let mut words: Vec<String> = if prefix.is_empty() {
+        Vec::new()
     } else {
         collect_matching_words(&window.text, prefix)
+            .into_iter()
+            .collect()
     };
+    words.sort_by(|left, right| {
+        score_completion_item(
+            right,
+            prefix,
+            completion_recency_rank(right, &request.recent_completions),
+        )
+        .cmp(&score_completion_item(
+            left,
+            prefix,
+            completion_recency_rank(left, &request.recent_completions),
+        ))
+        .then_with(|| left.cmp(right))
+    });
 
     let mut result = CompletionResultSet {
         request_id: request.request_id,
@@ -263,9 +282,65 @@ fn collect_matching_words(text: &str, prefix: &str) -> BTreeSet<String> {
 }
 
 fn collect_word(words: &mut BTreeSet<String>, word: &str, prefix: &str) {
-    if word.starts_with(prefix) {
+    if completion_prefix_matches(word, prefix) {
         words.insert(word.to_string());
     }
+}
+
+/// Return true for an exact or case-insensitive prefix match. Exact matches
+/// receive the stronger score, while case-insensitive matches keep completion
+/// useful when the buffer's casing differs from the typed prefix.
+pub(crate) fn completion_prefix_matches(candidate: &str, prefix: &str) -> bool {
+    candidate.starts_with(prefix) || starts_with_case_insensitive(candidate, prefix)
+}
+
+fn starts_with_case_insensitive(candidate: &str, prefix: &str) -> bool {
+    let mut candidate_chars = candidate.chars();
+    prefix.chars().all(|expected| {
+        candidate_chars
+            .next()
+            .is_some_and(|actual| actual.to_lowercase().eq(expected.to_lowercase()))
+    })
+}
+
+/// Rank one inert completion label. Higher scores win. Prefix quality dominates
+/// length, length dominates recency, and the caller supplies a bounded recency
+/// rank where newer accepted text has the larger value.
+pub(crate) fn score_completion_item(label: &str, prefix: &str, recency: u32) -> i32 {
+    let prefix_rank = if label.starts_with(prefix) {
+        2
+    } else if starts_with_case_insensitive(label, prefix) {
+        1
+    } else {
+        0
+    };
+    let shortness = 128usize.saturating_sub(label.chars().count().min(128)) as i32;
+    prefix_rank * 1_000_000 + shortness * 100 + recency.min(99) as i32
+}
+
+pub(crate) fn completion_recency_rank(insert_text: &str, recent: &[String]) -> u32 {
+    recent
+        .iter()
+        .position(|item| item == insert_text)
+        .map(|index| (recent.len() - index) as u32)
+        .unwrap_or(0)
+}
+
+pub(crate) fn rank_completion_items(items: &mut [CompletionItem], prefix: &str, recent: &[String]) {
+    items.sort_by(|left, right| {
+        score_completion_item(
+            &right.label,
+            prefix,
+            completion_recency_rank(&right.insert_text, recent),
+        )
+        .cmp(&score_completion_item(
+            &left.label,
+            prefix,
+            completion_recency_rank(&left.insert_text, recent),
+        ))
+        .then_with(|| left.label.cmp(&right.label))
+        .then_with(|| left.insert_text.cmp(&right.insert_text))
+    });
 }
 
 fn is_buffer_word_character(character: char) -> bool {
@@ -289,6 +364,12 @@ pub struct JsCompletionProviderRegistration {
     pub meta: CompletionProviderMeta,
     pub token: String,
     pub export_name: String,
+    /// Plan 127 P1: host-validated package module specifier declaring
+    /// `export_name`. When present the handler is materialized by importing
+    /// this module inside the serving lane's isolate, so the provider can run
+    /// on the latency lane. `None` keeps the token-backed closure registered
+    /// in the general lane's isolate (`module: {...}` registrations).
+    pub module_specifier: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -728,8 +809,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_builtin(meta, provider)
     }
@@ -753,8 +833,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package(package, meta, provider)
     }
@@ -766,8 +845,7 @@ impl CompletionCoordinator {
         provider: impl CompletionProvider,
     ) -> Result<(), CompletionProviderRegistryError> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .register_package_replacing_older(package, meta, provider)
     }
@@ -780,10 +858,7 @@ impl CompletionCoordinator {
         document_id: DocumentId,
         generation: CompletionProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_generations.insert(document_id, generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -797,10 +872,7 @@ impl CompletionCoordinator {
     /// Cancel active completion work and advance canonical version after an
     /// accepted edit. Submission is synchronous and never waits for providers.
     pub fn document_changed(&self, document_id: DocumentId, version: DocumentVersion) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.insert(document_id, version);
         let task_keys = inner
             .active_tasks
@@ -815,10 +887,7 @@ impl CompletionCoordinator {
     /// document: version/generation tracking and active completion work for
     /// the document (Plan 060 T6, P1-4).
     pub(crate) fn remove_document(&self, document_id: DocumentId) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.current_versions.remove(&document_id);
         inner.current_generations.remove(&document_id);
         let task_keys: Vec<_> = inner
@@ -838,10 +907,7 @@ impl CompletionCoordinator {
         target: impl Into<String>,
         generation: CompletionProviderGeneration,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if !inner.registry.disable_completion(target.into()) {
             return;
         }
@@ -861,10 +927,7 @@ impl CompletionCoordinator {
     /// is the package-scoped disable/revoke hook; it reuses the same abort
     /// path as generation replacement and never waits for provider completion.
     pub fn cancel_package(&self, package_prefix: &str) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_package(package_prefix);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -888,10 +951,7 @@ impl CompletionCoordinator {
     /// above `active_generation`, abort older in-flight work, and drain queued
     /// results so late old-generation output cannot publish.
     pub fn cancel_older_generations(&self, active_generation: CompletionProviderGeneration) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         inner.registry.remove_older_generations(active_generation);
         let task_keys: Vec<_> = inner
             .active_tasks
@@ -929,8 +989,7 @@ impl CompletionCoordinator {
     /// Snapshot the registry metadata, deterministically priority-ordered.
     pub fn providers(&self) -> Vec<CompletionProviderMeta> {
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .registry
             .list_ordered()
             .into_iter()
@@ -962,10 +1021,7 @@ impl CompletionCoordinator {
         validate_window(&request, &window)?;
 
         let (provider, meta, task_key) = {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("completion coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             let (meta, provider) = inner.registry.provider_clone(provider_id).ok_or_else(|| {
                 CompletionCoordinatorError::ProviderNotRegistered {
                     id: provider_id.to_string(),
@@ -1016,6 +1072,10 @@ impl CompletionCoordinator {
         let spawned_key = task_key.clone();
         let max_items = meta.max_items;
         let timeout_ms = meta.timeout_ms;
+        let prefix = window_text_range(&window, request.replacement_range)
+            .unwrap_or_default()
+            .to_string();
+        let recent_completions = request.recent_completions.clone();
         let task = tokio::spawn(async move {
             let result_future = provider.complete(request, window);
             let outcome =
@@ -1023,12 +1083,18 @@ impl CompletionCoordinator {
                     Ok(inner_result) => inner_result,
                     Err(_elapsed) => Err(CompletionProviderError::Timeout),
                 };
-            coordinator.finish_task(spawned_key, outcome, max_items, reply_tx);
+            coordinator.finish_task(
+                spawned_key,
+                outcome,
+                max_items,
+                prefix,
+                recent_completions,
+                reply_tx,
+            );
         });
 
         self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
+            .lock_or_recover()
             .active_tasks
             .insert(task_key, task);
         Ok(reply_rx)
@@ -1039,25 +1105,21 @@ impl CompletionCoordinator {
         task_key: TaskKey,
         result: Result<CompletionResultSet, CompletionProviderError>,
         max_items: usize,
+        prefix: String,
+        recent_completions: Box<[String]>,
         reply_tx: oneshot::Sender<CompletionResultSet>,
     ) {
-        let result = match result {
+        let mut result = match result {
             Ok(result) => result,
             Err(CompletionProviderError::Timeout) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.timed_out_tasks += 1;
                 inner.stats.failed_tasks += 1;
                 return;
             }
             Err(_) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.failed_tasks += 1;
                 return;
@@ -1065,31 +1127,23 @@ impl CompletionCoordinator {
         };
 
         if self.validate_task_freshness(&task_key).is_err() {
-            let mut inner = self
-                .inner
-                .lock()
-                .expect("completion coordinator lock poisoned");
+            let mut inner = self.inner.lock_or_recover();
             inner.active_tasks.remove(&task_key);
             inner.stats.stale_results_rejected += 1;
             return;
         }
 
+        rank_completion_items(&mut result.items, &prefix, &recent_completions);
         match self.validate_result(&result, max_items) {
             Ok(()) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.published_results += 1;
                 drop(inner);
                 let _ = reply_tx.send(result);
             }
             Err(_) => {
-                let mut inner = self
-                    .inner
-                    .lock()
-                    .expect("completion coordinator lock poisoned");
+                let mut inner = self.inner.lock_or_recover();
                 inner.active_tasks.remove(&task_key);
                 inner.stats.stale_results_rejected += 1;
             }
@@ -1100,10 +1154,7 @@ impl CompletionCoordinator {
         &self,
         task_key: &TaskKey,
     ) -> Result<(), CompletionCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&task_key.document_id)
@@ -1128,10 +1179,7 @@ impl CompletionCoordinator {
         result: &CompletionResultSet,
         max_items: usize,
     ) -> Result<(), CompletionCoordinatorError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let current_generation = inner
             .current_generations
             .get(&result.document_id)
@@ -1184,11 +1232,7 @@ impl CompletionCoordinator {
     }
 
     pub fn stats(&self) -> CompletionCoordinatorStats {
-        self.inner
-            .lock()
-            .expect("completion coordinator lock poisoned")
-            .stats
-            .clone()
+        self.inner.lock_or_recover().stats.clone()
     }
 }
 
@@ -1233,14 +1277,13 @@ fn validate_window(
         return Err(CompletionCoordinatorError::WindowMetadataMismatch);
     }
     // Cap the provider-visible window so package providers never see an
-    // unbounded document slice. 64 KiB is the generic completion window budget;
-    // it is well under the result payload budget and large enough for buffer-
-    // word and token-based providers.
-    const COMPLETION_WINDOW_BUDGET_BYTES: usize = 64 * 1024;
-    if window_bytes > COMPLETION_WINDOW_BUDGET_BYTES {
+    // unbounded document slice. The budget is shared with the window builder
+    // in `connection::runtime`, so a legitimately built window can never be
+    // rejected here.
+    if window_bytes > COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES {
         return Err(CompletionCoordinatorError::WindowTooLarge {
             bytes: window_bytes,
-            budget: COMPLETION_WINDOW_BUDGET_BYTES,
+            budget: COMPLETION_DOCUMENT_WINDOW_BUDGET_BYTES,
         });
     }
     Ok(())
@@ -1432,10 +1475,7 @@ mod tests {
 
         coordinator.disable_completion("core.words", 2);
 
-        let inner = coordinator
-            .inner
-            .lock()
-            .expect("completion coordinator lock poisoned");
+        let inner = coordinator.inner.lock_or_recover();
         assert!(
             inner
                 .registry
@@ -1471,5 +1511,83 @@ mod tests {
         assert_eq!(registry.remove_package("core"), 1);
         assert!(registry.is_empty());
         assert_eq!(registry.remove_package("core"), 0);
+    }
+
+    #[test]
+    fn score_prefers_exact_prefix_over_longer_case_mismatch() {
+        assert!(
+            score_completion_item("prefixLong", "pre", 0)
+                > score_completion_item("Prefix", "pre", 0)
+        );
+    }
+
+    #[test]
+    fn score_prefers_shorter_then_recency() {
+        assert!(score_completion_item("foo", "f", 0) > score_completion_item("foobar", "f", 99));
+        assert!(score_completion_item("foo", "f", 2) > score_completion_item("foo", "f", 1));
+    }
+
+    #[test]
+    fn buffer_words_not_alphabetical_when_scores_differ() {
+        let request = CompletionRequest {
+            request_id: 1,
+            client_id: 1,
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            cursor_byte_offset: 2,
+            replacement_range: CompletionReplacementRange::new(0, 2),
+            trigger: crate::protocol::CompletionTrigger::Manual,
+            provider_generation: 1,
+            recent_completions: vec!["fooz".to_string()].into_boxed_slice(),
+        };
+        let window = CompletionDocumentWindow {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            package_prefix: "core".to_string(),
+            byte_start: 0,
+            byte_end: 9,
+            text: "fooa fooz".to_string(),
+        };
+        let result = buffer_word_result(request, window);
+        let labels: Vec<_> = result
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect();
+        assert_eq!(labels, ["fooz", "fooa"]);
+    }
+
+    #[test]
+    fn ranking_scan_stops_at_item_and_payload_caps() {
+        let request = CompletionRequest {
+            request_id: 1,
+            client_id: 1,
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            cursor_byte_offset: 2,
+            replacement_range: CompletionReplacementRange::new(0, 2),
+            trigger: crate::protocol::CompletionTrigger::Manual,
+            provider_generation: 1,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
+        };
+        let text = (0..400)
+            .map(|index| format!("fooword{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let window = CompletionDocumentWindow {
+            document_id: 1,
+            document_version: 1,
+            behavior_version: 1,
+            package_prefix: "core".to_string(),
+            byte_start: 0,
+            byte_end: text.len() as u64,
+            text,
+        };
+        let result = buffer_word_result(request, window);
+        assert!(result.items.len() <= COMPLETION_RESULT_MAX_ITEMS);
+        assert!(estimated_result_payload_bytes(&result) <= COMPLETION_RESULT_PAYLOAD_BUDGET_BYTES);
     }
 }

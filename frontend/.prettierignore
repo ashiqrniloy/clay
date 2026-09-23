@@ -1,0 +1,12 @@
+# Build output.
+dist/
+
+# Generated: scripts/generate-icon-packs.mjs owns this file's shape and
+# `--check` fails on any drift, so a repo-wide `prettier --write` must not
+# touch it (plan 118 task E3).
+src/icons/fallback.generated.ts
+
+# Generated: ts-rs writes these from the Rust DTO layer (plan 119 SC-1) and
+# `scripts/check.sh` fails CI on any drift in them, so a repo-wide
+# `prettier --write` must not touch them.
+src/bridge/generated/

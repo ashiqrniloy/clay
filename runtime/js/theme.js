@@ -25,3 +25,18 @@ export function setAppearance(options) {
     }
     return JSON.parse(requireOps().op_clay_theme_set_appearance(JSON.stringify({ appearance })));
 }
+export function setDesignSystem(options) {
+    const specifier = typeof options === "string" ? options : options?.specifier;
+    if (typeof specifier !== "string" || specifier.length === 0) {
+        throw new Error("theme.invalid_request: setDesignSystem requires a design-system specifier");
+    }
+    return JSON.parse(requireOps().op_clay_theme_set_design_system(JSON.stringify({ specifier })));
+}
+export function setIconPack(options) {
+    const specifier = typeof options === "string" ? options : options?.specifier;
+    if (typeof specifier !== "string" || specifier.length === 0) {
+        throw new Error("theme.invalid_request: setIconPack requires an icon-pack specifier");
+    }
+    return JSON.parse(requireOps().op_clay_theme_set_icon_pack(JSON.stringify({ specifier })));
+}
+

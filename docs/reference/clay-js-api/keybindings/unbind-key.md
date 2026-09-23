@@ -78,7 +78,7 @@ unbindKey("Ctrl+X Ctrl+P", { scope: "global" });
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `keybindings.unbindKey` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `keybindings.unbindKey` in `~/.clay/init.js`.
 
 ## Custom properties
 

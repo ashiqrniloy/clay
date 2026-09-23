@@ -1,0 +1,379 @@
+/* Catalog `dropdown` (trigger + popover + list + items), `list` rows,
+ * `collapse`, and the shared `popover` surface.
+ *
+ * Layout (padding, gap, fixed sizes, min/max sizes) is host-owned. Every visual
+ * property comes from a `--clay-ds-*` recipe value or a `--clay-*` theme role.
+ * Retired patterns are absent by construction: no shadow on a resting control,
+ * no backdrop blur on an overlay, no leading accent bar on a selected row
+ * (DESIGN.md §14.13) — a selected row is its fill. */
+
+/* ---------------------------------------------------------------- dropdown */
+
+.selectTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--clay-ds-dropdown-default-trigger-rest-gap);
+  padding: var(--clay-ds-dropdown-default-trigger-rest-padding);
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--clay-text-body-size);
+
+  border-width: var(--clay-ds-dropdown-default-trigger-rest-border-width);
+  border-style: var(--clay-ds-dropdown-default-trigger-rest-border-style);
+  border-color: var(--clay-ds-dropdown-default-trigger-rest-border-color);
+  border-radius: var(--clay-ds-dropdown-default-trigger-rest-border-radius);
+  --fill: var(--clay-ds-dropdown-default-trigger-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-dropdown-default-trigger-rest-text-color);
+  transform: var(--clay-ds-dropdown-default-trigger-rest-transform-preset);
+  transition:
+    background-color
+      var(--clay-ds-dropdown-default-trigger-rest-transition-duration)
+      var(--clay-ds-dropdown-default-trigger-rest-transition-timing),
+    border-color
+      var(--clay-ds-dropdown-default-trigger-rest-transition-duration)
+      var(--clay-ds-dropdown-default-trigger-rest-transition-timing);
+}
+
+.selectTrigger[data-hovered] {
+  border-color: var(--clay-ds-dropdown-default-trigger-hover-border-color);
+  --fill: var(--clay-ds-dropdown-default-trigger-hover-background-color);
+  color: var(--clay-ds-dropdown-default-trigger-hover-text-color);
+  transform: var(--clay-ds-dropdown-default-trigger-hover-transform-preset);
+}
+.selectTrigger[data-pressed] {
+  border-color: var(--clay-ds-dropdown-default-trigger-active-border-color);
+  --fill: var(--clay-ds-dropdown-default-trigger-active-background-color);
+  color: var(--clay-ds-dropdown-default-trigger-active-text-color);
+  transform: var(--clay-ds-dropdown-default-trigger-active-transform-preset);
+}
+.selectTrigger[data-focused],
+.selectTrigger:focus-visible {
+  outline: var(--clay-ds-dropdown-default-trigger-focus-outline-width)
+    var(--clay-ds-dropdown-default-trigger-focus-outline-style)
+    var(--clay-ds-dropdown-default-trigger-focus-outline-color);
+  outline-offset: var(--clay-ds-dropdown-default-trigger-focus-outline-offset);
+}
+.selectTrigger[data-disabled] {
+  border-color: var(--clay-ds-dropdown-default-trigger-disabled-border-color);
+  --fill: var(--clay-ds-dropdown-default-trigger-disabled-background-color);
+  color: var(--clay-ds-dropdown-default-trigger-disabled-text-color);
+  opacity: var(--clay-ds-dropdown-default-trigger-disabled-opacity);
+  cursor: default;
+}
+
+/* The popover is an overlay: overlay fill, hairline, radius, pop shadow.
+ * No backdrop blur — blur belongs to the scrim and the toast (DESIGN.md §10.3). */
+.popover {
+  border-width: var(--clay-ds-dropdown-default-popover-rest-border-width);
+  border-style: var(--clay-ds-dropdown-default-popover-rest-border-style);
+  border-color: var(--clay-ds-dropdown-default-popover-rest-border-color);
+  border-radius: var(--clay-ds-dropdown-default-popover-rest-border-radius);
+  background: var(--clay-ds-dropdown-default-popover-rest-background-color);
+  color: var(--clay-ds-dropdown-default-popover-rest-text-color);
+  box-shadow: var(--clay-ds-dropdown-default-popover-rest-shadow);
+  min-width: 160px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.listBox {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A filterable list (the workspace sidebar's file listing, plan 118 task E1):
+ * the approved tools row above the rows and a count/hints foot below. The field
+ * is the shipped input well — one ring per surface, so the list draws none. */
+.listFiltered {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The file browser's listing must scroll inside the fixed sidebar instead of
+ * pushing rows below the fold with no way to reach them. */
+.listFiltered > .listBox {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.listTools {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: 0 0 var(--clay-spacing-xs, 8px);
+}
+
+.listTools > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.listTools :global(.labelHidden) {
+  display: none;
+}
+
+.listFoot {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  padding: var(--clay-spacing-xs, 8px) 0 0;
+  color: var(--clay-ds-key-hint-default-root-rest-text-color);
+  font-size: var(--clay-text-detail-size);
+}
+
+.listCount {
+  font-variant-numeric: tabular-nums;
+}
+
+.listHint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--clay-spacing-xxs, 4px);
+  color: var(--clay-ds-key-hint-default-root-rest-text-color);
+}
+
+.listFoot .spacer {
+  flex: 1 1 auto;
+}
+
+/* The dropdown's menu body (`dropdown.default.list`). */
+.menuList {
+  gap: 1px;
+  padding: var(--clay-ds-dropdown-default-list-rest-padding);
+  background: var(--clay-ds-dropdown-default-list-rest-background-color);
+  border-radius: var(--clay-ds-dropdown-default-popover-rest-border-radius);
+}
+
+/* Long control labels never spill: the trigger ellipsizes its own value. */
+.selectTrigger > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------- list rows */
+
+.listRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-xxs, 4px);
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  cursor: pointer;
+
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  --fill: var(--clay-ds-list-default-row-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-list-default-row-rest-text-color);
+  transition:
+    background-color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing),
+    color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+.listRow[data-hovered] {
+  --fill: var(--clay-ds-list-default-row-hover-background-color);
+  color: var(--clay-ds-list-default-row-hover-text-color);
+}
+.listRow[data-pressed] {
+  --fill: var(--clay-ds-list-default-row-active-background-color);
+  color: var(--clay-ds-list-default-row-active-text-color);
+}
+.listRow[data-selected] {
+  --fill: var(--clay-ds-list-default-row-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-list-default-row-selected-background-opacity,
+    1
+  );
+  color: var(--clay-ds-list-default-row-selected-text-color);
+}
+.listRow[data-focused],
+.listRow:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+.listRow[data-disabled] {
+  color: var(--clay-text-disabled);
+  opacity: var(--clay-opacity-disabled);
+  cursor: default;
+}
+
+.rowDetail {
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-detail-size);
+}
+
+/* Menu items take the dropdown item's own recipe (radius 8, accent-tinted
+ * selection) so the trigger's menu is not a list. */
+.dropdownItem {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--clay-spacing-xs, 8px);
+  border-radius: var(--clay-ds-dropdown-default-item-rest-border-radius);
+  padding: var(--clay-ds-dropdown-default-item-rest-padding);
+  color: var(--clay-ds-dropdown-default-item-rest-text-color);
+  transition: background-color
+    var(--clay-ds-dropdown-default-item-rest-transition-duration)
+    var(--clay-ds-dropdown-default-item-rest-transition-timing);
+}
+.dropdownItem[data-hovered] {
+  --fill: var(--clay-ds-dropdown-default-item-hover-background-color);
+  color: var(--clay-ds-dropdown-default-item-hover-text-color);
+}
+.dropdownItem[data-selected] {
+  --fill: var(--clay-ds-dropdown-default-item-selected-background-color);
+  --fill-opacity: var(
+    --clay-ds-dropdown-default-item-selected-background-opacity
+  );
+  color: var(--clay-ds-dropdown-default-item-selected-text-color);
+}
+.dropdownItem[data-focused],
+.dropdownItem:focus-visible {
+  outline: var(--clay-ds-dropdown-default-item-focus-outline-width)
+    var(--clay-ds-dropdown-default-item-focus-outline-style)
+    var(--clay-ds-dropdown-default-item-focus-outline-color);
+  outline-offset: var(--clay-ds-dropdown-default-item-focus-outline-offset);
+}
+/* The row's label takes the free space so a trailing hint (the picker's
+ * `current` mark) sits at the trailing edge, and the hint reads as data. */
+.dropdownItemLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dropdownItemHint {
+  color: var(--clay-text-muted);
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-status-size, 11px);
+}
+/* Provenance note under the list (where the values come from). */
+.dropdownFooter {
+  border-top: var(--clay-ds-divider-default-root-rest-border-width) solid
+    var(--clay-ds-divider-default-root-rest-border-color);
+  color: var(--clay-text-muted);
+  font-size: var(--clay-text-status-size, 11px);
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-xs, 8px) 2px;
+}
+
+/* ---------------------------------------------------------------- collapse */
+
+/* A disclosure is not a framed card (DESIGN.md §11 has no root border): the
+ * root carries the recipe's radius and fill only, and the section separator is
+ * the body's single top hairline from the `divider` family — the family that
+ * exists for separators. The collapse root declares no border box, so the
+ * contract describes what ships. */
+.collapseRoot {
+  border-radius: var(--clay-ds-collapse-default-root-rest-border-radius);
+  background: var(--clay-ds-collapse-default-root-rest-background-color);
+}
+
+.collapseHeader {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--clay-ds-collapse-default-header-rest-gap);
+  padding: var(--clay-ds-collapse-default-header-rest-padding);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--clay-text-section-size);
+  text-align: left;
+
+  border: 0;
+  border-radius: var(--clay-ds-collapse-default-header-rest-border-radius);
+  --fill: var(--clay-ds-collapse-default-header-rest-background-color);
+  background: color-mix(
+    in srgb,
+    var(--fill) calc(var(--fill-opacity, 1) * 100%),
+    transparent
+  );
+  color: var(--clay-ds-collapse-default-header-rest-text-color);
+  transition:
+    background-color
+      var(--clay-ds-collapse-default-header-rest-transition-duration)
+      var(--clay-ds-collapse-default-header-rest-transition-timing),
+    color var(--clay-ds-collapse-default-header-rest-transition-duration)
+      var(--clay-ds-collapse-default-header-rest-transition-timing);
+}
+
+.collapseHeader[data-hovered]:not([data-disabled]),
+.collapseHeader:hover:not([data-disabled]) {
+  --fill: var(--clay-ds-collapse-default-header-hover-background-color);
+  color: var(--clay-ds-collapse-default-header-hover-text-color);
+}
+
+.collapseHeader[data-focused],
+.collapseHeader:focus-visible {
+  outline: var(--clay-ds-collapse-default-header-focus-outline-width)
+    var(--clay-ds-collapse-default-header-focus-outline-style)
+    var(--clay-ds-collapse-default-header-focus-outline-color);
+  outline-offset: var(--clay-ds-collapse-default-header-focus-outline-offset);
+}
+
+/* The chevron belongs to the header (no `chevron` recipe key): it takes the
+ * header's colour and motion and rotates when open. */
+.collapseChevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--clay-text-muted);
+  transition: transform
+    var(--clay-ds-collapse-default-header-rest-transition-duration)
+    var(--clay-ds-collapse-default-header-rest-transition-timing);
+}
+
+.collapseChevronExpanded {
+  transform: rotate(90deg);
+}
+
+/* The body's separator is the root's border language applied to one edge:
+ * the schema states a single all-sides border, so a top-only hairline composes
+ * the same recipe values here (DESIGN.md §11: "1px hairline top"). */
+.collapseBody {
+  padding: var(--clay-ds-collapse-default-body-rest-padding);
+  border-top-width: var(--clay-ds-divider-default-root-rest-border-width);
+  border-top-style: var(--clay-ds-divider-default-root-rest-border-style);
+  border-top-color: var(--clay-ds-divider-default-root-rest-border-color);
+  background: var(--clay-ds-collapse-default-body-rest-background-color);
+}
+
+/* Dropdown grouped sections (plan 109 I3): provider-group headers. */
+.listSection {
+  display: contents;
+}
+
+.listSectionHeader {
+  padding: var(--clay-spacing-xs, 8px) var(--clay-spacing-sm, 12px);
+  font-family: inherit;
+  font-size: var(--clay-text-caption-size);
+  font-weight: 600;
+  color: var(--clay-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+/* Dropdown trigger indicator (Plan 112 Task 7): shared disclosure.down glyph
+ * inherits the trigger's text color via currentColor. */
+.selectIndicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--clay-text-icon, currentColor);
+}

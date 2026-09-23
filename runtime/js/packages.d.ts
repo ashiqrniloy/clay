@@ -25,9 +25,39 @@ export declare function inspect(_options: {
 /** List installed/bundled packages with provenance and authorization status.
  * Planned: not callable until the op wiring ships. */
 export declare function list(): never;
-/** Authorize capabilities and a runtime profile for a package.
- * Planned: not callable until the op wiring ships. */
-export declare function authorize(_options: Record<string, unknown>): never;
+/** Options for {@link authorize}. */
+export interface PackageAuthorizeOptions {
+    /** Installed package name or original requested source specifier. */
+    package: string;
+    /** Capabilities to approve; each must be declared by the package manifest. */
+    capabilities: string[];
+    /** Runtime profile recorded with the grant (default `native-trust`). */
+    runtimeProfile?: "native-trust" | "sandboxed" | "restricted";
+    /** Optional provenance match: the original requested specifier or resolved name. */
+    source?: string;
+    /** Who approved the grant; package activation can never grant. */
+    approvedBy: "user" | "cli" | "config";
+}
+/** Recorded capability grant returned by {@link authorize}. */
+export interface PackageAuthorizationGrant {
+    packageName: string;
+    version: string;
+    sourceKind: string;
+    capabilities: string[];
+    runtimeProfile: "native-trust" | "sandboxed" | "restricted";
+    approvedBy: string;
+    granted: true;
+}
+/** Authorize capabilities and a runtime profile for an installed package.
+ *
+ * Records an explicit user/CLI/config capability grant against the installed
+ * package's provenance. Trusted-only and refused during package activation,
+ * so package code can never grant capabilities to itself or another package.
+ * Every granted capability must be declared by the package manifest, and the
+ * grant is what lets `loadPackage` enable a package that requests powerful
+ * capabilities. Grants are visible in `clay package inspect` and withdrawn by
+ * `clay package revoke`. */
+export declare function authorize(options: PackageAuthorizeOptions): PackageAuthorizationGrant;
 /** Set an explicit user-selected winner for a package contribution conflict.
  * Planned: not callable until the op wiring ships. */
 export declare function setConflictOverride(_options: {

@@ -1,4 +1,6 @@
-use clay::packages::commands::{CommandRegistry, CommandValidationRule, PackageCommandDeclaration};
+use clay::packages::commands::{
+    CommandRegistry, CommandValidationRule, PackageCommandDeclaration, RegisteredCommand,
+};
 use clay::packages::manifest::validate_manifest_value;
 use clay::packages::permissions::PackagePermission;
 use clay::protocol::{
@@ -83,6 +85,44 @@ fn registered_server_command_executes_with_accepted_status() {
 
     assert_eq!(result.command_id, "markdown.togglePreview");
     assert_eq!(result.status, CommandExecutionStatus::Accepted);
+}
+
+#[test]
+fn package_edit_commands_are_not_accepted_as_palette_only_server_commands() {
+    for command_id in [
+        "rust.toggleLineComment",
+        "javascript.toggleLineComment",
+        "typescript.toggleLineComment",
+        "markdown.toggleComment",
+        "markdown.toggleList",
+        "markdown.insertHeading",
+    ] {
+        let mut registry = CommandRegistry::new();
+        registry.insert_test_command(RegisteredCommand {
+            package_name: "@clay/test".to_string(),
+            package_version: "0.1.0".to_string(),
+            api_prefix: command_id.split('.').next().unwrap().to_string(),
+            command_id: command_id.to_string(),
+            display_name: command_id.to_string(),
+            routing_policy: RoutingPolicy::ServerFirst,
+            key_bindings: Vec::new(),
+            custom_properties: BTreeMap::new(),
+            permissions: Vec::new(),
+        });
+
+        let mut command_request = request(command_id);
+        command_request.provenance = None;
+        command_request.expected_permissions.clear();
+        let error = CommandExecutor::new()
+            .execute(&registry, command_request)
+            .expect_err("editor-backed package command must not be palette-only");
+        assert_eq!(
+            error.rule,
+            CommandExecutionRule::UnknownCommand,
+            "{command_id}"
+        );
+        assert!(error.message.contains("client-mapped"), "{command_id}");
+    }
 }
 
 #[test]

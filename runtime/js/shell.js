@@ -3,7 +3,7 @@
 // Each export returns a stable Clay command ID string. The command IDs are
 // ClientUiCommand-routed: bindKey installs an inert keybinding that the client
 // dispatches to ClayShellWidget without a server round-trip. Packages and user
-// configuration (`~/.config/clay/init.js`) use these helpers with
+// configuration (`~/.clay/init.js`) use these helpers with
 // `keybindings.bindKey` to remap the default Phase 22.1 chords.
 //
 // No function here performs side effects, runs server IPC, or mutates the
@@ -92,6 +92,14 @@ export function clientTabActivate(position) {
 }
 export function clientTabMoveTo(position) {
     return tabVariantId("shell.clientTabMoveTo", position);
+}
+
+/**
+ * Return the stable command ID for toggling this tab's persistent agent lane.
+ * The shell applies the per-tab visibility change after explicit user routing.
+ */
+export function toggleAgentLane() {
+    return "shell.toggleAgentLane";
 }
 
 function tabVariantId(family, position) {

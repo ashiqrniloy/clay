@@ -1,3 +1,5 @@
+use crate::str_enum::string_enum_impl;
+
 use std::{
     error::Error,
     fmt, fs,
@@ -17,24 +19,12 @@ pub enum FixtureKind {
     NewlineHeavy,
 }
 
-impl FixtureKind {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "long-lines" => Some(Self::LongLines),
-            "many-short-lines" => Some(Self::ManyShortLines),
-            "mixed-unicode" => Some(Self::MixedUnicode),
-            "newline-heavy" => Some(Self::NewlineHeavy),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::LongLines => "long-lines",
-            Self::ManyShortLines => "many-short-lines",
-            Self::MixedUnicode => "mixed-unicode",
-            Self::NewlineHeavy => "newline-heavy",
-        }
+string_enum_impl! {
+    pub FixtureKind {
+        LongLines => "long-lines",
+        ManyShortLines => "many-short-lines",
+        MixedUnicode => "mixed-unicode",
+        NewlineHeavy => "newline-heavy",
     }
 }
 

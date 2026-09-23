@@ -54,6 +54,144 @@ Workspace `/tmp/clay-manual` with `test.rs`, `test.md`, `plain.txt`.
 | P14 | Switch appearance in settings | Runtime generation reloads live (module 02, C9 mechanism) |
 | P15 | Interact with a settings-panel control | Editor text/caret/version/status unchanged by panel interaction |
 
+## Plan 088 package/UI contract steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P16 | Show a package panel with long content (the settings composition is `panel` + `scroll`) | Content scrolls inside the bounded panel; child rendering and accessibility are clipped to the host; no panel row paints over the editor |
+| P17 | Inspect package controls in rest/hover/active/focus/disabled and status/error states | State changes use semantic token roles and focus/disabled semantics; diagnostics are not color-only; disabled actions do not dispatch |
+| P18 | Apply canonical dark and light themes with package panels/overlays present | Theme change updates cached package chrome without raw colors, layout churn, or loss of package state; contrast remains readable |
+| P19 | Repeat P16–P18 with large UI typography | Panel scroll, labels, controls, and hit/accessibility bounds remain usable; long labels clip/wrap intentionally rather than escaping their host |
+| P20 | Inspect package action provenance and available overlay origins | Package actions remain inert and provenance-labelled; packages cannot request `completion`/`centered`, own tabs/panes, or call native widgets/raw ops |
+| P21 | Apply a representative theme package with valid typed `designTokens` overrides, then return to a legacy `textStyles`-only theme | Typed overrides win only for their existing semantic roles; cached fallback/projection and AA validation remain intact; no package supplies structure, concrete fonts, or raw colors |
+
+## Plan 097 Phase 8 React package UI steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P32 | Load `@clay/markdown`, `@clay/settings`, and a visible package-panel fixture in the Tauri/React client | Validated SDUI tree, fixed slot, status item, and editor render through the React registry; no native Masonry package renderer is required |
+| P33 | Type in a package `textInput`, expand a `collapse`, then apply an unrelated same-ID server update | Input value, focus, disclosure state, and scroll position survive; only replaced node properties change |
+| P34 | Compare bundled and adopted package surfaces | Visible provenance says `trusted package` only for exact bundled inventory; adopted surfaces say `third-party shared runtime`; neither surface receives Tauri APIs or arbitrary React/JSX |
+| P35 | Activate SDUI button/list/dropdown/text-input actions | One typed `SduiAction` reaches the server with current UI version and item/value metadata; stale/unknown/unregistered actions fail closed |
+| P36 | Remove or replace the empty-tab package and reload | One-line `loadPackage` restores the declared entry; unload shows core Open File/Open Folder fallback; approved replacement stays third-party and rollback restores the bundled target |
+
+## Plan 097 Phase 8 Linux execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P32 | PASS deterministic React fixture | `code-reviews/screenshots/2026-08-23-tauri-react-phase8/package-ui-wide-final.png` and `package-ui-narrow-final.png`; CDP exposes Workspace complementary region, editor textbox, Settings region, controls, and package status |
+| P33 | PASS automated + visual | `frontend/src/sdui/{state,registry}.test.*` preserves surviving object/input/disclosure state; wide/narrow/large-type captures remain contained |
+| P34 | PASS automated + rendered provenance | Package graph/loading/cross-domain suites pass; fixture renders exact host-stamped trusted label; `package_loading::spoofed_clay_prefixed_package_stays_third_party` and replacement tests pass |
+| P35 | PASS automated + CDP interaction | Registry and SDUI renderer tests assert typed payloads; `package-ui-dropdown.png` and CDP tree expose Dialog/ListBox/Option keyboard semantics |
+| P36 | PASS automated / live package replacement not rerun (historical: the chat lane was removed with `@clay/chat` in plan 118; the same one-line registration path is exercised by the launcher/agent packages) | One-line registration and absent-package fallback tests pass; package graph adoption/revoke/replace/rollback suites pass |
+
+Linux `computer-use-linux_get_app_state` ran first. AT-SPI exposed only the Chrome frame and the compositor window list omitted Chrome-for-Testing, so no desktop-targeted keyboard claim is made; CDP supplied the bounded DOM accessibility and interaction evidence.
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P16 | NOT RUN visually — settings command is acknowledge-only | `@clay/settings` panel+scroll composition and flex-sizing tests pass; `settings.open` does not persist or make the panel visible, so no false screenshot pass was claimed |
+| P17 | PASS automated / NOT RUN interactively | `package_ui_conformance`, `ui_primitive_conformance`, and AccessKit disabled/status tests pass; targeted panel interaction is blocked by host focus/input limits |
+| P18 | PASS theme validation / NOT RUN package-panel visually | Dark/default and light-default Clay-window captures under `code-reviews/screenshots/2026-08-14-plan088-modernization/`; bundled theme AA tests pass, but settings/package panel input was host-blocked |
+| P19 | PASS strongest available evidence | `large-typography/` capture has no welcome a11y regression; responsive/label-clipping structural tests pass, but a live settings panel could not be opened |
+| P20 | PASS automated | Package catalog, provenance, anchor allowlist, raw-style denial, and public-surface tests pass; no new package authority was introduced |
+| P21 | PASS automated / NOT RUN visually | `theme_packages`, contrast, and typed-design-token validation tests pass; no bundled first-party theme currently ships a non-empty `designTokens` fixture for a live comparison |
+
+## Plan 097 Phase 9 React settings and package workflow steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P37 | Select `settings.open` in React Command Centre | Server validates the loaded package command, then sends one narrow client projection; exact bundled settings panel opens for the active tab |
+| P38 | Switch all four bundled themes and light/dark/system appearance | Each selection emits one current-version declared `settings.*` intent; server validates bundled provenance, persists, reloads, and sends resolved tokens only |
+| P39 | Edit all three font fallback stacks, sizes, and seven hierarchy ratios; apply | One complete bounded typography transaction persists and reflows shell/editor once; package JavaScript and React never parse font files or fetch fonts |
+| P40 | Enter size `200`, empty families, a partial hierarchy, or ratio `0` | Apply is disabled with accessible invalid fields; forged submission fails shared server validation and preserves prior typography/preference |
+| P41 | Close/reopen settings, reload, disable `@clay/settings` | Close is server-approved; current persisted values remain; disabling/removing package removes command/surface authority and forces the local panel closed |
+| P42 | Inspect trusted and third-party settings-like package surfaces | Only exact bundled `@clay/settings` selects compiled trusted presentation; adopted packages remain declarative and have no React/Tauri/native-dialog access |
+
+## Plan 097 Phase 9 execution record (2026-08-23)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P37–P39/P41 | PASS deterministic fixture + automated | Settings screenshots/a11y snapshots under `code-reviews/screenshots/2026-08-23-tauri-react-phase9/`; server settings persistence/reload and frontend complete-transaction tests pass |
+| P40 | PASS interaction + automated | `settings-validation-error.png`; CDP confirmed Apply disabled at invalid size; frontend and Rust independently reject invalid/partial transactions |
+| P42 | PASS structural/security | Phase 8 provenance/trust suites remain green; settings module is gated by exact host snapshot provenance and no broad Tauri plugin capability was added |
+
+## Plan 115 package install/update/remove CLI steps (2026-09-08)
+
+Deep references: `docs/reference/packages/creating-packages.md` (install
+semantics, adopt boundary), `docs/development/distribution.md` (channels,
+binary provisioning). Setup: isolated scratch `HOME` (never the developer
+profile); a local fixture registry (fixture tarballs with `package/` root,
+npm registry metadata document with `dist.tarball` + shasum/integrity, served
+with `python3 -m http.server`, `npm_config_registry` pointing at it) so no
+step needs the network; a scratch `init.js` with one benign comment line
+(watch the user line survive every step).
+
+| # | Action | Expected |
+|---|--------|----------|
+| P43 | `clay install npm:clay-fixture-pkg` (scratch HOME, local registry) | Installs into `<config>/packages` through the real npm backend; prints `Installed <name>@<version>`, `Not enabled, not adopted — will not run until \`clay package adopt <name>\``, and `Appended loadPackage("<name>") to <init.js>`; ledger records floating spec + resolved version; package is NOT enabled |
+| P44 | `clay list` | Fixture listed with spec, `floating`, source `npm`, `[installed] [pending]` |
+| P45 | Re-run the same `clay install` | Exactly ONE appended block in init.js (`Load line already present`); install is idempotent |
+| P46 | Launch `clay server` with the appended line, package installed but NOT adopted | Typed failure diagnostic on stderr/status strip; previous generation retained; app stays healthy; package JS never runs (negative: un-adopted load fails closed) |
+| P47 | `clay package adopt clay-fixture-pkg`, then reload | Clean reload (no failure diagnostics); package active via the appended line; no new grants beyond the adopted capabilities |
+| P48 | `clay remove npm:clay-fixture-pkg` | Store package removed, ledger entry removed, the exact Clay-appended block stripped; user-written init.js lines untouched (`Left user-written loadPackage(...)` when the line is hand-written); a stale hand-written line for a removed package reloads as a bounded typed `packages.load_failed` diagnostic, app alive |
+| P49 | `clay install npm:clay-fixture-pkg@0.1.0` (pinned), then `clay update --extensions` | Pinned install records `pinned: true`; `--extensions` SKIPS it with the hint `pinned; reinstall with a new version to move it` (negative check) |
+| P50 | `clay update npm:clay-fixture-pkg@0.1.0` and `clay update npm:@vendor/nope` | Pinned single-spec update skips with the same hint; un-managed/absent package reports `Skipped … not a Clay-managed install` |
+| P51 | `clay update` (self) in a dev checkout | Documented no-op: `not managed by an install channel (no channel marker)`; nothing downloaded or replaced |
+| P52 | `clay install` (no arguments) | Full binary presence report (obscura/graft/qmd/ripgrep) with resolved paths or manual-install commands; never spawns anything |
+| P53 | `clay install --bin obscura` (presence-only), then `clay install --bin graft` WITHOUT `--yes` | Presence-only binaries are never installed by Clay — prints the manual command. Graft refusal names the exact command it would run (`npm install --prefix <store> npm:@nanonets/graft --ignore-scripts`) and the `--yes` re-run instruction (negative: no install without explicit approval) |
+| P54 | `clay install npm:clay-fixture-pkg --allow-scripts` | Warning printed: lifecycle scripts ENABLED (remote install scripts ran); default installs stay silent (scripts suppressed server-side via `--ignore-scripts`) |
+
+Negative checks (all verified by the execution record below):
+
+- `clay install` NEVER enables, adopts, or executes — the printed contract
+  says so and the load only happens through the user's reviewed `init.js`.
+- The appended block is exactly two lines (marker comment + one
+  `await loadPackage` call); hand-edited lines are never touched by install
+  or remove.
+- Lifecycle scripts never run without `--allow-scripts`; `--yes` is required
+  per provisioning invocation and approves exactly the printed command.
+
+Known ceilings:
+
+- Real-registry steps require either the local fixture registry described in
+  the setup or network access; CI never depends on the network.
+- `clay install --bin graft --yes` provisions the real `@nanonets/graft` npm
+  package and needs network + explicit approval; the refusal path (P53) is
+  the manually verified half.
+- GUI-side pane rendering of package contributions is covered by P16–P21 and
+  the Plan 097 records, not by the CLI steps above.
+
+## Plan 115 Linux execution record (2026-09-08)
+
+Executed against a fresh `cargo build --bin clay` on Linux with an isolated
+scratch `HOME`, a local fixture registry (`clay-fixture-pkg` 0.1.0/0.2.0 with
+valid `clay` manifests, `python3 -m http.server`), and a live `clay server`
+for P46–P48. Developer profile untouched; all scratch state removed after.
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P43–P45 | PASS | Real npm-backend install from the local registry: ledger `{pinned:false, version:0.2.0, source:npm}`; exact two-line appended block; re-install reports `Load line already present`, block count stays 1 |
+| P46 | PASS | Un-adopted boot: `configuration failed [runtime.exception]` diagnostic; server stayed up; no package execution. (Drill initially surfaced a REAL defect — see below — fixed before this record) |
+| P47 | PASS | After `clay package adopt` + reload: clean reload, no failure diagnostics, package active |
+| P48 | PASS | Store package, ledger entry, and Clay block all removed; user comment lines untouched; hand-written stale line reloads as bounded `packages.load_failed: … could not be canonicalized`, app alive |
+| P49/P50 | PASS | Pinned 0.1.0 install → ledger `pinned:true`; `update --extensions` and single-spec update skip with `pinned; reinstall with a new version to move it`; absent package reports `Skipped @vendor/nope: not a Clay-managed install` |
+| P51 | PASS | `clay update` on the dev checkout: documented no-op (no channel marker) |
+| P52/P53 | PASS | Binary report renders all four rows with resolved PATH/fallback or manual commands, nothing spawned; presence-only refusal prints the manual command; graft refusal prints the exact `npm install --prefix … npm:@nanonets/graft --ignore-scripts` command and `--yes` instruction |
+| P54 | PASS | `--allow-scripts` prints the lifecycle-scripts-ENABLED warning; default install prints no warning (scripts suppressed) |
+| Startup budget (module 02 C34) | PASS | Boot-to-listening 33 ms with the appended adopted line vs 60 ms baseline without — no measurable regression |
+
+**Defect found and fixed during P46/P47 (2026-09-08):** the production server
+opened its `PackageService` with a `FakeBackend` and never ran
+`refresh_installed()`, so `loadPackage` of ANY store-installed package failed
+`packages.not_installed` even after adoption — `clay install` → adopt →
+activate could never complete end to end. Fixed by
+`PackageService::open_production` (`src/packages/service.rs`): one real
+manager discovery pass at boot, fail-closed fallback to the previous
+no-discovery behavior when no manager is available. Automated gates after the
+fix: lib 1284 passed, security package suites 116 passed, fmt/clippy clean.
+
 ## Negative checks
 
 - Packages never create native widgets or run client-side JavaScript;
@@ -69,3 +207,168 @@ Workspace `/tmp/clay-manual` with `test.rs`, `test.md`, `plain.txt`.
   registry activation.
 - Third-party packages require the adoption/approval flow (not covered here;
   see trust-boundary automated tests).
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P16–P21 | PASS structural / NOT RUN package-panel visually | Plan 089 did not add new package features; the visual review captured default/loading/error/recovery/large-typography states but settings/package panels remain unrendered because `settings.open` does not persist or make the panel visible |
+
+## Phase 26 theme textStyles axes steps
+
+Deep references: `docs/reference/packages/creating-packages.md` (textStyles
+`background`/`scale` entry fields), `docs/reference/primitives/
+syntax-vocabulary.md` (Phase 26 theme axes table). Setup: bundled first-party
+themes (`@clay/theme-gruvbox-material-dark`, `-light`, `@clay/theme-modus-
+operandi`, `-vivendi`) with the markdown + rust fixtures.
+
+| # | Action | Expected |
+|---|--------|----------|
+| P22 | `setTheme` each bundled theme in turn (init.js, reload) | Every theme resolves the full 35-token vocabulary with distinct colors; `background` entries (Quote/CodeBlock/Diagnostic/SearchMatch) and `scale` entries (headings, CodeSpan) apply per theme; switching themes swaps the axes atomically with no partial paint |
+| P23 | Theme with an invalid `scale` (non-finite or outside `(0, 4.0]`) or unknown `token` | Theme load rejected with a deterministic diagnostic; the previous theme stays active; no partial style reaches layout |
+| P24 | Compare light vs dark themes on the same document | Background tints and heading scales stay visible in both; syntax colors remain distinct (dormant-token distinctness is enforced per theme package) |
+
+## Phase 27 single-manifest / inspect steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| P25 | Isolated HOME: `target/debug/clay package inspect @clay/markdown` and `@clay/rust` | Prints `Preset: prose-mode` / `code-mode`, expanded permissions (includes `parse-document`), and `Syntax: … owned by native descriptor`. Status `bundled` is fine. No pnpm required. |
+| P26 | Same for `@clay/lsp-rust` | Prints `Preset: lsp-bridge` and `language-server` in permissions. Does **not** start rust-analyzer. Inspect is not a grant. |
+| P27 | `init.js` is only `await loadPackage("@clay/markdown")` then `await loadPackage("@clay/rust")` | Open `test.md` / `test.rs` still get mode, commands, completion, syntax. No user `serverRegister*` calls. |
+| P28 | Load `@clay/lsp-rust` without `authorizeLanguageServer` | Package metadata may load; no language-server child / no implicit process authority. |
+
+Negative: inspect/loadPackage never grant filesystem/network/shell/language-server. Children are not a sandbox.
+
+## Phase 27.8 Linux execution record (2026-08-19)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P25 | PASS CLI | Isolated-HOME `target/debug/clay package inspect @clay/markdown` / `@clay/rust` printed preset, expanded perms, native syntax ownership, status `bundled` |
+| P26 | PASS CLI | Same for `@clay/lsp-rust`: `lsp-bridge` + `language-server` in permissions; no child started |
+| P27 | PASS automated | Existing one-line `loadPackage` + apply-record tests (`default_init_js_load_package_lines_activate_markdown_and_rust`, language expansion tests) |
+| P28 | PASS automated | `lsp_*_package_loads_after_exact_grant_without_starting_child` |
+
+Negative: `textStyles` is inert manifest data — it grants no permission and
+executes no code; `background`/`scale` never change the protocol wire shape
+(no `DecorationSpan` field added; payload budgets unchanged).
+
+## Plan 126 package documents-op budget step
+
+| # | Action | Expected |
+|---|--------|----------|
+| P55 | From a package script, call `serverOpenDocument` (or `serverReloadDocument`) for a workspace file larger than the 256 KiB package documents budget (`DOCUMENTS_OP_MAX_DOCUMENT_BYTES`) | The call fails with the typed `documents.document_too_large` code instead of handing the file to JavaScript. The surfaced diagnostic is sanitized (`Document/workspace operation failed server validation.` in the status bar; the code in the server diagnostics/log), carries no path and no document text, and the client keeps working: the same file stays open and editable through the client's chunked transfer path, which the package budget never gates. Negative: no oversized text in the diagnostic, no orphan loading state, no client open refusal. |
+
+## Plan 136 capability-grant steps
+
+Deep references: `docs/reference/clay-js-api/packages/authorize.md`,
+`docs/reference/clay-js-api/configuration.md` (plan 136 section),
+`docs/reference/packages/creating-packages.md`. Setup: the plan 127 fixture
+package (`@fixture/lane`, declaring `parse-document`, `completion-provider`,
+`mode-registration`) seeded into an isolated scratch `HOME` with the command
+shape Clay's pnpm backend runs (`pnpm add <path>` in `~/.clay/packages`, because
+`clay install` accepts only `npm:` specs), then taken through Clay's own verbs.
+Harness: `test-plan/artifacts/127-lane-scheduling/run-live.sh` (`granted-lane`,
+`ungranted-lane`, `config-granted-lane`) with
+`test-plan/artifacts/136-capability-grants/` fixtures.
+
+| # | Action | Expected |
+|---|--------|----------|
+| P56 | Install and adopt the fixture, grant its declared capabilities (`clay package authorize`), then reference it from `~/.clay/init.js` with `await loadPackage("@fixture/lane")`; then repeat the run with the grant withdrawn | **Positive:** `clay package enable` succeeds, the app starts, the config loads the package, and the package's declared contributions (mode pattern, parse handler, module-backed completion provider) register on their lanes — no `packages.load_failed`/`configuration failed` diagnostic. **Negative sub-step (no grant):** `clay package enable` fails closed with `MissingCapabilityGrant { package_name: …, capability: CompletionProvider }`, the app still starts and the fixture document opens and edits, and the only surfaced diagnostic is the sanitized `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.` — no mode badge, no provider group, no half-applied contribution. Ceiling: package-owned mode activation for open documents is not wired (plan 136 task 6 further action), so the live editor cannot exercise the registered provider; registration is proven server-side and by the lane counters in module 11 Q44. Trusted-only ops stay unreachable even with the grant: the granted package keeps its own domain op set (automated `third_party_lane_denies_trusted_ops` / `lanes_share_their_domain_op_set`, and no `packages.authorize`/`language_server.authorize`-class op appears in the package extension). |
+| P57 | `clay package inspect @fixture/lane`, then `clay package authorize @fixture/lane --capability completion-provider --capability mode-registration --capability parse-document`, `inspect` again, `enable`, then `clay package revoke` + `inspect` + `enable`; finally authorize only `mode-registration` and `enable` again | Granting is explicit and auditable: `authorize` prints the granted set with the runtime profile and the attribution (`granted by: cli`), `inspect` gains `Grants: … (native-trust)` / `Granted by:` and drops them again after `revoke` (`Adoption: approval revoked`, `Ungranted: … (declared, not granted)`). `enable` succeeds only while the declared set is covered; a second `authorize` **replaces** the whole granted set, so re-granting just `mode-registration` makes `enable` fail closed again with `MissingCapabilityGrant`, and re-granting the full set restores it. Negatives: an undeclared capability is refused (`does not declare capability … in its manifest`); `authorize` on a revoked or unadopted record refuses to manufacture an approval (`run \`clay package adopt …\` first`); `revoke` returns the system to fail-closed with `AdoptionRequired { code: "package_approval.revoked" }` rather than a missing-grant error. |
+| P58 | Put the grant in `~/.clay/init.js` instead of the CLI (`await authorize({ package, capabilities, runtimeProfile, approvedBy: "config" })`) with no CLI grant, launch, then from a **separate** `clay` process run `inspect` and `enable`; relaunch on the same store | The grant is durable and process-independent: the store's approval record carries `grant: { capabilities, runtime_profile: native-trust, granted_by: config, granted_at }`, the fresh CLI process prints `Grants: … (native-trust)` / `Granted by: config`, and its `enable` succeeds. Negatives: `clay:packages` is trusted-domain-only, so package code cannot import `authorize` at all, and a package that calls it while its activation scope is open is refused with `packages.grant_during_activation` (no self-grant); unknown option keys are rejected with `packages.invalid_grant`; a provenance change (reinstall/replace) leaves the grant inert and the package fails closed again. |
+
+## Plan 127 capability-grant fail-closed record (pre-plan-136 shape)
+
+Plan 127 recorded the negative half of P56 while the grant surface did not exist:
+the same fixture, adopted, never granted, `enable` failing closed with
+`MissingCapabilityGrant` and only the sanitized `packages.load_failed`
+diagnostic. That behavior is now P56's negative sub-step above.
+
+## Plan 127 execution record (2026-09-19, task 7)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| P56 | PASS live | A local fixture package (`@fixture/lane`, declaring `parse-document` + `completion-provider` + `mode-registration`) was seeded into the isolated store with the same command shape Clay's pnpm backend runs (`pnpm add <path>` in `~/.clay/packages`, because `clay install` accepts only `npm:` specs) and adopted through Clay's own verb: `clay package adopt @fixture/lane` → `Adopted @fixture/lane 0.1.0 / capabilities: completion-provider, mode-registration, parse-document`. `clay package enable` then failed closed: `Error: MissingCapabilityGrant { package_name: "@fixture/lane", capability: CompletionProvider }`. The live app launched with the fixture `init.js` (`await loadPackage("@fixture/lane")`), logged `clay server configuration failed [packages.load_failed]: JavaScript runtime evaluation failed.`, opened `demo.lane`, echoed 9 typed characters (`v1 dirty`, 38 chars), and showed no fixture mode, handler, or provider. Artifacts: `test-plan/artifacts/127-lane-scheduling/grant-gate-live/` (`enable.log`, `server.log`, `tree.txt`, `window.png`) and the fixture packages under `test-plan/artifacts/127-lane-scheduling/`. |
+| Ceiling recorded | Reachability limit | Capability grants for non-bundled packages are recorded by `PackageService::authorize_package`, which today has no CLI/desktop/JS surface (bundled packages get `authorize_bundled_defaults`; language servers get `authorizeLanguageServer`). Until such a surface exists, a live third-party package cannot register a parse handler or completion provider, so the plan 127 lane-scheduling manual step cannot use a third-party fixture (module 04 E40 records the same reason). |
+
+## Phase 26 Linux execution record (2026-08-19)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P22 | PASS live | `code-reviews/screenshots/2026-08-18-phase26-review/` — 17 captures across all four themes × rust/ts/js/markdown show per-theme background tints, heading scales, and distinct syntax colors (review-log V1/V2) |
+| P23 | PASS automated | `size_scale_ladder_descends_headings_and_clamps_theme_overrides` (clamp to `HIERARCHY_SCALE_MAX`), theme parser validation (`scale` finite in `(0, 4.0]`), `tests/theme_packages.rs` dormant-token distinctness; live theme reload is host-blocked |
+| P24 | PASS live | `*-gruvbox-light/` + `*-modus-operandi/` vs `*-gruvbox-dark/` + `*-default/` captures; V4 (light gutter digit contrast) is the one open light-theme defect, tracked in the review log |
+
+## Phase 28 command and intelligence contributions
+
+Deep references: `docs/reference/packages/creating-packages.md`,
+`docs/reference/primitives/registry.md`, and the package-specific docs under
+`docs/reference/clay-js-api/`.
+
+| # | Action | Expected |
+|---|---|---|
+| P29 | Load `@clay/markdown` and `@clay/rust`, then open Markdown and Rust files | Behavior manifests install the declared comment, list, heading, enter, completion, and package-command contributions; Markdown uses prose chrome and Rust uses code chrome. No package JS runs in editor paint/text-event paths |
+| P30 | Load authorized `@clay/lsp-rust` and inspect a Rust document, then compare with Markdown | The bridge opts into `inlayHint` only for the authorized provider; code mode may show bounded inlay overlays while prose defaults them off. LSP provider failure remains a bounded diagnostic, not a package/runtime crash |
+| P31 | Negative: remove `render-folding` from a folding package fixture and reload, or publish an oversized/invalid package range | Package activation/publication is denied; no partial ranges or client chrome appear. If the public package fixture cannot be loaded manually, mark N/A rather than treating the automated permission/budget tests as a live pass |
+
+## Phase 28 Linux execution record (2026-08-20)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P29 | PASS structural / NOT RUN full live command path | Fresh shell captures show the package-backed connected editor states; package manifest, alias, and mode activation tests pass. Editable keyboard delivery prevented a complete live command round trip. |
+| P30 | UNRESOLVED live; PASS structural | The LSP GUI worker failed to resolve the existing `lsp-shared` helper. Bridge adapter and prose/code chrome tests pass; no inlay visibility claim is made. |
+| P31 | N/A live; PASS automated | No public manual package fixture exposed folding publication without permission. `folding_publish_round_trip_and_budget_deny`, decoration permission, and payload-bound tests pass. |
+
+## Phase 28.7 P1 GUI analyzer follow-up (2026-08-21)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| P30 | UNRESOLVED live; PASS worker/bridge structural | The authorized Rust GUI path now resolves the shared helper, receives host-stamped session options, and carries the real tab workspace into the analyzer runtime. No `analysis.worker_failed` appeared; the first real inlay response was empty while rust-analyzer warmed up. Keyboard input was unavailable for the no-op edit and `Ctrl+Alt+I` toggle, so both retained states stay unresolved. Evidence: `code-reviews/screenshots/2026-08-20-phase28.7-followups/inlay-visible/` and `inlay-toggled-off/`. |
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Package UI beside editor | PASS static visual/a11y | `code-reviews/screenshots/2026-08-24-tauri-react-parity/package-ui/fixture-*` shows bounded package surface, editor, status footer, and no absolute path |
+| Settings package | PASS static visual/a11y | `settings/fixture-*` shows hidden/expanded sections, dropdown controls, apply/reset actions, and invalid-state-compatible layout |
+| Chat package landing (removed) | PASS static + real AT-SPI (historical — plan 118 deleted `@clay/chat`; the same package-UI lane is covered by the agent pane rows above) | `chat/fixture-*` and `chat-landing/accessibility.txt` expose provenance-backed setup actions, transcript log, composer, and status |
+| Package actions/trust domain | PASS automated | Package UI conformance, package loading, cross-domain, and replacement tests remain green |
+
+## Plan 101 UI design-system recipe foundation execution record (2026-08-29)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Inert recipe contribution parsing (`clay.contributions.uiDesignSystem`) | PASS automated | `packages::record::tests::ui_design_system_valid_declaration_parses_into_descriptor` and `package_manifest_accepts_ui_design_system_and_detects_conflict` |
+| Prohibited authority & color authority rejection | PASS automated | `packages::record::tests::ui_design_system_rejects_literal_colors_and_prohibited_authorities` rejects raw CSS, scripts, class names, `#hex`, `rgb()`, and non-color tokens |
+| Core fallback coverage & AT-SPI accessibility | PASS live + automated | `plan101_core_fallbacks_cover_all_components_and_enforce_color_authority` (all 18 component kinds + 11 surfaces) and `.impeccable/review/plan-101/default/accessibility.txt` |
+
+No package JavaScript or raw UI authority enters the frontend render path.
+
+## Plan 102 & 103 design-system adoption and component migration cross-reference
+
+Design-system selection never installs or adopts: it resolves through the
+same enabled-record/authorization paths verified above and fails closed on
+missing, replaced, or revoked records (`theme.load_failed`/
+`theme.invalid_design_system`, previous generation retained). All catalog
+components and surfaces render through closed `--clay-ds-*` host recipe
+properties and active theme color roles with zero raw CSS injection or color
+leaks. Adoption, revocation-fallback, component recipe migration, and
+color-authority steps: [15 — UI design systems](15-ui-design-systems.md)
+(UI-DS-01…UI-DS-15, executed 2026-08-30).
+
+## Plan 112 cross-reference (2026-09-07)
+
+Icon packs are a new inert package contribution kind (`clay.contributions.iconPack`):
+bounded host-validated vector geometry parsed at record time, core semantic
+keys reserved for first-party inventory packs, third-party packs limited to
+own-prefixed keys, and load ≠ select enforced (selection never installs or
+grants authority). Git/markdown packages use semantic icon references with
+text labels carrying full meaning. Steps: [18 — Icon packs](18-icon-packs.md)
+(ICON-05, ICON-06, ICON-07, executed 2026-09-07).
+
+## Plan 126 execution record (2026-09-19, task 6)
+
+| Steps | Result | Evidence |
+|---|---|---|
+| P55 | PASS live | Live isolated run: the fixture init.js called `serverOpenDocument({ workspaceRootId: "1", path: "review.rs" })` for the 4,231,903-byte workspace file. Server diagnostics recorded `clay server runtime reload failed [documents.document_too_large]: Document/workspace operation failed server validation.` (no path, no content, no byte count); the status bar showed the same sanitized sentence while the client stayed connected with the 4 MiB document open and editable (`review.rs v7 dirty`). Artifacts: `test-plan/artifacts/126-access-paths/op-budget-live/` (`server-diagnostic.txt`, `accessibility.txt`, `screenshot.png`) and the fixture script `op-budget-init.js`. |
+| Automated companion | PASS | `documents_open_over_budget_returns_typed_error` drives both ops (`open` and `reload`) and asserts the typed code with the payload marker absent from the JS error path; `documents_open_under_budget_unchanged` pins the golden JSON contract for the under-budget path; `performance_budgets::chunked_document_security_budgets_are_pinned` pins the 256 KiB cap. |

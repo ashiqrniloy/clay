@@ -13,16 +13,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use masonry::kurbo::Rect;
+use kurbo::Rect;
 use serde_json::{Map, Value};
 
 use crate::{
-    editor::typography::UiTextVariant,
+    editor::typography::{TypographyRegistry, UiTextVariant},
+    perf::budgets::{COMPLETION_MAX_VISIBLE_ROWS, COMPLETION_MAX_WIDTH_PX},
     protocol::{FontRole, PackageUiSnapshot},
 };
 
 use super::layout::{FixedSlotId, FixedSlotState, PaneSlotLayout};
-use super::theme::PanelDefaults;
+use super::theme::{PanelDefaults, ResolvedUiTheme, SduiThemeStyle};
 use super::transient_menu::{
     TransientMenuFocusPolicy, TransientMenuItem, TransientMenuOrigin, TransientMenuSession,
     TransientMenuStatus,
@@ -79,29 +80,32 @@ pub(crate) struct TransientPackageOverlay {
     /// by [`TransientPackageOverlay::from_menu_session`]; the hosted
     /// `PackageRegionWidget` builds a `Menu`/`MenuItem`/`Status` a11y subtree
     /// from it instead of letting the generic `Group`/`ListItem` subtree flow.
+    /// Item labels are finalized by the shared bounded accessibility helper
+    /// before this payload reaches Masonry.
     /// `None` for package-declared overlays (they keep the generic subtree).
     pub(crate) menu_a11y: Option<MenuA11y>,
 }
 
 /// Plan 070 step 13f: a11y payload for a hosted transient menu — the hosted
 /// `PackageRegionWidget` reports `Role::Menu` (prompt) > `Role::MenuItem`
-/// (rows, with a `" selected"` suffix on the active item) + `Role::Status`
-/// (empty-state message), matching the legacy `collect_active_menu_accessibility_entries`
-/// screen-reader contract.
+/// (already bounded/sanitized rows, with a `" selected"` suffix on the active
+/// item) + `Role::Status` (empty-state message), matching the legacy
+/// `collect_active_menu_accessibility_entries` screen-reader contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MenuA11y {
     pub(crate) prompt: String,
     pub(crate) items: Vec<MenuA11yItem>,
     pub(crate) status: Option<String>,
-    /// Phase 24.4: centered Command Centre surfaces expose one stable polite
-    /// result-count status node, separate from empty-state detail text.
+    /// Phase 24.4: the composer's palette exposes one stable polite
+    /// result-count status node, separate from empty-state detail text (plan
+    /// 125 moved the counted origin off the retired centered sheet).
     pub(crate) result_count: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MenuA11yItem {
-    /// Resolved row label: the item's `accessibility_label` when non-empty, else
-    /// its display `label` (matches the legacy `base` selection).
+    /// Final bounded/sanitized row label, including the in-budget ` selected`
+    /// suffix when active. Display/action data remains on the session item.
     pub(crate) label: String,
     pub(crate) selected: bool,
 }
@@ -113,10 +117,8 @@ pub(crate) enum PackageOverlayAnchor {
     Main,
     Pointer,
     Bottom,
-    /// Phase 24.4: window-centered Command Centre surface. Clay-internal only:
-    /// `parse` never produces it (packages keep the four documented anchors),
-    /// and it is not part of `VALID_OVERLAY_ANCHORS` on the server.
-    Centered,
+    /// Clay-native completion surface anchored to the active caret.
+    Completion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,11 +297,82 @@ impl PackageUiRuntimeState {
 
     /// Replace package UI for a runtime-generation snapshot.
     ///
-    /// Contribution payloads are empty until package UI crosses IPC, so this
-    /// clears previous panels/overlays/routes and advances the version to the
-    /// snapshot generation under one install boundary.
+    /// Atomically replace package UI from the validated runtime-generation
+    /// snapshot. Any impossible component decode fails closed to no package UI.
     pub(crate) fn install_runtime_snapshot(&mut self, snapshot: &PackageUiSnapshot) {
+        let panels = snapshot.panels.iter().map(|panel| {
+            let value: Value = serde_json::from_str(&panel.component_json).ok()?;
+            let component = PackageUiComponentTree::from_declaration(&value).ok()?;
+            let slot_id = match panel.slot.as_str() {
+                "left" => FixedSlotId::Left,
+                "right" => FixedSlotId::Right,
+                "top" => FixedSlotId::Top,
+                "bottom" => FixedSlotId::Bottom,
+                _ => return None,
+            };
+            Some((
+                slot_id,
+                FixedPackagePanel::new(
+                    panel.id.clone(),
+                    slot_id,
+                    PackagePanelVisibility::parse(&panel.visibility),
+                    component,
+                    panel.action_targets.clone(),
+                ),
+            ))
+        });
+        let overlays = snapshot.overlays.iter().map(|overlay| {
+            let value: Value = serde_json::from_str(&overlay.component_json).ok()?;
+            let component = PackageUiComponentTree::from_declaration(&value).ok()?;
+            Some(TransientPackageOverlay::new(
+                overlay.id.clone(),
+                PackageOverlayAnchor::parse(&overlay.anchor),
+                overlay.focus_policy.clone(),
+                overlay.dismissal_policy.clone(),
+                component,
+                overlay.action_targets.clone(),
+                "z.overlay",
+            ))
+        });
+        let Some(fixed_panels) = panels.collect::<Option<BTreeMap<_, _>>>() else {
+            self.clear_to_version(snapshot.version);
+            return;
+        };
+        let Some(transient_overlays) = overlays
+            .map(|overlay| overlay.map(|value| (value.id.clone(), value)))
+            .collect::<Option<BTreeMap<_, _>>>()
+        else {
+            self.clear_to_version(snapshot.version);
+            return;
+        };
         self.version = snapshot.version;
+        self.fixed_panels = fixed_panels;
+        self.transient_overlays = transient_overlays;
+        self.input_routing = snapshot
+            .input_routes
+            .iter()
+            .map(|route| {
+                (
+                    route.id.clone(),
+                    PackageInputRouting::new(
+                        route.id.clone(),
+                        route.scope.clone(),
+                        route.component_id.clone(),
+                        route.pointer_click.clone(),
+                        route.pointer_action.clone(),
+                        route.pointer_drag.clone(),
+                        route.focus_policy.clone(),
+                        route.selection_policy.clone(),
+                        route.context_modes.clone(),
+                        route.action_targets.clone(),
+                    ),
+                )
+            })
+            .collect();
+    }
+
+    fn clear_to_version(&mut self, version: u64) {
+        self.version = version;
         self.fixed_panels.clear();
         self.transient_overlays.clear();
         self.input_routing.clear();
@@ -491,40 +564,50 @@ impl TransientPackageOverlay {
         // labels + selected, empty-state status). Built once from the session;
         // the hosted `PackageRegionWidget` reports `Menu`/`MenuItem`/`Status`
         // from it regardless of which component-tree branch renders below.
+        // Package-authored labels are normalized here, before Masonry sees the
+        // payload; display/action data remains unchanged.
         let menu_a11y = MenuA11y {
-            prompt: crate::editor::accessibility::sanitize_recovery_summary(session.prompt())
+            prompt: crate::sanitize::sanitize_summary(session.prompt())
                 .unwrap_or_else(|| "Transient menu".to_string()),
             items: session
                 .items()
                 .iter()
                 .enumerate()
-                .map(|(index, item)| MenuA11yItem {
-                    label: if item.accessibility_label.trim().is_empty() {
-                        item.label.clone()
-                    } else {
-                        item.accessibility_label.clone()
-                    },
-                    selected: index == session.selected_index(),
+                .map(|(index, item)| {
+                    let selected = index == session.selected_index();
+                    MenuA11yItem {
+                        label: crate::sanitize::menu_item_label(
+                            &item.accessibility_label,
+                            &item.label,
+                            selected,
+                        ),
+                        selected,
+                    }
                 })
                 .collect(),
             status: match session.status() {
                 TransientMenuStatus::Empty { message } => {
-                    crate::editor::accessibility::sanitize_recovery_summary(message)
+                    crate::sanitize::sanitize_summary(message)
                 }
                 _ => None,
             },
-            result_count: (session.origin() == TransientMenuOrigin::Centered).then(|| {
-                crate::editor::accessibility::compose_menu_result_count(session.items().len())
-            }),
+            // Plan 125: the counted origin is the composer's palette. The
+            // retired `Centered` sheet owned the only other counted surface,
+            // and every session now reaches the palette origin.
+            result_count: (session.origin() == TransientMenuOrigin::CommandPalette)
+                .then(|| crate::sanitize::menu_result_count(session.items().len())),
         };
         // Phase 20.5: anchor selected by surface origin.
         let anchor = match session.origin() {
             TransientMenuOrigin::ContextMenu => PackageOverlayAnchor::Pointer,
             TransientMenuOrigin::MenuBar => PackageOverlayAnchor::Main,
-            TransientMenuOrigin::CommandPalette => PackageOverlayAnchor::Bottom,
-            // Phase 24.4: command/path mode request the window-centered
-            // surface; the host routes it to the window-level overlay layer.
-            TransientMenuOrigin::Centered => PackageOverlayAnchor::Centered,
+            TransientMenuOrigin::CommandPalette | TransientMenuOrigin::Centered => {
+                PackageOverlayAnchor::Bottom
+            }
+            TransientMenuOrigin::Completion => PackageOverlayAnchor::Completion,
+            // Plan 125: the retired window sheet's origin. No producer sends
+            // it and no anchor centers it any more; an older peer's snapshot
+            // still projects (bottom-anchored, uncounted) instead of panicking.
         };
         let prompt_id = format!("menu.{}.prompt", session.session_id().0);
         let query_id = format!("menu.{}.query", session.session_id().0);
@@ -593,7 +676,7 @@ impl TransientPackageOverlay {
                     .filter(|item| item.action.completion_accept.is_none())
                     .map(|item| item.action.command_id.clone())
                     .collect();
-                children.push(PackageUiComponentTree {
+                let list = PackageUiComponentTree {
                     id: list_id,
                     disabled: false,
                     kind: "list".to_string(),
@@ -605,6 +688,20 @@ impl TransientPackageOverlay {
                     action_command_id: None,
                     items,
                     children: Vec::new(),
+                    validation_state: None,
+                };
+                children.push(PackageUiComponentTree {
+                    id: format!("menu.{}.scroll", session.session_id().0),
+                    disabled: false,
+                    kind: "scroll".to_string(),
+                    font_role: FontRole::Ui,
+                    text_variant: None,
+                    title: None,
+                    text: None,
+                    label: None,
+                    action_command_id: None,
+                    items: Vec::new(),
+                    children: vec![list],
                     validation_state: None,
                 });
                 return Self {
@@ -706,26 +803,54 @@ impl PackageOverlayAnchor {
     }
 
     pub(crate) fn rect(self, working_area: Rect, main_rect: Rect) -> Rect {
-        self.rect_with_centered_width(working_area, main_rect, 640.0)
-    }
-
-    /// Resolve geometry with the cached centered-surface width. The centered
-    /// anchor uses window bounds; other anchors preserve their existing
-    /// pane-local geometry.
-    pub(crate) fn rect_with_centered_width(
-        self,
-        working_area: Rect,
-        main_rect: Rect,
-        centered_width: f64,
-    ) -> Rect {
         match self {
-            Self::Main => main_rect,
             Self::Pointer => centered_rect(main_rect, 320.0, 220.0),
             Self::Bottom => bottom_rect(main_rect),
+            Self::Main | Self::Completion => main_rect,
             Self::WorkingArea | Self::ActivePane => working_area,
-            Self::Centered => centered_rect(working_area, centered_width, 220.0),
         }
     }
+}
+
+pub(crate) fn completion_overlay_rect(
+    main_rect: Rect,
+    caret: Option<Rect>,
+    item_count: usize,
+    typography: &TypographyRegistry,
+    ui_theme: &ResolvedUiTheme,
+) -> Rect {
+    let style = SduiThemeStyle::from_ui_theme(ui_theme);
+    let body = typography.ui_text_metrics(FontRole::Ui, style.body_text);
+    let detail = typography.ui_text_metrics(FontRole::Ui, UiTextVariant::Detail);
+    let row_height = body.list_height(detail);
+    let visible_rows = item_count.clamp(1, COMPLETION_MAX_VISIBLE_ROWS);
+    let padding = ui_theme.scalar_f64("spacing.panel").unwrap_or(16.0);
+    let height = (padding + body.row_height * 2.0 + row_height * visible_rows as f64)
+        .min(main_rect.height().max(0.0));
+    let width = main_rect.width().clamp(0.0, COMPLETION_MAX_WIDTH_PX);
+    let max_x = (main_rect.x1 - width).max(main_rect.x0);
+    let caret = caret.unwrap_or(Rect::new(
+        main_rect.x0,
+        main_rect.y0,
+        main_rect.x0,
+        main_rect.y0,
+    ));
+    let x = caret.x0.clamp(main_rect.x0, max_x);
+    let gap = ui_theme.scalar_f64("spacing.inline").unwrap_or(6.0);
+    let y = if height >= main_rect.height().max(0.0) {
+        main_rect.y0
+    } else {
+        let below = caret.y1 + gap;
+        let above = caret.y0 - gap - height;
+        if below + height <= main_rect.y1 {
+            below
+        } else if above >= main_rect.y0 {
+            above
+        } else {
+            below.clamp(main_rect.y0, main_rect.y1 - height)
+        }
+    };
+    Rect::new(x, y, x + width, y + height)
 }
 
 impl PackageUiComponentTree {
@@ -876,7 +1001,12 @@ pub(crate) fn centered_rect(bounds: Rect, width: f64, height: f64) -> Rect {
 }
 
 fn bottom_rect(main_rect: Rect) -> Rect {
-    let height = (main_rect.height() * 0.35).clamp(120.0, 240.0);
+    let available = main_rect.height().max(0.0);
+    let height = if available < 120.0 {
+        available
+    } else {
+        (available * 0.35).clamp(120.0, 240.0).min(available)
+    };
     Rect::new(
         main_rect.x0,
         main_rect.y1 - height,
@@ -887,7 +1017,7 @@ fn bottom_rect(main_rect: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use masonry::kurbo::Rect;
+    use kurbo::Rect;
     use serde_json::json;
 
     use super::*;
@@ -909,6 +1039,13 @@ mod tests {
             }]
         }))
         .unwrap()
+    }
+
+    fn find_list(tree: &PackageUiComponentTree) -> Option<&PackageUiComponentTree> {
+        if tree.kind == "list" {
+            return Some(tree);
+        }
+        tree.children.iter().find_map(find_list)
     }
 
     #[test]
@@ -952,11 +1089,13 @@ mod tests {
         let geometry = runtime
             .slot_layout(&defaults)
             .compute_geometry(Rect::new(0.0, 0.0, 900.0, 600.0));
-        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 660.0, 600.0));
+        // The fixed-slot default follows `dimension.panel.side.default` (244px,
+        // DESIGN.md §5; plan 118 task E1).
+        assert_eq!(geometry.main_rect, Rect::new(0.0, 0.0, 656.0, 600.0));
         assert_eq!(geometry.fixed_slots[0].slot_id, FixedSlotId::Right);
         assert_eq!(
             geometry.fixed_slots[0].rect,
-            Rect::new(660.0, 0.0, 900.0, 600.0)
+            Rect::new(656.0, 0.0, 900.0, 600.0)
         );
     }
 
@@ -1057,12 +1196,7 @@ mod tests {
         assert_eq!(overlay.component.kind, "stack");
         assert_eq!(overlay.action_targets, vec!["clay.alpha", "clay.beta"]);
 
-        let list_component = overlay
-            .component
-            .children
-            .iter()
-            .find(|child| child.kind == "list")
-            .expect("menu overlay contains list component");
+        let list_component = find_list(&overlay.component).expect("menu overlay contains list");
         assert_eq!(list_component.items.len(), 2);
         assert_eq!(list_component.items[0].label, "Alpha Command");
         assert_eq!(
@@ -1078,31 +1212,56 @@ mod tests {
     }
 
     #[test]
-    fn centered_menu_projection_uses_window_geometry_and_stays_internal() {
-        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Control Center")
+    fn the_retired_centered_origin_still_projects_without_a_centered_anchor() {
+        // Plan 125 retired the window sheet: the wire value stays decodable and
+        // the projection must not panic on it, but no anchor centers it — the
+        // palette owns the counted, bottom-anchored surface now.
+        let session = TransientMenuSession::new(TransientMenuSessionId(8), "Session actions")
             .with_origin(TransientMenuOrigin::Centered);
         let overlay = TransientPackageOverlay::from_menu_session(&session);
-        assert_eq!(overlay.anchor, PackageOverlayAnchor::Centered);
+        assert_eq!(
+            overlay.anchor,
+            PackageOverlayAnchor::Bottom,
+            "the retired origin falls in with the palette's bottom anchor"
+        );
+        assert!(
+            overlay.menu_a11y.as_ref().unwrap().result_count.is_none(),
+            "no producer counts results for the retired origin"
+        );
         assert_eq!(
             PackageOverlayAnchor::parse("centered"),
             PackageOverlayAnchor::WorkingArea,
-            "package parsing cannot request the internal centered anchor"
+            "package parsing cannot request a Clay-internal anchor"
         );
 
-        let window = Rect::new(0.0, 0.0, 900.0, 600.0);
+        // The palette origin is the one the sheet uses and the one the count
+        // belongs to.
+        let palette = TransientMenuSession::new(TransientMenuSessionId(9), "Commands")
+            .with_origin(TransientMenuOrigin::CommandPalette)
+            .with_items(vec![crate::shell::transient_menu::TransientMenuItem::new(
+                "shell.toggleAgentLane",
+                "Toggle Agent Lane",
+                crate::shell::transient_menu::TransientMenuAction::new("shell.toggleAgentLane"),
+            )]);
+        let overlay = TransientPackageOverlay::from_menu_session(&palette);
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Bottom);
         assert_eq!(
-            overlay
-                .anchor
-                .rect_with_centered_width(window, Rect::ZERO, 640.0),
-            Rect::new(130.0, 190.0, 770.0, 410.0)
+            overlay.menu_a11y.as_ref().unwrap().result_count.as_deref(),
+            Some("1 result")
         );
-        assert_eq!(
-            overlay.anchor.rect_with_centered_width(
-                Rect::new(0.0, 0.0, 300.0, 200.0),
-                Rect::ZERO,
-                640.0
-            ),
-            Rect::new(0.0, 0.0, 300.0, 200.0)
+    }
+
+    #[test]
+    fn bottom_overlay_stays_inside_short_main_regions() {
+        for height in [48.0, 119.0, 120.0, 200.0] {
+            let main = Rect::new(0.0, 10.0, 300.0, 10.0 + height);
+            let overlay = bottom_rect(main);
+            assert!(overlay.x0 >= main.x0 && overlay.x1 <= main.x1);
+            assert!(overlay.y0 >= main.y0 && overlay.y1 <= main.y1);
+            assert!(overlay.height() <= main.height());
+        }
+        assert!(
+            (bottom_rect(Rect::new(0.0, 0.0, 300.0, 80.0)).height() - 80.0).abs() < f64::EPSILON
         );
     }
 
@@ -1143,9 +1302,9 @@ mod tests {
         let overlay_rect =
             runtime.overlay_observations(Rect::new(0.0, 0.0, 900.0, 600.0), &defaults)[0].rect;
         assert!(overlay_rect.y0 >= geometry.main_rect.y0);
-        assert_eq!(overlay_rect.y1, geometry.main_rect.y1);
-        assert_eq!(overlay_rect.x0, geometry.main_rect.x0);
-        assert_eq!(overlay_rect.x1, geometry.main_rect.x1);
+        assert!((overlay_rect.y1 - geometry.main_rect.y1).abs() < f64::EPSILON);
+        assert!((overlay_rect.x0 - geometry.main_rect.x0).abs() < f64::EPSILON);
+        assert!((overlay_rect.x1 - geometry.main_rect.x1).abs() < f64::EPSILON);
         assert!(overlay_rect.height() <= 240.0);
     }
 
@@ -1167,19 +1326,72 @@ mod tests {
             )],
             provenance: crate::protocol::CompletionProvenance::builtin_core(),
         };
-        let session = crate::shell::completion_result_to_menu_session(&result);
+        let session = crate::shell::transient_menu::completion_result_to_menu_session(&result);
         let overlay = TransientPackageOverlay::from_menu_session(&session);
 
         assert!(overlay.action_targets.is_empty());
-        let list_component = overlay
-            .component
-            .children
-            .iter()
-            .find(|child| child.kind == "list")
-            .expect("completion menu overlay contains list component");
+        assert_eq!(overlay.anchor, PackageOverlayAnchor::Completion);
+        assert!(
+            overlay
+                .component
+                .children
+                .iter()
+                .any(|child| child.kind == "scroll")
+        );
+        let list_component =
+            find_list(&overlay.component).expect("completion menu overlay contains list");
         assert_eq!(list_component.items[0].label, "alpha");
         assert!(list_component.items[0].action_command_id.is_none());
         assert!(list_component.items[0].selected);
+    }
+
+    #[test]
+    fn completion_overlay_clamps_above_or_below_caret_inside_main_rect() {
+        let typography = TypographyRegistry::default();
+        let theme = ResolvedUiTheme::default();
+        let main = Rect::new(0.0, 20.0, 900.0, 820.0);
+        let below = completion_overlay_rect(
+            main,
+            Some(Rect::new(180.0, 100.0, 181.0, 120.0)),
+            COMPLETION_MAX_VISIBLE_ROWS + 4,
+            &typography,
+            &theme,
+        );
+        assert!(below.x0 >= main.x0 && below.x1 <= main.x1);
+        assert!((below.width() - COMPLETION_MAX_WIDTH_PX).abs() < f64::EPSILON);
+        assert!(below.y0 >= 120.0 && below.y1 <= main.y1);
+
+        let above = completion_overlay_rect(
+            main,
+            Some(Rect::new(180.0, 760.0, 181.0, 780.0)),
+            COMPLETION_MAX_VISIBLE_ROWS + 4,
+            &typography,
+            &theme,
+        );
+        assert!(above.x0 >= main.x0 && above.x1 <= main.x1);
+        assert!(above.y0 >= main.y0 && above.y1 <= 760.0);
+    }
+
+    #[test]
+    fn completion_overlay_height_uses_visible_row_cap() {
+        let typography = TypographyRegistry::default();
+        let theme = ResolvedUiTheme::default();
+        let main = Rect::new(0.0, 0.0, 900.0, 600.0);
+        let caret = Some(Rect::new(120.0, 100.0, 121.0, 120.0));
+        let one = completion_overlay_rect(main, caret, 1, &typography, &theme);
+        let eight = completion_overlay_rect(
+            main,
+            caret,
+            COMPLETION_MAX_VISIBLE_ROWS,
+            &typography,
+            &theme,
+        );
+        let many = completion_overlay_rect(main, caret, usize::MAX, &typography, &theme);
+
+        assert!(one.height() < eight.height());
+        assert!((many.height() - eight.height()).abs() < f64::EPSILON);
+        assert!(many.height() <= main.height());
+        assert!((many.width() - COMPLETION_MAX_WIDTH_PX).abs() < f64::EPSILON);
     }
 
     #[test]

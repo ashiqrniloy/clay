@@ -1,0 +1,79 @@
+{
+  "name": "@clay/launcher",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./load": "./dist/load.js"
+  },
+  "clay": {
+    "apiPrefix": "launcher",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [],
+    "docs": "./docs/index.md",
+    "apiDependencies": [
+      "ui.serverRegisterPaneContentContribution"
+    ],
+    "performance": {
+      "estimatedManifestBytes": 2084,
+      "hotPathPolicy": "no hot-path JS on keypress/paint"
+    },
+    "contributions": {
+      "commands": [],
+      "ui": {
+        "paneContents": [
+          {
+            "id": "launcher.start",
+            "activation": "empty-tab",
+            "actionTargets": [
+              "workspace.clientOpenFolderDialog"
+            ],
+            "component": {
+              "kind": "panel",
+              "id": "launcher.root",
+              "title": "Start",
+              "children": [
+                {
+                  "kind": "label",
+                  "id": "launcher.caption",
+                  "text": "Open a folder, an agent, or both.",
+                  "style": {
+                    "typography": "typography.caption"
+                  }
+                },
+                {
+                  "kind": "button",
+                  "id": "launcher.openFolder",
+                  "label": "Open folder\u2026",
+                  "action": {
+                    "commandId": "workspace.clientOpenFolderDialog",
+                    "source": {
+                      "kind": "node",
+                      "nodeId": "launcher.openFolder"
+                    },
+                    "arguments": []
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "modes": [],
+    "extensionPoints": [
+      {
+        "id": "launcher.surface",
+        "version": 1,
+        "operations": [
+          "replace"
+        ],
+        "contributionKinds": [
+          "panelContribution"
+        ],
+        "summary": "Replace the launcher's start-surface pane content."
+      }
+    ]
+  }
+}

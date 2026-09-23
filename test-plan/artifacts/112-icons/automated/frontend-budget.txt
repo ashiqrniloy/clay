@@ -1,0 +1,27 @@
+
+> clay-frontend@0.1.0 check:budget
+> node scripts/bundle-budget.mjs
+
+ChatPanel-Bfci-5SZ.js                    2.0 kB  chat
+ChatPanel-DIWIBY-X.css                   1.1 kB  chat
+CodingAgentPanel-CrE6pz1O.css            1.7 kB  chat
+CodingAgentPanel-DmZ8aU2Z.js             6.0 kB  chat
+CommandCentre-CojG9Rn5.css               0.5 kB  workflow
+CommandCentre-D8LxmG7o.js                1.1 kB  workflow
+PackageWorkspace-B1kg6eNl.css            1.2 kB  package
+PackageWorkspace-zHnbn76z.js             3.0 kB  package
+WorkspacePanes-Cn3Nq0yX.js               21.1 kB  workflow
+WorkspacePanes-DRGKyhN2.css              3.0 kB  workflow
+actions-Csg0X_EA.js                      0.4 kB  shell
+chat-agent-core-By5sBKPB.js              37.4 kB  chat
+codemirror-BK0xr6xt.js                   115.0 kB  editor
+controls-2NI1ybc2.css                    1.3 kB  workflow
+controls-DnLSw8hB.js                     16.8 kB  workflow
+index-C7pZM018.css                       4.8 kB  shell
+index-Cm7h6v3o.js                        154.9 kB  shell
+registry-B7YUGSYx.css                    0.5 kB  package
+registry-BaP1gD64.js                     1.8 kB  package
+text-field-BbVZ6Ziq.css                  0.7 kB  shell
+text-field-BszKW3Ad.js                   3.7 kB  shell
+shell gzip: 164.4 kB (budget 180 kB)
+total gzip: 378.0 kB (budget 400 kB)

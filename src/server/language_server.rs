@@ -732,7 +732,7 @@ where
     let mut chunk = [0u8; 4096];
     loop {
         match reader.read(&mut chunk).await {
-            Ok(0) => break,
+            Ok(0) | Err(_) => break,
             Ok(read) => {
                 let mut capture = capture.lock().await;
                 let remaining =
@@ -743,7 +743,6 @@ where
                 // Continue reading/discarding after retention fills so a child
                 // cannot block forever on a full stderr pipe.
             }
-            Err(_) => break,
         }
     }
 }

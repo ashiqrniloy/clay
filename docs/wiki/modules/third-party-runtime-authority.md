@@ -2,18 +2,20 @@
 
 ## Source
 
-- `src/packages/bundled.rs` — `BUNDLED_PACKAGES` inventory (11 entries, FNV-1a-64 fingerprints), `verify_bundled_trust`, `RuntimeDomain` enum.
+- `src/packages/bundled.rs` — `BUNDLED_PACKAGES` inventory (19 loadable first-party package roots generated from `src/packages/bundled-inventory.toml`, FNV-1a-64 manifest fingerprints), `verify_bundled_trust`, `RuntimeDomain` enum.
 - `src/packages/manifest.rs` — `ExtensionPointDeclaration`, `StructuredRelationRequest`, `parse_extension_point`, `parse_mixed_relation_array`, contribution namespace validation.
 - `src/packages/extension_points.rs` — `RelationOperation`, `ExtensionContributionKind` (16 variants), validation constants and charset rules.
-- `src/packages/approvals.rs` — `PackageApprovalStore`, `PackageApprovalRecord`, `ApprovedRelation`, `ApprovedReplacement`, `approval_covers`, `AdoptionState`, atomic file persistence.
-- `src/packages/service.rs` — `install_from_value_at_root_with_spec`, `approve_package`, `adoption_state`, `enable` with adoption gating and replacement approval revocation, `rollback_replacement`, `enable_graph` with `verify_relation_authority`, `enable` transactionality (snapshot/restore), `force_enabled_runtime_domain_for_test`.
-- `src/packages/record.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
+- `src/packages/approvals.rs` — `PackageApprovalStore`, `PackageApprovalRecord`, `CapabilityGrant` (granted subset + runtime profile + `granted_by`/`granted_at`), `record_grant`, `current_grant`, `approval_covers`, `AdoptionState`, atomic file persistence.
+- `src/packages/authorization.rs` — `RuntimeProfile` (`native-trust`/`sandboxed`/`restricted`) and its fail-closed `parse`, `LanguageServerGrant`.
+- `src/packages/service.rs` — `install_from_value_at_root_with_spec`, `approve_package`, `authorize_package`, `capability_granted` (the single capability read path), `adoption_state`, `enable` with adoption gating and replacement approval revocation, `rollback_replacement`, `enable_graph` with `verify_relation_authority`, `enable` transactionality (snapshot/restore), `force_enabled_runtime_domain_for_test`.
+- `src/packages/record/mod.rs` — `PackageRecord` with `runtime_domain` field, `PartialEq` excluding `runtime_domain`.
 - `src/packages/conflict.rs` — `reconcile_enabled_conflicts` post-enable, `PackageReplaces` conflict resolution.
-- `src/server/cross_domain.rs` — `CrossDomainRequestEnvelope`, cross-domain invocation validation, `dispatch_to_domain` with provider routing.
-- `src/server/ops/packages.rs` — `op_clay_packages_load_package_by_specifier` (sync trusted-only, stamps domain in result), `op_clay_packages_load_in_package_domain` (async, bridge dispatch + absorption).
-- `src/server/js_runtime.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
+- `src/server/ops/packages.rs` — `op_clay_packages_authorize` (trusted-only grant op), `ensure_grant_authority_open` (refuses grants inside a package activation), `op_clay_packages_load_package_by_specifier` (sync trusted-only, stamps domain in result), `op_clay_packages_load_in_package_domain` (async, bridge dispatch + absorption).
+- `src/server/facades.rs` — `clay:packages` registered `Facade::trusted`, so package code cannot import `authorize` at all.
+- `runtime/js/packages.js` — `authorize` facade (rejects unknown option keys with `packages.invalid_grant`).
+- `src/server/js_runtime/mod.rs` — Two-domain runtime topology, `production_reload`, cross-domain bridge wiring, `replay_third_party_domain`, `dispatch_to_domain` with replacement.
 - `src/server/mod.rs` — `TrustedOpState`, connected-loop references wired to `PackageService` and bridge.
-- `src/main.rs` — CLI `clay package adopt/revoke/rollback/inspect`, `PackageService::open` for durable store.
+- `src/cli.rs` — CLI `clay package adopt/authorize/revoke/rollback/inspect`, `PackageService::open` for durable store.
 - `decision-logs/2026-07-21-0001-two-package-runtime-trust-domains.md`
 - `decision-logs/2026-06-27-2014-unified-user-authorized-package-authority.md` (superseded authority model retained for provenance)
 - `plans/061-Two-Package-Runtime-Trust-Domains-and-Extension-Authority.md`
@@ -24,15 +26,15 @@ Package authority in Clay is built on four layers:
 
 1. **Identity**: immutable bundled inventory (`BUNDLED_PACKAGES`) for Clay-shipped packages, everything else is third-party.
 2. **Provenance**: package name + version + canonical root + manifest fingerprint matched against the bundled inventory, or an installed provenance record for third-party packages.
-3. **Adoption**: durable user-approved `PackageApprovalRecord` stored at `~/.config/clay/packages` with exact identity/version/integrity/capabilities/processes/relations/replacements. No code executes before adoption.
+3. **Adoption**: durable user-approved `PackageApprovalRecord` stored at `~/.clay/packages` with exact identity/version/integrity/capabilities/processes/relations/replacements. No code executes before adoption.
 4. **Extension**: versioned extension points (`clay-extension-point-v1`) declared by package owners, combined with structured relation requests (`clay-package-relation-v1`) from consuming packages. Both owner consent (extension point declarations) and user consent (durable approval) are required before enable.
 
 ## Bundled Trust Inventory
 
-`src/packages/bundled.rs` defines a compile-time `BUNDLED_PACKAGES` array of 11 first-party packages. Each entry has:
+`src/packages/bundled.rs` defines a compile-time `BUNDLED_PACKAGES` array generated by `build.rs` from `src/packages/bundled-inventory.toml` (19 loadable roots today, plus non-loadable helper exports). Each entry has:
 
 - Exact name (e.g., `@clay/markdown`), version, canonical root relative to `CARGO_MANIFEST_DIR/packages/<slug>`.
-- An FNV-1a-64 fingerprint over the canonical root directory for drift detection.
+- An FNV-1a-64 hex fingerprint of the shipped `package.json` **bytes** (`manifest_fingerprint`) for exact binding plus drift detection — not over the source tree, which is itself the trust root; an attacker who can write under `CARGO_MANIFEST_DIR` can replace the binary.
 - An `inventory_matches_source_tree` unit test that fails if source changes without fingerprint regeneration.
 
 `verify_bundled_trust` is the single choke point: it validates `source_kind == ClayShipped`, exact name/version/canonical root match, and fingerprint equality before granting `Trusted` domain. The `PackageSourceKind::from_spec` `@clay/*` prefix classification remains a "claimed family" heuristic; trust decisions are always deferred to `verify_bundled_trust`.
@@ -72,10 +74,11 @@ Package manifests declare `graph.relations` with mixed string/object arrays. Str
 
 ## Durable Approval Store
 
-`PackageApprovalStore` (at `~/.config/clay/packages`) persists one JSON document per approved package. Each `PackageApprovalRecord` contains:
+`PackageApprovalStore` (at `~/.clay/packages`) persists one JSON document per approved package. Each `PackageApprovalRecord` contains:
 
 - Exact `package_name`, `package_version`, `api_prefix`, `integrity`.
-- `approved_permissions`: snapshot of approved capability strings at adoption time.
+- `capabilities`: snapshot of the adoption ceiling (capability strings) at adoption time.
+- `grant`: explicit capability grant — the granted subset of `capabilities`, the granted runtime profile, and `granted_by`/`granted_at`. Absent means no grant, so adoption alone never authorizes a capability. Cleared by revoke and inert when the record's identity no longer matches the installed package.
 - `processes`: language-server contribution IDs requiring external processes.
 - `relations`: array of `ApprovedRelation` (target + extension_point + operation).
 - `replacements`: array of `ApprovedReplacement` (replaced target + withdrawn contribution IDs + `rollback_restore_target` flag).
@@ -84,7 +87,37 @@ Package manifests declare `graph.relations` with mixed string/object arrays. Str
 
 Serialization is manual `serde_json::Value` conversion (Clay has no `serde` dependency). Atomic writes use temp-file + fsync + rename with `0o600` owner-only permissions. Corruption at open time fails closed (in-memory empty store).
 
-`approval_covers` validates exact identity match (name, version, api_prefix, integrity), permissions subset, and relations/replacements subset. Version drift, scope expansion, and target replacement invalidate the approval (returning `Stale`). Permission narrowing requires re-adoption.
+`approval_covers` validates exact identity match (name, version, api_prefix, integrity), permissions subset, and relations/replacements subset. Version drift, scope expansion, and target replacement invalidate the approval (returning `Stale`). Permission narrowing requires re-adoption. `current_grant` applies the same identity rule to the grant section, so a grant from another version, another source, or a revoked record contributes nothing.
+
+`CapabilityGrant::validate` runs at both load and upsert: the granted list must be non-empty, `granted_by`/`granted_at` must be non-empty, and every granted name must be a subset of the record's `capabilities` ceiling. An oversized grant therefore fails closed from disk as well as from a live call. `record_grant` returns `Ok(false)` (silent, in-memory only) when no record exists, the record is revoked, or the record's identity no longer matches the installed package — a grant never manufactures an approval and never re-points one at another package.
+
+## Capability Grants
+
+Adoption is the ceiling; a **grant** is the explicit, narrower authority to use part of it. Four surfaces read it and they all go through one function, `PackageService::capability_granted(record, permission)`, so a grant cannot be visible to one gate and invisible to another:
+
+1. `ensure_capability_grants` — the enable gate. It fails on the first declared capability the grant does not cover (`MissingCapabilityGrant { package_name, capability }`); `LanguageServer` is exempt because session start is itself grant-gated.
+2. `ensure_package_control_grant` — the graph disables/replaces gate.
+3. `require_current_package_capability` / mode activation — the op-dispatch gate.
+4. Inspection (`clay package inspect`) — a union view of the in-memory authorization and the durable grant.
+
+The read is provenance-matched: the in-memory authorization is consulted only when the installed record still matches it, then the durable grant (`approvals.current_grant(...)`) is consulted, which applies the same identity rule. A reinstall, version bump, or source change leaves the grant inert and the package fails closed again.
+
+Grant sources (all trusted-user only):
+
+- **Clay JS API** — `authorize` from `clay:packages`, documented in [`docs/reference/clay-js-api/packages/authorize.md`](../../reference/clay-js-api/packages/authorize.md). Used from `~/.clay/init.js` or another trusted configuration module.
+- **CLI** — `clay package authorize <name> --capability <cap> [--capability <cap>]... [--runtime-profile <p>] [--approved-by <who>]`, defaults `native-trust` / `cli`. It refuses an unadopted package (`run clay package adopt … first`), because an in-memory grant would die with the process.
+- **Runtime profile** — `native-trust`, `sandboxed`, or `restricted`, parsed by the fail-closed `RuntimeProfile::parse`.
+
+What a grant can never do:
+
+- **No self-grant.** `clay:packages` is `Facade::trusted`, so third-party package code cannot import `authorize`. The op also calls `ensure_grant_authority_open`, which refuses while a package activation scope is open (`packages.grant_during_activation`), so trusted-domain code running a package's load entry cannot grant on its behalf.
+- **No undeclared capability.** A capability the manifest does not declare is refused (`package \`<name>\` does not declare capability \`<cap>\` in its manifest`), and the grant must stay inside the adoption ceiling.
+- **No widening by repetition.** A grant is a complete set: re-authorizing replaces the previous set, so dropping a capability takes effect at the next enable.
+- **No approval.** `authorize` on a pending or revoked record refuses instead of creating one; adoption and grants stay separate steps.
+
+`clay package revoke` clears the grant together with the approval (`grant: null`, `revoked: true`) and disables an enabled package, so revocation returns the system to fail-closed: the next `enable` fails with `AdoptionRequired { code: "package_approval.revoked" }` rather than a missing-grant error.
+
+Read the lane occupancy behind these packages (how many commands each package lane dispatched, and how much work was dropped) with the `js_runtime.lane.*` counters described in [Persistent Runtime Hardening](persistent-runtime-hardening.md).
 
 ## Adoption Lifecycle
 
@@ -95,11 +128,11 @@ Installed → Pending → (user/cli approve) → Approved → (loadPackage) → 
 ```
 
 - **Install**: `PackageService::install_from_value_at_root_with_spec` records the package root and manifest. No code executes.
-- **Authorize**: `authorize_package` sets the `RuntimeProfile` (currently `Restricted` for all third-party packages) and approved capabilities.
+- **Authorize**: `authorize_package` sets the `RuntimeProfile` and the approved capability set, and persists the grant section on the package's current approval record so a later process reads the same authority. It refuses capabilities the manifest does not declare, and never creates an approval: without a current record the grant stays in-memory for that generation and the package still cannot execute. The host CLI verb `clay package authorize <name> --capability <cap>... [--runtime-profile <p>] [--approved-by <who>]` (defaults `native-trust`/`cli`) routes through the same service call and refuses an unadopted package, because a CLI grant on an unadopted package would die with the process. A grant is a complete set: re-authorizing replaces it. `clay package inspect` prints the granted capabilities, the profile, who granted/approved them and when, and the declared-but-ungranted remainder.
 - **Adopt**: `approve_package` builds and persists a `PackageApprovalRecord` from host-side facts (provenance, assembled manifest, permissions, LS contribution IDs, graph relations, replacement targets).
-- **Enable**: `loadPackage` / `enable` checks `adoption_state`. If `Approved`, enables the package with capability verification, graph resolution, and conflict reconciliation. Rejected otherwise.
+- **Enable**: `loadPackage` / `enable` checks `adoption_state`. If `Approved`, enables the package with capability verification (`capability_granted` reads the in-memory authorization or the durable grant), graph resolution, and conflict reconciliation. Rejected otherwise.
 - **Stale**: `adoption_state` returns `Stale` when the installed version, api_prefix, or integrity no longer matches the approval record, or when scope/replacement expansion is detected.
-- **Revoke**: `revoke_package_approval` removes the approval and (if enabled) disables the package.
+- **Revoke**: `revoke_package_approval` clears the grant, removes the approval, and (if enabled) disables the package.
 
 ### Enable Transactionality
 
@@ -117,14 +150,9 @@ When a third-party package with `replaces` relation is enabled:
 
 ## Cross-Domain Typed Invocation
 
-`src/server/cross_domain.rs` validates `clay-cross-domain-envelope-v1` requests:
+The `clay-cross-domain-envelope-v1` design validated requests at ingress: requester must be enabled ThirdParty (Trusted blocked), target enabled with declared `extension_point/version/operation`, `approval_ref` bound to a matching durable approval covered by `approval_covers`. Denial reasons: stale requester, revoked approval, wrong target/point/operation, oversize payload, forged approval_ref. Constants: max 16 pending cross-domain requests, 250ms deadline.
 
-- Requester must be enabled ThirdParty (Trusted blocked at ingress).
-- Target must be enabled with declared `extension_point/version/operation`.
-- `approval_ref` must bind to a matching durable approval.
-- Durable approval must cover the relation (`approval_covers`).
-
-Denial reasons: stale requester, revoked approval, wrong target/point/operation, oversize payload, forged approval_ref. Constants: max 16 pending cross-domain requests, 250ms deadline.
+Plan 131 deleted `src/server/cross_domain.rs` (envelope types, validator, tests, `CROSS_DOMAIN_PAYLOAD_BUDGET_BYTES`) as unwired: no handler consumed a validated route, and the first-party extension surfaces it was pre-wired for never arrived. Git retains the implementation; the validator should return with the first real consumer. Live cross-domain work is the load bridge — `op_clay_packages_load_in_package_domain` dispatches a third-party load entry through `dispatch_to_domain` and `absorb_cross_domain_evaluation` merges coordinator-bound registrations into the trusted op state.
 
 ## First-Party Package Replacement
 
@@ -152,6 +180,8 @@ Language-server session spoofing is closed: `start_session` resolves identity ho
 - Trusted domain = compiled bundled inventory only. No runtime promotion into Trusted.
 - Third-party shared runtime = one trust cohort. Packages within the third-party runtime can mutate each other; this is disclosed at adoption.
 - All third-party enables require durable approval (no blanket approval for packages without relations).
+- Capabilities are granted, never implied: adoption records the ceiling, `capability_granted` decides, and a missing grant fails closed at every read surface. A grant is a set (re-authorizing replaces it), stays inside the ceiling, and is inert once the record's identity no longer matches the installed package.
+- Capability grants are trusted-user authority only: third-party package code cannot import `clay:packages`, and the grant op refuses inside a package activation scope.
 - Replacement requires: (a) owner extension point declaration, (b) user durable approval, (c) replacement stays ThirdParty. Clay core is not replaceable.
 - Extension point payload budget 8192 bytes. Cross-domain envelope payload 8192 bytes. Both are compiled constants.
 - LS grants are non-transferable: each package gets its own, keyed to the package name in the grant map.
@@ -168,9 +198,11 @@ cargo test --test security package_graph::        # extension point validation, 
 cargo test --test security package_loading::      # replacement withdraws trusted target atomically, LS lifecycles, adoption gating
 cargo test --test security package_conflicts::    # replacement edge approval, stale-on-commit
 cargo test --test protocol primitives_docs::      # op/extension/subset inventory tests, wiki doc completeness
-cargo test --lib package_approval      # PackageApprovalStore round-trip, corruption, version drift
+cargo test --lib package_approval      # PackageApprovalStore round-trip, corruption, version drift, grant validation
+cargo test --test security package_loading::   # plan 136 durable grants: durable_grant_survives_a_new_service_process, store_without_grants_still_fails_closed, grant_is_inert_after_provenance_change, revoke_withdraws_the_durable_grant
+cargo test --test security package_cli::      # plan 136 task 5: the `clay package authorize` verb, inspect `Grants:`/`Ungranted:` lines
+cargo test --lib package_code_cannot_self_grant_capabilities_during_activation   # plan 136: no self-grant while a package activation scope is open
 cargo test --lib bundled_trust         # inventory matches source, extension points match real contributions
-cargo test --lib cross_domain          # cross-domain envelope validation, requester/target checks
 cargo test --lib third_party_config    # plan 061 task 15 config verification (adoption, stale, load)
 cargo test --lib runtime_resource      # two-runtime RSS/thread/candidate reload baselines
 cargo test --lib rust_visibility       # facade allowlist parity, internal type audit
@@ -180,8 +212,12 @@ cargo test --lib rust_visibility       # facade allowlist parity, internal type 
 
 - [Embedded JavaScript Runtime](embedded-js-runtime.md) — Two Runtime Trust Domains section
 - [Package Loading](package-loading.md)
+- [Persistent Runtime Hardening](persistent-runtime-hardening.md) — lane occupancy counters (`js_runtime.lane.*`) and the tuning decision
 - [Parse Coordinator](parse-coordinator.md)
 - [Language Server Process Service](language-server-process-service.md)
+- `docs/reference/clay-js-api/packages/authorize.md` — the `authorize` API (grant surface reference)
+- `docs/reference/clay-js-api/configuration.md` — granting from `init.js`
+- `docs/development/performance.md` — lane-occupancy measurement and budgets
 - `docs/reference/primitives/package-security.md`
 - `docs/reference/primitives/package-loading.md`
 - `docs/reference/packages/creating-packages.md`

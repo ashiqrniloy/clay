@@ -15,7 +15,19 @@ phase: Phase 7
 visibility: public
 permissions: [document-edit]
 key_bindings: [Backspace, Delete]
-custom_properties: []
+custom_properties:
+  - name: documentId
+    type: string
+    default: required
+    description: Target document identifier.
+  - name: end
+    type: number
+    default: required
+    description: Exclusive end offset of the range to delete.
+  - name: start
+    type: number
+    default: required
+    description: Start offset of the range to delete.
 security: Requires document edit authority, valid byte/scalar boundaries, and an editable lease; does not grant filesystem, network, shell, extension loading, AI mutation, workspace, package, WASM, or client-side JavaScript authority.
 agent_guidance: Use `editor.serverDeleteRange` only for its documented editor responsibility; prefer the Clay JS facade over raw Rust functions, protocol DTOs, or `Deno.core.ops` names.
 lookup_tags: [backspacedelete, editor, js-api]
@@ -68,7 +80,7 @@ Default key bindings:
 - `Backspace`
 - `Delete`
 
-Users may rebind or remove these through documented key binding APIs in `~/.config/clay/init.js`.
+Users may rebind or remove these through documented key binding APIs in `~/.clay/init.js`.
 
 ## Custom properties
 
@@ -101,7 +113,7 @@ Use `editor.serverDeleteRange` when the user asks for delete text range through 
 - JS facade: `runtime/js/editor.js::serverDeleteRange`
 - Future Deno op: `src/server/ops/editor.rs::op_clay_editor_delete_range` (`op_clay_editor_delete_range`)
 - Backing Rust/current owner: `src/server/document.rs::DocumentState::apply_edit`
-- Current implementation audit path: `src/editor/surface.rs::EditorSurface::backspace_with_event; src/editor/surface.rs::EditorSurface::delete_forward_with_event; src/server/document.rs::DocumentState::apply_edit`
+- Current implementation audit path: `src/client_commands.rs::EditorClientCommand; src/server/document.rs::DocumentState::apply_edit`
 
 ## Lookup metadata
 

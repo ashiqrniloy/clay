@@ -5,26 +5,23 @@ description: Create and maintain numbered plan documents for work that requires 
 
 # Create Plan
 
-Create or update actionable, numbered, documentation-backed implementation plans in `plans/` at the repository root.
+Create or update actionable, numbered, documentation-backed implementation plans in `plans/` at the repository root. Executing a plan is routed through `.agents/skills/clay-execution/` (deterministic execution loop, per-task references); this skill defines the plan document itself.
 
 ## Plan Creation Workflow
 
-1. Determine the repository root: Git root if available, otherwise current working directory.
-2. Ensure `plans/` exists.
-3. Choose the next filename by incrementing the highest existing three-digit prefix, e.g. `001-Setup.md`, `002-Window-Creation.md`.
-4. Read current docs for relevant libraries, frameworks, SDKs, packages, crates, CLIs, or services. Prefer project-local docs, then documentation lookup tools. Record exact docs/API references in the plan.
-5. If `.agents/skills/project-patterns/` exists, use it before writing task approaches and cite relevant pattern files.
-6. For phase implementation plans that add or change an editor mode, language mode, JS package, extension point, or reusable capability, include a dedicated primitive-review task before implementation. The task must inventory existing primitives, document what can be achieved with them, plan only generic reusable new primitives when required, and then build package/mode functionality on top of those primitives.
-7. For any plan that touches Clay app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, or layout), apply the UI requirements:
-   - Run `npx ui-skills start` first and load the smallest useful UI skill set before designing UI tasks.
-   - Load the `clay-ui` skill and read `.agents/skills/clay-ui/references/components.md` and `.agents/skills/clay-ui/references/tokens.md`.
-   - Tasks must reuse cataloged primitives and components first; building custom components outside the catalog requires explicit justification in the task's `Options Considered`.
-   - Include one post-implementation **visual and accessibility review** task before final documentation/wiki work. It must launch a real representative UI, take and inspect screenshots for every changed state, and record screenshot paths plus findings. When computer-use capability is available, start with `get_app_state`, inspect the accessibility tree, and verify keyboard focus, roles, labels, and interaction for changed controls. If live UI or computer use is unavailable, record the blocker and run the strongest available structural/accessibility checks; do not claim visual review passed.
-8. Load project-specific plan requirements deterministically:
-   - Read `.agents/skills/create-plan/references/default.md` if it exists.
-   - Read `.agents/skills/create-plan/references/<git-root-basename>.md` if it exists.
-   - Apply all loaded requirements before finalizing tasks.
-9. If `.agents/skills/project-wiki/` exists, include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks. Use `.agents/skills/create-plan/references/wiki-task.md` when present.
+1. Determine the repository root (git root, else cwd); ensure `plans/` exists.
+2. Choose the next filename by incrementing the highest existing three-digit prefix, e.g. `001-Setup.md`.
+3. Read current docs for relevant libraries/frameworks/SDKs/packages/crates/CLIs/services (project-local docs first, then documentation lookup tools); record exact references in the plan.
+4. If `.agents/skills/clay-execution/` exists, use it before writing task approaches (router: plan-creation integration, pattern references) and cite relevant reference files.
+5. For phase plans adding/changing an editor mode, language mode, JS package, extension point, or reusable capability, include a dedicated primitive-review task before implementation (inventory existing primitives, document what they achieve, plan only generic reusable new primitives, build package/mode functionality on top).
+6. For any plan touching Clay app UI (components, panels, overlays, pop-ups, dropdowns, menus, text inputs, multi-selects, completion pop-ups, theme, typography, tokens, layout), apply the UI gate: every UI task reads [`DESIGN.md`](../../../DESIGN.md) (the normative Quiet Instrument design system), `.agents/skills/clay-execution/references/ui.md` plus the catalog references (`references/components.md`, `references/tokens.md`) and lists them under `Approach -> Documentation Reviewed`; plan-level mention alone is insufficient. Substantial new-surface design tasks additionally load the four project-local design skills (`impeccable`, `full-output-enforcement`, `high-end-visual-design`, `design-taste-frontend`). Reuse cataloged primitives/components first; custom components outside the catalog require explicit justification in `Options Considered`, and no task may reintroduce a pattern retired by `DESIGN.md` §14. Include one post-implementation visual/accessibility review task before final documentation work (duty details: `clay-execution/references/planning-checklist.md`).
+7. Apply the mandatory UI prototype-and-approval gate — HTML prototype first, explicit user approval second, implementation third (full duty: `references/clay.md` → UI Prototype and Explicit User Approval Task).
+   - **Prototype, no authority.** Any app-UI change needs an HTML prototype committed under `design-artifacts/prototypes/<slug>/` before implementation, unless an artifact under `design-artifacts/approved/<slug>/` already covers that exact surface and state set — then implementation cites that artifact instead. Prototypes are self-contained (open over `file://`, no build step), render against the four shipped content themes, cover every component state (rest/hover/active/focus/selected/disabled/invalid) plus empty/loading/error/recovery where applicable, and cover narrow and wide layouts when layout can change. A prototype is exploratory and has no authority.
+   - **Explicit approval, frozen artifact.** One task copies the chosen prototype into `design-artifacts/approved/<slug>/` and records the approval in the task evidence (date, approving user statement, chosen variant, requested changes). Approved artifacts are append-only: a later change re-enters the prototype loop as a new variant, never an in-place edit. Implementation tasks may not start before the approved artifact exists.
+   - **Strict conformance.** Every implementation task cites the approved artifact path, and the visual/accessibility review compares the running UI against it and records each deviation. A deviation is either a defect fix or an explicit re-approval through the same loop — silent drift is a defect. Prototypes are never cited as authority for shipped behavior; only `design-artifacts/approved/` plus `DESIGN.md` are normative.
+   - Aesthetic changes to the language itself land in `DESIGN.md` (plus design-system package data) and require re-approval before host CSS or component source changes.
+8. Load project-specific plan requirements deterministically: `.agents/skills/create-plan/references/default.md` and `references/<git-root-basename>.md` when present, and apply them before finalizing tasks. For Clay this includes, for plans touching a user-facing configuration surface, the example-config maintenance task plus a separate live launch-test task.
+9. Include exactly one final code-wiki task after implementation/verification and project-specific maintenance tasks (when the wiki workflow applies per `.agents/skills/clay-execution/references/docs-as-code.md`); use the template in `references/clay.md`.
 10. Write the plan using the structure below.
 
 ## Required Plan Structure
@@ -76,29 +73,10 @@ Create or update actionable, numbered, documentation-backed implementation plans
 
 ## Task Writing Rules
 
-- Make every task independently checkable with `- [ ]` or `- [x]`.
-- Keep acceptance criteria specific; include functional, performance, code quality, and security criteria for every task.
-- Treat `Approach` as mandatory and evidence-based.
-- Include documentation-derived API examples for library/framework/SDK/package/crate/CLI/service usage.
-- For new JS packages or mode implementations, add a primitive-first task before package work: read primitive docs/wiki, assess existing Rust-side primitives, identify generic primitive gaps, reject mode-specific Rust logic, and include tests/docs so the primitive library becomes easier to reuse for later modes.
-- List every expected file. If uncertain, mark the list tentative and explain why.
-- Write test cases before implementation, derived from acceptance criteria.
+- Make every task independently checkable (`- [ ]` / `- [x]`); acceptance criteria must cover functional, performance, code quality, and security.
+- Treat `Approach` as mandatory and evidence-based; include documentation-derived API examples for library/framework/SDK/package/crate/CLI/service usage.
+- For new JS packages or mode implementations, add a primitive-first task before package work: read primitive docs/wiki, assess existing Rust-side primitives, identify generic primitive gaps, reject mode-specific Rust logic, include tests/docs so the primitive library becomes easier to reuse.
+- For app-UI plans, include the gate as real tasks in order: prototype task(s), then the freeze/approval task, then implementation tasks that each cite the approved artifact path by name. Never plan UI implementation whose reference artifact does not exist yet.
+- List every expected file (mark tentative lists as such, with reason). Write test cases before implementation, derived from acceptance criteria.
 - Apply loaded project-specific requirements before finalizing the task list.
 - Do not fill `Compromises Made` or `Further Actions` before execution unless known constraints already exist.
-
-## Deterministic Execution Loop
-
-When executing a plan:
-
-1. Read the full plan.
-2. Select the first unchecked task unless the user names a specific task.
-3. Re-read relevant project patterns, loaded project-specific plan requirements, decision logs, and existing wiki pages for files/modules being changed.
-4. Implement only the selected task unless dependencies require a small, explicitly noted prerequisite.
-5. Run the task's listed tests/checks and any directly relevant validation.
-6. Update the task checkbox to `- [x]` only after implementation and checks pass.
-7. If the approach, files, or tests changed, update that task before continuing.
-8. Repeat from step 2 until implementation and verification tasks are complete.
-9. Execute any project-specific API/documentation maintenance task, such as Clay JS API verification, when present.
-10. Execute the final code-wiki task when present.
-11. Run final verification for the plan.
-12. Fill `Compromises Made` and `Further Actions` with actual deviations, deferred work, rationale, and priority.

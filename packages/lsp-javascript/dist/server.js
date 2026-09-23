@@ -1,4 +1,4 @@
-import { createTypescriptLanguageServerBridge } from "./shared/typescript-language-server.js";
+import { createTypescriptLanguageServerBridge } from "lsp-shared/typescript-language-server.js";
 import {
   contributionId,
   languageIds,

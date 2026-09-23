@@ -1,0 +1,27 @@
+0|application|-|clay-desktop|/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay|/org/a11y/atspi/accessible/9|clay-desktop
+2|panel|-||/org/a11y/atspi/accessible/1|clay-desktop
+3|panel|-||/org/a11y/atspi/accessible/2|clay-desktop
+4|filler|-||/org/a11y/atspi/accessible/3|clay-desktop
+5|separator|-||/org/a11y/atspi/accessible/5|clay-desktop
+5|button|-|Minimise|/org/a11y/atspi/accessible/12|clay-desktop
+5|button|-|Maximise|/org/a11y/atspi/accessible/11|clay-desktop
+5|button|-|Close|/org/a11y/atspi/accessible/13|clay-desktop
+4|filler|-||/org/a11y/atspi/accessible/4|clay-desktop
+5|label|-|Clay|/org/a11y/atspi/accessible/6|clay-desktop
+5|label|-||/org/a11y/atspi/accessible/7|clay-desktop
+2|filler|-||/org/a11y/atspi/accessible/10|clay-desktop
+3|filler|-||/org/a11y/atspi/accessible/8|clay-desktop
+4|filler|-||/org/a11y/webkit/accessible/41297c2c_18db_4646_ae81_6af38f06d023|clay-desktop
+5|scroll pane|-||/org/a11y/atspi/accessible/07678521_7fd2_4af4_a564_b3508f6bb1ae|clay-desktop
+6|document web|-|Clay|/org/a11y/atspi/accessible/76fb42a4_1ada_4d3c_a40d_601cd1c1298a|clay-desktop
+7|landmark|-||/org/a11y/atspi/accessible/43cb18f6_18c9_498f_b1d5_5edaf6801ae9|clay-desktop
+8|section|-||/org/a11y/atspi/accessible/0e15bc37_c154_4caa_b523_8c7aafa12440|clay-desktop
+8|section|-||/org/a11y/atspi/accessible/ca90ad7b_a701_429a_859c_6269e6f34367|clay-desktop
+9|page tab list|-|Window tabs|/org/a11y/atspi/accessible/f8211d89_2ff6_4793_9614_6237fd4895b5|clay-desktop
+10|page tab|selected|Workspace|/org/a11y/atspi/accessible/80c0955d_912c_4493_b29a_7e674a70cc17|clay-desktop
+7|landmark|-|Clay workspace|/org/a11y/atspi/accessible/8197317e_a106_43c8_bafa_5c4365cfcb8c|clay-desktop
+8|notification|-||/org/a11y/atspi/accessible/2249cf16_742d_45b2_a38e_330e1aeca147|clay-desktop
+9|button|-|Reconnect session|/org/a11y/atspi/accessible/e7b17abf_4a95_45ab_9b17_32885323c994|clay-desktop
+7|landmark|-||/org/a11y/atspi/accessible/ba1e0354_9515_47ce_8fb6_ef27b09e13d3|clay-desktop
+8|status bar|-||/org/a11y/atspi/accessible/889fe515_a08b_4c51_bd86_fdca9709ab3a|clay-desktop

@@ -21,10 +21,10 @@ No default Rust-level shortcuts are hardcoded. Every key binding above is config
 
 ### Selected-file dialog (`clientOpenFileDialog`)
 
-Opens the native OS file picker. After the user selects a file, the client sends the path to the server with a single-use capability token. The server canonicalizes and validates the path, creates a single-file grant (not a workspace root), and sends back a full-text `DocumentOpened` snapshot.
+Opens the native OS file picker. After the user selects a file, the client sends the path to the server with a single-use capability token. The server canonicalizes and validates the path, creates a single-file grant (not a workspace root), streams the UTF-8 file into its canonical rope under the resident-memory budget, and sends back a bounded `DocumentOpened` head; remaining bytes use versioned chunk requests.
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { clientOpenFileDialog } from "clay:documents";
 import { bindKey } from "clay:keybindings";
 import { loadPackage } from "clay:packages";
@@ -40,10 +40,10 @@ Selected-file grants are single-file: the server authorizes only the canonical p
 
 | Platform | Backend | Filters | Cancellation |
 |---|---|---|---|
-| Windows | COM `IFileOpenDialog` | `.md`, `.markdown`, `.mdown`, `*.*` | non-error no-op |
-| Linux | xdg-desktop-portal `FileChooser.OpenFile` | glob: `*.md`, `*.markdown`, `*.mdown`, `*` | non-error no-op |
-| macOS | objc2-app-kit `NSOpenPanel` | Markdown extensions, `allowsOtherFileTypes` | non-error no-op |
-| Other | N/A | N/A | returns `Unsupported` diagnostic |
+| Windows | desktop bridge `dialog_open_file` (native picker pending long-term Windows target) | `.md`, `.markdown`, `.mdown`, `*` | non-error no-op |
+| Linux | `dialog_open_file` over the `ashpd` XDG portal (`FileChooser.OpenFile`) | glob: `*.md`, `*.markdown`, `*.mdown`, `*` | non-error no-op |
+| macOS | native picker pending at the same command seam | Markdown extensions, `allowsOtherFileTypes` | non-error no-op |
+| Other | N/A | N/A | sanitized diagnostic |
 
 On unsupported platforms, `clientOpenFileDialog` returns a status diagnostic: `client.file_dialog.not_supported_on_this_platform`. No panic, no crash, no blank dialog.
 
@@ -67,20 +67,34 @@ Phase 24.3 adds a built-in dired-style path browser over the transient-menu roun
 
 ### Document state after open
 
-Both selected-file and workspace opens produce a `DocumentOpened` client event. The editor widget:
+Both selected-file and workspace opens produce a `DocumentOpened` client event.
+The workspace controller owns one `DocumentSession` per pane and routes the
+reply by its in-flight path before falling back to document identity. There is
+no app-wide document-session singleton.
 
-1. Stashes the previously active document session (text, caret, viewport, undo/redo history, dirty state, pending edits) into a `DocumentSessionStore` bound at 64 sessions.
-2. Loads the new document snapshot (text, version, access lease, metadata).
-3. Installs the server-provided behavior manifest (if any) and shared theme/typography.
-4. Updates the edit queue authority for the new document.
+The owning session:
 
-Opening the same document again replaces the active buffer without creating a duplicate session.
+1. Installs the bounded `DocumentTextHead` and paints its first chunk immediately.
+2. Keeps one current CodeMirror `Text`: `view.state.doc` while attached, or a
+   detached snapshot only while no view exists.
+3. Installs server behavior/theme/typography metadata and updates edit
+   authority without duplicating document text.
+4. Requests remaining bytes one offset at a time through `DocumentChunkRequest`;
+   each response is deduplicated, appended programmatically with history
+   disabled, and bounded by `MAX_CHUNK_BYTES`.
+5. Marks the session ready only after all bytes arrive. A rejected/stale chunk
+   stops the load or restarts it through resync; it never exposes a partial
+   editable document.
+
+Opening another file in a pane replaces that pane's current document. Other
+panes and tabs retain their own sessions; opening the same document elsewhere
+is routed by the server's document/lease authority rather than a client mirror.
 
 ## Saving Documents
 
 ### Server-first save (`serverSaveDocument`)
 
-Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server writes the canonical text to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename).
+Save is a server file IO operation, never client-local. The client sends `ClientMessage::SaveDocument` with the document ID and known version; the server clones the canonical Crop rope (Arc-root), releases the document mutex, and streams rope chunks to the authorized file path atomically (exclusive unpredictable temp file + `fsync` + permission restore + target-identity revalidation + rename). The write never materializes a whole-document `String`.
 
 ```js
 bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
@@ -89,7 +103,7 @@ bindKey("Ctrl+S", "documents.serverSaveDocument", { scope: "editor" });
 When `Ctrl+S` fires:
 
 1. The keybinding matches `documents.serverSaveDocument` in the behavior manifest.
-2. The `EditorWidget` intercepts the command locally (before the generic server `CommandExecutor` route) and calls `request_save_active_document`.
+2. The editor host intercepts the command locally (before the generic server `CommandExecutor` route) and calls the save flow.
 3. The edit queue sends `ClientMessage::SaveDocument` for the active document's ID and current confirmed version.
 4. The server `save_document_unlocked` reauthorizes the canonical path, compares disk metadata for staleness, writes atomically, and returns `ServerMessage::DocumentSaved { document_id, version, dirty }`.
 5. The client receives `ClientConnectionEvent::DocumentSaved`: dirty chrome clears, stale conflict diagnostics clear, and the version updates.
@@ -131,7 +145,7 @@ Dirty persists on:
 
 Reload replaces the editor text with the current on-disk version. Clean documents reload without friction; dirty documents require explicit force.
 
-Open and reload read through one opened handle: the server validates the handle's type and size against the openable-file budget, then reads with a hard ceiling of the budget plus one byte, so a file that grows or is swapped between validation and read stays bounded and is rejected with `FileTooLarge` instead of exhausting memory. The workspace mutex is never held across the disk read.
+Open and reload read through one opened handle while the workspace mutex is released. The server reserves the 256 MiB session resident-rope budget, sniffs NUL bytes in the first 8 KiB, and streams UTF-8 through a bounded `RopeBuilder` with a three-byte carry, so a file that grows between validation and EOF is rejected with `DocumentBudgetExceeded` without a document-sized transient `String`. The workspace mutex is never held across the disk read; successful open/reload responses carry a bounded head and the client fetches remaining chunks.
 
 ```js
 // Not typically bound to a direct key; reachable via Control Center or recovery menus.
@@ -178,18 +192,31 @@ When `reload_document` is called without `force` on a dirty document, the server
 
 ### Accessibility during conflict
 
-Recovery menus are exposed as `Role::Menu` with `Role::MenuItem` children in the AccessKit tree. Menu item labels include the action description and whether the item is selected.
+Recovery menus are server-owned menu snapshots rendered by the React client as accessible listbox/menu surfaces; item labels include the action description and selected state.
 
-## Multi-Document Sessions
+## Multi-Document and Multi-Pane Sessions
 
-Clay retains up to 64 document sessions locally. Opening a second file stashes the first session; switching documents restores the stashed text, caret, viewport, undo/redo history, and dirty state.
+The server caps open documents per client at 64, but frontend ownership is
+pane-scoped rather than a global document mirror. Each pane has one session and
+one current `Text`; detached text exists only while that pane has no attached
+view. A four-pane layout therefore has four independent session/document
+routes, and tabs have separate runtimes/connections.
 
-**Switch active document:**
-- `clientShowOpenDocuments` opens a transient menu listing all open documents with dirty markers.
-- Selecting a document calls `clientActivateDocument` with the `DocumentId`.
-- Switching is client-local: no server round trip, no re-download.
+**Switch or restore a document:**
 
-Dirty state and pending edits are per-document. Confirmed server version is per-document.
+- The shell persists pane paths/layout, then `workspace-controller.ts` creates
+  or reuses the owning pane session during restore.
+- `DocumentOpened` replies match the session's in-flight path before document
+  ID/active-pane fallback, so simultaneous pane opens cannot cross-wire.
+- A newly attached view installs the pane's detached snapshot; it does not
+  replay a second document copy or a cached feature stream into another pane.
+- Switching panes/tabs is client-local presentation work; save, reload,
+  resync, leases, versions, and file authority remain server-first.
+
+Dirty state, pending edits, confirmed version, progressive loading, and feature
+layers are per pane/document session. Programmatic head/chunk/reload/resync
+installs use no-history transactions, so undo cannot restore partial transfer
+chunks.
 
 ```js
 bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });
@@ -199,14 +226,14 @@ bindKey("Ctrl+Tab", "editor.clientShowOpenDocuments", { scope: "editor" });
 
 | Capability | Windows | Linux | macOS | Other |
 |---|---|---|---|---|
-| Native file-open dialog | COM `IFileOpenDialog` | xdg-desktop-portal | `NSOpenPanel` | Unsupported diagnostic |
-| Native folder dialog | COM `IFileOpenDialog` | xdg-desktop-portal | `NSOpenPanel` | Unsupported diagnostic |
+| Native file-open dialog | pending at the `dialog_open_file` seam | XDG portal (`ashpd`) | pending at the same command seam | sanitized diagnostic |
+| Native folder dialog | pending at the same command seam | XDG portal (`dialog_open_folder`) | native picker pending at the same command seam | sanitized diagnostic |
 | Atomic save | `MoveFileExW` rename | POSIX atomic rename | POSIX atomic rename | N/A |
 | Markdown filters | extension filter list | portal glob filters | `setAllowedFileTypes` (deprecated) | N/A |
 | All-files fallback | `*.*` | `*` (normalized) | `allowsOtherFileTypes: true` | N/A |
 | Clipboard copy/cut/paste | `Ctrl+C`/`X`/`V` | `Ctrl+C`/`X`/`V` | `Cmd+C`/`X`/`V` | persistent text-only client `arboard` sink |
 | Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` | same | `Cmd+Z` / `Cmd+Shift+Z` | 256-entry inverse stack |
-| IME preedit overlay | OS IME via Masonry | ibus/fcitx when available | OS IME via Masonry | paint-only until commit |
+| IME preedit overlay | WebKitGTK IME → CodeMirror composition | ibus/fcitx when available | same path per platform | composition is local until commit |
 | Snapshot retain (64 docs) | yes | yes | yes | yes |
 | Undo/redo (256 entries) | yes | yes | yes | yes |
 | Save/conflict recovery menus | yes | yes | yes | yes |
@@ -290,7 +317,7 @@ Save-as, file watchers, and autosave remain deferred. When implemented, they wil
 - [Server File Workspace Model](../wiki/modules/server-file-workspace.md) — server workspace roots, grants, open/save/reload internals
 - [Client File Dialog Backend](../wiki/modules/client-file-dialog.md) — platform dialog implementations
 - [Launch and GUI Smoke Validation](launch-and-gui-smoke.md) — command-first smoke paths and fixtures
-- [Client/Server Edit Acknowledgement Flow](../wiki/flows/client-server-edit-ack.md) — edit queue, acks, resync
+- [Client/Server Edit Acknowledgement Flow](../wiki/archive/client-server-edit-ack.md) — edit queue, acks, resync
 - [Clay JS API: serverSaveDocument](../reference/clay-js-api/documents/server-save-document.md)
 - [Clay JS API: serverReloadDocument](../reference/clay-js-api/documents/server-reload-document.md)
 - [Clay JS API: clientOpenFileDialog](../reference/clay-js-api/documents/client-open-file-dialog.md)

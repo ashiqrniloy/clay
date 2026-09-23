@@ -1,0 +1,32 @@
+/* Clay icon slot — `paint_icon_slot` projection (Plan 112 Task 7).
+ * Token-only: glyph size from `dimension.icon.size`, glyph color from the
+ * `text.icon` role, disabled from `opacity.disabled`. Inherits `currentColor`
+ * so parent control states (hover/active/primary/danger) tint the glyph. */
+
+.icon {
+  display: inline-block;
+  /* Token is the floor; 1em lets glyphs track increased UI typography
+   * (task 11 finding: 16px glyphs looked undersized next to 24px text). */
+  inline-size: max(var(--clay-dimension-icon-size, 16px), 1em);
+  block-size: max(var(--clay-dimension-icon-size, 16px), 1em);
+  color: var(--clay-text-icon, inherit);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Decorative + informative icons never become focus targets and never
+ * intercept pointer events from the owning control's full hit target. */
+.icon:focus {
+  outline: none;
+}
+
+/* Unknown key: stable empty inline slot, no announcement, no glyph. */
+.empty {
+  display: none;
+}
+
+@media (forced-colors: active) {
+  .icon {
+    forced-color-adjust: auto;
+  }
+}

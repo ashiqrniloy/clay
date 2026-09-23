@@ -1,0 +1,1203 @@
+<!doctype html>
+<html lang="en" data-theme="modus-operandi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f0f0f0">
+<title>Quiet Instrument — Palette stage flows &amp; halo (plan 125 prototype)</title>
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="ds-quiet.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="pages.css">
+<link rel="stylesheet" href="palette-stages.css">
+<link rel="stylesheet" href="lane.css">
+<style>/* The two approved screens this page composes, kept as they ship: the
+   workspace view's document column (workspace.html) and the agent view's
+   header / transcript / turns (agent-landing.html). Only the subsets the lane
+   prototype needs are repeated here; nothing below is a new design decision. */
+
+/* ---------- workspace view (approved screen 1) ------------------------- */
+.docbar { display: flex; align-items: center; gap: 12px; padding: 12px 18px 10px; min-width: 0; flex-wrap: wrap; }
+.crumb { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.crumb-name { font: 500 14px/1 var(--font-mono); letter-spacing: -0.01em; }
+.crumb-path { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+.badges { display: flex; align-items: center; gap: 6px; }
+.docbar-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+
+.editor-wrap { flex: 1; min-height: 0; display: flex; justify-content: center; overflow: hidden; padding: 0 8px; }
+.editor { display: grid; grid-template-columns: 46px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); width: 100%; max-width: calc(var(--measure) + 4rem); min-height: 0; overflow: hidden; }
+.gutter { padding: 20px 0 40vh; text-align: right; user-select: none; }
+.gln { display: block; padding-right: 14px; font: 400 var(--fs-xs) / 22px var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.gln[data-current='true'] { color: var(--c-accent); font-weight: 500; }
+.doc { margin: 0; padding: 20px 24px 40vh 0; overflow: auto; font: 400 13px/22px var(--font-mono); color: var(--c-text); outline: none; caret-color: var(--c-caret); tab-size: 2; min-width: 0; }
+.doc .ln { display: block; white-space: pre-wrap; min-height: 22px; border-left: 2px solid transparent; margin-left: -12px; padding-left: 10px; border-radius: 0 var(--r-xs) var(--r-xs) 0; }
+.doc .ln[data-current='true'] { background: var(--c-accent-soft); border-left-color: var(--c-accent); }
+.md-blank { color: transparent; }
+.md-h1 { color: var(--c-doc-h1); font-weight: 600; font-size: 1.35em; letter-spacing: -0.01em; }
+.md-h2 { color: var(--c-doc-h2); font-weight: 600; }
+.md-code { background: var(--c-code-bg); color: var(--c-code-span); border-radius: var(--r-xs); padding: 0 3px; }
+.md-strong { font-weight: 600; }
+
+/* ---------- agent view (approved screen 2) ----------------------------- */
+
+/* Review 2026-09-16: no header — the tab's agent, model and effort live in the
+   lane's composer box, so the transcript starts at the top of the pane. */
+.agent { display: flex; flex-direction: column; min-height: 0; min-width: 0; flex: 1; }
+.ctl { display: flex; align-items: center; gap: 7px; }
+
+.transcript { flex: 1; min-height: 0; overflow: auto; padding: 4px 18px 18px; }
+.transcript-inner { max-width: 72ch; margin: 0 auto; display: flex; flex-direction: column; }
+.turn { padding: 16px 0; border-bottom: 1px solid var(--hairline); }
+.turn[hidden] { display: none; }
+.turn-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.turn-role { font: 500 10px/1 var(--font-ui); letter-spacing: var(--label-tracking); text-transform: uppercase; color: var(--c-text-3); }
+.turn[data-role='agent'] .turn-role { color: var(--c-accent); }
+.turn-time { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); font-variant-numeric: tabular-nums; }
+.turn-note { font: 400 var(--fs-xs) / 1.6 var(--font-mono); color: var(--c-text-3); margin-top: 8px; }
+.turn-body { font-size: var(--fs-md); line-height: 1.68; white-space: pre-wrap; }
+.turn-body code { font-family: var(--font-mono); background: var(--c-code-bg); border-radius: var(--r-xs); padding: 1px 4px; color: var(--c-code-span); }
+.typing { display: inline-flex; gap: 3px; align-items: center; }
+.typing i { width: 4px; height: 11px; border-radius: var(--r-pill); background: var(--c-accent); animation: pulse 1.1s ease-in-out infinite; }
+.typing i:nth-child(2) { animation-delay: 160ms; }
+.typing i:nth-child(3) { animation-delay: 320ms; }
+.state-strip { display: flex; align-items: center; gap: 10px; padding: 7px 18px; border-top: 1px solid var(--hairline); font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+.state-strip .spacer { margin-left: auto; }
+
+/* ---------- inspector (agent view) ------------------------------------- */
+
+.inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--hairline); background: color-mix(in oklab, var(--c-bg) 70%, transparent); }
+.inspector-body { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 12px; }
+.section-head { display: flex; align-items: center; gap: 8px; padding: 10px 4px; }
+.row-name { font-size: var(--fs-sm); }
+.row-desc { font: 400 var(--fs-xs) / 1.5 var(--font-mono); color: var(--c-text-3); }
+.sess-mark { flex: none; width: 16px; font: 500 10px/1 var(--font-mono); color: var(--c-text-3); }
+.sess-role { font: 400 var(--fs-xs) / 1 var(--font-mono); color: var(--c-text-3); }
+
+/* ---------- review-only strips ---------------------------------------- */
+
+.scene-note { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; padding: 7px 10px; border: 1px solid var(--hairline); border-radius: var(--r-sm); background: var(--veil); font: 400 var(--fs-xs) / 1.5 var(--font-mono); color: var(--c-text-3); }
+.scene-note [data-tone='err'] { color: var(--c-err); }
+</style>
+</head>
+
+<body class="proto">
+<div class="proto-bar">
+  <span class="proto-id">
+    <h1>Palette stage flows &amp; halo</h1>
+    <span class="t-micro" data-clay-ds="label.default.root.rest">plan 125 prototype · no authority</span>
+  </span>
+  <nav class="proto-nav" aria-label="Reference screens"><a class="proto-link" href="../agent-lane-palette/lane-palette.html">plan 124 lane &amp; palette ↗</a><a class="proto-link" href="../quiet-instrument-migration/command-centre.html">retired centered sheet ↗</a></nav>
+  <span class="proto-note">One sheet for the catalogue and every picker stage: the catalogue needs <code>/</code>, a stage does not; the secret stage shields its value in the sheet; the foot says what <code>↵</code> does and how <code>Esc</code>/<code>Alt+←</code> walk back; the halo board compares the candidate against today's drop shadow.</span>
+  <div class="proto-actions">
+    <span class="seg" role="radiogroup" aria-label="Catalogue states">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="lane">lane</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="lane-railed">lane · rails</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="lane-full">lane · full</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="catalogue">/ query</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="catalogue-empty">/ empty</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="catalogue-no-match">/ no match</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="catalogue-scopes">scopes</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="catalogue-chords">chords</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Picker stages">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-provider">provider</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-auth">auth</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-secret">secret</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-url">url</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-oauth">oauth</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-model">models</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-session">sessions</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="stage-back">back</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Menus and comparison">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="mentions">@</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-scene="halo">halo</button>
+    </span>
+    <span class="popwrap">
+      <button class="btn" type="button" data-popover-toggle="proto-theme" aria-expanded="false" data-clay-ds="button.default.root.rest">
+        <span data-theme-label>Modus Operandi</span>
+      </button>
+      <div class="popover" data-popover="proto-theme" data-open="false" role="menu" aria-label="Content theme" data-clay-ds="popover.default.root.rest">
+        <div class="pop-head"><span class="label">Content theme</span><span class="panel-sub">four shipped palettes, one geometry</span></div>
+        <div class="pop-list" data-clay-ds="dropdown.default.list.rest"><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-operandi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Operandi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="modus-vivendi" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Modus Vivendi</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-dark" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Dark</span></button><button class="btn" type="button" role="menuitemradio" data-set-theme="gruvbox-material-light" aria-checked="false" data-clay-ds="button.default.root.rest"><span>Gruvbox Material Light</span></button></div>
+      </div>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Palette shadow">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-halo="current">drop shadow</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-halo="halo">halo</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Motion">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="full">motion</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-motion="reduced">reduced</button>
+    </span>
+    <span class="seg" role="radiogroup" aria-label="Frame width">
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="wide">1500</button>
+      <button class="seg-item" type="button" role="radio" aria-checked="false" data-set-width="narrow">1024</button>
+    </span>
+  </div>
+</div>
+
+<div class="proto-stage">
+  <div class="proto-frame">
+    <div class="win" data-clay-ds="shell.default.root.rest">
+
+      <!-- ================= title bar =================
+           Taken from the app as implemented (frontend/src/app/layout/
+           app-shell.tsx + shell.module.css): the window mark, the tab strip
+           hugging it, the spacer, then the window actions — the Control Center
+           trigger and the tab's view switcher — at the right edge. No window
+           buttons: the frame in the app is the OS window (Tauri), and no
+           inspector/files toggles either — those belong to the status bar's
+           hint family there. -->
+      <header class="titlebar" data-clay-ds="shell.default.header.rest">
+        <span class="tb-brand" data-brand data-clay-ds="shell.default.brand.rest">Clay</span>
+        <div class="tb-tabs" role="tablist" aria-label="Window tabs" data-clay-ds="tabBar.default.root.rest">
+          <button class="tb-tab" role="tab" aria-selected="true" data-active="true" title="/workspace — agent: Coding Agent" data-clay-ds="tab.default.item.rest"><span>clay</span><span class="tab-agent" data-tab-agent data-busy="false" title="Agent attached">agent</span></button>
+          <button class="tb-tab tb-tab--add" type="button" title="New tab" aria-label="New tab" data-clay-ds="button.muted.root.rest"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+        <span class="tb-spacer"></span>
+        <nav class="tb-actions" aria-label="Application controls">
+          <!-- Decision A (prototype): the Control Center trigger opens the
+               palette in the lane instead of the centered modal, and the
+               trigger stays the icon-only button the app draws. -->
+          <button class="tb-btn tb-btn--icon" type="button" data-commands title="Control Center — Ctrl+X Ctrl+O" aria-label="Control Center" data-clay-ds="button.muted.root.rest">
+            <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M180,144H160V112h20a36,36,0,1,0-36-36V96H112V76a36,36,0,1,0-36,36H96v32H76a36,36,0,1,0,36,36V160h32v20a36,36,0,1,0,36-36ZM160,76a20,20,0,1,1,20,20H160ZM56,76a20,20,0,0,1,40,0V96H76A20,20,0,0,1,56,76ZM96,180a20,20,0,1,1-20-20H96Zm16-68h32v32H112Zm68,88a20,20,0,0,1-20-20V160h20a20,20,0,0,1,0,40Z"/></svg>
+          </button>
+          <span class="seg viewswitch" role="tablist" aria-label="Tab view" data-viewswitch>
+            <button class="seg-item" type="button" role="tab" aria-selected="true" data-set-view="workspace" title="Workspace view — the folder and its files" data-clay-ds="seg.default.item.rest">Workspace</button>
+            <button class="seg-item" type="button" role="tab" aria-selected="false" data-set-view="agent" title="Agent view — the agent attached to this tab" data-clay-ds="seg.default.item.rest">Agent</button>
+          </span>
+        </nav>
+      </header>
+
+      <div class="app" data-app data-view="workspace" data-lane="open" data-sidebar="expanded" data-inspector="expanded" data-clay-ds="shell.default.workingArea.rest">
+
+        <!-- ================= files ================= -->
+        <aside class="side" data-focus-zone=".side" aria-label="Workspace files">
+          <div class="side-head">
+            <h2 class="side-title">Workspace<button class="btn btn--ghost btn--icon" type="button" data-toggle="sidebar" title="Hide files" aria-label="Hide files" data-clay-ds="button.muted.root.rest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M14 6 9 12l5 6"/></svg></button></h2>
+            <p class="side-kicker">Workspace · clay</p>
+          </div>
+          <div class="side-tools">
+            <label class="field" data-clay-ds="textInput.default.field.rest">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+              <input type="search" placeholder="Filter files" aria-label="Filter files" autocomplete="off" spellcheck="false">
+              <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">/</kbd>
+            </label>
+          </div>
+          <div class="side-body">
+            <nav class="tree" role="tree" aria-label="Workspace file tree">
+              <div class="tree-row" data-type="dir" role="treeitem" aria-expanded="true" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">src/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">protocol/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">server/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">shell/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" aria-expanded="true" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">frontend/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">shell/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">coding-agent/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" tabindex="-1" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">command-centre/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" aria-expanded="true" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">packages/</span></div>
+              <div class="tree-row" data-type="dir" role="treeitem" aria-selected="true" data-active="true" tabindex="0" style="padding-left:20px" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></span><span class="tree-name">coding-agent/</span></div>
+              <div class="tree-row" data-type="file" role="treeitem" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/></svg></span><span class="tree-name">DESIGN.md</span></div>
+              <div class="tree-row" data-type="file" role="treeitem" tabindex="-1" data-clay-ds="list.default.row.rest"><span class="tree-caret" aria-hidden="true"></span><span class="tree-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/></svg></span><span class="tree-name">AGENTS.md</span></div>
+            </nav>
+          </div>
+          <div class="side-foot"><span>12 items</span><span class="spacer"></span><span><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">↑↓</kbd> move</span><span><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">↵</kbd> open</span></div>
+        </aside>
+        <main class="pane main" aria-label="Tab view">
+          <!-- Review device: one line naming what the scene shows. Not part of
+               the design; the sheet, the foot and the prompt carry the design. -->
+          <p class="scene-note" data-scene-note hidden></p>
+
+          <!-- workspace view -->
+          <div class="viewslot" data-view-slot="workspace">
+            <div class="docbar">
+              <span class="crumb"><span class="crumb-name">DESIGN.md</span><span class="crumb-path">clay / repository root</span></span>
+              <span class="badges"><span class="badge" data-clay-ds="badge.default.root.rest">modified</span><span class="badge badge--muted" data-clay-ds="badge.muted.root.rest">markdown</span></span>
+              <span class="docbar-actions">
+                <button class="btn btn--ghost btn--icon" type="button" title="Open relative path" aria-label="Open relative path" data-clay-ds="button.muted.root.rest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg></button>
+              </span>
+            </div>
+            <div class="editor-wrap">
+              <div class="editor">
+                <div class="gutter" aria-hidden="true"><span class="gln">1</span><span class="gln">2</span><span class="gln">3</span><span class="gln" data-current="true">4</span><span class="gln">5</span><span class="gln">6</span><span class="gln">7</span></div>
+                <div class="doc" role="textbox" aria-label="DESIGN.md">
+                  <span class="ln md-h1"># Clay — design language</span>
+                  <span class="ln md-blank">&nbsp;</span>
+                  <span class="ln">One sheet answers to the field it belongs to,</span>
+                  <span class="ln">whichever flow opened it. Stages are states</span>
+                  <span class="ln">of that sheet, not surfaces of their own.</span>
+                  <span class="ln md-blank">&nbsp;</span>
+                  <span class="ln">The veil dims the working area; the lane stays live.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- agent view -->
+          <div class="viewslot" data-view-slot="agent" hidden>
+            <div class="agent">
+              <div class="transcript" role="log" aria-label="Transcript" aria-live="polite">
+                <div class="transcript-inner">
+                  <article class="turn" data-role="user" data-conversation>
+                    <header class="turn-head"><span class="turn-role">you</span><span class="turn-time">09:41</span><span class="spacer"></span><span class="turn-time">prompt</span></header>
+                    <div class="turn-body">Which surfaces still hardcode geometry instead of using the design system?</div>
+                  </article>
+                  <article class="turn" data-role="agent" data-conversation>
+                    <header class="turn-head"><span class="turn-role">agent</span><span class="turn-time">09:41</span><span class="spacer"></span><span class="turn-time">turn</span></header>
+                    <div class="turn-body">Two: the palette sheet and the lane. Everything else reads a typed token or a <code>--clay-ds-*</code> recipe.</div>
+                    <p class="turn-note">Turn complete · Esc cancels the next one</p>
+                  </article>
+                </div>
+              </div>
+              <div class="state-strip" role="status">
+                <span class="dot" data-state-dot></span>
+                <span data-state-text>Ready</span>
+                <span class="spacer"></span>
+                <span data-state-note>agent idle</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- the halo comparison (scene: halo) — review only, no design -->
+          <div class="viewslot" data-view-slot="halo" hidden>
+            <div class="halo-board">
+              <p class="halo-note">One value per surface, two keys: the sheet (<code>commandCentre.default.root.rest.shadow</code>) and the mentions menu (<code>menu.default.root.rest.shadow</code>). Left: today's two-layer drop shadow, offset down (<code>0 24px 60px -16px</code> / <code>0 14px 34px -14px</code>). Right: the candidate halo — both layers at offset 0, so the light wraps the box instead of falling from it (<code>0 0 14px -2px</code> at 14%, <code>0 0 3px 0</code> at 8%, <code>text.primary</code>). Both cells sit on the veiled backdrop the sheets really appear over.</p>
+              <div class="halo-grid">
+                <figure class="halo-cell">
+                  <figcaption class="halo-cap">palette · today<code>commandCentre…shadow, unchanged</code></figcaption>
+                  <div class="halo-stage">
+                    <div class="halo-sheet" data-shadow="current">
+                      <div class="halo-head">Commands · 95 results</div>
+                      <div class="halo-row" data-active="true"><span class="pal-title">Toggle Agent Lane</span><span class="pal-meta">Ctrl+X Ctrl+P</span></div>
+                      <div class="halo-row"><span class="pal-title">Configure Provider</span><span class="pal-meta">agent</span></div>
+                      <div class="halo-row"><span class="pal-title">Browse Filesystem</span><span class="pal-meta">Ctrl+X Ctrl+F</span></div>
+                      <div class="halo-foot">↑↓ navigate · ↵ run · Esc close</div>
+                    </div>
+                  </div>
+                </figure>
+                <figure class="halo-cell">
+                  <figcaption class="halo-cap">palette · candidate<code>0 0 14px -2px 14% · 0 0 3px 8%</code></figcaption>
+                  <div class="halo-stage">
+                    <div class="halo-sheet" data-shadow="halo">
+                      <div class="halo-head">Commands · 95 results</div>
+                      <div class="halo-row" data-active="true"><span class="pal-title">Toggle Agent Lane</span><span class="pal-meta">Ctrl+X Ctrl+P</span></div>
+                      <div class="halo-row"><span class="pal-title">Configure Provider</span><span class="pal-meta">agent</span></div>
+                      <div class="halo-row"><span class="pal-title">Browse Filesystem</span><span class="pal-meta">Ctrl+X Ctrl+F</span></div>
+                      <div class="halo-foot">↑↓ navigate · ↵ run · Esc close</div>
+                    </div>
+                  </div>
+                </figure>
+                <figure class="halo-cell">
+                  <figcaption class="halo-cap">@ mentions · today<code>menu.default.root.rest.shadow, unchanged</code></figcaption>
+                  <div class="halo-stage">
+                    <div class="halo-sheet halo-sheet--menu" data-shadow="current">
+                      <div class="halo-row" data-active="true"><span class="pal-title">@skill:impeccable</span><span class="pal-meta">skill</span></div>
+                      <div class="halo-row"><span class="pal-title">@file:DESIGN.md</span><span class="pal-meta">root</span></div>
+                      <div class="halo-row"><span class="pal-title">@file:use-shell-chords.ts</span><span class="pal-meta">shell</span></div>
+                    </div>
+                  </div>
+                </figure>
+                <figure class="halo-cell">
+                  <figcaption class="halo-cap">@ mentions · candidate<code>same halo value</code></figcaption>
+                  <div class="halo-stage">
+                    <div class="halo-sheet halo-sheet--menu" data-shadow="halo">
+                      <div class="halo-row" data-active="true"><span class="pal-title">@skill:impeccable</span><span class="pal-meta">skill</span></div>
+                      <div class="halo-row"><span class="pal-title">@file:DESIGN.md</span><span class="pal-meta">root</span></div>
+                      <div class="halo-row"><span class="pal-title">@file:use-shell-chords.ts</span><span class="pal-meta">shell</span></div>
+                    </div>
+                  </div>
+                </figure>
+              </div>
+            </div>
+          </div>
+
+          <!-- ================= the lane (one instance, both views) ================= -->
+          <div class="lane" data-agent-lane data-mode="idle" data-clay-ds="shell.default.footer.rest" aria-label="Agent lane">
+            <div class="approval" data-approval role="alertdialog" aria-label="Tool approval" hidden>
+              <span class="approval-text">Tool “write_file” needs approval — DESIGN.md, 12 lines</span>
+              <button class="btn" type="button" data-approve data-clay-ds="button.default.root.rest">Allow</button>
+              <button class="btn" type="button" data-deny data-clay-ds="button.default.root.rest">Deny</button>
+            </div>
+
+            <form class="lane-composer" data-form autocomplete="off">
+              <div class="lane-row">
+                <!-- The sheet anchors to the *border box*: the slot is the
+                     positioning context (the shipped app reaches the same
+                     geometry through ClayTextField's `.fieldSlot`; plan 124
+                     defect D5). -->
+                <div class="field-slot" data-field-slot>
+                <div class="input-shell" data-shell data-clay-ds="textInput.default.field.rest">
+                  <div class="shell-row">
+                    <textarea class="field-input" id="lane-input" data-input rows="2" placeholder="Ask, or type / or @" aria-label="Message to the coding agent" data-clay-ds="textInput.default.input.rest"></textarea>
+
+                    <!-- the `@` mentions menu: not part of this plan's change,
+                         drawn here because the palette's halo applies to it too -->
+                    <ul class="completions" data-mentions data-halo="true" hidden role="listbox" aria-label="Mentions">
+                      <li role="presentation">
+                        <span class="completion-section" role="presentation">Skills</span>
+                        <ul role="group" aria-label="Skills matches">
+                          <li><button class="completion-row" type="button" role="option" aria-selected="true" data-mention="skill:impeccable"><span class="completion-name">@skill:impeccable</span><span class="completion-detail">frontend design review and iteration</span></button></li>
+                          <li><button class="completion-row" type="button" role="option" aria-selected="false" data-mention="skill:create-plan"><span class="completion-name">@skill:create-plan</span><span class="completion-detail">numbered plan documents</span></button></li>
+                        </ul>
+                      </li>
+                      <li role="presentation">
+                        <span class="completion-section" role="presentation">Files</span>
+                        <ul role="group" aria-label="Files matches">
+                          <li><button class="completion-row" type="button" role="option" aria-selected="false" data-mention="file:DESIGN.md"><span class="completion-name">@file:DESIGN.md</span><span class="completion-detail">repository root</span></button></li>
+                          <li><button class="completion-row" type="button" role="option" aria-selected="false" data-mention="file:frontend/src/shell/use-shell-chords.ts"><span class="completion-name">@file:use-shell-chords.ts</span><span class="completion-detail">frontend/src/shell</span></button></li>
+                        </ul>
+                      </li>
+                    </ul>
+
+                    <span class="lane-actions" data-lane-actions hidden>
+                      <button class="btn btn--ghost btn--icon btn--danger" type="button" data-stop hidden title="Stop" aria-label="Stop" data-clay-ds="button.danger.root.rest"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+                    </span>
+                  </div>
+
+                  <!-- the tab's agent controls, as approved (plan 124) -->
+                  <div class="lane-controls" data-lane-controls aria-label="Agent controls">
+                    <span class="popwrap">
+                      <button class="agent-pick" type="button" data-popover-toggle="lane-agent" aria-expanded="false" title="Agent type" data-clay-ds="agentPicker.trigger.rest"><span data-agent-name>Coding Agent</span><svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                      <div class="popover popover--left popover--up" data-popover="lane-agent" data-open="false" role="menu" aria-label="Agent type" data-clay-ds="dropdown.default.popover.rest">
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="true" data-pick="agent" data-value="Coding Agent" data-clay-ds="dropdown.default.item.rest"><span>Coding Agent</span><span class="pop-hint">current</span></button>
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="false" data-pick="agent" data-value="Code Reviewer" data-clay-ds="dropdown.default.item.rest"><span>Code Reviewer</span></button>
+                        <div class="pop-note">Coding Agent · 12 skills · from ~/.clay/agents/</div>
+                      </div>
+                    </span>
+                    <span class="popwrap">
+                      <button class="ctl" type="button" data-popover-toggle="lane-model" aria-expanded="false" title="Model" data-clay-ds="dropdown.default.trigger.rest"><span class="label">Model</span><span class="mono" data-model-value>anthropic/claude-sonnet-4-5</span><svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                      <div class="popover popover--left popover--up" data-popover="lane-model" data-open="false" role="menu" aria-label="Model" data-clay-ds="dropdown.default.popover.rest">
+                        <span class="pop-label">Anthropic</span>
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="true" data-pick="model" data-value="anthropic/claude-sonnet-4-5" data-clay-ds="dropdown.default.item.rest"><span>claude-sonnet-4-5</span><span class="pop-hint">current</span></button>
+                        <div class="pop-note">Providers come from Settings → Providers.</div>
+                      </div>
+                    </span>
+                    <span class="popwrap" data-effort-wrap>
+                      <button class="ctl" type="button" data-popover-toggle="lane-effort" aria-expanded="false" title="Reasoning effort" data-clay-ds="dropdown.default.trigger.rest"><span class="label">Effort</span><span class="mono" data-effort-value>medium</span><svg class="caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                      <div class="popover popover--left popover--up" data-popover="lane-effort" data-open="false" role="menu" aria-label="Effort" data-clay-ds="dropdown.default.popover.rest">
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="false" data-pick="effort" data-value="low" data-clay-ds="dropdown.default.item.rest"><span>low</span></button>
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="true" data-pick="effort" data-value="medium" data-clay-ds="dropdown.default.item.rest"><span>medium</span></button>
+                        <button class="pop-item" type="button" role="menuitemradio" aria-checked="false" data-pick="effort" data-value="high" data-clay-ds="dropdown.default.item.rest"><span>high</span></button>
+                      </div>
+                    </span>
+                    <span class="spacer"></span>
+                    <span class="meter" data-meter title="Context usage: 24% of ceiling"><span class="meter-track" aria-hidden="true"><span class="meter-fill" style="width:24%"></span></span><span class="meter-value">24k/200k</span></span>
+                  </div>
+
+                  <!-- ========== the palette: one sheet, every stage ==========
+                       Plan 125: the catalogue, the path mode and every picker
+                       stage are this sheet. `data-mode` says which vocabulary
+                       the head and the foot speak; the `prompt` line is the
+                       stage's question; `stage-field` exists only where the
+                       value must not be the composer's draft (the API key and
+                       the base URL); `stage-code` carries the device flow. -->
+                </div>
+                  <section class="lane-palette" data-palette data-mode="catalogue" data-halo="true" hidden role="dialog" aria-label="Commands" data-clay-ds="commandCentre.default.root.rest">
+                    <header class="pal-head">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/></svg>
+                      <span class="prompt" data-pal-prompt hidden data-clay-ds="label.default.root.rest">Providers</span>
+                      <span class="pal-query" data-pal-query data-empty="true">type a command</span>
+                      <span class="seg" data-pal-scopewrap role="group" aria-label="Scope">
+                        <button class="seg-item" type="button" data-pal-scope="all" data-active="true" data-clay-ds="seg.default.item.rest">All</button>
+                        <button class="seg-item" type="button" data-pal-scope="session" data-clay-ds="seg.default.item.rest">Session</button>
+                        <button class="seg-item" type="button" data-pal-scope="shell" data-clay-ds="seg.default.item.rest">Shell</button>
+                        <button class="seg-item" type="button" data-pal-scope="files" data-clay-ds="seg.default.item.rest">Files</button>
+                      </span>
+                    </header>
+                    <label class="stage-field" data-pal-field hidden data-clay-ds="textInput.default.field.rest">
+                      <input class="stage-input" data-pal-field-input type="password" aria-label="API key (hidden)" autocomplete="off" spellcheck="false" data-clay-ds="textInput.default.input.rest">
+                      <span class="stage-desc" data-pal-field-desc data-clay-ds="textInput.default.description.rest"></span>
+                    </label>
+                    <div class="stage-code" data-pal-code hidden>
+                      <span class="stage-code-label">user code</span>
+                      <code data-pal-code-user></code>
+                      <span class="stage-code-label">verification URI</span>
+                      <code class="stage-code-uri" data-pal-code-uri></code>
+                    </div>
+                    <div class="pal-list" data-pal-list role="listbox" aria-label="Commands"></div>
+                    <p class="pal-empty" data-pal-empty hidden data-clay-ds="commandCentre.default.empty.rest">No match. <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Esc</kbd> dismisses the palette and returns the composer.</p>
+                    <footer class="pal-foot" data-pal-foot data-clay-ds="commandCentre.default.status.rest"></footer>
+                  </section>
+                </div>
+              </div>
+              <div class="lane-hints">
+                <span><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">/</kbd> commands</span>
+                <span><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">@</kbd> mention file or skill</span>
+                <span><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">↵</kbd> send · <kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">⇧</kbd><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">↵</kbd> newline</span>
+                <span class="hint-count" data-count></span>
+              </div>
+            </form>
+
+            <div class="lane-foot" aria-label="Session environment">
+              <span data-foot-root>/workspace</span>
+              <span class="faint">·</span>
+              <span data-foot-git>git feat/composer-palette-stages</span>
+              <span class="faint" data-foot-ext-sep>·</span>
+              <span data-foot-ext>extensions graft, markdown</span>
+              <span class="spacer"></span>
+              <span data-foot-mcp data-tone="ok">MCP graft · 6 tools</span>
+            </div>
+          </div>
+        </main>
+
+        <!-- ================= inspector (agent view) ================= -->
+        <aside class="inspector" aria-label="Agent inspector">
+          <div class="tabs" role="tablist" aria-label="Agent detail" data-clay-ds="tabBar.default.root.rest">
+            <button class="tab" role="tab" aria-selected="true" data-clay-ds="tab.default.item.rest">Files</button>
+            <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-clay-ds="tab.default.item.rest">Memory</button>
+            <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-clay-ds="tab.default.item.rest">Context</button>
+            <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-clay-ds="tab.default.item.rest">Session Info</button>
+            <button class="tab" role="tab" aria-selected="false" tabindex="-1" data-clay-ds="tab.default.item.rest">Settings</button>
+          </div>
+          <div class="inspector-body">
+            <div class="section-head"><span class="label">Session files</span><span class="chip" data-clay-ds="badge.muted.root.rest">3</span><span class="spacer"></span>
+              <label class="field field--quiet" style="max-width:118px" data-clay-ds="textInput.default.field.rest"><input type="search" placeholder="Filter" aria-label="Filter session files" autocomplete="off" spellcheck="false"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">F</kbd></label>
+            </div>
+            <div class="rows" role="listbox" aria-label="Files this session has touched">
+              <button class="row sess-row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="sess-mark" aria-hidden="true">M</span><span class="row-main"><span class="row-name">DESIGN.md</span><span class="row-desc">repository root</span></span><span class="sess-role">modified</span></button>
+              <button class="row sess-row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="sess-mark" aria-hidden="true">M</span><span class="row-main"><span class="row-name">use-shell-chords.ts</span><span class="row-desc">frontend/src/shell</span></span><span class="sess-role">modified</span></button>
+              <button class="row sess-row" type="button" role="option" data-clay-ds="list.default.row.rest"><span class="sess-mark" aria-hidden="true">R</span><span class="row-main"><span class="row-name">control_center.rs</span><span class="row-desc">src/server</span></span><span class="sess-role">read</span></button>
+            </div>
+            <p class="row-desc">Files this session has read, written or searched. Opening one switches the tab to its workspace view at that file.</p>
+          </div>
+        </aside>
+
+        <div class="lane-scrim" data-scrim data-clay-ds="modal.default.scrim.rest" aria-hidden="true"></div>
+      </div>
+
+      <!-- ================= status bar ================= -->
+      <footer class="statusbar" data-clay-ds="statusBar.default.root.rest">
+        <span class="status-seg" data-clay-ds="statusItem.default.root.rest"><span class="dot dot--ok"></span>/workspace</span>
+        <span class="status-seg status-seg--muted" data-status-lane>Lane · idle</span>
+        <span class="status-hints">
+          <button class="status-key" type="button" data-toggle-lane><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Ctrl+X</kbd><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Ctrl+P</kbd> lane</button>
+          <button class="status-key" type="button" data-commands><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">/</kbd> commands</button>
+          <button class="status-key" type="button" data-commands><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Ctrl+X</kbd><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Ctrl+O</kbd> palette</button>
+          <button class="status-key" type="button" data-toggle="inspector" title="Toggle inspector"><kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">Ctrl+I</kbd> inspector</button>
+        </span>
+      </footer>
+    </div>
+  </div>
+</div>
+<script src="ds.js"></script>
+<script>
+/* Plan 125 prototype behaviour. Review device only: the scenes are the states
+   the plan's acceptance criteria name (catalogue, empty query, no match,
+   scopes, chords, the five picker stages, a long list, the session secondary
+   action, stage-back, the mentions menu, the halo board) and the live path —
+   `/`, `@`, arrows, `↵`, `Esc`, `Alt+←`, `Alt+↵`, chip clicks — is the same
+   keyboard path the design claims. The server is not here: the stage graph,
+   the masked echo and the row sets mirror what the picker session already
+   returns (src/server/agent_picker.rs). */
+(function () {
+  'use strict';
+
+  var app = document.querySelector('[data-app]');
+  var lane = document.querySelector('.lane');
+  var input = document.querySelector('[data-input]');
+  var palette = document.querySelector('[data-palette]');
+  var palList = document.querySelector('[data-pal-list]');
+  var palEmpty = document.querySelector('[data-pal-empty]');
+  var palQuery = document.querySelector('[data-pal-query]');
+  var palPrompt = document.querySelector('[data-pal-prompt]');
+  var palScopeWrap = document.querySelector('[data-pal-scopewrap]');
+  var palField = document.querySelector('[data-pal-field]');
+  var palFieldInput = document.querySelector('[data-pal-field-input]');
+  var palFieldDesc = document.querySelector('[data-pal-field-desc]');
+  var palCode = document.querySelector('[data-pal-code]');
+  var palCodeUser = document.querySelector('[data-pal-code-user]');
+  var palCodeUri = document.querySelector('[data-pal-code-uri]');
+  var palFoot = document.querySelector('[data-pal-foot]');
+  var mentions = document.querySelector('[data-mentions]');
+  var scrim = document.querySelector('[data-scrim]');
+  var sceneNote = document.querySelector('[data-scene-note]');
+  var modelValue = document.querySelector('[data-model-value]');
+
+  var DS = window.ClayDS || {};
+
+  /* Real catalogue rows (ids, labels, chords, scopes) — the shipped catalogue
+     of plan 124, plus the picker rows this plan folds in. `stage` is the stage
+     a row opens; everything else runs where it stands. */
+  var CATALOGUE = [
+    { scope: 'session', title: '/compact', detail: 'Compact the current session manually', meta: 'coding-agent' },
+    { scope: 'session', title: '/new', detail: 'Start a fresh session with the same profile, provider, and model', meta: 'coding-agent' },
+    { scope: 'session', title: '/resume', detail: 'Resume a session from this workspace', meta: 'coding-agent', stage: 'session' },
+    { scope: 'session', title: '/model', detail: 'Choose a model from all configured providers', meta: 'coding-agent', stage: 'model' },
+    { scope: 'session', title: '/branch', detail: 'Checkout a branch point: args { entryId }', meta: 'coding-agent' },
+    { scope: 'shell', title: 'Configure Provider', detail: 'agent.clientOpenProviderSetup — was a centered modal', meta: 'core', stage: 'provider' },
+    { scope: 'shell', title: 'Toggle Agent Lane', detail: 'shell.toggleAgentLane', meta: 'core', keys: ['Ctrl+X', 'Ctrl+P'] },
+    { scope: 'shell', title: 'Toggle File Browser', detail: 'workspace.toggleFileBrowser', meta: 'core', keys: ['Ctrl+B'] },
+    { scope: 'shell', title: 'New Tab', detail: 'shell.clientTabNew', meta: 'core', keys: ['Ctrl+Shift+T'] },
+    { scope: 'shell', title: 'Split Pane Vertical', detail: 'shell.clientSplitPaneVertical', meta: 'core', keys: ['Ctrl+\\'] },
+    { scope: 'shell', title: 'Toggle Comment', detail: 'editor.toggleComment', meta: 'core', keys: ['Ctrl+/'] },
+    { scope: 'files', title: 'Browse Filesystem', detail: 'controlCenter.openPath — the palette\'s path mode', meta: 'core', keys: ['Ctrl+X', 'Ctrl+F'] }
+  ];
+
+  /* The picker stages, as the session already builds them: prompt, rows and
+     the one field a stage owns where the value must not be the composer's. */
+  var STAGES = {
+    provider: {
+      mode: 'list',
+      prompt: 'Providers',
+      label: 'providers',
+      rows: [
+        { id: 'anthropic', title: 'Anthropic', detail: 'API key set · 6 models', meta: 'ready' },
+        { id: 'openai', title: 'OpenAI', detail: 'API key set · 4 models', meta: 'ready' },
+        { id: 'google', title: 'Google', detail: 'No credential yet', meta: 'needs a key' },
+        { id: 'openrouter', title: 'OpenRouter', detail: 'No credential yet', meta: 'needs a key' },
+        { id: 'ollama', title: 'Ollama', detail: 'Local · no credential needed', meta: 'local' }
+      ]
+    },
+    auth: {
+      mode: 'list',
+      prompt: 'Choose sign-in method',
+      label: 'methods',
+      rows: [
+        { id: 'api-key', title: 'API key', detail: 'Stored in the OS keychain', meta: 'recommended' },
+        { id: 'oauth', title: 'Sign in with the provider', detail: 'Device code · opens the browser', meta: 'oauth' },
+        { id: 'base-url', title: 'Custom base URL', detail: 'OpenAI-compatible endpoint', meta: 'advanced' }
+      ]
+    },
+    secret: {
+      mode: 'secret',
+      prompt: 'API key (hidden)',
+      label: 'action',
+      field: {
+        label: 'API key (hidden)',
+        value: '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022',
+        desc: 'Masked here and masked on the wire: the server echoes bullets, never the value. The composer draft never holds it.'
+      },
+      rows: [{ id: 'store_secret', title: 'Store API key', detail: 'Value is hidden. Enter stores it.', meta: 'keychain' }]
+    },
+    url: {
+      mode: 'field',
+      prompt: 'API base URL',
+      label: 'action',
+      field: {
+        label: 'API base URL',
+        value: 'https://api.example.com/v1',
+        desc: 'Saved as the provider\'s base URL. Same sheet, same field family — only the masking differs.'
+      },
+      rows: [{ id: 'store_url', title: 'Save base URL', detail: 'OpenAI-compatible endpoint', meta: 'provider' }]
+    },
+    oauth: {
+      mode: 'oauth',
+      prompt: 'Authorize provider',
+      label: 'actions',
+      code: { user: 'WDJB-MJHT', uri: 'https://example.com/device' },
+      rows: [
+        { id: 'open_oauth_url', title: 'Open in browser', detail: 'example.com/device', meta: 'browser' },
+        { id: 'copy_oauth_url', title: 'Copy URL', detail: 'Device flow · code above', meta: 'clipboard' }
+      ]
+    },
+    model: {
+      mode: 'list',
+      prompt: 'Models',
+      label: 'models',
+      rows: [
+        { id: 'm1', title: 'anthropic/claude-sonnet-4-5', detail: '200k context · streaming', meta: 'current' },
+        { id: 'm2', title: 'anthropic/claude-opus-4-1', detail: '200k context · streaming', meta: '' },
+        { id: 'm3', title: 'anthropic/claude-haiku-4-5', detail: '200k context · fast', meta: '' },
+        { id: 'm4', title: 'openai/gpt-5-codex', detail: '400k context · reasoning', meta: '' },
+        { id: 'm5', title: 'openai/gpt-5', detail: '400k context · reasoning', meta: '' },
+        { id: 'm6', title: 'openai/gpt-4.1-mini', detail: '1M context · cheap', meta: '' },
+        { id: 'm7', title: 'google/gemini-2.5-pro', detail: '1M context · reasoning', meta: '' },
+        { id: 'm8', title: 'google/gemini-2.5-flash', detail: '1M context · fast', meta: '' },
+        { id: 'm9', title: 'openrouter/qwen3-coder', detail: '262k context · code', meta: '' },
+        { id: 'm10', title: 'openrouter/deepseek-v3', detail: '128k context · code', meta: '' },
+        { id: 'm11', title: 'ollama/qwen3:32b', detail: 'local · 32B', meta: 'local' },
+        { id: 'm12', title: 'ollama/llama3.3:70b', detail: 'local · 70B', meta: 'local' }
+      ]
+    },
+    session: {
+      mode: 'list',
+      prompt: 'Sessions',
+      label: 'sessions',
+      secondary: 'delete',
+      rows: [
+        { id: 's1', title: 'Palette stage flows', detail: '/workspace · 12 minutes ago', meta: 'this session' },
+        { id: 's2', title: 'Agent lane and slash palette', detail: '/workspace · 2 hours ago', meta: '42 turns' },
+        { id: 's3', title: 'Design system consumption gate', detail: '/workspace · yesterday', meta: '18 turns' },
+        { id: 's4', title: 'Editor intelligence: inlays', detail: '/workspace · yesterday', meta: '31 turns' },
+        { id: 's5', title: 'Prism 0.7 work scope', detail: '/workspace · 2 days ago', meta: '9 turns' },
+        { id: 's6', title: 'Graft context graph refresh', detail: '/workspace · 3 days ago', meta: '14 turns' },
+        { id: 's7', title: 'Launcher landing fallback', detail: '/workspace · 4 days ago', meta: '22 turns' },
+        { id: 's8', title: 'Tab strip card sizing', detail: '/workspace · last week', meta: '6 turns' }
+      ]
+    }
+  };
+
+  /* Which stage a pick lands on — the picker's own graph (agent_picker.rs). */
+  var NEXT = {
+    'api-key': 'secret',
+    oauth: 'oauth',
+    'base-url': 'url'
+  };
+
+  var SCENES = {
+    lane: {
+      view: 'workspace',
+      draft: 'Which surfaces still hardcode geometry?',
+      note: 'The lane as it ships (plan 124): no palette, the field carries a draft.'
+    },
+    'lane-railed': {
+      view: 'agent', sidebar: 'expanded', inspector: 'expanded', palette: true, draft: '/model',
+      note: 'Both rails active: the lane is the view pane\u2019s width and stops at the inspector\u2019s edge — the sheet is the lane\u2019s width inside it, and the veil covers both rails.'
+    },
+    'lane-full': {
+      view: 'agent', sidebar: 'collapsed', inspector: 'collapsed', palette: true, draft: '/',
+      note: 'Both rails hidden: the lane takes the working area\u2019s whole width again — and the sheet widens with it, because its width is the lane\u2019s.'
+    },
+    catalogue: {
+      view: 'workspace', palette: true, draft: '/model',
+      note: 'Catalogue: the `/` sigil is the catalogue\'s own. Scope chips and per-row chords are server row fields.'
+    },
+    'catalogue-empty': {
+      view: 'workspace', palette: true, draft: '/',
+      note: 'Empty query: the whole catalogue, the head says `type a command`, the sigil stays accent.'
+    },
+    'catalogue-no-match': {
+      view: 'workspace', palette: true, draft: '/zzz',
+      note: 'No match: the sheet keeps its height and the bare empty state points at Esc.'
+    },
+    'catalogue-scopes': {
+      view: 'workspace', palette: true, draft: '/', scope: 'files',
+      note: 'Scope chip: the filter belongs to the session — the chip is sent with the query, not applied here.'
+    },
+    'catalogue-chords': {
+      view: 'workspace', palette: true, draft: '/', scope: 'shell',
+      note: 'Chord chips: one chip per stroke, spelled exactly as the status bar spells them.'
+    },
+    'stage-provider': {
+      view: 'workspace', palette: true, stage: 'provider', draft: 'anth',
+      note: 'Stage 1 — providers, opened from a palette row. The filter is typed in the composer: no `/` sigil in a stage.'
+    },
+    'stage-auth': {
+      view: 'workspace', palette: true, stage: 'auth', trail: ['provider', 'auth'],
+      note: 'Stage 2 — sign-in method. Same sheet, same rows; the `prompt` line is the stage\'s question.'
+    },
+    'stage-secret': {
+      view: 'workspace', palette: true, stage: 'secret', trail: ['provider', 'auth', 'secret'],
+      note: 'Stage 3 — the shielded key. The value lives in the sheet\'s own field, never in the composer draft; the wire echo is bullets.'
+    },
+    'stage-url': {
+      view: 'workspace', palette: true, stage: 'url', trail: ['provider', 'auth', 'url'],
+      note: 'The base-URL stage: same field composition, visible value, different masking rule.'
+    },
+    'stage-oauth': {
+      view: 'workspace', palette: true, stage: 'oauth', trail: ['provider', 'auth', 'oauth'],
+      note: 'The device-code stage: code and verification URI as selectable text; the rows do the actions.'
+    },
+    'stage-model': {
+      view: 'workspace', palette: true, stage: 'model',
+      note: 'A long list: the sheet caps at min(52vh, 420px) and the list scrolls inside it.'
+    },
+    'stage-session': {
+      view: 'workspace', palette: true, stage: 'session',
+      note: 'Sessions: `↵` resumes, `Alt+↵` deletes — the selected row carries the secondary hint.'
+    },
+    'stage-back': {
+      view: 'workspace', palette: true, stage: 'secret', trail: ['provider', 'auth', 'secret'],
+      note: 'Depth 3: `Esc` / `Alt+←` walk back one stage at a time (key → sign-in method → providers); at the first stage they close the sheet.'
+    },
+    mentions: {
+      view: 'workspace', draft: '@', mentions: true,
+      note: 'The `@` mentions menu keeps its narrow dropdown; the halo applies to it as well.'
+    },
+    halo: {
+      view: 'halo',
+      note: ''
+    }
+  };
+
+  var stage = null;
+  var trail = [];
+  var activeRow = 0;
+  var paletteOpen = false;
+  var dismissed = false;
+  var halo = 'halo';
+
+  function esc(value) {
+    return String(value).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  function chip(spec) {
+    var label = DS.key ? DS.key(spec) : spec;
+    return '<kbd class="kbd kbd--sm kbd--flat" data-clay-ds="kbd.default.root.rest">' + esc(label) + '</kbd>';
+  }
+
+  function spec() { return stage ? STAGES[stage] : null; }
+  function mode() { return stage ? STAGES[stage].mode : 'catalogue'; }
+
+  /* The stage's filter is typed without a sigil; the catalogue's needs one. */
+  function query() {
+    var value = input.value;
+    if (stage && mode() === 'list') return value.trim().toLowerCase();
+    if (!stage && value.charAt(0) === '/') return value.slice(1).trim().toLowerCase();
+    return null;
+  }
+
+  function activeScope() {
+    var chip = document.querySelector('[data-pal-scope][data-active="true"]');
+    return chip ? chip.dataset.palScope : 'all';
+  }
+
+  function currentRows() {
+    var spec = stage ? STAGES[stage] : null;
+    var source = spec ? spec.rows : CATALOGUE;
+    var scope = activeScope();
+    var text = query();
+    return source.filter(function (row) {
+      if (!spec && scope !== 'all' && row.scope !== scope) return false;
+      if (!text) return true;
+      return (row.title + ' ' + (row.detail || '') + ' ' + (row.meta || '')).toLowerCase().indexOf(text) !== -1;
+    });
+  }
+
+  function countLabel(rows) {
+    var spec = stage ? STAGES[stage] : null;
+    if (!spec) return rows.length + (rows.length === 1 ? ' result' : ' results');
+    return rows.length + ' ' + spec.label;
+  }
+
+  function footHints() {
+    if (!stage) return [['up+down', 'navigate'], ['enter', 'run'], ['esc', 'close']];
+    var primary = {
+      secret: 'store',
+      field: 'save',
+      oauth: 'run',
+      list: stage === 'session' ? 'resume' : 'choose'
+    }[mode()];
+    var hints = [['up+down', 'navigate'], ['enter', primary], ['esc', 'back'], ['alt+left', 'back']];
+    if (stage === 'session') hints.push(['alt+enter', 'delete']);
+    return hints;
+  }
+
+  function renderPalette() {
+    var spec = stage ? STAGES[stage] : null;
+    var rows = currentRows();
+    if (activeRow > rows.length - 1) activeRow = Math.max(rows.length - 1, 0);
+
+    palette.dataset.mode = mode();
+    palette.dataset.halo = halo === 'halo' ? 'true' : 'false';
+
+    /* Head: the stage's question, the filter echo, the scope chips (catalogue
+       only — a stage's rows are not scoped). */
+    if (spec) {
+      palPrompt.hidden = false;
+      palPrompt.textContent = spec.prompt;
+      palette.setAttribute('aria-label', spec.prompt);
+    } else {
+      palPrompt.hidden = true;
+      palette.setAttribute('aria-label', 'Commands');
+    }
+    var raw = stage ? input.value.trim() : input.value.slice(1).trim();
+    /* A stage echoes only what was typed into it: the prompt above already
+       names the question, and a stage that owns a field has no query echo. */
+    palQuery.hidden = Boolean(spec && (spec.field || !raw));
+    palQuery.textContent = raw || (stage ? '' : 'type a command');
+    palQuery.dataset.empty = raw ? 'false' : 'true';
+    palScopeWrap.hidden = Boolean(spec);
+
+    /* The stage's own field — the API key (masked) and the base URL. */
+    palField.hidden = !(spec && spec.field);
+    if (spec && spec.field) {
+      palFieldInput.type = mode() === 'secret' ? 'password' : 'text';
+      palFieldInput.value = spec.field.value;
+      palFieldInput.setAttribute('aria-label', spec.field.label);
+      palFieldDesc.textContent = spec.field.desc;
+    }
+
+    /* The device-code stage: code and URI are text, not rows. */
+    palCode.hidden = !(spec && spec.code);
+    if (spec && spec.code) {
+      palCodeUser.textContent = spec.code.user;
+      palCodeUri.textContent = spec.code.uri;
+    }
+
+    palList.innerHTML = rows.map(function (row, index) {
+      var secondary = spec && spec.secondary
+        ? '<span class="pal-sec">' + chip('alt+enter') + ' ' + esc(spec.secondary) + '</span>'
+        : '';
+      return '<button class="pal-item" type="button" role="option" data-pal-row="' + esc(row.id || row.title) + '" data-active="' + (index === activeRow ? 'true' : 'false') + '" data-clay-ds="list.default.row.rest">'
+        + '<span class="pal-title">' + esc(row.title) + '</span>'
+        + '<span class="pal-detail">' + esc(row.detail || '') + '</span>'
+        + (row.meta ? '<span class="pal-meta">' + esc(row.meta) + '</span>' : '')
+        + (row.keys ? row.keys.map(function (key) { return chip(key.toLowerCase()); }).join('') : '')
+        + secondary
+        + '</button>';
+    }).join('');
+
+    palEmpty.hidden = rows.length !== 0;
+    palEmpty.innerHTML = stage
+      ? 'No match. ' + chip('esc') + ' goes back a stage.'
+      : 'No match. ' + chip('esc') + ' dismisses the palette and returns the composer.';
+
+    palFoot.innerHTML = '<span data-pal-count>' + esc(countLabel(rows)) + '</span><span class="spacer"></span>'
+      + footHints().map(function (hint) {
+        return '<span class="hint">' + chip(hint[0]) + ' ' + esc(hint[1]) + '</span>';
+      }).join('');
+  }
+
+  function syncScrim() {
+    var open = paletteOpen || !mentions.hidden;
+    scrim.dataset.open = open ? 'true' : 'false';
+  }
+
+  function setPalette(open) {
+    paletteOpen = open;
+    palette.hidden = !open;
+    if (open) renderPalette();
+    syncScrim();
+  }
+
+  function setMentions(open) {
+    mentions.hidden = !open;
+    if (open) {
+      mentions.querySelectorAll('.completion-row').forEach(function (row, index) {
+        row.setAttribute('aria-selected', index === 0 ? 'true' : 'false');
+      });
+    }
+    syncScrim();
+  }
+
+  function enterStage(name) {
+    stage = name;
+    if (trail[trail.length - 1] !== name) trail.push(name);
+    activeRow = 0;
+    if (mode() === 'list') input.value = '';
+    setPalette(true);
+  }
+
+  /* Esc / Alt+←: one stage back, or out of the sheet at the first stage. */
+  function back() {
+    if (stage) {
+      trail.pop();
+      var previous = trail[trail.length - 1];
+      if (previous) {
+        stage = previous;
+        activeRow = 0;
+        input.value = '';
+        renderPalette();
+        return;
+      }
+      stage = null;
+      trail = [];
+    } else {
+      dismissed = true;
+    }
+    setPalette(false);
+    input.focus();
+  }
+
+  function close() {
+    stage = null;
+    trail = [];
+    setPalette(false);
+  }
+
+  function toast(message, tone) {
+    if (DS.toast) DS.toast(message, { tone: tone || 'ok' });
+  }
+
+  function activate(row) {
+    if (!row) return;
+    if (!stage && row.stage) { enterStage(row.stage); return; }
+    if (stage === 'provider') { enterStage('auth'); return; }
+    if (stage === 'auth') { enterStage(NEXT[row.id] || 'auth'); return; }
+    if (stage === 'model') {
+      modelValue.textContent = row.title;
+      toast('Model set to ' + row.title);
+      close();
+      input.value = '';
+      input.focus();
+      return;
+    }
+    if (stage === 'session') { toast('Resumed session “' + row.title + '”'); close(); input.value = ''; input.focus(); return; }
+    if (stage === 'secret') { toast('API key stored · provider configured'); close(); input.value = ''; input.focus(); return; }
+    if (stage === 'url') { toast('Base URL saved'); close(); input.value = ''; input.focus(); return; }
+    if (stage === 'oauth') { toast('Opened the browser at the verification URI'); return; }
+    toast('Ran ' + row.title);
+    close();
+    input.value = '';
+    input.focus();
+  }
+
+  function secondary() {
+    if (stage !== 'session') return;
+    var rows = currentRows();
+    var row = rows[activeRow];
+    if (!row) return;
+    STAGES.session.rows = STAGES.session.rows.filter(function (candidate) { return candidate.id !== row.id; });
+    toast('Deleted session “' + row.title + '”', 'err');
+    activeRow = Math.min(activeRow, Math.max(currentRows().length - 1, 0));
+    renderPalette();
+  }
+
+  /* ---------- live composer path ---------------------------------------- */
+
+  function sync() {
+    var value = input.value;
+    if (stage) {
+      /* A stage keeps the sheet open; in a list stage the draft is its filter. */
+      if (mode() === 'list') renderPalette();
+    } else if (!input.disabled && value.charAt(0) === '/') {
+      dismissed = false;
+      setMentions(false);
+      enterStageIfClosed();
+      setPalette(true);
+    } else {
+      setPalette(false);
+      setMentions(!input.disabled && value.charAt(0) === '@');
+    }
+    document.querySelector('[data-count]').textContent = value.trim() ? value.trim().length + ' chars' : '';
+  }
+
+  /* The catalogue is opened by the draft, not by a stage: a `/`-led draft that
+     was dismissed stays dismissed until the draft changes (shipped rule). */
+  function enterStageIfClosed() {
+    if (dismissed) return;
+    if (!paletteOpen) renderPalette();
+  }
+
+  function liveState() {
+    if (stage) {
+      if (mode() === 'list') renderPalette();
+    } else if (!input.disabled && input.value.charAt(0) === '/') {
+      setMentions(false);
+      setPalette(true);
+    } else {
+      setPalette(false);
+      setMentions(!input.disabled && input.value.charAt(0) === '@');
+    }
+    document.querySelector('[data-count]').textContent = input.value.trim() ? input.value.trim().length + ' chars' : '';
+  }
+
+  /* ---------- scenes ----------------------------------------------------- */
+
+  function applyScene(name) {
+    var scene = SCENES[name];
+    if (!scene) return;
+    app.dataset.view = scene.view;
+    app.dataset.lane = 'open';
+    /* Rail state is part of the scene: the lane's width is a consequence of it. */
+    app.dataset.sidebar = scene.sidebar || 'expanded';
+    app.dataset.inspector = scene.inspector || 'expanded';
+    document.querySelectorAll('[data-view-slot]').forEach(function (slot) {
+      slot.hidden = slot.dataset.viewSlot !== scene.view;
+    });
+    document.querySelectorAll('[data-set-view]').forEach(function (btn) {
+      var on = btn.dataset.setView === scene.view;
+      btn.dataset.active = on ? 'true' : 'false';
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    sceneNote.hidden = !scene.note;
+    sceneNote.textContent = scene.note || '';
+
+    stage = scene.stage || null;
+    trail = scene.trail ? scene.trail.slice() : stage ? [stage] : [];
+    activeRow = 0;
+    dismissed = false;
+    input.value = scene.draft || '';
+    if (scene.scope) {
+      document.querySelectorAll('[data-pal-scope]').forEach(function (chip) {
+        chip.dataset.active = chip.dataset.palScope === scene.scope ? 'true' : 'false';
+      });
+    }
+    if (scene.palette || stage) setPalette(true);
+    else setPalette(false);
+    setMentions(Boolean(scene.mentions));
+    document.querySelector('[data-count]').textContent = input.value.trim() ? input.value.trim().length + ' chars' : '';
+  }
+
+  /* ---------- pointer ---------------------------------------------------- */
+
+  document.querySelectorAll('[data-set-view]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var next = btn.dataset.setView;
+      app.dataset.view = next;
+      document.querySelectorAll('[data-view-slot]').forEach(function (slot) { slot.hidden = slot.dataset.viewSlot !== next; });
+      document.querySelectorAll('[data-set-view]').forEach(function (other) {
+        var on = other === btn;
+        other.dataset.active = on ? 'true' : 'false';
+        other.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    });
+  });
+
+  document.querySelectorAll('[data-commands]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      app.dataset.lane = 'open';
+      stage = null;
+      trail = [];
+      dismissed = false;
+      input.focus();
+      input.value = '/';
+      setPalette(true);
+      setMentions(false);
+    });
+  });
+
+  document.querySelector('[data-toggle-lane]').addEventListener('click', function () {
+    app.dataset.lane = app.dataset.lane === 'open' ? 'hidden' : 'open';
+    if (app.dataset.lane === 'open') input.focus();
+  });
+
+  document.querySelectorAll('[data-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.dataset.toggle;
+      var next = app.dataset[key] === 'expanded' ? 'collapsed' : 'expanded';
+      app.dataset[key] = next;
+      btn.setAttribute('aria-expanded', next === 'expanded' ? 'true' : 'false');
+    });
+  });
+
+  document.querySelectorAll('[data-pal-scope]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('[data-pal-scope]').forEach(function (other) { other.dataset.active = other === btn ? 'true' : 'false'; });
+      activeRow = 0;
+      renderPalette();
+    });
+  });
+
+  document.querySelectorAll('[data-set-halo]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      halo = btn.dataset.setHalo;
+      document.querySelectorAll('[data-set-halo]').forEach(function (other) {
+        var on = other === btn;
+        other.dataset.active = on ? 'true' : 'false';
+        other.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      palette.dataset.halo = halo === 'halo' ? 'true' : 'false';
+      mentions.dataset.halo = halo === 'halo' ? 'true' : 'false';
+      toast(halo === 'halo' ? 'Palette shadow: candidate halo' : 'Palette shadow: today’s drop shadow', 'quiet');
+    });
+  });
+
+  palList.addEventListener('click', function (event) {
+    var row = event.target.closest('[data-pal-row]');
+    if (!row) return;
+    var rows = currentRows();
+    activate(rows[Array.prototype.indexOf.call(palList.children, row)] || null);
+  });
+
+  mentions.addEventListener('click', function (event) {
+    var row = event.target.closest('[data-mention]');
+    if (!row) return;
+    var at = input.value.lastIndexOf('@');
+    input.value = input.value.slice(0, at) + '@' + row.dataset.mention + ' ';
+    setMentions(false);
+    input.focus();
+  });
+
+  /* The lane's pickers stay the shipped dropdown behaviour (plan 124). */
+  document.querySelectorAll('.popover [data-pick]').forEach(function (item) {
+    item.addEventListener('click', function () {
+      var popover = item.closest('[data-popover]');
+      var toggle = document.querySelector('[data-popover-toggle="' + popover.dataset.popover + '"]');
+      popover.querySelectorAll('[data-pick]').forEach(function (other) { other.setAttribute('aria-checked', other === item ? 'true' : 'false'); });
+      if (item.dataset.pick === 'model') modelValue.textContent = item.dataset.value;
+      popover.dataset.open = 'false';
+      if (toggle) { toggle.setAttribute('aria-expanded', 'false'); toggle.focus(); }
+      toast('Set ' + item.dataset.pick + ' to ' + item.dataset.value);
+    });
+  });
+
+  /* ---------- keyboard --------------------------------------------------- */
+
+  input.addEventListener('input', liveState);
+
+  input.addEventListener('keydown', function (event) {
+    var rows = paletteOpen ? currentRows() : [];
+    if (event.altKey && event.key === 'ArrowLeft' && paletteOpen) { event.preventDefault(); back(); return; }
+    if (event.key === 'Escape' && (paletteOpen || !mentions.hidden)) {
+      event.preventDefault();
+      setMentions(false);
+      back();
+      return;
+    }
+    if (paletteOpen && rows.length) {
+      if (event.key === 'ArrowDown') { event.preventDefault(); activeRow = (activeRow + 1) % rows.length; renderPalette(); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); activeRow = (activeRow - 1 + rows.length) % rows.length; renderPalette(); return; }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (event.altKey && stage === 'session') { secondary(); return; }
+        activate(rows[activeRow]);
+        return;
+      }
+    }
+    var mentionRows = mentions.hidden ? [] : Array.prototype.slice.call(mentions.querySelectorAll('.completion-row'));
+    if (mentionRows.length) {
+      var current = mentionRows.findIndex(function (row) { return row.getAttribute('aria-selected') === 'true'; });
+      if (event.key === 'ArrowDown') { event.preventDefault(); mentionRows.forEach(function (row, i) { row.setAttribute('aria-selected', i === (current + 1) % mentionRows.length ? 'true' : 'false'); }); return; }
+      if (event.key === 'ArrowUp') { event.preventDefault(); mentionRows.forEach(function (row, i) { row.setAttribute('aria-selected', i === (current - 1 + mentionRows.length) % mentionRows.length ? 'true' : 'false'); }); return; }
+      if (event.key === 'Tab' || event.key === 'Enter') { event.preventDefault(); mentionRows[Math.max(current, 0)].click(); return; }
+    }
+    /* Enter with no rows still falls through to the composer's own submit, so a
+       typed built-in (`/model`) is sent as text exactly as it is today. */
+    if (event.key === 'Enter' && !event.shiftKey && !paletteOpen) {
+      event.preventDefault();
+      if (input.value.trim()) toast('Sent to the tab\'s agent session');
+      input.value = '';
+      liveState();
+    }
+  });
+
+  palFieldInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') { event.preventDefault(); activate(currentRows()[0] || null); return; }
+    if (event.key === 'Escape' || (event.altKey && event.key === 'ArrowLeft')) { event.preventDefault(); back(); return; }
+  });
+
+  /* Ctrl+X Ctrl+P hides/shows the lane; Ctrl+X Ctrl+O opens the catalogue. */
+  var pending = false;
+  document.addEventListener('keydown', function (event) {
+    if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'x') {
+      pending = true;
+      setTimeout(function () { pending = false; }, 1500);
+      return;
+    }
+    if (!pending || !event.ctrlKey) return;
+    var key = event.key.toLowerCase();
+    if (key === 'p') {
+      event.preventDefault();
+      pending = false;
+      app.dataset.lane = app.dataset.lane === 'open' ? 'hidden' : 'open';
+      if (app.dataset.lane === 'open') input.focus();
+    } else if (key === 'o') {
+      event.preventDefault();
+      pending = false;
+      app.dataset.lane = 'open';
+      stage = null;
+      trail = [];
+      dismissed = false;
+      input.focus();
+      if (input.value.charAt(0) !== '/') input.value = '/';
+      liveState();
+    }
+  });
+
+  document.addEventListener('clay:scene', function (event) { applyScene(event.detail.name); });
+
+  document.querySelectorAll('[data-set-halo]').forEach(function (btn) {
+    var on = btn.dataset.setHalo === halo;
+    btn.dataset.active = on ? 'true' : 'false';
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  palette.dataset.halo = 'true';
+  mentions.dataset.halo = 'true';
+
+  applyScene(new URLSearchParams(window.location.search).get('scene') || 'lane');
+
+  /* The kit's own default collapses the inspector under 1240px (ds.js). A scene
+     names its rail state, and the lane's width is a consequence of exactly
+     that, so the scene wins — re-asserted on load, after the kit's pass. */
+  window.addEventListener('load', function () {
+    applyScene(new URLSearchParams(window.location.search).get('scene') || 'lane');
+  });
+})();
+</script>
+
+</body>
+</html>

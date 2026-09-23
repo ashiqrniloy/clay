@@ -29,21 +29,97 @@ cargo build
 | L7 | After L1 | Status shows `Connected — Editable`; version text like `vN` |
 | L8 | Type text | `Pending edits: N` increments then decrements after ack |
 | L9 | Kill the server process while GUI open | `Disconnected` + recovery/dismiss menu; no raw paths/host strings leaked |
-| L10 | Put a syntax error in `~/.config/clay/init.js`, restart | GUI still opens; status/terminal shows `runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
+| L10 | Put a syntax error in `~/.clay/init.js`, restart | GUI still opens; status/terminal shows `runtime.syntax_error` diagnostic, previous generation behavior retained as documented |
 | L11 | No server reachable for a client-only invocation | `Local Fallback` state |
+
+## Landing steps (Plan 087 foundation, reshaped by Plan 118 Part D)
+
+The empty tab is a **package contribution** since plan 118 Part D
+(`DESIGN.md` §12/§16). Two states exist and both are steps below:
+
+- **Launcher landing** — the bundled `@clay/launcher` package contributes the
+  empty-tab content and the host renders its compiled panel (the trusted
+  provenance lookup beside the Coding Agent panel). This is what
+  `examples/config/packages/first-party.js` loads, i.e. the shipped landing.
+- **Core fallback** — with no empty-tab contribution installed, the empty tab
+  is the Clay-owned `Start with a file or folder` card with `Open file` /
+  `Open folder`. Core carries **no product-named landing** (plan 118).
+
+| # | Action | Expected |
+|---|--------|----------|
+| L12 | Fresh isolated launch with an empty-document tab and **no** empty-tab contribution (`scripts/capture-ui-review.sh --fixture ui-review-default --output <dir>`, whose `init.js` is empty) | Core fallback only: group named `Empty tab`, title `Start with a file or folder`, buttons `Open file` and `Open folder`, polite status `Ready to edit; Open a file or folder to start editing.; Workspace: <basename>; Connection: Connected; Access: Editable.`, status bar `Connected — Editable`; **no `Coding Agent` button and no product name anywhere in the fallback**; no `Welcome to Clay's Phase 4 IPC server.` copy; no ambient config/socket used |
+| L12a | Same launch with the bundled launcher loaded (`scripts/capture-ui-review.sh --fixture ui-review-launcher --output <dir>`, whose `init.js` loads `@clay/launcher`) | The landing replaces the fallback: `Start` title plus its one-paragraph explanation, one `Workspaces` and one `Agents` pane each with a count chip and a `Filter` well, rows from the server listing (real names + the stored path / agent config root), the first-run note when a pane is empty (`No workspace has been opened yet…`, `No agent is configured…`), each pane's foot (`Open folder…` / `One folder per agent in ~/.clay/agents/`), and one action row: `Tab panes · ↑↓ move · ⏎ pick · ⌘⏎ open both · esc clear` beside the primary button, which names exactly what it opens (`Open <name>`, `Open Coding Agent`, `Open <name> + Coding Agent`) and stays disabled until a row is picked. Shell chrome around it is unchanged (tab strip, sidebar, outline rail); no fabricated rows; no document is opened by rendering the landing |
+| L13 | Review harness contract: `scripts/capture-ui-review.sh --fixture <name> --output <dir>` | Documented repeatable command (module reference `docs/development/launch-and-gui-smoke.md`) boots an isolated server+client (mode-700 HOME/XDG/socket), captures AT-SPI dump + window-cropped screenshot, and writes `review.status PASS`; UNRESOLVED (exit 2) with a stated reason when the desktop accessibility bus or portal capture is unavailable — never a false pass. Both landing fixtures above are accepted by the argument check; the removed design-system fixtures exit 2 as unknown |
+| L14 | Watch the AT-SPI tree while idle (either landing state) | No `Phase 4 IPC server` copy anywhere; the entry/status chrome keeps basenames only. The launcher's recents rows deliberately show the stored absolute workspace path (it is the user's own workspace identity, and the landing must not invent a display name) — that is product data, not a sanitize leak; no *other* label may carry a host path, secret or token |
+| L14a | Landing → workspace handoff: pick a recents row, then activate the primary button (click, or AT-SPI action) | The folder opens as the tab's workspace; the landing disappears and the editor pane (plus the docbar's document actions) takes its place; the tab strip label updates. UNRESOLVED on hosts without an input-synthesis backend — the automated legs below pin the same wiring |
+| L14b | Landing → agent handoff: with `@clay/coding-agent` loaded and one agent folder present, pick the agent row and activate the primary button | The tab switches to the agent view (module [17](17-coding-agent-parity.md) C38) instead of opening a document; picking one workspace **and** one agent and using `⌘⏎ open both` opens the workspace and then the agent view in the same tab. UNRESOLVED on hosts without input synthesis; automated legs: `frontend/src/launcher/LauncherPanel.test.tsx`, `frontend/src/shell/WorkspacePanes.test.tsx` |
 
 ## Negative checks
 
 - Status line never shows absolute paths, source snippets, secrets, tokens,
   or env dumps (sanitize contract).
+- Landing: with no empty-tab contribution the fallback shows no product name
+  (L12); with the launcher installed, an empty recents store renders the
+  first-run note rather than a placeholder row, and a stored path whose folder
+  disappeared is pruned instead of being listed.
+- Landing: rendering the launcher never opens a document, never records a new
+  recent (recents are stamped only when a folder is opened — L14a) and never
+  writes to the workspace.
 - Typing never blocks on IPC: keystrokes stay local-optimistic even while
   `Pending edits` > 0 or after disconnect.
 
 ## Linux execution record (Plan 086 task 11, 2026-08-14)
 
 - **PASS — L6/L7/L8:** isolated `clay server <temp-socket>` + `clay client <temp-socket>` launch (HOME, XDG config/data, and socket under a mode-700 `/tmp/clay-plan086-manual-*` root) produced a live AT-SPI `clay` application. The initial tree showed `Connected — Editable`, version text, two restored tabs, two panes, the attached `Server-driven UI region`, and no startup panic. Text insertion updated the document/status tree and the server/client stayed alive.
-- **PASS — isolation/negative:** the custom `init.js` was loaded from the isolated HOME (the client log contained the custom `Ctrl+O`, `Ctrl+S`, `Ctrl+Alt+P`, and `Alt+P` bindings); no ambient `~/.config/clay` or default socket was used. AT-SPI labels exposed basenames/status text, not host paths or secrets.
+- **PASS — isolation/negative:** the custom `init.js` was loaded from the isolated HOME (the client log contained the custom `Ctrl+O`, `Ctrl+S`, `Ctrl+Alt+P`, and `Alt+P` bindings); no ambient `~/.clay` or default socket was used. AT-SPI labels exposed basenames/status text, not host paths or secrets.
 - **Coverage note:** observer/restart/local-fallback flows (L2–L5, L9–L11) were not re-run in this pass; their automated/Task 8 live coverage remains unchanged. Native window focus/input limitations blocked a clean second-client keyboard run.
+
+## Linux execution record (Plan 087 task 11, 2026-08-15)
+
+- **PASS — L12/L14 welcome entry state:** fresh isolated launch (mode-700 root, X11-backend client, `ui-review-completion` fixture init.js, no restored document) showed the Clay-owned welcome: Frame `Clay` (active+focused), `Pane 1 of 1: editor`, `Welcome to Clay` panel with polite status `Ready to edit; Open a file or folder to start editing.; Workspace: workspace; Connection: Connected; Access: Editable.` plus `Open File`/`Open Folder` buttons and status bar `Clay — Connected — Editable — doc 2 — v1`. No `Phase 4 IPC server` copy and no absolute path in any AT-SPI label. Server/client stayed alive throughout.
+- **PASS — L13 harness contract:** the documented `scripts/capture-ui-review.sh` flow was exercised earlier this plan (task 7/2 evidence: default/loading/error/recovery/completion/command-centre all `review.status PASS`, UNRESOLVED reported for interactive states that could not be driven).
+
+## Plan 088 modernization steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| L15 | Run `scripts/capture-ui-review.sh --fixture ui-review-default --output <dir>` on the current Linux build and inspect the Clay-only screenshot/tree | Welcome shell is bounded at the documented 900×600 logical window; Open File/Open Folder have names; status exposes Connected/Editable; no host path appears |
+| L16 | Compare dark and light theme welcome captures, then reload with the large-typography fixture (`ui` size 24) | Surface/text hierarchy remains legible and in bounds in both themes; UI typography changes geometry without changing user-owned font-family policy |
+| L17 | Inspect the runtime-error fixture | Error copy appears in accessible panel/status names and is not conveyed by color alone; client remains usable |
+| L18 | Inspect the disconnect/recovery fixture | Welcome, recovery panel, and status chrome all report Disconnected consistently; no absolute path or secret appears |
+| L19 | Inspect the loading fixture | The published loading state is observable in the tree and screenshot, or the harness records `UNRESOLVED` with the fixture/observability reason rather than claiming a pass |
+
+## Plan 088 task 12 Linux execution record (2026-08-15)
+
+Real Linux/GNOME Wayland execution used `cargo build`, the isolated mode-700 review harness, xdg-desktop-portal PNG capture, and Python GI/AT-SPI dumps. Window targeting remains unavailable, so no targeted keyboard or native-dialog action was claimed as a pass.
+
+| Checks | Result | Evidence |
+|---|---|---|
+| L15 | PASS | Current-build artifact: `code-reviews/screenshots/2026-08-15-plan088-task12-manual/default/` (`review.status PASS`, 900×600 logical metadata, Clay-only 913×1152 crop); tree exposes Welcome to Clay, Open File/Open Folder, Connected/Editable status, and no absolute path |
+| L16 | PASS | Existing same-build dark/light and large-typography artifacts: `code-reviews/screenshots/2026-08-14-plan088-modernization/light-default/` and `large-typography/`; no a11y regression, with visual large-type sizing recorded |
+| L17 | PASS | `code-reviews/screenshots/2026-08-14-plan088-modernization/error/`; diagnostic is present in panel and status accessible names, not color-only |
+| L18 | FAIL — P1 follow-up | `code-reviews/screenshots/2026-08-14-plan088-modernization/recovery/`; recovery/status chrome says Disconnected but the WelcomeWidget status still says Connected. Track as a product defect, not a false pass |
+| L19 | UNRESOLVED — observability gap | `code-reviews/screenshots/2026-08-14-plan088-modernization/loading/` captured the welcome shell instead of the intended loading SDUI tree; harness pass alone is insufficient |
+
+## Plan 089 validation and platform steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| L20 | Launch two real Clay desktop clients on a Wayland host with large-typography init.js (ui 24/mono 20/proportional 21) and dump AT-SPI per instance | Two distinct `clay-desktop` frames are exposed with positive physical bounds and scale factors between 0.5 and 4.0. (The automated `live_atspi_smoke::live_multi_window_scale_smoke` harness was removed with the native client; this step is now manual-only.) |
+| L21 | Resize the desktop window across scale changes (e.g. 1×→2× display scale) and confirm layout stays in bounds; cross-check the Plan 097 Phase 12 wide/narrow captures | Tab bar, panes, status bar, and dialogs stay inside window bounds after rescale; no clipped chrome. (The headless Masonry rescale unit test was removed with the native client; responsive coverage now comes from this manual check plus the retained fixture captures.) |
+| L22 | Inspect the `ui-review-large-typography` fixture capture (`scripts/capture-ui-review.sh --fixture ui-review-large-typography --output <dir>`) | Welcome state with large UI typography (size 24/20/21) renders in bounds; Open File/Open Folder buttons, status bar, and polite status remain legible and accessible; no absolute path leaks |
+
+## Plan 089 task 9 Linux execution record (2026-08-17)
+
+Real Linux/GNOME Wayland execution used `cargo build`, the isolated mode-700 review harness, xdg-desktop-portal PNG capture, Python GI/AT-SPI dumps, and the now-active GNOME Shell extension for window targeting (`can_query_windows=true`, `can_focus_windows=true`).
+
+| Checks | Result | Evidence |
+|---|---|---|
+| L18 | PASS | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/recovery/` shows `Connection lost` / `Connection: Disconnected` consistently in the welcome panel, status chrome, and AT-SPI tree after the `request_welcome_render` fix |
+| L19 | PASS (delivered-RuntimeStateSnapshot evidence) | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/loading/` with `runtime-tree.txt` confirming the published loading SDUI tree (Panel `Loading review`, Label `Loading workspace…`) was delivered via `RuntimeStateSnapshot`; the restore-gate fix and kind-changed reconcile fix ensure the tree reaches the accessibility layer |
+| L20 | PASS live | `CLAY_LIVE_WINDOW_SMOKE=1` multi-window smoke test launched two real Clay clients; AT-SPI exposed two PID-separated frames with positive bounds and scale factors within 0.5–4.0 |
+| L21 | PASS headless | `rescale_event_recomputes_logical_bounds_from_physical_size` passes; logical size remains 900x600 at 2x physical scale |
+| L22 | PASS | `code-reviews/screenshots/2026-08-14-plan089-platform-validation/visual-review/large-typography/` shows the large UI fixture in bounds with named welcome actions and Connected status |
 
 ## Known ceilings
 
@@ -51,3 +127,105 @@ cargo build
   unsupported-command error.
 - Observer cannot gain the editable lease until the editable client
   disconnects cleanly; lease handover timing is out of scope here.
+
+## Plan 097 Phase 12 Tauri/React visual and accessibility review (2026-08-24)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Launch/welcome shell | PASS real AT-SPI structure | `code-reviews/screenshots/2026-08-24-tauri-react-parity/default-welcome/accessibility.txt` exposes the Tauri frame, `Clay workspace`, `Window tabs`, `Workspace`, `Pane 1`, and named Open File/Open Folder actions |
+| Opened editor shell | PASS real AT-SPI structure | `editor-opened/accessibility.txt` exposes Save/Reload/Close, Open path, Open, `Editor notes.md`, and the Document editor entry |
+| Loading/empty/error/recovery | PASS static visual/a11y coverage | `states/fixture-{wide,narrow}.png` and paired AX snapshots |
+| Physical keyboard/reconnect re-run | UNRESOLVED host | `/dev/uinput` denied; no xdotool/ydotool; Wayland portal cannot target Clay. No interactive pass inferred |
+
+The retained screenshots are app-only CDP captures; full-desktop portal PNGs
+with unrelated windows were deleted. See the dated review log for all state
+results and cleanup policy.
+
+## Plan 098 chunked document transfer steps
+
+| # | Action | Expected |
+|---|--------|----------|
+| L23 | Start `scripts/large-document-smoke.sh` and inspect its private `clay server <socket>` plus Tauri client launch | Current Linux build completes a protocol-v28 handshake on the workspace-private socket; status reaches Connected; no default-endpoint server is adopted |
+| L24 | If a v27 server binary is available, connect the current client to it; otherwise run `cargo test --lib protocol_v27_client_is_rejected_by_v28_server` | Mixed protocol versions fail closed with `UnsupportedProtocolVersion`; no document/workspace state is installed and the current client remains recoverable |
+
+## Plan 098 Linux execution record (2026-08-26)
+
+| Checks | Result | Evidence |
+|---|---|---|
+| L23 | PASS launch / UNRESOLVED interactive close | `scripts/large-document-smoke.sh` built `target/debug/clay`, started a server on a private temporary socket, and launched the Tauri desktop. The welcome screenshot is `code-reviews/screenshots/2026-08-26-plan098-manual/real-app-welcome.png`; no default socket was used. Portal/window targeting became unstable before a stable document state, so no live editor interaction pass is claimed |
+| L24 | PASS automated; NOT RUN against a separate live v26 binary | `cargo test --lib protocol_v26_client_is_rejected_by_v27_server` passed; no v26 server executable was available for a second live process |
+
+Known ceiling for this record: AT-SPI exposed the native Tauri frame but not
+WebKitGTK document nodes, and the host's compositor moved the test window
+partly off-screen during portal focus. These conditions leave live L23
+editor interaction unresolved rather than converting protocol evidence into a
+GUI pass.
+
+## Plan 099 performance launch and recovery steps
+
+| # | Action | Expected |
+|---|---|---|
+| L25 | Launch `scripts/editor-performance-smoke.sh --sizes 1,10,50 --enforce` and inspect the private server/client window | Real Tauri/WebKit client reaches Connected on the private socket; synthetic fixture roots stay isolated; no host path or source text enters reports |
+| L26 | Stop and restart the private server, then reload the active fixture | Client reports bounded Disconnected/recovery state, reconnects to the authoritative snapshot, and keeps the pane/document; no stale patch or lost text |
+
+## Plan 099 Linux execution record (2026-08-28)
+
+| Check | Result | Evidence |
+|---|---|---|
+| L25 | PASS launch; PARTIAL state inspection | Full 1/10/50 MiB × four-shape × six-extension fixture generation and private profiled launch passed. The targeted screenshot showed the Clay welcome/Connected shell and AT-SPI exposed the real frame/window controls; the WebKit document tree was unavailable. Reports: [`manual-test-plan.md`](../code-reviews/screenshots/2026-08-28-plan099-manual/manual-test-plan.md). |
+| L26 | UNRESOLVED | No document session was established and no keyboard-capable input backend is available (`uinput` denied; no `xdotool`, `ydotool`, or portal input device), so server-stop/restart/resync interaction was not claimed. |
+
+The full run passed `--enforce` with zero long tasks over 50 ms and bounded
+retention. Do not treat the bootstrap-only p95 table or zero parser queue as
+proof of L26; repeat on an input-capable designated device.
+
+## Plan 105 Linux execution record (2026-09-01)
+
+Repository-review remediation plan (junk/dead-code removal, internal refactors,
+frontend chunk split, docs). No user-visible behavior change by design; this
+record is the required launch-gate smoke after the structural work.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Launch gate (L1/L12/L15 class) | PASS | `scripts/capture-ui-review.sh --fixture ui-review-default --output code-reviews/screenshots/2026-09-01-plan105-manual/default` on the freshly built `target/debug/clay` (contains all Plan 105 changes through task 12): `review.status=PASS`, 900×600 logical, private socket, mode-700 isolated config. Clay-only crop `screenshot-clay.png` shows the welcome state (Start with a file or folder, Open file/Open folder), `CLAY`/`Workspace` tab bar, and the sanitized status hint with workspace basename — no absolute host path. Full-desktop portal PNG (contained unrelated user windows) was deleted per the evidence-retention policy. |
+| AT-SPI structure | PASS | `accessibility.txt` exposes the `Clay` frame, `Clay workspace`, `Window tabs`, and named `Open file`/`Open folder` actions; no `/home/...` path appears in any name/footer. Footer `Connected` text remains invisible to AT-SPI names — the documented WebKitGTK live-region ceiling (Plan 097 record), not a Plan 105 regression. |
+| Observer/lease/restart/local-fallback (L2–L5, L9–L11) | NOT RUN — unchanged | `computer-use-linux doctor` (2026-09-01): `can_send_development_input=false` (no uinput/xdotool/ydotool/wtype). These flows are untouched by the plan (extraction code was moved, not modified; dialog backend deletion kept the Tauri bridge path); prior live records remain the evidence. |
+
+Dialog open path: the deleted `src/client/file_dialog.rs` backends were never
+JS- or Tauri-reachable (task-13 inventory); the live dialog path remains
+`invoke("dialog_open_file" | "dialog_open_folder")` → `src-tauri/src/commands.rs::pick_path`
+(ashpd portal), and the Open file/Open folder welcome actions render with
+sanitized names in the capture. Live chooser selection stays input-blocked as
+in every prior record.
+
+## Plan 118 landing execution record (2026-09-13)
+
+Executed against a freshly rebuilt `target/debug/clay` **and**
+`target/debug/clay-desktop` (`cargo build --bins` plus
+`cargo build --bins -p clay-desktop`; the desktop binary lives in `src-tauri`
+and a stale one produces `Session lost` — the standing mixed-binary ceiling).
+Artifacts: `test-plan/artifacts/118-quiet-instrument-migration/`.
+
+| Steps | Result | Evidence |
+|---|---|---|
+| L12 core fallback | PASS live | `core-fallback/` (`review.status=PASS`): AT-SPI tree is `Empty tab` + `Open file` / `Open folder` only — no `Coding Agent` button, no product name; window-cropped screenshot shows `Start with a file or folder` inside the shipped shell |
+| L12a launcher landing | PASS live | `launcher-landing/`: tree exposes `Start` (heading + paragraph), `Recent workspaces` landmark with a `list box` holding the real recents row (`workspace  /tmp/clay-ui-review.*/workspace`), `Open folder…`, `Agents` landmark with its first-run paragraph, and the action footer with the disabled primary `Open`; `runtime-tree.txt` records the contribution; screenshot inspected (both panes, count chips `1`/`0`, filter wells, hints) |
+| L13 harness contract | PASS + 2 defects found and fixed | The launcher fixture is accepted by the argument check and the removed-system fixtures still exit 2 (`plan118_ui_review_harness_captures_the_shipped_system_and_rejects_removed_states`). **Defect 1 (fixed):** the harness `chmod 700 "$home/.config"` ran against a directory it never created, so **every** fixture aborted under `set -e` before launch — `mkdir` now creates it. **Defect 2 (fixed):** `ui-review-coding-agent` relied on `commandDispatch("coding-agent.profile")` alone, so with the agent package unloaded the fixture silently captured the fallback; it now loads `@clay/coding-agent` first |
+| L14 sanitize / AT-SPI names | PASS | `launcher-landing/accessibility.txt`: the only absolute path is the launcher's own recents row (intended product data, L14); status/footer keep the workspace basename; no secret/token string anywhere |
+| L14a/L14b interactive handoffs | UNRESOLVED — no input-synthesis backend | `computer-use-linux doctor`: `can_send_development_input=false` (no `/dev/uinput`, xdotool/ydotool, or portal input path). AT-SPI action invocation works on this host (Plan 087 opened the native dialog that way) but the capture harness tears the app down before a probe can act; automated legs pin the same wiring (`LauncherPanel.test.tsx`, `WorkspacePanes.test.tsx`). Not a false pass and not a weakened step |
+| L15–L22 regression class (welcome/shell geometry, error, recovery, loading, large typography) | PASS live | `core-fallback/`, `error/` (status bar `JavaScript runtime evaluation failed.`), `recovery/` (`Reconnect session`), `loading/` (`Loading review` panel), `large-typography/` (landing-free fallback at size 24/20/21, in bounds) — all `review.status=PASS` |
+| Cross-module | see | Coding Agent view [17](17-coding-agent-parity.md#plan-118-coding-agent-view-record-2026-09-13), Workspace composition [15](15-ui-design-systems.md#plan-118-ui-design-system-execution-record-2026-09-13), panes [13](13-window-splits.md#plan-118-execution-record-2026-09-13), files/workspace [03](03-files-and-workspace.md#plan-118-execution-record-2026-09-13) |
+
+**Finding carried to the visual review (module 15 task, not a pass claim):**
+on the landing the workspace route still mounts its side chrome — the file
+browser on the left and the outline rail on the right. The rail renders a
+zero-document fact block (`FILE —`, `REVISION v1`, `STATE clean`,
+`ENTRIES 0`, `WORDS 0`, `No headings in this document.`) for a tab whose
+document set is empty. The values are the session's real defaults (nothing is
+fabricated), but the composition reads as if a document existed; the approved
+`start.html` draws the landing without either surface. Recorded for the
+visual-review task's deviation table: fix by hiding the rail (and optionally
+the sidebar) when the active pane has no document, or re-approve the chrome.
+
+No existing step was deleted or weakened. L12 changed only in wording (the
+fallback copy/name that ships) and gained its launcher counterpart.

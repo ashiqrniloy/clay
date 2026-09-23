@@ -7,11 +7,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+#[cfg(test)]
+use tokio::task::JoinSet;
 use tokio::{
     io::AsyncReadExt,
     process::Command,
     sync::{Mutex, Notify, Semaphore},
-    task::JoinSet,
     time::timeout,
 };
 
@@ -20,6 +21,7 @@ use crate::perf::budgets::GIT_ROOT_CONCURRENCY;
 use super::workspace::{WorkspaceRootId, WorkspaceState};
 
 pub(crate) const GIT_DISCOVERY_TIMEOUT: Duration = Duration::from_millis(750);
+#[cfg(test)]
 pub(crate) const GIT_STATUS_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const GIT_OUTPUT_MAX_BYTES: usize = 256 * 1024;
 const GIT_DIAGNOSTIC_MAX_CHARS: usize = 512;
@@ -133,6 +135,7 @@ impl GitDiscoveryService {
         self
     }
 
+    #[cfg(test)]
     pub(crate) async fn discover_workspace_statuses(
         &self,
         workspace: &WorkspaceState,
@@ -437,30 +440,7 @@ impl GitStatusCache {
             .collect()
     }
 
-    pub(crate) async fn refresh_workspace(
-        &self,
-        workspace: &WorkspaceState,
-    ) -> Vec<GitCachedStatus> {
-        let mut tasks = JoinSet::new();
-        for root in workspace.directory_roots() {
-            let cache = self.clone();
-            tasks.spawn(async move {
-                cache
-                    .refresh_root(root.workspace_root_id, root.canonical_path)
-                    .await
-            });
-        }
-
-        let mut statuses = Vec::new();
-        while let Some(result) = tasks.join_next().await {
-            if let Ok(status) = result {
-                statuses.push(status);
-            }
-        }
-        statuses.sort_by_key(|status| status.workspace_root_id);
-        statuses
-    }
-
+    #[cfg(test)]
     pub(crate) async fn refresh_stale_workspace(
         &self,
         workspace: &WorkspaceState,
@@ -594,6 +574,7 @@ impl GitCacheEntry {
         }
     }
 
+    #[cfg(test)]
     fn should_poll(&self, now: SystemTime) -> bool {
         match self.refresh_state {
             GitRefreshState::Idle => true,

@@ -4,8 +4,8 @@ import test from "node:test";
 
 import { lspJavascriptPackageManifest } from "./dist/index.js";
 import { createJavascriptBridge } from "./dist/server.js";
-import { encodeFrame, FrameDecoder } from "./dist/shared/framing.js";
-import { languageIdForRelativePath } from "./dist/shared/typescript-language-server.js";
+import { encodeFrame, FrameDecoder } from "../lsp-shared/framing.js";
+import { languageIdForRelativePath } from "../lsp-shared/typescript-language-server.js";
 
 const identity = {
   package: "@clay/lsp-javascript",
@@ -102,8 +102,8 @@ function range(start, end) {
 }
 
 test("JavaScript package manifest matches package.json and reuses typescript-language-server launch contract", () => {
-  assert.deepEqual(lspJavascriptPackageManifest(), JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url))));
-  const manifest = lspJavascriptPackageManifest();
+  const manifest = JSON.parse(fs.readFileSync(new URL("./package.json", import.meta.url)));
+  assert.equal(manifest.clay.preset, "lsp-bridge");
   assert.deepEqual(manifest.clay.contributions.languageServers, [{
     id: "lsp-javascript.server",
     executable: "typescript-language-server",

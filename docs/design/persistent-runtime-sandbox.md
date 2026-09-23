@@ -4,6 +4,16 @@
 
 This document defines the separate-process JavaScript runtime sandbox as a hardening primitive and optional runtime profile. It is not a first-party/third-party dividing line: any Clay-shipped or user-installed package may use a sandboxed, restricted, or native-trust profile when the user grants that profile.
 
+## Status (2026-09-14)
+
+The plan-034 minimal harness this design once pointed at
+(`src/server/runtime_sandbox.rs`, `src/bin/clay-runtime-sandbox.rs`,
+`tests/runtime_sandbox_harness.rs`) was deleted in plan 119: it had no
+production caller — the in-process persistent JS runtime owns heap-limit and
+timeout termination — and reviving it would have shipped an unbounded
+process-isolation path. This document is therefore an unbuilt migration gate:
+no separate-process sandbox code ships today.
+
 ## Boundary
 
 Clay splits runtime authority into a parent supervisor and a child JavaScript process.
@@ -54,7 +64,7 @@ Allowed requests are profile-dependent and parent-built:
 
 ## Production Enforcement Contract
 
-The current `RuntimeSandboxSupervisor` newline-delimited JSON harness is evidence only, not production API. Production sandbox routing requires a bounded typed protocol shaped like the main IPC `Codec`: length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes, and metrics for frame-too-large/protocol-failure cases.
+The plan-034 `RuntimeSandboxSupervisor` newline-delimited JSON harness was evidence only, not production API, and was deleted in plan 119 (2026-09-14) with its binary and harness test. Production sandbox routing would require a bounded typed protocol shaped like the main IPC `Codec`: length-prefixed frames, maximum frame size, typed request/response variants, decode validation, generation IDs, stable error codes, and metrics for frame-too-large/protocol-failure cases.
 
 Required request flow:
 
@@ -122,11 +132,11 @@ Initial measurable targets for the harness:
 5. Measure startup, package-load, parse, timeout, heap, and reload overhead.
 6. Generalize production routing for any package source once Plan 035 implements user authorization and package graph support.
 
-## Minimal Harness Status
+## Minimal Harness Status (removed in plan 119)
 
-`src/server/runtime_sandbox.rs` and `src/bin/clay-runtime-sandbox.rs` implement the current internal harness only. It proves child spawn/handshake, controlled evaluation, parent timeout kill, fresh restart, payload-budget rejection, and absence of filesystem/network/shell globals. It uses newline-delimited JSON over child stdio rather than the final production protocol and is not wired into package loading. Parent framing is still bounded: `fill_buf`/`consume` retains no more than the negotiated payload ceiling plus one byte, excludes the newline from the payload budget, and kills then awaits the child on overflow, unterminated EOF, read failure, or malformed JSON. Production migration still requires the typed length-prefixed protocol above.
+`src/server/runtime_sandbox.rs` and `src/bin/clay-runtime-sandbox.rs` were the plan-034 internal harness, deleted on 2026-09-14. It had proven child spawn/handshake, controlled evaluation, parent timeout kill, fresh restart, payload-budget rejection, and absence of filesystem/network/shell globals, using newline-delimited JSON over child stdio rather than the protocol described above, and it was never wired into package loading. Any future revival must start from this design's typed length-prefixed protocol, not from that harness.
 
 ## Tests Required Before Implementation Completion
 
 - Design doc guard requires process boundary, bounded protocol, restart policy, parent-side validation, hot-path exclusion, runtime profiles, and user-authorized package source language.
-- `tests/runtime_sandbox_harness.rs` proves child start/evaluate, timeout kill/restart, bounded newline-terminated and unterminated overflow with child reaping, oversized valid output rejection, and no filesystem/network/shell authority through the protocol by default.
+- `tests/runtime_sandbox_harness.rs` (deleted with the harness in plan 119) proved child start/evaluate, timeout kill/restart, bounded newline-terminated and unterminated overflow with child reaping, oversized valid output rejection, and no filesystem/network/shell authority through the protocol by default. Any future implementation must re-establish that evidence.

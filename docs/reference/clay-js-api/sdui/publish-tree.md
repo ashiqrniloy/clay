@@ -43,7 +43,7 @@ The API publishes native UI metadata only. It does not execute JavaScript on the
 
 ## When to use
 
-Use this API from `~/.config/clay/init.js` or a local configuration module when configuration should replace or augment the server-driven UI tree with documented native UI nodes.
+Use this API from `~/.clay/init.js` or a local configuration module when configuration should replace or augment the server-driven UI tree with documented native UI nodes.
 
 ## JavaScript usage
 

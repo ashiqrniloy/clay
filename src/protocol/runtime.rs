@@ -16,11 +16,14 @@
 
 use crate::perf::budgets::{
     RUNTIME_STATE_SNAPSHOT_MAX_DIAGNOSTICS, RUNTIME_STATE_SNAPSHOT_MAX_DOCUMENTS,
+    RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES,
 };
 use crate::protocol::{
     ActiveTheme, ActiveTypography, BehaviorManifest, ClientId, DecorationSet, DiagnosticSet,
     DocumentId, DocumentVersion, RuntimeDiagnostic, SduiTree,
 };
+pub use crate::shell::design_system::{ActiveDesignSystem, DesignSystemProvenance};
+pub use crate::shell::icons::ActiveIconPack;
 
 /// Monotonic runtime-generation identity shared by server contributions and
 /// client snapshots. Independently monotonic behavior/document versions remain
@@ -29,14 +32,192 @@ pub type RuntimeGenerationId = u64;
 
 /// Versioned package-UI replacement carried inside a runtime snapshot.
 ///
-/// Contribution payloads remain empty until package UI is published over IPC.
-/// A non-zero version still advances so clients clear previous package UI under
-/// the same atomic install boundary as behavior/theme/SDUI.
+/// The complete validated package projection installs atomically with its
+/// runtime generation. `empty_tab` carries the one-winner pane-content
+/// contribution for new/empty `main` slots; absent means the core Open File /
+/// Open Folder fallback. Component trees remain bounded JSON only on the rkyv
+/// wire and are parsed into typed inert Tauri DTO values before React sees them.
 #[derive(
-    rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq, Eq, Default,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct PackageUiSnapshot {
     pub version: u64,
+    pub empty_tab: Option<EmptyTabContent>,
+    /// Named pane surfaces (`activation: "pane"`), e.g. the Coding Agent
+    /// split surface. Same wire shape as the empty-tab landing.
+    #[serde(default)]
+    pub surfaces: Vec<EmptyTabContent>,
+    pub panels: Vec<PackagePanelContent>,
+    pub overlays: Vec<PackageOverlayContent>,
+    pub components: Vec<PackageComponentContent>,
+    pub input_routes: Vec<PackageInputRouteContent>,
+}
+
+/// Host-stamped package identity shown by package UI projections.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub struct PackageUiProvenance {
+    pub package_name: String,
+    pub package_version: String,
+    pub api_prefix: String,
+    pub trust_domain: PackageUiTrustDomain,
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub enum PackageUiTrustDomain {
+    Trusted,
+    ThirdParty,
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct PackagePanelContent {
+    pub id: String,
+    pub slot: String,
+    pub visibility: String,
+    pub component_json: String,
+    pub action_targets: Vec<String>,
+    pub provenance: PackageUiProvenance,
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageOverlayContent {
+    pub id: String,
+    pub anchor: String,
+    pub focus_policy: String,
+    pub dismissal_policy: String,
+    pub component_json: String,
+    pub action_targets: Vec<String>,
+    pub provenance: PackageUiProvenance,
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageComponentContent {
+    pub id: String,
+    pub component_json: String,
+    pub action_targets: Vec<String>,
+    pub provenance: PackageUiProvenance,
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub struct PackageInputRouteContent {
+    pub id: String,
+    pub scope: String,
+    pub component_id: String,
+    pub pointer_click: String,
+    pub pointer_action: Option<String>,
+    pub pointer_drag: String,
+    pub focus_policy: String,
+    pub selection_policy: String,
+    pub context_modes: Vec<String>,
+    pub action_targets: Vec<String>,
+    pub provenance: PackageUiProvenance,
+}
+
+/// Server-authoritative empty-tab `main` contribution.
+///
+/// `component_json` is the already-validated inert catalog tree. Recursive
+/// rkyv trees overflow the Archive bound; JSON stays bounded by the SDUI
+/// snapshot budget and is parsed only by host-owned Rust adapters.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct EmptyTabContent {
+    pub id: String,
+    pub package_name: String,
+    pub component_json: String,
+    pub action_targets: Vec<String>,
+    pub provenance: PackageUiProvenance,
 }
 
 /// Per-document decoration/diagnostic reset and optional initial sets.
@@ -49,7 +230,19 @@ pub struct PackageUiSnapshot {
 /// per-document behavior manifest) when one is published, so recovery installs
 /// each pane's mode content without cross-pane bleed. Absent means the
 /// document is governed by the snapshot's connection-wide manifest.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
 pub struct DocumentRuntimeRenderState {
     pub document_id: DocumentId,
     pub document_version: DocumentVersion,
@@ -61,23 +254,127 @@ pub struct DocumentRuntimeRenderState {
 }
 
 /// Complete connection-scoped runtime state for one atomic client install.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeStateSnapshot {
     pub runtime_generation_id: RuntimeGenerationId,
     pub client_id: ClientId,
     pub behavior: BehaviorManifest,
     pub active_theme: ActiveTheme,
     pub active_typography: ActiveTypography,
+    #[serde(default = "default_active_design_system")]
+    pub active_design_system: ActiveDesignSystem,
+    /// Resolved active icon pack (Plan 112 task 6). `None` means the host
+    /// fallback subset (bundled Regular geometry, zero package execution) is
+    /// active. Additive + defaulted so older clients ignore it; skipped on
+    /// the wire while no explicit pack is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_icon_pack: Option<ActiveIconPack>,
+    /// Installable Settings selections (plan 110 task 10).
+    #[serde(default)]
+    pub ui_choices: UiChoicesSnapshot,
     pub sdui_tree: SduiTree,
     pub package_ui: PackageUiSnapshot,
     pub documents: Vec<DocumentRuntimeRenderState>,
     pub diagnostics: Vec<RuntimeDiagnostic>,
 }
 
+fn default_active_design_system() -> ActiveDesignSystem {
+    ActiveDesignSystem::core_fallback(0)
+}
+
+/// One installable UI choice (plan 110 task 10): a specifier plus an optional
+/// host-declared label. Theme packages carry no display name, so the client
+/// derives labels from the specifier when `display_name` is `None`.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub struct UiChoiceOption {
+    pub specifier: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+/// Server-enumerated Settings selections (plan 110 task 10): installed theme
+/// packages, enabled UI design systems, and the persisted appearance. The
+/// server owns enumeration from the enabled package inventory; the client
+/// never scans packages. Additive + defaulted so older clients ignore it.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "camelCase", default)]
+#[cfg_attr(feature = "ts-bindings", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-bindings", ts(export_to = "bridge.ts"))]
+pub struct UiChoicesSnapshot {
+    pub themes: Vec<UiChoiceOption>,
+    pub design_systems: Vec<UiChoiceOption>,
+    /// Persisted light/dark/system preference, when one is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<String>,
+}
+
+impl UiChoicesSnapshot {
+    /// Bounded option lists and non-empty bounded strings.
+    fn validate(&self) -> Result<(), RuntimeStateSnapshotValidationError> {
+        if self.themes.len() > RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES
+            || self.design_systems.len() > RUNTIME_STATE_SNAPSHOT_MAX_UI_CHOICES
+        {
+            return Err(RuntimeStateSnapshotValidationError::TooManyUiChoices);
+        }
+        for option in self.themes.iter().chain(&self.design_systems) {
+            if option.specifier.is_empty()
+                || option.specifier.len() > 256
+                || option
+                    .display_name
+                    .as_ref()
+                    .is_some_and(|name| name.len() > 256)
+            {
+                return Err(RuntimeStateSnapshotValidationError::InvalidUiChoice);
+            }
+        }
+        if let Some(appearance) = &self.appearance
+            && !matches!(appearance.as_str(), "light" | "dark" | "system")
+        {
+            return Err(RuntimeStateSnapshotValidationError::InvalidUiChoice);
+        }
+        Ok(())
+    }
+}
+
 /// Why a runtime snapshot failed validation before install or fan-out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeStateSnapshotValidationError {
     InvalidTypography,
+    InvalidDesignSystem,
     EmptyBehaviorManifestId,
     TooManyDocuments { count: usize, max: usize },
     DuplicateDocumentId { document_id: DocumentId },
@@ -85,6 +382,106 @@ pub enum RuntimeStateSnapshotValidationError {
     DiagnosticsDocumentMismatch { document_id: DocumentId },
     BehaviorManifestDocumentMismatch { document_id: DocumentId },
     TooManyRuntimeDiagnostics { count: usize, max: usize },
+    InvalidPackageUi,
+    TooManyUiChoices,
+    InvalidUiChoice,
+    InvalidIconPack,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageUiSnapshotValidationError {
+    TooManyEntries,
+    DuplicateId,
+    InvalidPolicy,
+    InvalidComponent,
+}
+
+impl PackageUiSnapshot {
+    /// Validate the already-server-validated wire projection before fan-out.
+    pub fn validate(&self) -> Result<(), PackageUiSnapshotValidationError> {
+        if self.panels.len() > 4 || self.overlays.len() > 16 || self.input_routes.len() > 64 {
+            return Err(PackageUiSnapshotValidationError::TooManyEntries);
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        let surface_ids = self
+            .empty_tab
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .chain(self.surfaces.iter().map(|entry| entry.id.as_str()))
+            .chain(self.panels.iter().map(|entry| entry.id.as_str()))
+            .chain(self.overlays.iter().map(|entry| entry.id.as_str()))
+            .chain(self.components.iter().map(|entry| entry.id.as_str()))
+            .chain(self.input_routes.iter().map(|entry| entry.id.as_str()));
+        if surface_ids
+            .into_iter()
+            .any(|id| id.is_empty() || !ids.insert(id))
+        {
+            return Err(PackageUiSnapshotValidationError::DuplicateId);
+        }
+        if self.panels.iter().any(|entry| {
+            !matches!(entry.slot.as_str(), "left" | "right" | "top" | "bottom")
+                || !matches!(
+                    entry.visibility.as_str(),
+                    "visible" | "hidden" | "collapsed"
+                )
+        }) || self.overlays.iter().any(|entry| {
+            !matches!(
+                entry.anchor.as_str(),
+                "working-area" | "active-pane" | "main" | "pointer"
+            )
+        }) {
+            return Err(PackageUiSnapshotValidationError::InvalidPolicy);
+        }
+        let components = self
+            .empty_tab
+            .iter()
+            .map(|entry| entry.component_json.as_str())
+            .chain(
+                self.surfaces
+                    .iter()
+                    .map(|entry| entry.component_json.as_str()),
+            )
+            .chain(
+                self.panels
+                    .iter()
+                    .map(|entry| entry.component_json.as_str()),
+            )
+            .chain(
+                self.overlays
+                    .iter()
+                    .map(|entry| entry.component_json.as_str()),
+            )
+            .chain(
+                self.components
+                    .iter()
+                    .map(|entry| entry.component_json.as_str()),
+            );
+        for component in components {
+            if component.len() > 16 * 1024
+                || serde_json::from_str::<serde_json::Value>(component).is_err()
+            {
+                return Err(PackageUiSnapshotValidationError::InvalidComponent);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn allows_action(&self, ui_version: u64, command_id: &str) -> bool {
+        self.version == ui_version
+            && self
+                .empty_tab
+                .iter()
+                .flat_map(|entry| &entry.action_targets)
+                .chain(self.surfaces.iter().flat_map(|entry| &entry.action_targets))
+                .chain(self.panels.iter().flat_map(|entry| &entry.action_targets))
+                .chain(self.overlays.iter().flat_map(|entry| &entry.action_targets))
+                .chain(
+                    self.components
+                        .iter()
+                        .flat_map(|entry| &entry.action_targets),
+                )
+                .any(|target| target == command_id)
+    }
 }
 
 impl RuntimeStateSnapshot {
@@ -93,6 +490,14 @@ impl RuntimeStateSnapshot {
         self.active_typography
             .validate()
             .map_err(|_| RuntimeStateSnapshotValidationError::InvalidTypography)?;
+        self.active_design_system
+            .validate()
+            .map_err(|_| RuntimeStateSnapshotValidationError::InvalidDesignSystem)?;
+        if let Some(icon_pack) = &self.active_icon_pack {
+            icon_pack
+                .validate()
+                .map_err(|_| RuntimeStateSnapshotValidationError::InvalidIconPack)?;
+        }
         if self.behavior.manifest_id.trim().is_empty() {
             return Err(RuntimeStateSnapshotValidationError::EmptyBehaviorManifestId);
         }
@@ -110,6 +515,12 @@ impl RuntimeStateSnapshot {
                 },
             );
         }
+        self.package_ui
+            .validate()
+            .map_err(|_| RuntimeStateSnapshotValidationError::InvalidPackageUi)?;
+        self.ui_choices
+            .validate()
+            .map_err(|_| RuntimeStateSnapshotValidationError::InvalidUiChoice)?;
 
         let mut seen = Vec::with_capacity(self.documents.len());
         for document in &self.documents {
@@ -159,5 +570,38 @@ impl RuntimeStateSnapshot {
     pub fn for_client(mut self, client_id: ClientId) -> Self {
         self.client_id = client_id;
         self
+    }
+}
+
+#[cfg(test)]
+mod package_ui_tests {
+    use super::*;
+
+    fn provenance() -> PackageUiProvenance {
+        PackageUiProvenance {
+            package_name: "@clay/settings".into(),
+            package_version: "0.1.0".into(),
+            api_prefix: "settings".into(),
+            trust_domain: PackageUiTrustDomain::Trusted,
+        }
+    }
+
+    #[test]
+    fn package_action_requires_current_version_and_declared_target() {
+        let snapshot = PackageUiSnapshot {
+            version: 7,
+            panels: vec![PackagePanelContent {
+                id: "settings.surface".into(),
+                slot: "right".into(),
+                visibility: "visible".into(),
+                component_json: r#"{"id":"settings.root","kind":"panel"}"#.into(),
+                action_targets: vec!["settings.setTheme".into()],
+                provenance: provenance(),
+            }],
+            ..Default::default()
+        };
+        assert!(snapshot.allows_action(7, "settings.setTheme"));
+        assert!(!snapshot.allows_action(6, "settings.setTheme"));
+        assert!(!snapshot.allows_action(7, "settings.reset"));
     }
 }

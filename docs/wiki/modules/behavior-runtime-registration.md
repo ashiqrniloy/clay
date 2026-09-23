@@ -2,7 +2,7 @@
 
 ## Source
 
-- `src/server/js_runtime.rs`
+- `src/server/js_runtime/mod.rs`
 - `src/server/ops/mod.rs`
 - `src/server/ops/keybindings.rs`
 - `src/server/ops/behavior.rs`
@@ -47,6 +47,34 @@ Batch table form (bindKey ergonomics round): `bindKey({ scope, bindings: { chord
 `documents.clientOpenFileDialog` is the first runtime-bindable client UI command. `bindKey("Ctrl+O", "documents.clientOpenFileDialog", { scope: "editor" })` records a `RoutingPolicy::ClientUiCommand` route with `CommandAuthority::ClientUi`; keypress handling later remains a native manifest lookup and submits an app-driver action, not JavaScript execution or a server-first request.
 
 `op_clay_keybindings_unbind_key` removes the matching chord/context and publishes another validated manifest replacement. `listKeyBindings`, `getActiveBehaviorManifest`, and `listBehaviorRoutes` are read-only facades over the same server-owned manifest state. `ClayRuntimeEvaluation` returns a behavior manifest only when configuration changed it; server startup applies that manifest to the process-wide `ActiveBehaviorManifest`, allowing normal connection bootstrap and replacement publication to keep using existing protocol paths.
+
+## Phase 28 package key routing and line transforms
+
+Package `clay.contributions.keyRouting` is converted through the same
+`parse_key_sequence`/`parse_key_chord` grammar used by `bindKey`; one-stroke and
+space-separated multi-stroke bindings become real `KeyStroke` sequences during
+load/activation. The trusted package loader (`src/server/ops/packages.rs`)
+attaches those parsed rules to the registered command snapshot, so Control
+Center and active behavior manifests retain package-declared chords. Execute-only
+load entries must not duplicate commands already applied from `package.json`.
+`parse_keymap` now returns errors instead of creating a raw character chord, and
+activation installs only validated rules. `RoutingPolicy::parse` in
+`src/protocol/mod.rs` is the single string-to-policy parser, so package keymaps,
+runtime `bindKey`, and built-in command declarations cannot drift into different
+accepted policy vocabularies.
+
+Mode `editorRules` carries generic transform data: `comments[].linePrefix` and
+`continuePrefix` feed the indent-aware comment continuation/toggle engine,
+`enter.kind = continueLineMarkers` supplies list markers, and ordered
+`headingPrefixes` supplies heading rotation. The Rust client executes these
+manifest parameters as leased client-first edits; package JavaScript never runs
+before local paint. Package command IDs must have a registered server handler,
+a documented built-in client route, or a closed Clay alias.
+`EditorClientCommand::from_command_id` owns the Phase 28 alias table for
+Rust/TypeScript/JavaScript line comments and Markdown list/heading commands,
+while `editor.clientToggleFold` and `editor.toggleInlayHints` remain closed
+client-UI routes. Metadata-only commands fail closed rather than returning an
+accepted no-op.
 
 ## Invariants and Constraints
 

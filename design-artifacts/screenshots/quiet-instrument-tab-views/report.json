@@ -1,0 +1,87 @@
+{
+  "base": "http://localhost:5199",
+  "viewport": {
+    "w": 1500,
+    "h": 950
+  },
+  "checks": {
+    "switcherPresent": true,
+    "consumesSegRecipes": true,
+    "approvedItemSemantics": true,
+    "inertWhenUncommitted": true,
+    "titlebarHeight": true,
+    "noHorizontalOverflow": true,
+    "selectedPaintIsAccentTint": true,
+    "disabledPaintIsDimmed": true,
+    "hoverRulePresent": true
+  },
+  "probe": {
+    "present": true,
+    "dataViewswitch": "empty",
+    "segRoot": "seg/root",
+    "itemRoles": [
+      "tab",
+      "tab"
+    ],
+    "items": [
+      {
+        "text": "Workspace",
+        "segAttribute": "seg/item",
+        "disabled": true,
+        "selected": "false",
+        "title": "Pick a workspace first"
+      },
+      {
+        "text": "Agent",
+        "segAttribute": "seg/item",
+        "disabled": true,
+        "selected": "false",
+        "title": "Pick an agent first"
+      }
+    ],
+    "rect": {
+      "x": 623,
+      "y": 2,
+      "w": 129,
+      "h": 36
+    },
+    "titlebar": {
+      "x": 0,
+      "y": 0,
+      "w": 1500,
+      "h": 40
+    },
+    "overflow": 0,
+    "paints": {
+      "rest": {
+        "background": "color(srgb 0 0 0 / 0)",
+        "color": "rgb(185, 178, 207)",
+        "fill": "transparent",
+        "fillOpacity": "",
+        "outlineWidth": 3,
+        "outlineOffset": 0,
+        "opacity": "1"
+      },
+      "selected": {
+        "background": "color(srgb 0.486274 0.435294 1 / 0.15)",
+        "color": "rgb(124, 111, 255)",
+        "fill": "#7c6fff",
+        "fillOpacity": "0.15",
+        "outlineWidth": 3,
+        "outlineOffset": 0,
+        "opacity": "1"
+      },
+      "disabled": {
+        "background": "color(srgb 0 0 0 / 0)",
+        "color": "rgb(128, 122, 155)",
+        "fill": "transparent",
+        "fillOpacity": "",
+        "outlineWidth": 3,
+        "outlineOffset": 0,
+        "opacity": "0.5"
+      }
+    },
+    "hoverRuleDeclaresSurfaceHover": true
+  },
+  "passed": true
+}

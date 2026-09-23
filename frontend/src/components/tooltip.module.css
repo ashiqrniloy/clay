@@ -1,0 +1,46 @@
+/* Clay tooltip — the `tooltip.default.root.rest` recipe: overlay fill, 1px
+ * hairline, radius 8, pop shadow, `spacing.tooltip` padding. Typography comes
+ * from the semantic body variant; z-order from `z.tooltip`. No backdrop blur:
+ * only the scrim and the toast blur (DESIGN.md §10.3). */
+
+.tooltip {
+  box-sizing: border-box;
+  max-inline-size: 20rem;
+  padding: var(--clay-ds-tooltip-default-root-rest-padding);
+  font-family: var(--clay-font-ui);
+  font-size: var(--clay-text-body-size, 13px);
+  line-height: var(--clay-text-body-line-height, 1.2);
+  word-break: break-word;
+
+  border-width: var(--clay-ds-tooltip-default-root-rest-border-width);
+  border-style: var(--clay-ds-tooltip-default-root-rest-border-style);
+  border-color: var(--clay-ds-tooltip-default-root-rest-border-color);
+  border-radius: var(--clay-ds-tooltip-default-root-rest-border-radius);
+  background: var(--clay-ds-tooltip-default-root-rest-background-color);
+  color: var(--clay-ds-tooltip-default-root-rest-text-color);
+  box-shadow: var(--clay-ds-tooltip-default-root-rest-shadow);
+
+  z-index: var(--clay-z-tooltip, 50);
+  outline: none;
+  pointer-events: none;
+
+  /* Entry: fade only (no positional animation); global reduced-motion
+   * preferences collapse this to zero duration. */
+  opacity: 1;
+  transition: opacity
+    var(--clay-ds-tooltip-default-root-rest-transition-duration)
+    var(--clay-ds-tooltip-default-root-rest-transition-timing);
+}
+
+.tooltip[data-entering] {
+  opacity: 0;
+}
+
+@media (forced-colors: active) {
+  .tooltip {
+    forced-color-adjust: none;
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+}

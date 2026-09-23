@@ -1,0 +1,113 @@
+depth|role|states|name|text|extents|ifaces
+1|application||clay-desktop||-1,-1,-1x-1|
+2|frame|active,enabled,resizable,sensitive,showing,visible|Clay||0,0,1332x1203|Component
+3|panel|enabled,sensitive,showing,visible|||26,23,1280x47|Component
+4|panel|enabled,sensitive,showing,visible|||26,23,1280x47|Component
+5|filler|enabled,horizontal,sensitive,showing,visible|||1186,23,114x46|Component
+6|separator|enabled,sensitive,vertical|||-2147483648,-2147483648,1x1|Component
+6|button|enabled,sensitive,showing,visible|Minimise||1186,31,34x30|Action,Component
+6|button|enabled,sensitive,showing,visible|Maximise||1226,31,34x30|Action,Component
+6|button|enabled,sensitive,showing,visible|Close||1266,31,34x30|Action,Component
+5|filler|enabled,sensitive,showing,vertical,visible|||631,37,69x17|Component
+6|label|enabled,multi-line,sensitive,showing,visible|Clay||631,37,69x17|Text,Component
+6|label|enabled,multi-line,sensitive|||-2147483648,-2147483648,1x1|Text,Component
+3|filler|enabled,sensitive,showing,vertical,visible|||26,70,1280x1104|Component
+4|filler||||26,70,1280x1104|Component
+5|filler||||26,70,1280x1104|Component
+6|scroll pane|enabled,focusable,sensitive|||26,70,1280x1104|Action,Component
+7|document web|enabled,focusable,sensitive,showing,visible|Clay||26,70,1280x1104|Action,Component
+8|landmark|enabled,sensitive,showing,visible|||26,70,1280x40|Action,Component
+9|section|enabled,sensitive,showing,visible|||46,86,7x7|Text,Action,Component
+9|section|enabled,sensitive,showing,visible|||60,82,35x15|Text,Action,Component
+9|page tab list|enabled,horizontal,selectable,sensitive,showing,visible|Window tabs||111,74,114x31|Action,Component
+10|page tab|enabled,focusable,selectable,selected,sensitive,showing,visible|workspace agent||111,74,114x31|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|New tab||225,72,35x35|Action,Component
+9|landmark|enabled,sensitive,showing,visible|Application controls||1152,73,142x33|Action,Component
+10|button|enabled,focusable,sensitive,showing,visible|Control Center||1152,73,33x33|Action,Component
+10|page tab list|enabled,horizontal,selectable,sensitive,showing,visible|Tab view||1188,75,106x29|Action,Component
+11|page tab|enabled,focusable,selectable,selected,sensitive,showing,visible|Workspace||1193,80,61x19|Action,Component
+11|page tab|enabled,focusable,selectable,sensitive,showing,visible|Agent||1253,80,36x19|Action,Component
+8|landmark|enabled,sensitive,showing,visible|Clay workspace||26,110,1280x1036|Action,Component
+9|section|enabled,sensitive,visible|||25,110,941x1036|Text,Action,Component
+10|section|enabled,sensitive,visible|||25,110,941x1036|Text,Action,Component
+11|button|enabled,focusable,sensitive,showing,visible|Hide file browser||237,110,32x32|Action,Component
+11|label|enabled,sensitive,visible|||25,149,1x1|Text,Action,Component
+11|entry|editable,enabled,focusable,selectable-text,sensitive,showing,single-line,visible|Filter files||26,150,219x36|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||253,155,17x26|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||258,160,7x16|Text,Action,Component
+11|list box|enabled,focusable,sensitive,showing,vertical,visible|Server-driven items||26,194,243x919|Action,Component
+12|list item|enabled,focusable,sensitive,showing,visible|notes.md||26,194,243x35|Action,Component
+11|panel|enabled,sensitive,visible|||26,1113,243x10|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||153,1121,23x25|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||158,1126,13x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||179,1126,32x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||218,1121,19x25|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|||223,1126,9x15|Text,Action,Component
+11|section|enabled,sensitive,showing,visible|||240,1126,30x15|Text,Action,Component
+11|landmark|enabled,sensitive,showing,visible|||270,110,696x810|Action,Component
+12|landmark|enabled,sensitive,showing,visible|Pane 1||270,110,696x810|Action,Component
+13|section|enabled,sensitive,showing,visible|Document state||593,122,60x26|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||598,127,10x16|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||621,127,26x16|Text,Action,Component
+13|button|enabled,expandable,focusable,sensitive,showing,visible|Open||660,118,52x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Undo||713,118,52x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Redo||766,118,51x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Reload||817,119,33x32|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Save||851,118,73x34|Action,Component
+13|button|enabled,focusable,sensitive,showing,visible|Close||926,119,32x32|Action,Component
+13|landmark|enabled,sensitive,showing,visible|Editor notes.md||270,160,696x760|Action,Component
+14|section|enabled,sensitive,visible|||270,160,696x10|Text,Action,Component
+14|section|enabled,focusable,sensitive,showing,visible|||270,160,696x760|Text,Action,Component
+15|entry|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible|Document editor||270,160,696x760|Text,Action,Component
+11|footer|enabled,sensitive,showing,visible|Package status||270,920,696x26|Action,Component
+12|status bar|enabled,sensitive,visible|||270,920,696x10|Text,Action,Component
+12|status bar|enabled,sensitive,visible|||270,920,696x10|Text,Action,Component
+12|status bar|enabled,sensitive,visible|||270,920,696x10|Text,Action,Component
+12|status bar|enabled,sensitive,visible|||270,920,696x10|Text,Action,Component
+11|footer|enabled,sensitive,showing,visible|Agent lane||270,946,696x200|Action,Component
+12|form|enabled,sensitive,showing,visible|||270,947,696x175|Action,Component
+13|label|enabled,sensitive,showing,visible|||297,1059,1x1|Text,Action,Component
+13|entry|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,visible|Message||297,966,642x48|Text,Action,Component
+13|combo box|enabled,focusable,has-popup,sensitive,showing,visible|Coding Agent Agent type||297,1026,98x34|Action,Component
+13|combo box|has-popup,showing,visible|Configure a provider Model||398,1026,170x34|Action,Component
+13|section|enabled,sensitive,showing,visible|||292,1081,16x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||297,1086,6x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||311,1086,52x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||370,1081,17x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||375,1086,7x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||390,1086,88x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||485,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||490,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||508,1086,24x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||538,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||543,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||560,1081,19x25|Text,Action,Component
+14|section|enabled,sensitive,showing,visible|||565,1086,9x15|Text,Action,Component
+13|section|enabled,sensitive,showing,visible|||582,1086,37x15|Text,Action,Component
+12|section|enabled,sensitive,showing,visible|Session environment||270,1122,696x24|Text,Action,Component
+9|landmark|enabled,sensitive,showing,visible|Document outline||966,110,340x1036|Action,Component
+10|section|enabled,sensitive,showing,visible|||1046,132,5x16|Text,Action,Component
+10|button|enabled,focusable,sensitive,showing,visible|Hide outline||1260,124,32x32|Action,Component
+10|description list|enabled,sensitive,showing,visible|||967,166,339x114|Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,167,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,166,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,188,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,187,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,209,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,208,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,230,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,229,244x15|Text,Action,Component
+11|description term|enabled,sensitive,showing,visible|||981,251,56x15|Text,Action,Component
+11|description value|enabled,sensitive,showing,visible|||1049,250,244x15|Text,Action,Component
+10|separator|showing,visible|||967,280,339x1|Text,Action,Component
+10|list|enabled,sensitive,showing,visible|||967,281,339x833|Action,Component
+11|list item|enabled,sensitive,showing,visible|||975,287,323x30|Text,Action,Component
+12|button|enabled,focusable,sensitive,showing,visible|Plan 130 scratch workspace||975,287,323x30|Action,Component
+8|landmark|enabled,sensitive,showing,visible|||26,1146,1280x28|Action,Component
+9|section|enabled,sensitive,showing,visible|||38,1151,70x18|Text,Action,Component
+9|status bar|enabled,sensitive,showing,visible|||267,1153,71x15|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|hide lane Ctrl X P||583,1144,162x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|palette Ctrl X O||758,1144,147x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|files Ctrl B||918,1144,109x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|hide outline Ctrl I||1040,1144,164x33|Action,Component
+9|button|enabled,focusable,sensitive,showing,visible|filter /||1217,1144,78x33|Action,Component

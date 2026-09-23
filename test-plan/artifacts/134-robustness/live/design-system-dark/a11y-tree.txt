@@ -1,0 +1,95 @@
+0|application|-|clay-desktop||/org/a11y/atspi/accessible/root|clay-desktop
+1|frame|-|Clay||/org/a11y/atspi/accessible/10|clay-desktop
+2|panel|-|||/org/a11y/atspi/accessible/1|clay-desktop
+3|panel|-|||/org/a11y/atspi/accessible/2|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/3|clay-desktop
+5|separator|-|||/org/a11y/atspi/accessible/5|clay-desktop
+5|button|-|Minimize||/org/a11y/atspi/accessible/13|clay-desktop
+5|button|-|Maximize||/org/a11y/atspi/accessible/11|clay-desktop
+5|button|-|Close||/org/a11y/atspi/accessible/9|clay-desktop
+4|filler|-|||/org/a11y/atspi/accessible/4|clay-desktop
+5|label|-|Clay||/org/a11y/atspi/accessible/6|clay-desktop
+5|label|-|||/org/a11y/atspi/accessible/7|clay-desktop
+2|filler|-|||/org/a11y/atspi/accessible/12|clay-desktop
+3|filler|-|||/org/a11y/atspi/accessible/8|clay-desktop
+4|filler|-|||/org/a11y/webkit/accessible/61dc50f6_aac2_4634_9541_40a54e3b87c7|clay-desktop
+5|scroll pane|-|||/org/a11y/atspi/accessible/5e169252_9d68_47db_ae2d_ba614ee9b21f|clay-desktop
+6|document web|-|Clay||/org/a11y/atspi/accessible/d54b12ec_fb65_485e_b409_c7f5a71ef56c|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/c2a5712a_80db_40fb_93d0_18510bd64829|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/8d36c6b2_abee_4af3_881f_0074ce873dd6|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/392c060a_1532_49a1_b3c7_f5f83f33230a|clay-desktop
+8|page tab list|-|Window tabs||/org/a11y/atspi/accessible/7b91b184_49b9_4ddb_bed7_7b19a7d6f926|clay-desktop
+9|page tab|selected|workspace||/org/a11y/atspi/accessible/8b6f9d4d_148f_494d_9c6a_06a3d3808a6f|clay-desktop
+8|button|-|New tab||/org/a11y/atspi/accessible/4fd7c213_0180_4f1b_8537_7b8a862f3570|clay-desktop
+8|landmark|-|Application controls||/org/a11y/atspi/accessible/eaae2d02_eb24_4c00_be7c_abe3415f8466|clay-desktop
+9|button|-|Control Center||/org/a11y/atspi/accessible/22bfb7df_09f0_4fdb_a768_04bf4868e5cd|clay-desktop
+9|page tab list|-|Tab view||/org/a11y/atspi/accessible/623a3a07_a834_41b2_9453_b5a0d993589e|clay-desktop
+10|page tab|selected|Workspace||/org/a11y/atspi/accessible/da6cd5c2_69ef_4555_8d4b_367c883cce7c|clay-desktop
+10|page tab|-|Agent||/org/a11y/atspi/accessible/558c90f3_4d9c_4034_9dfa_ea7a71c32771|clay-desktop
+7|landmark|-|Clay workspace||/org/a11y/atspi/accessible/42856ec4_a4d5_40a0_ae68_ab8d03fd7b4a|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/1a78d925_b767_4cbb_8ac0_382494885c30|clay-desktop
+9|section|-|||/org/a11y/atspi/accessible/5e0bc945_a5fb_4ff4_89d6_054e0fb50b2e|clay-desktop
+10|landmark|-|||/org/a11y/atspi/accessible/9985b58c_c41e_48bd_97d2_c55ed07e7384|clay-desktop
+11|landmark|-|Design system review||/org/a11y/atspi/accessible/6d77adf5_0545_4f49_b32b_6bd511b701bc|clay-desktop
+12|button|-|Primary action||/org/a11y/atspi/accessible/927d3fc8_437d_449e_a5ca_e3ebba1e45c5|clay-desktop
+12|list box|-|Server-driven items||/org/a11y/atspi/accessible/229b7298_7698_49ef_a9c4_bfb592d948f4|clay-desktop
+13|list item|-|Enabled state Host-owned action||/org/a11y/atspi/accessible/1d316345_1037_4479_a080_8b0870e222c1|clay-desktop
+13|list item|-|Disabled state No action authority||/org/a11y/atspi/accessible/08f00ee9_1bf7_45ee_a284_502727fa39ed|clay-desktop
+11|landmark|-|Pane 1||/org/a11y/atspi/accessible/cefe6d67_2df0_4f83_811a_00f1a556aecd|clay-desktop
+12|section|-|Document state||/org/a11y/atspi/accessible/d1c86134_b733_4b5b_b4e2_f19bbd1d962f|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/cc748c97_1b61_4a7c_a7cc_40e78e3b7224|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/e921acc0_390b_4194_9141_f24f2259e526|clay-desktop
+12|button|-|Open||/org/a11y/atspi/accessible/9a04b119_cd96_4a4c_9660_f202c718813a|clay-desktop
+12|button|-|Undo||/org/a11y/atspi/accessible/7d1c27f2_51c7_4b92_80c0_7d2dfc559314|clay-desktop
+12|button|-|Redo||/org/a11y/atspi/accessible/cfc096c6_d7ac_4f52_8a11_4841c2da381b|clay-desktop
+12|button|-|Reload||/org/a11y/atspi/accessible/206cd48a_ae62_419c_9ce4_fde34fb29a63|clay-desktop
+12|button|-|Save||/org/a11y/atspi/accessible/dd309c86_19e5_43f7_a318_62a8ed234d65|clay-desktop
+12|button|-|Close||/org/a11y/atspi/accessible/992f1970_f127_43e3_bc11_87bb6b791b8a|clay-desktop
+12|landmark|-|Editor loading.txt||/org/a11y/atspi/accessible/f110f0e7_d26e_462d_bd3d_3cc639ae4265|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/0b886050_59b1_4261_b6f2_b242308096a0|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/3cf92a85_c309_4599_8929_77b6c4929b59|clay-desktop
+14|entry|-|Document editor||/org/a11y/atspi/accessible/304b950a_e17e_472a_98d3_c35ebff5850e|clay-desktop
+10|footer|-|Agent lane||/org/a11y/atspi/accessible/665e82cb_cf1f_4f86_bd99_5d5f865ed166|clay-desktop
+11|form|-|||/org/a11y/atspi/accessible/5cfc8af8_4aa5_485c_be96_69a97123b524|clay-desktop
+12|label|-|||/org/a11y/atspi/accessible/420dbe9c_28b3_4f4d_a02c_3d3b5af78972|clay-desktop
+12|entry|-|Message||/org/a11y/atspi/accessible/c7ca36cb_9179_4218_b832_ed1f6a0cb156|clay-desktop
+12|combo box|-|Attach an agent Agent type||/org/a11y/atspi/accessible/07ebc830_b14b_4bcc_9c58_598197bac431|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/de853edf_b403_4bd3_8c16_da660a296bdc|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/e015784f_d8e6_4290_b8fa_975b67625f51|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/c443902e_ccc1_40db_9dc4_9f4a1a49843e|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/4df74ab3_b3e0_445b_b9b2_a104956c4152|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/fe812e3d_ebba_42c6_814d_aa2a59fd1004|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/2c18645b_8e48_4311_89e0_34f63dbf9ccc|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/f29fb5f8_a21c_48ef_8448_3eb50b87d59a|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/3ffc47e9_72d5_4134_8d00_3b2087189202|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/e4d47c48_dca3_4491_b50c_33c4c8b52345|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/775c9b1a_3941_4a9a_a157_90e19534e6de|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/5709ba90_1bc0_48dd_8298_9ada96dac967|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/58657cb7_e5f0_4e1d_922b_8fca9bd71215|clay-desktop
+13|section|-|||/org/a11y/atspi/accessible/a025bf54_9604_427a_a679_e8cc9f5753bb|clay-desktop
+12|section|-|||/org/a11y/atspi/accessible/de3c93f4_577b_4901_81ab_1019fb5676c1|clay-desktop
+11|section|-|Session environment||/org/a11y/atspi/accessible/a3a4b747_f0fa_40a6_a4aa_50dd88095917|clay-desktop
+8|landmark|-|Document outline||/org/a11y/atspi/accessible/1d65a6d8_8541_4b2b_a944_b382b386a894|clay-desktop
+9|section|-|||/org/a11y/atspi/accessible/4c590ebb_505c_44a4_9c0a_e0895d6b96f8|clay-desktop
+9|button|-|Hide outline||/org/a11y/atspi/accessible/7194b105_3061_41de_9fb9_cca4c49f4696|clay-desktop
+9|description list|-|||/org/a11y/atspi/accessible/7d018969_245f_4ab6_a595_18c3674bc107|clay-desktop
+10|description term|-|||/org/a11y/atspi/accessible/a3d9405e_c38a_402e_9474_b07d8a208542|clay-desktop
+10|description value|-|||/org/a11y/atspi/accessible/63e22b49_7efc_463d_b233_bb6dd4cef324|clay-desktop
+10|description term|-|||/org/a11y/atspi/accessible/d81b2aac_3655_43df_b837_8f3d8d412640|clay-desktop
+10|description value|-|||/org/a11y/atspi/accessible/3800a2e8_6041_45f7_b44a_e5f75a82be26|clay-desktop
+10|description term|-|||/org/a11y/atspi/accessible/da3747da_0e24_4916_b1f5_a5e8dd170210|clay-desktop
+10|description value|-|||/org/a11y/atspi/accessible/b6d6fe62_30f3_4ca5_9e9f_7e99dd16ffd2|clay-desktop
+10|description term|-|||/org/a11y/atspi/accessible/51af5e4b_8497_4da3_861f_a4992aa16420|clay-desktop
+10|description value|-|||/org/a11y/atspi/accessible/410968fd_473c_4653_82b0_dcc9926f5185|clay-desktop
+10|description term|-|||/org/a11y/atspi/accessible/f6e3c2f7_3bf5_442b_ba0b_43bbf53fb948|clay-desktop
+10|description value|-|||/org/a11y/atspi/accessible/49321a80_0021_4a9a_98f5_9ab84bf44fec|clay-desktop
+9|separator|-|||/org/a11y/atspi/accessible/adf302be_f79b_494a_86a3_2f813aa5fee3|clay-desktop
+9|paragraph|-|||/org/a11y/atspi/accessible/f4f4a5e1_da02_4dbf_a416_5be8f1fc6d98|clay-desktop
+7|landmark|-|||/org/a11y/atspi/accessible/5bbf494f_bed7_4e1b_a70c_aa7a9d3074f5|clay-desktop
+8|section|-|||/org/a11y/atspi/accessible/b22cdf5f_70cc_4e2e_bf20_cf3e322ae6d9|clay-desktop
+8|status bar|-|||/org/a11y/atspi/accessible/9cc601c8_f496_4b3b_8b67_a0fab5ff399d|clay-desktop
+8|button|-|hide lane Ctrl X P||/org/a11y/atspi/accessible/896820bd_fc92_40c1_b1ff_3b488a212604|clay-desktop
+8|button|-|palette Ctrl X O||/org/a11y/atspi/accessible/79dbb8f7_3567_4ccc_aae3_e4a6274789a3|clay-desktop
+8|button|-|files Ctrl B||/org/a11y/atspi/accessible/195fea62_2268_4003_9dd0_ef02f913d90a|clay-desktop
+8|button|-|hide outline Ctrl I||/org/a11y/atspi/accessible/6e2272bd_107f_4310_ab8c_d49b51cf5514|clay-desktop
+8|button|-|filter /||/org/a11y/atspi/accessible/cfa5b952_09dc_42da_980c_14e163e3865b|clay-desktop

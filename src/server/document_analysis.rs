@@ -15,6 +15,7 @@ use std::{
     },
 };
 
+use crate::lock_util::LockOrRecover;
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::{
@@ -47,6 +48,7 @@ use crate::{
             LanguageIntelligenceProvider, LanguageIntelligenceProviderError,
             LanguageIntelligenceProviderFuture, LanguageIntelligenceProviderMeta,
         },
+        workspace::WorkspaceState,
     },
 };
 
@@ -188,7 +190,7 @@ impl AnalysisMailbox {
         reply: Option<AnalysisReply>,
     ) -> Result<(), EnqueueError> {
         let bytes = event.estimated_bytes();
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         if state.closed {
             return Err(EnqueueError::Closed);
         }
@@ -213,7 +215,7 @@ impl AnalysisMailbox {
             return self.push(event, None);
         };
         let bytes = event.estimated_bytes();
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         if state.closed {
             return Err(EnqueueError::Closed);
         }
@@ -247,7 +249,7 @@ impl AnalysisMailbox {
         loop {
             let notified = self.ready.notified();
             {
-                let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+                let mut state = self.state.lock_or_recover();
                 if let Some(event) = state.queue.pop_front() {
                     state.bytes = state.bytes.saturating_sub(event.bytes);
                     return Some(event);
@@ -261,7 +263,7 @@ impl AnalysisMailbox {
     }
 
     fn close(&self) {
-        let mut state = self.state.lock().expect("analysis mailbox lock poisoned");
+        let mut state = self.state.lock_or_recover();
         state.closed = true;
         state.queue.clear();
         state.bytes = 0;
@@ -275,6 +277,7 @@ struct WorkerKey {
     package_name: String,
     contribution: String,
     workspace_root_id: WorkspaceRootId,
+    canonical_root_path: PathBuf,
     generation: u64,
 }
 
@@ -375,7 +378,7 @@ impl AnalysisOutputSink {
     /// (the worker treats that as a queue-limit failure, unchanged semantics).
     fn try_send(&self, output: DocumentAnalysisOutput) -> bool {
         {
-            let router = self.router.lock().expect("analysis output router poisoned");
+            let router = self.router.lock_or_recover();
             match &output {
                 DocumentAnalysisOutput::Decorations(set) => {
                     router.route_document(set.document_id, &output);
@@ -394,10 +397,7 @@ impl AnalysisOutputSink {
 
 impl fmt::Debug for DocumentAnalysisCoordinator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         formatter
             .debug_struct("DocumentAnalysisCoordinator")
             .field("registrations", &inner.registrations.len())
@@ -437,16 +437,14 @@ impl DocumentAnalysisCoordinator {
         client_id: ClientId,
     ) -> mpsc::Receiver<DocumentAnalysisOutput> {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .subscribe_client(client_id)
     }
 
     /// Authorize `client_id` to receive analysis output for `document_id`.
     pub(crate) fn subscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .subscribe_document(document_id, client_id);
     }
 
@@ -454,16 +452,14 @@ impl DocumentAnalysisCoordinator {
     /// close; the document may remain open for other connections).
     pub(crate) fn unsubscribe_document(&self, document_id: DocumentId, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .unsubscribe_document(document_id, client_id);
     }
 
     /// Remove every subscription held by one connection (disconnect).
     pub(crate) fn unsubscribe_client(&self, client_id: ClientId) {
         self.output_router
-            .lock()
-            .expect("analysis output router poisoned")
+            .lock_or_recover()
             .unsubscribe_client(client_id);
     }
 }
@@ -484,10 +480,7 @@ impl DocumentAnalysisCoordinator {
             &registration,
             language_intelligence,
         )?;
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         if inner.registrations.iter().any(|registered| {
             registered.generation == generation
                 && registered.registration.package.manifest.name
@@ -509,6 +502,7 @@ impl DocumentAnalysisCoordinator {
 
     pub(crate) fn open_document(
         &self,
+        workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
         generation: u64,
         metadata: &DocumentMetadata,
         active_mode: &str,
@@ -522,10 +516,7 @@ impl DocumentAnalysisCoordinator {
             )];
         }
         let mut diagnostics = Vec::new();
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         let matching = inner
             .registrations
             .iter()
@@ -559,6 +550,7 @@ impl DocumentAnalysisCoordinator {
                 package_name: registration.package.manifest.name.clone(),
                 contribution: registration.contribution.clone(),
                 workspace_root_id: metadata.workspace_root_id,
+                canonical_root_path: canonical_root_path.clone(),
                 generation,
             };
             if inner
@@ -582,6 +574,7 @@ impl DocumentAnalysisCoordinator {
                 let worker = spawn_worker(
                     runtime.clone(),
                     registration.clone(),
+                    Arc::clone(&workspace),
                     metadata.workspace_root_id,
                     AnalysisOutputSink {
                         global_tx: self.outputs_tx.clone(),
@@ -595,10 +588,7 @@ impl DocumentAnalysisCoordinator {
                 .get(&key)
                 .expect("analysis worker inserted above")
                 .clone();
-            let mut documents = worker
-                .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned");
+            let mut documents = worker.active_documents.lock_or_recover();
             if documents.len() >= DOCUMENT_ANALYSIS_MAX_DOCUMENTS_PER_WORKER {
                 diagnostics.push(analysis_status(
                     "analysis.document_limit",
@@ -662,10 +652,7 @@ impl DocumentAnalysisCoordinator {
         byte_end: u64,
         inserted_text: String,
     ) -> bool {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return false;
         };
@@ -689,8 +676,7 @@ impl DocumentAnalysisCoordinator {
                 Ok(()) => {
                     if let Some(document) = worker
                         .active_documents
-                        .lock()
-                        .expect("analysis document state lock poisoned")
+                        .lock_or_recover()
                         .get_mut(&document_id)
                     {
                         document.version = document_version;
@@ -717,10 +703,7 @@ impl DocumentAnalysisCoordinator {
             self.close_document(document_id, document_version);
             return;
         }
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return;
         };
@@ -736,8 +719,7 @@ impl DocumentAnalysisCoordinator {
             if worker.mailbox.coalesce_reset(event).is_ok() {
                 if let Some(document) = worker
                     .active_documents
-                    .lock()
-                    .expect("analysis document state lock poisoned")
+                    .lock_or_recover()
                     .get_mut(&document_id)
                 {
                     document.version = document_version;
@@ -755,10 +737,7 @@ impl DocumentAnalysisCoordinator {
         document_id: DocumentId,
         document_version: DocumentVersion,
     ) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.remove(&document_id) else {
             return;
         };
@@ -769,8 +748,7 @@ impl DocumentAnalysisCoordinator {
             };
             worker
                 .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned")
+                .lock_or_recover()
                 .remove(&document_id);
             let _ = worker.mailbox.push(
                 DocumentAnalysisEvent::Close {
@@ -779,12 +757,7 @@ impl DocumentAnalysisCoordinator {
                 },
                 None,
             );
-            if worker
-                .active_documents
-                .lock()
-                .expect("analysis document state lock poisoned")
-                .is_empty()
-            {
+            if worker.active_documents.lock_or_recover().is_empty() {
                 let _ = worker.mailbox.push(DocumentAnalysisEvent::Shutdown, None);
                 empty_workers.push(route.key);
             }
@@ -796,10 +769,7 @@ impl DocumentAnalysisCoordinator {
 
     pub(crate) fn cancel_package(&self, package_name: &str) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -819,10 +789,7 @@ impl DocumentAnalysisCoordinator {
     )]
     pub(crate) fn cancel_root(&self, root_id: WorkspaceRootId) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -849,10 +816,7 @@ impl DocumentAnalysisCoordinator {
     /// outputs so late old-generation decorations/diagnostics cannot publish.
     pub(crate) fn cancel_older_generations(&self, active_generation: u64) {
         let keys = {
-            let inner = self
-                .inner
-                .lock()
-                .expect("analysis coordinator lock poisoned");
+            let inner = self.inner.lock_or_recover();
             inner
                 .workers
                 .keys()
@@ -862,8 +826,7 @@ impl DocumentAnalysisCoordinator {
         };
         self.cancel_workers(keys);
         self.inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .registrations
             .retain(|registration| registration.generation >= active_generation);
         self.drain_pending_outputs();
@@ -887,8 +850,7 @@ impl DocumentAnalysisCoordinator {
     pub(crate) fn registered_generations(&self) -> Vec<u64> {
         let mut generations = self
             .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .registrations
             .iter()
             .map(|registration| registration.generation)
@@ -909,8 +871,7 @@ impl DocumentAnalysisCoordinator {
     pub(crate) fn worker_generations(&self) -> Vec<u64> {
         let mut generations = self
             .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned")
+            .lock_or_recover()
             .workers
             .keys()
             .map(|key| key.generation)
@@ -921,10 +882,7 @@ impl DocumentAnalysisCoordinator {
     }
 
     fn cancel_workers(&self, keys: Vec<WorkerKey>) {
-        let mut inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let mut inner = self.inner.lock_or_recover();
         for key in &keys {
             if let Some(worker) = inner.workers.remove(key) {
                 worker.active.store(false, Ordering::Release);
@@ -944,10 +902,7 @@ impl DocumentAnalysisCoordinator {
     }
 
     pub(crate) fn active_completion_provider_ids(&self, document_id: DocumentId) -> Vec<String> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let Some(routes) = inner.routes.get(&document_id) else {
             return Vec::new();
         };
@@ -1050,10 +1005,7 @@ impl DocumentAnalysisCoordinator {
         package_name: &str,
         document_id: DocumentId,
     ) -> Result<(AnalysisWorker, JsDocumentAnalyzerRegistration), CompletionProviderError> {
-        let inner = self
-            .inner
-            .lock()
-            .expect("analysis coordinator lock poisoned");
+        let inner = self.inner.lock_or_recover();
         let route = inner
             .routes
             .get(&document_id)
@@ -1100,6 +1052,7 @@ fn acquire_request_slot(pending: &AtomicUsize) -> Result<(), String> {
 fn spawn_worker(
     runtime: ClayJsRuntimeService,
     registration: JsDocumentAnalyzerRegistration,
+    workspace: Arc<tokio::sync::Mutex<WorkspaceState>>,
     workspace_root_id: WorkspaceRootId,
     outputs: AnalysisOutputSink,
 ) -> AnalysisWorker {
@@ -1120,8 +1073,11 @@ fn spawn_worker(
                 active.store(false, Ordering::Release);
                 break;
             }
-            let invocation =
-                runtime.invoke_document_analyzer(registration.clone(), queued.event.clone());
+            let invocation = runtime.invoke_document_analyzer(
+                registration.clone(),
+                queued.event.clone(),
+                Arc::clone(&workspace),
+            );
             let invocation = if shutdown {
                 tokio::time::timeout(
                     std::time::Duration::from_millis(DOCUMENT_ANALYSIS_TOTAL_SHUTDOWN_MS),
@@ -1180,8 +1136,7 @@ fn publish_invocation_outputs(
     let mut output_failed = false;
     if let Some(set) = invocation.decorations {
         let current = active_documents
-            .lock()
-            .expect("analysis document state lock poisoned")
+            .lock_or_recover()
             .get(&set.document_id)
             .copied();
         if current.is_some_and(|document| document.version == set.document_version)
@@ -1192,8 +1147,7 @@ fn publish_invocation_outputs(
     }
     if let Some(set) = invocation.diagnostics {
         let current = active_documents
-            .lock()
-            .expect("analysis document state lock poisoned")
+            .lock_or_recover()
             .get(&set.document_id)
             .copied();
         if current.is_some_and(|document| document.version == set.document_version)
@@ -1456,11 +1410,16 @@ mod tests {
     fn analyzer_source(package: &serde_json::Value) -> String {
         format!(
             r#"
+import {{ startLanguageServerSession }} from "clay:language-server";
 import {{ serverPublishDecorations }} from "clay:decorations";
 import {{ serverPublishDiagnostics }} from "clay:diagnostics";
 const manifest = {package};
 const documents = new Map();
 export async function handleDocumentAnalysis(event) {{
+  if (event.kind === "open") {{
+    const session = await startLanguageServerSession({{ contribution: "analysis.server", workspaceRootId: event.workspaceRootId }});
+    await session.stop();
+  }}
   if (event.kind === "open" || event.kind === "reset") {{
     documents.set(event.documentId, {{ text: event.text, version: event.documentVersion }});
   }} else if (event.kind === "change") {{
@@ -1588,6 +1547,12 @@ export async function handleDocumentAnalysis(event) {{
         )
     }
 
+    fn analysis_workspace(root: &std::path::Path) -> Arc<tokio::sync::Mutex<WorkspaceState>> {
+        let mut workspace = WorkspaceState::new();
+        workspace.add_root(root).unwrap();
+        Arc::new(tokio::sync::Mutex::new(workspace))
+    }
+
     fn metadata(version: u64) -> DocumentMetadata {
         DocumentMetadata {
             document_id: 7,
@@ -1614,6 +1579,7 @@ export async function handleDocumentAnalysis(event) {{
             },
             trigger: CompletionTrigger::Manual,
             provider_generation: 1,
+            recent_completions: Vec::<String>::new().into_boxed_slice(),
         }
     }
 
@@ -1675,7 +1641,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap();
         assert!(
             coordinator
-                .open_document(1, &metadata(1), "test", root, "fn".to_string())
+                .open_document(
+                    analysis_workspace(&root),
+                    1,
+                    &metadata(1),
+                    "test",
+                    root,
+                    "fn".to_string(),
+                )
                 .is_empty()
         );
         let output = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1683,10 +1656,13 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap()
             .unwrap();
         assert!(matches!(output, DocumentAnalysisOutput::Decorations(_)));
-        // Plan 061 task 4: analyzer registration, document open, and analysis
-        // invocation never create additional persistent runtimes beyond the
-        // two domain workers.
-        assert_eq!(runtime_probe.workers_started(), 2);
+        // Plan 061 task 4 / Plan 127 P1: analyzer registration, document
+        // open, and analysis invocation never create additional persistent
+        // runtimes beyond the two domain workers and their lanes.
+        assert_eq!(
+            runtime_probe.workers_started(),
+            2 * crate::perf::budgets::JS_RUNTIME_LANES_PER_DOMAIN as u64
+        );
 
         assert!(!coordinator.change_document(7, 1, 2, 2, 2, " x".to_string()));
         let output = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1762,7 +1738,14 @@ export async function handleDocumentAnalysis(event) {{
                 &LanguageIntelligenceCoordinator::new(),
             )
             .unwrap();
-        coordinator.open_document(1, &metadata(1), "test", root, "fn".to_string());
+        coordinator.open_document(
+            analysis_workspace(&root),
+            1,
+            &metadata(1),
+            "test",
+            root,
+            "fn".to_string(),
+        );
         let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
             .await
             .unwrap();
@@ -1791,7 +1774,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap();
         assert!(
             coordinator
-                .open_document(1, &metadata(1), "test", root.clone(), "fn".to_string())
+                .open_document(
+                    analysis_workspace(&root),
+                    1,
+                    &metadata(1),
+                    "test",
+                    root.clone(),
+                    "fn".to_string(),
+                )
                 .is_empty()
         );
         let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1805,8 +1795,14 @@ export async function handleDocumentAnalysis(event) {{
             .unwrap()
             .revoke_language_server_grants("@vendor/analysis");
         coordinator.cancel_package("@vendor/analysis");
-        let diagnostics =
-            coordinator.open_document(1, &metadata(1), "test", root, "fn".to_string());
+        let diagnostics = coordinator.open_document(
+            analysis_workspace(&root),
+            1,
+            &metadata(1),
+            "test",
+            root,
+            "fn".to_string(),
+        );
 
         assert_eq!(diagnostics[0].code, "analysis.unauthorized");
         assert!(coordinator.active_completion_provider_ids(7).is_empty());
@@ -1832,7 +1828,14 @@ export async function handleDocumentAnalysis(event) {{
                 .unwrap();
             assert!(
                 coordinator
-                    .open_document(1, &metadata(1), "test", root, "fn".to_string())
+                    .open_document(
+                        analysis_workspace(&root),
+                        1,
+                        &metadata(1),
+                        "test",
+                        root,
+                        "fn".to_string(),
+                    )
                     .is_empty()
             );
             let _ = tokio::time::timeout(Duration::from_secs(2), coordinator.next_output())
@@ -1874,6 +1877,7 @@ export async function handleDocumentAnalysis(event) {{
             )
             .unwrap();
         let diagnostics = coordinator.open_document(
+            analysis_workspace(&root),
             1,
             &metadata(1),
             "test",

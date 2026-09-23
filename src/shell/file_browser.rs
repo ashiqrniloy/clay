@@ -15,8 +15,8 @@ use std::path::PathBuf;
 
 use crate::protocol::{
     DocumentId, DocumentVersion, SduiActionArgument, SduiActionIntent, SduiActionSource,
-    SduiActionValue, SduiEditorBinding, SduiFlexDirection, SduiListItem, SduiNode, SduiNodeId,
-    SduiNodeKind, SduiTree, WorkspaceRootId,
+    SduiActionValue, SduiEditorBinding, SduiFlexDirection, SduiListFilter, SduiListItem, SduiNode,
+    SduiNodeId, SduiNodeKind, SduiTree, WorkspaceRootId,
 };
 use crate::server::workspace::{FileListEntryKind, UserBrowseEntryKind, WorkspaceState};
 
@@ -43,7 +43,6 @@ pub(crate) const TOGGLE_FILE_BROWSER_COMMAND_ID: &str = "workspace.toggleFileBro
 pub(crate) struct FileBrowserState {
     root_id: WorkspaceRootId,
     root_display_name: String,
-    root_display_path: String,
     current_directory: PathBuf,
     entries: Vec<FileBrowserEntry>,
 }
@@ -132,8 +131,9 @@ impl FileBrowserState {
 
         Ok(Self {
             root_id,
-            root_display_name: root_metadata.display_name,
-            root_display_path: root_metadata.display_path,
+            root_display_name: crate::sanitize::sanitize_document_display_name(
+                &root_metadata.display_name,
+            ),
             current_directory: relative_path,
             entries,
         })
@@ -147,8 +147,13 @@ impl FileBrowserState {
         &self.entries
     }
 
-    /// Produce an SDUI tree with a left Workspace panel populated by the
+    /// Produce an SDUI tree with a left Workspace region populated by the
     /// inert file listing and a main editor view. No filesystem access.
+    ///
+    /// The left region is a plain stack, not a `Panel`: the workspace sidebar
+    /// is a flush canvas zone with one hairline edge (DESIGN.md §6), so the
+    /// host's left slot paints it (`fileBrowser` + `divider`); a panel would
+    /// frame the region a second time.
     pub(crate) fn to_sdui_tree(
         &self,
         document_id: DocumentId,
@@ -156,21 +161,52 @@ impl FileBrowserState {
     ) -> SduiTree {
         let root_id = SduiNodeId(1);
         let sidebar_id = SduiNodeId(2);
-        let sidebar_stack_id = SduiNodeId(3);
         let title_label_id = SduiNodeId(4);
+        let title_row_id = SduiNodeId(7);
+        let collapse_button_id = SduiNodeId(8);
         let file_list_id = SduiNodeId(5);
         let editor_id = SduiNodeId(6);
 
-        let workspace_title = format!(
-            "Workspace · {} · {}",
-            self.root_display_name, self.root_display_path
-        );
+        // Keep shell-visible workspace labels useful without exposing the
+        // server's absolute root path. The typed action still carries the
+        // validated root ID and relative path for server-side authority.
+        let workspace_title = format!("Workspace · {}", self.root_display_name);
         let title = if self.current_directory.as_os_str().is_empty() {
             workspace_title
         } else {
-            format!("{workspace_title} · {}", self.current_directory.display())
+            let directory = self.current_directory.to_string_lossy().replace('\\', "/");
+            format!("{workspace_title} · {}", sanitize_browser_label(&directory))
         };
-        let title_label = SduiNode::new(title_label_id, SduiNodeKind::Label { text: title });
+        let title_label = SduiNode::new(
+            title_label_id,
+            SduiNodeKind::Label {
+                text: title,
+                icon: None,
+            },
+        );
+        // The sidebar's own hide control: a `>` indicator in the title row so
+        // the top bar owns no file-browser button. The row (not a plain
+        // label) is what the renderer paints as the title line.
+        let collapse_button = SduiNode::new(
+            collapse_button_id,
+            SduiNodeKind::Button {
+                label: "Hide file browser".to_string(),
+                icon: Some("disclosure.right".to_string()),
+                action: SduiActionIntent::command(
+                    TOGGLE_FILE_BROWSER_COMMAND_ID,
+                    SduiActionSource::Button {
+                        node_id: collapse_button_id,
+                    },
+                ),
+            },
+        );
+        let title_row = SduiNode::new(
+            title_row_id,
+            SduiNodeKind::Flex {
+                direction: SduiFlexDirection::Row,
+                children: vec![title_label_id, collapse_button_id],
+            },
+        );
 
         let mut list_items: Vec<SduiListItem> = Vec::new();
         if let Some(parent) = self.current_directory.parent() {
@@ -181,21 +217,29 @@ impl FileBrowserState {
                 .iter()
                 .map(|entry| entry.to_sdui_list_item(file_list_id)),
         );
-        let file_list = SduiNode::new(file_list_id, SduiNodeKind::List { items: list_items });
-
-        let sidebar_stack = SduiNode::new(
-            sidebar_stack_id,
-            SduiNodeKind::Stack {
-                children: vec![title_label_id, file_list_id],
+        // The listing is delivered whole and bounded, so the filter is host
+        // behaviour over it (the approved tools row) rather than a per-keystroke
+        // server round-trip (plan 118 task E1).
+        let file_list = SduiNode::new(
+            file_list_id,
+            SduiNodeKind::List {
+                items: list_items,
+                filter: Some(SduiListFilter {
+                    placeholder: "Filter files".to_string(),
+                    shortcut: Some("/".to_string()),
+                }),
             },
         );
 
-        let sidebar = SduiNode::new(
+        // The region is sized from the host's typed dimension token (244px,
+        // 224px at ≤1240px): the approved sidebar width, which a flex share
+        // cannot express (plan 118 task E1).
+        let sidebar = SduiNode::sized(
             sidebar_id,
-            SduiNodeKind::Panel {
-                title: "Workspace".to_string(),
-                children: vec![sidebar_stack_id],
+            SduiNodeKind::Stack {
+                children: vec![title_row_id, file_list_id],
             },
+            "dimension.sidebar.default",
         );
 
         let editor = SduiNode::new(
@@ -219,19 +263,29 @@ impl FileBrowserState {
         SduiTree {
             ui_version: 1,
             root_id,
-            nodes: vec![root, sidebar, sidebar_stack, title_label, file_list, editor],
+            nodes: vec![
+                root,
+                sidebar,
+                title_label,
+                collapse_button,
+                title_row,
+                file_list,
+                editor,
+            ],
         }
     }
 
     /// Produce the inert editor-only tree used while the workspace pane is
     /// hidden. The editor binding keeps the existing document surface alive;
-    /// the absence of a panel lets the client reclaim the left slot.
+    /// a `<` show indicator at the row's leading edge re-opens the region,
+    /// since the top bar owns no file-browser button.
     pub(crate) fn hidden_sdui_tree(
         document_id: DocumentId,
         document_version: DocumentVersion,
     ) -> SduiTree {
         let root_id = SduiNodeId(1);
         let editor_id = SduiNodeId(2);
+        let expand_button_id = SduiNodeId(8);
         SduiTree {
             ui_version: 1,
             root_id,
@@ -240,7 +294,20 @@ impl FileBrowserState {
                     root_id,
                     SduiNodeKind::Flex {
                         direction: SduiFlexDirection::Row,
-                        children: vec![editor_id],
+                        children: vec![expand_button_id, editor_id],
+                    },
+                ),
+                SduiNode::new(
+                    expand_button_id,
+                    SduiNodeKind::Button {
+                        label: "Show file browser".to_string(),
+                        icon: Some("disclosure.right".to_string()),
+                        action: SduiActionIntent::command(
+                            TOGGLE_FILE_BROWSER_COMMAND_ID,
+                            SduiActionSource::Button {
+                                node_id: expand_button_id,
+                            },
+                        ),
                     },
                 ),
                 SduiNode::new(
@@ -297,8 +364,12 @@ impl FileBrowserState {
                         "relativePath": relative,
                     }),
                 );
-                TransientMenuItem::new(index.to_string(), entry.name.clone(), action)
-                    .with_detail(entry.kind_label())
+                TransientMenuItem::new(
+                    index.to_string(),
+                    sanitize_browser_label(&entry.name),
+                    action,
+                )
+                .with_detail(entry.kind_label())
             })
             .collect();
 
@@ -318,6 +389,17 @@ impl FileBrowserEntry {
             FileBrowserEntryKind::File => "file".to_string(),
             FileBrowserEntryKind::Symlink => "link".to_string(),
             FileBrowserEntryKind::Other => "other".to_string(),
+        }
+    }
+
+    /// Semantic icon key from server metadata — never name/slash heuristics.
+    /// `Other` carries no icon; the text label is the sole signal.
+    fn semantic_icon(&self) -> Option<&'static str> {
+        match self.kind {
+            FileBrowserEntryKind::Directory => Some("file.folder"),
+            FileBrowserEntryKind::File => Some("file.file"),
+            FileBrowserEntryKind::Symlink => Some("file.symlink"),
+            FileBrowserEntryKind::Other => None,
         }
     }
 
@@ -348,19 +430,34 @@ impl FileBrowserEntry {
             id: self.name.clone(),
             label: self.display_label(),
             detail: self.child_count.map(|count| format!("{count} items")),
+            icon: self.semantic_icon().map(str::to_string),
             action: Some(action),
         }
     }
 
     fn display_label(&self) -> String {
+        let name = sanitize_browser_label(&self.name);
         match self.kind {
-            FileBrowserEntryKind::Directory => format!("{}/", self.name),
-            _ => self.name.clone(),
+            FileBrowserEntryKind::Directory => format!("{name}/"),
+            _ => name,
         }
     }
 
     fn root_id_hint(&self) -> u64 {
         self.root_id
+    }
+}
+
+fn sanitize_browser_label(value: &str) -> String {
+    let safe: String = value
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(crate::sanitize::DISPLAY_NAME_MAX_CHARS)
+        .collect();
+    if safe.is_empty() {
+        "untitled".to_string()
+    } else {
+        safe
     }
 }
 
@@ -372,8 +469,9 @@ fn parent_directory_item(
     let relative = parent.to_string_lossy().to_string();
     SduiListItem {
         id: "..".to_string(),
-        label: "../".to_string(),
-        detail: Some("parent".to_string()),
+        label: "Parent folder".to_string(),
+        detail: None,
+        icon: Some("navigation.up".to_string()),
         action: Some(SduiActionIntent {
             command_id: OPEN_DIRECTORY_COMMAND_ID.to_string(),
             source: SduiActionSource::ListItem {
@@ -451,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn file_browser_sdui_tree_has_left_workspace_panel() {
+    fn file_browser_sdui_tree_has_flat_left_workspace_region() {
         let root = temp_workspace("browser-sdui");
         fs::write(root.join("main.rs"), "fn main() {}").unwrap();
         fs::create_dir(root.join("src")).unwrap();
@@ -462,16 +560,94 @@ mod tests {
         let browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
 
         let tree = browser.to_sdui_tree(7u64, 3u64);
+        // The sidebar is one stack (title row + listing) inside the row: no
+        // panel frames it, because the host's left slot owns the region's
+        // paint.
         assert!(
-            tree.nodes
+            !tree
+                .nodes
                 .iter()
-                .any(|node| matches!(node.kind, SduiNodeKind::Panel { .. }))
+                .any(|node| matches!(node.kind, SduiNodeKind::Panel { .. })),
+            "the workspace sidebar must not be a framed panel"
         );
+        let (sidebar, sidebar_size) = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Stack { children } => Some((children.clone(), node.size.clone())),
+                _ => None,
+            })
+            .expect("workspace sidebar stack");
+        // Plan 118 task E1: the region is sized by the host's token (244 / 224)
+        // instead of taking an equal flex share, and the listing carries the
+        // approved filter affordance — the field + the `/` hint.
+        assert_eq!(sidebar_size.as_deref(), Some("dimension.sidebar.default"));
+        let kinds: Vec<&SduiNodeKind> = sidebar
+            .iter()
+            .map(|id| {
+                &tree
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == *id)
+                    .expect("sidebar child")
+                    .kind
+            })
+            .collect();
+        // The title row keeps the workspace name and its `>` hide indicator
+        // on one line (a flex of label + toggle button); the listing follows.
+        let title_row = kinds
+            .first()
+            .and_then(|kind| match kind {
+                SduiNodeKind::Flex { children, .. } => Some(children.clone()),
+                _ => None,
+            })
+            .expect("sidebar title row");
+        assert_eq!(title_row.len(), 2);
+        let title_kinds: Vec<&SduiNodeKind> = title_row
+            .iter()
+            .map(|id| {
+                &tree
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == *id)
+                    .expect("title row child")
+                    .kind
+            })
+            .collect();
+        assert!(matches!(
+            title_kinds.first(),
+            Some(SduiNodeKind::Label { .. })
+        ));
+        let toggle = title_kinds
+            .get(1)
+            .and_then(|kind| match kind {
+                SduiNodeKind::Button {
+                    label,
+                    icon,
+                    action,
+                } => Some((label.as_str(), icon.as_deref(), action)),
+                _ => None,
+            })
+            .expect("sidebar hide indicator");
+        assert_eq!(toggle.0, "Hide file browser");
+        assert_eq!(toggle.1, Some("disclosure.right"));
+        assert_eq!(toggle.2.command_id, TOGGLE_FILE_BROWSER_COMMAND_ID);
+        assert!(matches!(kinds.get(1), Some(SduiNodeKind::List { .. })));
+        let filter = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { filter, .. } => filter.clone(),
+                _ => None,
+            })
+            .expect("the file listing is filterable");
+        assert_eq!(filter.placeholder, "Filter files");
+        assert_eq!(filter.shortcut.as_deref(), Some("/"));
         let title = tree
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::Label { text } => Some(text.as_str()),
+                SduiNodeKind::Label { text, icon: _ } => Some(text.as_str()),
                 _ => None,
             })
             .expect("workspace header label");
@@ -480,8 +656,8 @@ mod tests {
             .into_iter()
             .find(|root| root.workspace_root_id == root_id)
             .unwrap();
-        assert!(title.contains(&root_metadata.display_name));
-        assert!(title.contains(&root_metadata.display_path));
+        assert_eq!(title, format!("Workspace · {}", root_metadata.display_name));
+        assert!(!title.contains(&root_metadata.display_path));
 
         let nested =
             FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
@@ -490,7 +666,7 @@ mod tests {
             .nodes
             .into_iter()
             .find_map(|node| match node.kind {
-                SduiNodeKind::Label { text } => Some(text),
+                SduiNodeKind::Label { text, icon: _ } => Some(text),
                 _ => None,
             })
             .unwrap();
@@ -500,7 +676,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -512,13 +688,30 @@ mod tests {
     #[test]
     fn hidden_sdui_tree_keeps_editor_without_left_panel() {
         let tree = FileBrowserState::hidden_sdui_tree(7, 3);
-        assert_eq!(tree.nodes.len(), 2);
+        assert_eq!(tree.nodes.len(), 3);
         assert!(tree.nodes.iter().all(|node| {
             !matches!(
                 node.kind,
                 SduiNodeKind::Panel { .. } | SduiNodeKind::List { .. }
             )
         }));
+        // The hidden state keeps a `<` show indicator at the row's leading
+        // edge (the top bar owns no file-browser button).
+        let expand = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::Button {
+                    label,
+                    icon,
+                    action,
+                } => Some((label.as_str(), icon.as_deref(), action)),
+                _ => None,
+            })
+            .expect("sidebar show indicator");
+        assert_eq!(expand.0, "Show file browser");
+        assert_eq!(expand.1, Some("disclosure.right"));
+        assert_eq!(expand.2.command_id, TOGGLE_FILE_BROWSER_COMMAND_ID);
         assert!(tree.nodes.iter().any(|node| matches!(
             node.kind,
             SduiNodeKind::EditorView {
@@ -616,7 +809,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -647,7 +840,7 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
@@ -673,6 +866,65 @@ mod tests {
     }
 
     #[test]
+    fn file_browser_rows_carry_semantic_kind_icons_and_parent_up_icon() {
+        let root = temp_workspace("browser-semantic-icons");
+        fs::create_dir(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("src/main.rs"), root.join("src/link.rs")).unwrap();
+        }
+
+        let mut workspace = WorkspaceState::new();
+        let root_id = workspace.add_root(&root).unwrap();
+        let browser =
+            FileBrowserState::from_workspace_at(&workspace, root_id, PathBuf::from("src")).unwrap();
+        let tree = browser.to_sdui_tree(1u64, 1u64);
+
+        let list = tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        let parent = list
+            .iter()
+            .find(|item| item.label == "Parent folder")
+            .unwrap();
+        assert_eq!(parent.icon.as_deref(), Some("navigation.up"));
+        assert_eq!(parent.id, "..");
+
+        let file = list.iter().find(|item| item.label == "main.rs").unwrap();
+        assert_eq!(file.icon.as_deref(), Some("file.file"));
+        assert!(file.action.is_some());
+
+        #[cfg(unix)]
+        {
+            let link = list.iter().find(|item| item.label == "link.rs").unwrap();
+            assert_eq!(link.icon.as_deref(), Some("file.symlink"));
+        }
+
+        // Directory rows carry the folder icon (root listing).
+        let root_browser = FileBrowserState::from_workspace(&workspace, root_id).unwrap();
+        let root_tree = root_browser.to_sdui_tree(1u64, 1u64);
+        let root_list = root_tree
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let dir = root_list.iter().find(|item| item.label == "src/").unwrap();
+        assert_eq!(dir.icon.as_deref(), Some("file.folder"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn file_browser_nested_file_row_source_id_matches_declared_item_id() {
         let root = temp_workspace("browser-nested-source-id");
         fs::create_dir(root.join("src")).unwrap();
@@ -688,7 +940,9 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => items.iter().find(|item| item.label == "main.rs"),
+                SduiNodeKind::List { items, .. } => {
+                    items.iter().find(|item| item.label == "main.rs")
+                }
                 _ => None,
             })
             .expect("nested main.rs list item");
@@ -729,11 +983,11 @@ mod tests {
             .nodes
             .iter()
             .find_map(|node| match &node.kind {
-                SduiNodeKind::List { items } => Some(items.clone()),
+                SduiNodeKind::List { items, .. } => Some(items.clone()),
                 _ => None,
             })
             .unwrap();
-        assert!(list.iter().any(|item| item.label == "../"));
+        assert!(list.iter().any(|item| item.label == "Parent folder"));
         let item = list
             .iter()
             .find(|item| item.label == "main.rs")
@@ -785,7 +1039,7 @@ mod tests {
         else {
             panic!("expected Opened workspace result, got {:?}", result.status);
         };
-        assert_eq!(snapshot.text, "fn main() {}");
+        assert_eq!(snapshot.head.first_chunk, "fn main() {}");
         assert!(snapshot.metadata.path.contains("main.rs"));
 
         let _ = fs::remove_dir_all(root);

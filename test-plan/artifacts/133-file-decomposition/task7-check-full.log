@@ -1,0 +1,309 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1261 security advisories (from /home/arn/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (605 crate dependencies)
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+
+warning: 9 allowed warnings found
+== [fmt] cargo fmt --check
+== [check] cargo check --all-targets
+    Checking clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.13s
+== [clippy] cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+== [test] cargo test --all-targets --quiet
+
+running 1420 tests
+....................................................................................... 87/1420
+....................................................................................... 174/1420
+....................................................................................... 261/1420
+....................................................................................... 348/1420
+....................................................................................... 435/1420
+....................................................................................... 522/1420
+...................................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1790076596262887019/.git/
+[main (root-commit) f8f81e5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.... 609/1420
+Initialized empty Git repository in /tmp/clay-git-discovery-parent-1790076596310253858/.git/
+.Initialized empty Git repository in /tmp/clay-git-discovery-detached-1790076596314288439/.git/
+..[main (root-commit) f8f81e5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at f8f81e5 initial
+...Initialized empty Git repository in /tmp/clay-git-discovery-repo-1790076596354047333/.git/
+..[main (root-commit) f8f81e5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1790076596374287976/.git/
+.................................................................Initialized empty Git repository in /tmp/clay-git-facade-1790076596706702527/repo/.git/
+......[main (root-commit) f8f81e5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+....... 696/1420
+.........Initialized empty Git repository in /tmp/clay-git-package-load-1790076596779631547/repo/.git/
+.[main (root-commit) f8f81e5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+............................................................................. 783/1420
+..............................................................i........................ 870/1420
+....................................................................................... 957/1420
+....................................................................................... 1044/1420
+....................................................................................... 1131/1420
+....................................................................................... 1218/1420
+....................................................................................... 1305/1420
+....................................................................................... 1392/1420
+............................
+test result: ok. 1419 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 13.95s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+.....................................................
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.03s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.81s
+
+
+running 152 tests
+....................................................................................... 87/152
+.................................................................
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.65s
+
+Gnuplot not found, using plotters backend
+Testing protocol_codec_payloads/hello_roundtrip
+Success
+Testing protocol_codec_payloads/client_edit/16
+Success
+Testing protocol_codec_payloads/client_edit/1024
+Success
+Testing protocol_codec_payloads/client_edit/16384
+Success
+Testing protocol_codec_payloads/initial_document_64k
+Success
+
+Testing client_edit_queue_pressure/1
+Success
+Testing client_edit_queue_pressure/64
+Success
+Testing client_edit_queue_pressure/256
+Success
+
+Testing server_document_acknowledgements/1
+Success
+Testing server_document_acknowledgements/16
+Success
+Testing server_document_acknowledgements/128
+Success
+
+Testing server_stale_edit_rejections/1
+Success
+Testing server_stale_edit_rejections/16
+Success
+Testing server_stale_edit_rejections/128
+Success
+
+== [bench-compile] cargo bench --no-run
+   Compiling clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `bench` profile [optimized] target(s) in 1m 22s
+  Executable benches src/lib.rs (target/release/deps/clay-cd85f3660620f83f)
+  Executable benches src/main.rs (target/release/deps/clay-bb91c960be923314)
+  Executable benches src/bin/clay-server.rs (target/release/deps/clay_server-86de3c8921ec25b9)
+  Executable benches src/bin/update-doc-registry.rs (target/release/deps/update_doc_registry-89543ec89da726ff)
+  Executable benches/protocol_server_baselines.rs (target/release/deps/protocol_server_baselines-ba53695c398b0505)
+== [desktop-clippy] cargo clippy -p clay-desktop --all-targets -- -D warnings
+   Compiling glib-sys v0.18.1
+   Compiling gobject-sys v0.18.0
+   Compiling gio-sys v0.18.1
+   Compiling gdk-sys v0.18.2
+   Compiling gdk-pixbuf-sys v0.18.0
+   Compiling cairo-sys-rs v0.18.2
+   Compiling pango-sys v0.18.0
+   Compiling atk-sys v0.18.2
+   Compiling gtk-sys v0.18.2
+   Compiling soup3-sys v0.5.0
+   Compiling javascriptcore-rs-sys v1.1.1
+   Compiling gtk v0.18.2
+   Compiling webkit2gtk-sys v2.0.2
+   Compiling gdkx11-sys v0.18.2
+   Compiling libdbus-sys v0.2.7
+   Compiling x11-dl v2.21.0
+warning: javascriptcore-rs-sys@1.1.1: 
+error: failed to run custom build command for `javascriptcore-rs-sys v1.1.1`
+
+Caused by:
+  process didn't exit successfully: `/home/arn/Projects/clay/target/debug/build/javascriptcore-rs-sys-4a398b3b274ebfd1/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=JAVASCRIPTCOREGTK_4.1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:warning=
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags javascriptcoregtk-4.1 'javascriptcoregtk-4.1 >= 2.38'
+
+  pkg-config output:
+    Package javascriptcoregtk-4.1 was not found in the pkg-config search path.
+    Perhaps you should add the directory containing `javascriptcoregtk-4.1.pc'
+    to the PKG_CONFIG_PATH environment variable
+    Package 'javascriptcoregtk-4.1' not found
+    Package 'javascriptcoregtk-4.1' not found
+
+  The system library `javascriptcoregtk-4.1` required by crate `javascriptcore-rs-sys` was not found.
+  The file `javascriptcoregtk-4.1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `javascriptcoregtk-4.1.pc`.
+
+warning: build failed, waiting for other jobs to finish...
+warning: webkit2gtk-sys@2.0.2: 
+error: failed to run custom build command for `webkit2gtk-sys v2.0.2`
+
+Caused by:
+  process didn't exit successfully: `/home/arn/Projects/clay/target/debug/build/webkit2gtk-sys-91133ee953778f7b/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-env-changed=WEBKIT2GTK_4.1_NO_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_PATH
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64-unknown-linux-gnu
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR_x86_64_unknown_linux_gnu
+  cargo:rerun-if-env-changed=HOST_PKG_CONFIG_SYSROOT_DIR
+  cargo:rerun-if-env-changed=PKG_CONFIG_SYSROOT_DIR
+  cargo:warning=
+  pkg-config exited with status code 1
+  > PKG_CONFIG_ALLOW_SYSTEM_CFLAGS=1 pkg-config --libs --cflags webkit2gtk-4.1 'webkit2gtk-4.1 >= 2.40'
+
+  pkg-config output:
+    Package webkit2gtk-4.1 was not found in the pkg-config search path.
+    Perhaps you should add the directory containing `webkit2gtk-4.1.pc'
+    to the PKG_CONFIG_PATH environment variable
+    Package 'webkit2gtk-4.1' not found
+    Package 'webkit2gtk-4.1' not found
+
+  The system library `webkit2gtk-4.1` required by crate `webkit2gtk-sys` was not found.
+  The file `webkit2gtk-4.1.pc` needs to be installed and the PKG_CONFIG_PATH environment variable must contain its parent directory.
+  The PKG_CONFIG_PATH environment variable is not set.
+
+  HINT: if you have installed the library, try setting PKG_CONFIG_PATH to the directory containing `webkit2gtk-4.1.pc`.
+
+FAILED at stage: desktop-clippy

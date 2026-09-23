@@ -9,7 +9,7 @@ deno_op: op_clay_configuration_set_package_option
 deno_op_path: src/server/ops/configuration.rs::op_clay_configuration_set_package_option
 name: setPackageOption
 user_facing_name: Set Package Option
-summary: Register a validated package-owned configuration option from `~/.config/clay/init.js`.
+summary: Register a validated package-owned configuration option from `~/.clay/init.js`.
 owner: server
 phase: Phase 18.4
 visibility: public
@@ -32,8 +32,8 @@ custom_properties:
     type: enum
     default: init-js
     description: One of `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6 persisted user-preference source).
-hot_path_policy: Evaluated during configuration/package update work only; not during typing, parsing, Masonry layout, or paint hot paths.
-security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct Masonry widgets, native widget handles, raw CSS, callbacks, or state-value authority.
+hot_path_policy: Evaluated during configuration/package update work only; not during typing, parsing, client layout, or paint hot paths.
+security: does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, hidden option keys, direct client widgets, native widget handles, raw CSS, callbacks, or state-value authority.
 agent_guidance: Use only documented typed override/configuration records; never expose hidden keys, raw ops, callbacks, native handles, raw CSS, or client-side JavaScript.
 lookup_tags: [configuration, package-options, init-js, clay-js-api, phase18.4, runtime-backed]
 app_visible: true
@@ -46,7 +46,7 @@ async: false
 
 ## Summary
 
-`setPackageOption` records a validated package-owned option from `~/.config/clay/init.js`.
+`setPackageOption` records a validated package-owned option from `~/.clay/init.js`.
 
 ## Description
 
@@ -73,7 +73,7 @@ setPackageOption({ packagePrefix: "markdown", option: "markdown.layout.defaultVi
 - `packagePrefix`: package apiPrefix.
 - `option`: package-prefixed documented option.
 - `value`: typed bounded value.
-- `source`: `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6). The `ui-session` source labels values persisted from the settings UI into `~/.config/clay/preferences.json`.
+- `source`: `init-js`, `package-default`, `clay-default`, or `ui-session` (Phase 20.6). The `ui-session` source labels values persisted from the settings UI into `~/.clay/preferences.json`.
 
 ## Key bindings
 
@@ -96,7 +96,7 @@ Throws `configuration.invalid_package_option` for hidden keys, ad hoc keys, inva
 
 ## Permissions and security
 
-Requires: `package-configuration`. server-side validation is required before any package option is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct Masonry widgets, native widget handles, raw CSS, callbacks, or hidden option-key authority.
+Requires: `package-configuration`. server-side validation is required before any package option is accepted. This API does not grant filesystem, network, shell, extension loading, AI mutation, workspace mutation, package enable/disable, WASM, client-side JavaScript, raw Deno ops, direct client widgets, native widget handles, raw CSS, callbacks, or hidden option-key authority.
 
 ## Agent guidance
 

@@ -1,0 +1,4 @@
+RuntimeStateSnapshot=PASS
+active_design_system=@clay/design-instrument
+sdui_panel=Design system review
+sdui_states=enabled,disabled

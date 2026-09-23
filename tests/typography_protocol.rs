@@ -90,6 +90,7 @@ fn decoration_font_role_is_limited_to_syntax_and_semantic_layers() {
         viewport_byte_start: 0,
         viewport_byte_end: 4,
         spans: vec![diagnostic],
+        trace_id: None,
     };
 
     assert_eq!(
@@ -117,10 +118,9 @@ fn first_party_modes_declare_roles_without_rendering_language_branches() {
     }
 
     for path in [
-        "src/editor/layout.rs",
-        "src/editor/surface.rs",
-        "src/masonry_editor.rs",
-        "src/masonry_sdui.rs",
+        "frontend/src/editor/create-editor.ts",
+        "frontend/src/editor/extensions/controller.ts",
+        "frontend/src/sdui/registry.tsx",
     ] {
         let source = std::fs::read_to_string(path).unwrap();
         assert!(!source.contains("mode_id == \"markdown\""), "{path}");

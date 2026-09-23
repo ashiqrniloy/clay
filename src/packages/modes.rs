@@ -1153,12 +1153,14 @@ impl ModeRegistry {
                 .iter()
                 .filter(|c| is_package_owned_id(&c.id, &minor_act.api_prefix))
                 .filter_map(|c| {
-                    parse_routing_policy(&c.routing_policy).map(|policy| CommandDeclaration {
-                        command_id: c.id.clone(),
-                        display_name: c.display_name.clone(),
-                        routing_policy: policy,
-                        authority: crate::protocol::CommandAuthority::ServerIntent,
-                    })
+                    RoutingPolicy::parse(&c.routing_policy)
+                        .ok()
+                        .map(|policy| CommandDeclaration {
+                            command_id: c.id.clone(),
+                            display_name: c.display_name.clone(),
+                            routing_policy: policy,
+                            authority: crate::protocol::CommandAuthority::ServerIntent,
+                        })
                 })
                 .collect();
 
@@ -1365,7 +1367,7 @@ fn append_package_commands(
             continue;
         }
         // Only accept server-intent routing policies for package commands.
-        let Some(policy) = parse_routing_policy(&contrib.routing_policy) else {
+        let Some(policy) = RoutingPolicy::parse(&contrib.routing_policy).ok() else {
             continue;
         };
         // Skip client-edit policies — packages may not declare built-in client-edit authority.
@@ -1381,21 +1383,6 @@ fn append_package_commands(
             routing_policy: policy,
             authority,
         });
-    }
-}
-
-/// Parse a routing policy string into the [`RoutingPolicy`] enum.
-///
-/// Returns `None` for unknown or unsupported policy strings so callers can
-/// skip contributions with unrecognised policies rather than failing hard.
-fn parse_routing_policy(value: &str) -> Option<RoutingPolicy> {
-    match value {
-        "client-first-predictable" => Some(RoutingPolicy::ClientFirstPredictable),
-        "client-first-requires-ack" => Some(RoutingPolicy::ClientFirstRequiresAck),
-        "server-first" => Some(RoutingPolicy::ServerFirst),
-        "ui-reactive-priority" => Some(RoutingPolicy::UiReactivePriority),
-        "background" => Some(RoutingPolicy::Background),
-        _ => None,
     }
 }
 

@@ -70,7 +70,7 @@ const node = defineList({ items: [{ id: "active", label: "Current document" }] }
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `sdui.defineList` in `~/.config/clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
+No default key binding is assigned. Users may bind a key to `sdui.defineList` in `~/.clay/init.js` only if a future command surface explicitly supports invoking SDUI helper APIs; normal use is from startup/reload configuration modules before `publishTree`.
 
 ## Custom properties
 
@@ -103,7 +103,7 @@ Use `sdui.defineList` when the user asks for runtime-backed Clay SDUI schema hel
 - JS facade: `runtime/js/sdui.js::defineList`
 - Deno op: `src/server/ops/sdui.rs::op_clay_sdui_define_node` (`op_clay_sdui_define_node`)
 - Backing Rust/current owner: `src/protocol/sdui.rs::SduiNodeKind::List`
-- Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `src/masonry_sdui.rs`
+- Current implementation audit path: `src/protocol/sdui.rs`; `src/server/sdui.rs`; `frontend/src/sdui/renderer.tsx (React SDUI host renders validated sdui trees; no native state)`
 
 ## Lookup metadata
 

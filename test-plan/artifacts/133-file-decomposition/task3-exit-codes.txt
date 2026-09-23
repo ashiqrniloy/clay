@@ -1,0 +1,10 @@
+Plan 133 task 3 (src/server/mod.rs split) — 2026-09-21, HEAD 6ee3b4c + working tree changes
+
+  scripts/check.sh full          -> 0   (281 s, "full check PASSED", log: task3-check-full.log)
+  cargo test counts              -> 1996 passed / 0 failed / 1 ignored (identical to the task-1 baseline)
+  cargo check --all-targets      -> 0   (no warnings; clippy -D warnings clean inside check.sh)
+  cargo check --lib (after touch)-> 4.9 s split vs 4.9 s pre-change steady state (A/B in task3-server-split.md)
+
+Test totals by target are the same 15 targets as the baseline; 47 #[test]/#[tokio::test]
+attributes moved out of mod.rs (runtime_outputs_tests 4, runtime_generation_tests 41,
+tab_server_state_tests 1, windows_tests 1) with their names unchanged.

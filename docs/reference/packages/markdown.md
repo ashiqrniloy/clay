@@ -4,7 +4,7 @@
 
 ## End-User UX Baseline
 
-The intended default end-user setup for Markdown mode is a small `~/.config/clay/init.js`:
+The intended default end-user setup for Markdown mode is a small `~/.clay/init.js`:
 
 ```js
 import { bindKey } from "clay:keybindings";
@@ -22,18 +22,19 @@ Baseline invariants for the end-user Markdown UX:
 - **Optional preview on demand.** An optional preview/status panel is a `clay:ui` `PanelContribution` targeting a slot such as `right` with `defaultVisibility: "hidden"`, shown only through `setPackageOption`, `serverSetLayoutOverride`, or `markdown.togglePreview`.
 - **Selected-file open supports save/conflict UX.** Opening a file through `Ctrl+O` activates Markdown behavior/decorations through generic `MajorModeActivation` + `DocumentClassification`. Dirty state is visible in Clay-owned status chrome; `bindKey("Ctrl+S", "documents.serverSaveDocument")` saves through server file IO. Stale-metadata and dirty-reload conflicts present an explicit recovery menu rather than silent overwrite.
 
-Loading, contribution validation, selected-file activation, and Phase 19 reload refresh run at configuration/document-open/reload time only; typing, paint, scroll, layout, and text-event paths stay client-local/non-blocking and read only installed inert shell/contribution state. Hot reload reruns the one-line `await loadPackage("@clay/markdown")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache, replacing Markdown mode metadata and parse handler tokens without adding a Markdown-specific Rust branch. Failed reloads keep the prior Markdown generation active and surface sanitized diagnostics. The one-line loader does not broaden package installation, filesystem (beyond the selected file and config root), workspace expansion, shell, network, AI mutation, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority beyond what the constrained first-party `@clay/*` resolver already grants.
+Loading, contribution validation, selected-file activation, and Phase 19 reload refresh run at configuration/document-open/reload time only; typing, paint, scroll, layout, and text-event paths stay client-local/non-blocking and read only installed inert shell/contribution state. Hot reload reruns the one-line `await loadPackage("@clay/markdown")` setup in a fresh runtime generation with an empty `globalThis.__clayLoadedPackages` cache, replacing Markdown mode metadata from `package.json` and parse-handler tokens from the execute-only `loadEntry` without adding a Markdown-specific Rust branch. Failed reloads keep the prior Markdown generation active and surface sanitized diagnostics. The one-line loader does not broaden package installation, filesystem (beyond the selected file and config root), workspace expansion, shell, network, AI mutation, WASM, raw-op, native-widget, raw-CSS, renderer-callback, or client-side JavaScript authority beyond what the constrained first-party `@clay/*` resolver already grants.
 
 ## Contract
 
 - `package.json` name: `@clay/markdown`
 - Clay API prefix: `markdown`
+- Preset: `prose-mode` (permissions / `apiDependencies` / extension points expand at validate time)
 - Mode: `markdown`
 - File patterns: `.md`, `.markdown`, `.mdown`
 - MIME type: `text/markdown`
 - Docs path: `./docs/index.md`
 - Entries: `./dist/index.js`, `./dist/load.js`, parser export `./dist/parser.js`, and SDUI export `./dist/sdui.js`
-- Grammar contribution: `native`, source `tree-sitter-md-025` (no package `.wasm` asset)
+- Grammar contribution: owned by native descriptor (`FIRST_PARTY_NATIVE_GRAMMARS`); package.json omits `syntaxGrammars`
 - Highlight query: `./queries/highlights.scm`
 - Vocabulary styleMap: headings/prose/code/list/link/quote captures map directly to closed `TokenType` + `Modifiers`
 - Completion provider `markdown.keywords`: priority-0 metadata-only provider carrying 16 inert Markdown construct text replacements, `#`/`[`/`` ` `` triggers, and 300 ms/32-item budgets; snippet transforms remain deferred to Phase 18.19
@@ -61,7 +62,7 @@ Load-time package validation and activation are explicit package/configuration/d
 
 Default Markdown parse/decorations are produced by the compiled `tree-sitter-md-025` descriptor and `packages/markdown/queries/highlights.scm`. On document open, the generic syntax selector chooses the path-matching native contribution, installs a generation-scoped `TreeSitterSyntaxHandler` under its grammar ID, and publishes vocabulary `DecorationSpan`s through `ParseCoordinator`; no package JavaScript runs for native highlighting. `./dist/parser.js` remains registered under the package/mode key as Tier 3 fallback and uses `markdown-it` or its small scanner only when no native handler is selected. Runtime replacement keeps stale generations from publishing. The Rust client receives only validated viewport-bounded spans from either engine.
 
-The native grammar contribution caps each selected parse window at `4 KiB`. The Tier 3 fallback keeps the fixed Phase 18.5 policy: full highlighting through `1 MiB`, windowed highlighting above `1 MiB`, large-file behavior above `5 MiB`, `64 KiB` parse windows, `4 KiB` guard ranges, a `30 MiB` syntax/decor budget, and `5000 ms` parser timeout. These are not user-tunable `~/.config/clay/init.js` settings yet; the package declares no `contributions.configuration` entries and does not request `package-configuration`. The parse-window, guard, memory-budget, timeout, parse-unit, and viewport-priority registration fields are documented as `custom_properties` on `parse.serverRegisterParseHandler` and are rejected by the server when unsafe. If syntax budget pressure is reported or the supplied window payload exceeds the budget, the adapter returns no Markdown spans and reports `plain-text-fallback` instead of invoking `markdown-it`.
+The native grammar contribution caps each selected parse window at `4 KiB`. The Tier 3 fallback keeps the fixed Phase 18.5 policy: full highlighting through `1 MiB`, windowed highlighting above `1 MiB`, large-file behavior above `5 MiB`, `64 KiB` parse windows, `4 KiB` guard ranges, a `30 MiB` syntax/decor budget, and `5000 ms` parser timeout. These are not user-tunable `~/.clay/init.js` settings yet; the package declares no `contributions.configuration` entries and does not request `package-configuration`. The parse-window, guard, memory-budget, timeout, parse-unit, and viewport-priority registration fields are documented as `custom_properties` on `parse.serverRegisterParseHandler` and are rejected by the server when unsafe. If syntax budget pressure is reported or the supplied window payload exceeds the budget, the adapter returns no Markdown spans and reports `plain-text-fallback` instead of invoking `markdown-it`.
 
 Independently, the unchanged package-owned `./dist/sdui.js` adapter builds an inert preview/status panel with mode, parse, decoration, highlighting-policy, and preview labels plus a `markdown.togglePreview` button. Runtime SDUI validation requires package commands to be registered before a package-owned SDUI tree can target them, so disabling or invalidating the package falls back to plain text without stale Markdown command/keybinding authority. Status text uses fixed/sanitized package messages (`full`, `windowed`, `degraded`, `plain-text-fallback`) and does not include document text or absolute paths.
 

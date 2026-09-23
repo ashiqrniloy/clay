@@ -1,0 +1,5 @@
+RuntimeStateSnapshot=PASS
+fixture=ui-review-icons-duotone-dark
+sdui_panel=Icon Pack Review
+sdui_icons=git.branch,status.success,preview.toggle,file.folder,file.file
+editor_action_row=save,reload,close (icon buttons) + open (text)

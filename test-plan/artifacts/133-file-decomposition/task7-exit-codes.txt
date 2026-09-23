@@ -1,0 +1,20 @@
+Plan 133 task 7 — scripts/check.sh full (2026-09-21, HEAD 40022f6 + task 7)
+Log: test-plan/artifacts/133-file-decomposition/task7-check-full.log
+
+audit        PASS (9 allowed RUSTSEC warnings)
+fmt          PASS (cargo fmt --check clean)
+check        PASS (cargo check --all-targets clean)
+clippy       PASS (cargo clippy --all-targets -- -D warnings, zero warnings)
+test         PASS (1944 passed / 0 failed / 1 ignored; identical to task 6)
+bench-compile PASS (cargo bench --no-run)
+desktop-clippy FAIL exit 101 — environment, not change: system library
+             javascriptcoregtk-4.1 (WebKitGTK dev) absent; no passwordless
+             sudo to install it. Fails identically without task 7 changes
+             (`pkg-config --exists javascriptcoregtk-4.1` -> MISSING at HEAD).
+desktop-test not reached (desktop-clippy aborts the gate).
+bindings     not reached.
+
+Supplementary desktop verification (both PASS, stubbed system .pc files +
+stub frontend/dist/index.html; type-check only, no link/run):
+  cargo check  -p clay-desktop --all-targets
+  cargo clippy -p clay-desktop --all-targets -- -D warnings

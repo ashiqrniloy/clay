@@ -61,6 +61,28 @@ pub(super) fn op_clay_language_register_intelligence_provider(
         .get("runtimeBridge")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    // Plan 127 P1: an optional validated module specifier lets the latency
+    // lane materialize the handler in its own isolate (document-analyzer
+    // precedent). It must resolve to a loaded module owned by this package.
+    // Read flat first (the facade forwards it at the top level) and fall back
+    // to the nested `provider` object, mirroring `exportName`.
+    let module_specifier = options
+        .get("moduleSpecifier")
+        .or_else(|| provider_options.get("moduleSpecifier"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+        .map(str::to_string);
+    if let Some(specifier) = &module_specifier {
+        let clay = state.borrow::<Arc<ClayOpState>>();
+        if !clay
+            .load_entry_allowlist()
+            .is_package_module(specifier, &package.manifest.name)
+        {
+            return Err(clay_error(
+                "language.invalid_provider: moduleSpecifier must resolve to a loaded module owned by the package",
+            ));
+        }
+    }
 
     let token = super::registration_token(
         &package.manifest.clay.api_prefix,
@@ -76,6 +98,7 @@ pub(super) fn op_clay_language_register_intelligence_provider(
         meta: meta.clone(),
         token: token.clone(),
         export_name: export_name.clone(),
+        module_specifier,
     };
 
     let clay = state.borrow::<Arc<ClayOpState>>();

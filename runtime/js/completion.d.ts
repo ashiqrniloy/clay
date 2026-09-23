@@ -1,3 +1,6 @@
+/** A completion provider's declared item shape, as written in
+ *  `clay.contributions.completionProviders` in `package.json`. This call never
+ *  reads items from its options object (plan 136 task 8). */
 export type CompletionProviderItem = string | {
     label: string;
     insertText: string;
@@ -5,20 +8,6 @@ export type CompletionProviderItem = string | {
     textFormat?: "plainText" | "snippet";
 };
 export type ServerRegisterCompletionProviderOptions = {
-    completionProvider?: unknown;
-    contribution?: unknown;
-    providerId?: string;
-    triggerCharacters?: string[];
-    triggers?: {
-        characters?: string[];
-        wordBoundary?: boolean;
-    };
-    wordBoundaryChars?: string[];
-    items?: CompletionProviderItem[];
-    priority?: number;
-    exclusive?: boolean;
-    timeoutMs?: number;
-    maxItems?: number;
     handler?: never;
     callback?: never;
     complete?: never;
@@ -27,6 +16,12 @@ export type ServerRegisterCompletionProviderOptions = {
     nativeHandle?: never;
     rawOps?: never;
     module?: Record<string, unknown>;
+    /** Plan 127 P1: the package-owned module that declares `exportName`,
+     *  resolved with `import.meta.resolve("./provider.js")`. When present the
+     *  provider runs on the domain's latency lane (module import), so a busy
+     *  parse/analysis/config lane cannot delay completions. Omit it for an
+     *  inline `module: {...}` handler, which stays on the general lane. */
+    moduleSpecifier?: string;
     exportName?: string;
 };
 export declare function serverRegisterCompletionProvider(options: ServerRegisterCompletionProviderOptions): unknown;

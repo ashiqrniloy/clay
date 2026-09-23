@@ -12,7 +12,7 @@ in `package.json` and registered by `dist/load.js` via
 
 | Control | Catalog kind |
 |---------|-------------|
-| Container | `panel` (fixed right slot, `defaultVisibility: hidden`) |
+| Container | `panel` (fixed right slot, `defaultVisibility: hidden`) + `scroll` (bounded settings content) |
 | Sections | `collapse` |
 | Theme picker | `dropdown` (items carry `settings.setTheme`) |
 | Appearance picker | `dropdown` (light / dark / system) |
@@ -45,7 +45,7 @@ forwarding added in Phase 20.6.
 ## Activation
 
 ```js
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { loadPackage } from "clay:packages";
 await loadPackage("@clay/settings");
 ```

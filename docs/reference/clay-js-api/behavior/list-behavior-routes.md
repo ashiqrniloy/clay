@@ -61,7 +61,7 @@ const routes = await listBehaviorRoutes("current");
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `behavior.listBehaviorRoutes` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `behavior.listBehaviorRoutes` in `~/.clay/init.js`.
 
 ## Custom properties
 

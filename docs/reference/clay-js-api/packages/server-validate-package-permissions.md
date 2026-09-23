@@ -65,7 +65,7 @@ const result = serverValidatePackagePermissions(["mode-registration", "mode-acti
 
 ## Key bindings
 
-No default key binding is assigned. Users may bind a key to `packages.serverValidatePackagePermissions` in `~/.config/clay/init.js`.
+No default key binding is assigned. Users may bind a key to `packages.serverValidatePackagePermissions` in `~/.clay/init.js`.
 
 ## Custom properties
 

@@ -1,0 +1,18 @@
+Measured from the rendered captures (single-pixel sampling of the PNG, sRGB relative luminance).
+Boundary 1 = the vertical edge at 25% width (the sidebar/editor split: the focused
+pane's 1px accent outline sits on that edge in the running app, so this row measures
+the outline, not a hairline). Boundary 2 = the rail's leading divider at 77.5% width,
+which is the shipped border.hairline; the floor for it is 1.2:1 (UI-DS-40).
+State fills are not measured here: the shipped selection is accent at 15% over the
+surface by design, so fill-vs-surface contrast is intentionally subtle; the 3:1 state
+floor applies to text over the composited fill and is enforced on resolved roles by
+src/shell/theme.rs and tests/theme_packages.rs.
+
+hairline/sidebar workspace-rail--theme-gruvbox-material-dark--1500x950: {'line_rgb': [125, 174, 163], 'surface_rgb': [40, 40, 40], 'contrast': 5.94, 'x': 373}
+hairline/rail workspace-rail--theme-gruvbox-material-dark--1500x950: {'line_rgb': [76, 71, 66], 'surface_rgb': [40, 40, 40], 'contrast': 1.61, 'x': 1160}
+hairline/sidebar workspace-rail--theme-gruvbox-material-light--1500x950: {'line_rgb': [7, 102, 120], 'surface_rgb': [251, 241, 199], 'contrast': 5.82, 'x': 373}
+hairline/rail workspace-rail--theme-gruvbox-material-light--1500x950: {'line_rgb': [212, 201, 165], 'surface_rgb': [251, 241, 199], 'contrast': 1.46, 'x': 1160}
+hairline/sidebar workspace-rail--theme-modus-operandi--1500x950: {'line_rgb': [0, 49, 169], 'surface_rgb': [255, 255, 255], 'contrast': 10.44, 'x': 373}
+hairline/rail workspace-rail--theme-modus-operandi--1500x950: {'line_rgb': [214, 214, 214], 'surface_rgb': [255, 255, 255], 'contrast': 1.45, 'x': 1160}
+hairline/sidebar workspace-rail--theme-modus-vivendi--1500x950: {'line_rgb': [47, 175, 255], 'surface_rgb': [0, 0, 0], 'contrast': 8.7, 'x': 373}
+hairline/rail workspace-rail--theme-modus-vivendi--1500x950: {'line_rgb': [38, 38, 38], 'surface_rgb': [0, 0, 0], 'contrast': 1.39, 'x': 1160}

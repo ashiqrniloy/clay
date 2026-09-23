@@ -1,0 +1,107 @@
+role|name|states|extents
+label|Clay|enabled,multi-line,sensitive,showing,visible|631,37,69x17
+label||enabled,multi-line,sensitive|-2147483648,-2147483648,1x1
+label||enabled,sensitive,visible|25,149,1x1
+entry|Filter files|editable,enabled,focusable,selectable-text,sensitive,showing,single-line,visible|26,150,219x36
+list box|Server-driven items|enabled,focusable,sensitive,showing,vertical,visible|26,194,243x919
+list item|notes.md|enabled,focusable,sensitive,showing,visible|26,194,243x35
+entry|Document editor|editable,enabled,focusable,multi-line,selectable-text,sensitive,showing,supports-autocompletion,visible|270,160,696x760
+label||enabled,sensitive,showing,visible|297,1059,1x1
+entry|Message|editable,enabled,focusable,focused,multi-line,selectable-text,sensitive,showing,visible|297,966,642x48
+list box|Commands|enabled,sensitive,showing,vertical,visible|289,586,658x306
+list item|/branch server-first — @clay/coding-agent@0.1.0|enabled,focusable,selected,sensitive,showing,visible|301,598,634x32
+list item|/clone server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,630,634x32
+list item|/compact server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,662,634x32
+list item|/discard server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,694,634x32
+list item|/fork server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,726,634x32
+list item|/n server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,758,634x32
+list item|/new server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,790,634x32
+list item|/open-session server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,822,634x32
+list item|/open-session-as-fork server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,854,634x32
+list item|/resume server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,showing,visible|301,886,634x32
+list item|/tree server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,918,634x32
+list item|Activate Tab 1 client — built-in Ctrl+1 Ctrl+Alt+1|enabled,focusable,sensitive,visible|301,950,634x41
+list item|Activate Tab 2 client — built-in Ctrl+2 Ctrl+Alt+2|enabled,focusable,sensitive,visible|301,991,634x41
+list item|Activate Tab 3 client — built-in Ctrl+3 Ctrl+Alt+3|enabled,focusable,sensitive,visible|301,1032,634x41
+list item|Activate Tab 4 client — built-in Ctrl+4 Ctrl+Alt+4|enabled,focusable,sensitive,visible|301,1073,634x41
+list item|Activate Tab 5 client — built-in Ctrl+5 Ctrl+Alt+5|enabled,focusable,sensitive,visible|301,1114,634x41
+list item|Activate Tab 6 client — built-in Ctrl+6 Ctrl+Alt+6|enabled,focusable,sensitive,visible|301,1155,634x41
+list item|Activate Tab 7 client — built-in Ctrl+7 Ctrl+Alt+7|enabled,focusable,sensitive,visible|301,1196,634x41
+list item|Activate Tab 8 client — built-in Ctrl+8 Ctrl+Alt+8|enabled,focusable,sensitive,visible|301,1237,634x41
+list item|Activate Tab 9 client — built-in Ctrl+9 Ctrl+Alt+9|enabled,focusable,sensitive,visible|301,1278,634x41
+list item|Add Equal Pane client — built-in Ctrl+Shift+\|enabled,focusable,sensitive,visible|301,1319,634x41
+list item|Browse Filesystem server-first — built-in Ctrl+X Ctrl+F|enabled,focusable,sensitive,visible|301,1360,634x41
+list item|Choose Agent server-first — built-in|enabled,focusable,sensitive,visible|301,1401,634x32
+list item|Choose Model server-first — built-in|enabled,focusable,sensitive,visible|301,1433,634x32
+list item|Choose Provider server-first — built-in|enabled,focusable,sensitive,visible|301,1465,634x32
+list item|Close Coding Agent server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,1497,634x32
+list item|Close Pane client — built-in Ctrl+Alt+W|enabled,focusable,sensitive,visible|301,1529,634x41
+list item|Close Settings server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,1570,634x32
+list item|Close Tab client — built-in Ctrl+Shift+W|enabled,focusable,sensitive,visible|301,1602,634x41
+list item|Code Actions server-first — built-in|enabled,focusable,sensitive,visible|301,1643,634x32
+list item|Coding Agent server-first — @clay/coding-agent@0.1.0|enabled,focusable,sensitive,visible|301,1675,634x32
+list item|Configure Provider server-first — built-in|enabled,focusable,sensitive,visible|301,1707,634x32
+list item|Cycle Reasoning Effort server-first — @clay/coding-agent@0.1.0 Shift+Tab|enabled,focusable,sensitive,visible|301,1739,634x41
+list item|Dismiss Language Result server-first — built-in|enabled,focusable,sensitive,visible|301,1780,634x32
+list item|Explain Active Mode server-first — built-in|enabled,focusable,sensitive,visible|301,1812,634x32
+list item|Focus Active Document server-first — built-in|enabled,focusable,sensitive,visible|301,1844,634x32
+list item|Focus Next Pane client — built-in Ctrl+Alt+→|enabled,focusable,sensitive,visible|301,1876,634x41
+list item|Focus Previous Pane client — built-in Ctrl+Alt+←|enabled,focusable,sensitive,visible|301,1917,634x41
+list item|Go to Definition server-first — built-in|enabled,focusable,sensitive,visible|301,1958,634x32
+list item|Hover server-first — built-in|enabled,focusable,sensitive,visible|301,1990,634x32
+list item|Insert Markdown Heading server-first — @clay/markdown@0.1.0 Ctrl+Alt+1|enabled,focusable,sensitive,visible|301,2022,634x41
+list item|List Active Modes server-first — built-in|enabled,focusable,sensitive,visible|301,2063,634x32
+list item|List Git Statuses server-first — built-in|enabled,focusable,sensitive,visible|301,2095,634x32
+list item|Move Pane Next client — built-in Ctrl+Alt+]|enabled,focusable,sensitive,visible|301,2127,634x41
+list item|Move Pane Previous client — built-in Ctrl+Alt+[|enabled,focusable,sensitive,visible|301,2168,634x41
+list item|Move Tab Left client — built-in Ctrl+Shift+[|enabled,focusable,sensitive,visible|301,2209,634x41
+list item|Move Tab Right client — built-in Ctrl+Shift+]|enabled,focusable,sensitive,visible|301,2250,634x41
+list item|Move Tab to Position 1 client — built-in Ctrl+Shift+1|enabled,focusable,sensitive,visible|301,2291,634x41
+list item|Move Tab to Position 2 client — built-in Ctrl+Shift+2|enabled,focusable,sensitive,visible|301,2332,634x41
+list item|Move Tab to Position 3 client — built-in Ctrl+Shift+3|enabled,focusable,sensitive,visible|301,2373,634x41
+list item|Move Tab to Position 4 client — built-in Ctrl+Shift+4|enabled,focusable,sensitive,visible|301,2414,634x41
+list item|Move Tab to Position 5 client — built-in Ctrl+Shift+5|enabled,focusable,sensitive,visible|301,2455,634x41
+list item|Move Tab to Position 6 client — built-in Ctrl+Shift+6|enabled,focusable,sensitive,visible|301,2496,634x41
+list item|Move Tab to Position 7 client — built-in Ctrl+Shift+7|enabled,focusable,sensitive,visible|301,2537,634x41
+list item|Move Tab to Position 8 client — built-in Ctrl+Shift+8|enabled,focusable,sensitive,visible|301,2578,634x41
+list item|Move Tab to Position 9 client — built-in Ctrl+Shift+9|enabled,focusable,sensitive,visible|301,2619,634x41
+list item|Navigate Definition server-first — built-in|enabled,focusable,sensitive,visible|301,2660,634x32
+list item|New Tab client — built-in Ctrl+T|enabled,focusable,sensitive,visible|301,2692,634x41
+list item|Next Tab client — built-in Ctrl+Tab|enabled,focusable,sensitive,visible|301,2733,634x41
+list item|Open Control Center server-first — built-in Ctrl+X Ctrl+O|enabled,focusable,sensitive,visible|301,2774,634x41
+list item|Open Directory server-first — built-in|enabled,focusable,sensitive,visible|301,2815,634x32
+list item|Open File server-first — built-in|enabled,focusable,sensitive,visible|301,2847,634x32
+list item|Open File by Name server-first — built-in|enabled,focusable,sensitive,visible|301,2879,634x32
+list item|Open Recent Document server-first — built-in|enabled,focusable,sensitive,visible|301,2911,634x32
+list item|Open Settings server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,2943,634x32
+list item|Preview Edit (Deferred) server-first — built-in|enabled,focusable,sensitive,visible|301,2975,634x32
+list item|Previous Tab client — built-in Ctrl+Shift+Tab|enabled,focusable,sensitive,visible|301,3007,634x41
+list item|Refresh Git Status server-first — built-in|enabled,focusable,sensitive,visible|301,3048,634x32
+list item|Refresh Workspace server-first — built-in|enabled,focusable,sensitive,visible|301,3080,634x32
+list item|Reload Configuration and Packages server-first-with-lock — built-in Ctrl+Shift+R|enabled,focusable,sensitive,visible|301,3112,634x41
+list item|Reset Settings server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,3153,634x32
+list item|Resize Pane Down client — built-in Ctrl+Alt+Shift+↓|enabled,focusable,sensitive,visible|301,3185,634x41
+list item|Resize Pane Left client — built-in Ctrl+Alt+Shift+←|enabled,focusable,sensitive,visible|301,3226,634x41
+list item|Resize Pane Right client — built-in Ctrl+Alt+Shift+→|enabled,focusable,sensitive,visible|301,3267,634x41
+list item|Resize Pane Up client — built-in Ctrl+Alt+Shift+↑|enabled,focusable,sensitive,visible|301,3308,634x41
+list item|Resume Session server-first — built-in|enabled,focusable,sensitive,visible|301,3349,634x32
+list item|Reveal in File Tree server-first — built-in|enabled,focusable,sensitive,visible|301,3381,634x32
+list item|Search Sessions server-first — built-in|enabled,focusable,sensitive,visible|301,3413,634x32
+list item|Set Appearance server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,3445,634x32
+list item|Set Design System server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,3477,634x32
+list item|Set Theme server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,3509,634x32
+list item|Set Typography server-first — @clay/settings@0.1.0|enabled,focusable,sensitive,visible|301,3541,634x32
+list item|Signature Help server-first — built-in|enabled,focusable,sensitive,visible|301,3573,634x32
+list item|Split Pane Down client — built-in|enabled,focusable,sensitive,visible|301,3605,634x32
+list item|Split Pane Horizontal client — built-in Ctrl+-|enabled,focusable,sensitive,visible|301,3637,634x41
+list item|Split Pane Right client — built-in|enabled,focusable,sensitive,visible|301,3678,634x32
+list item|Split Pane Vertical client — built-in Ctrl+\|enabled,focusable,sensitive,visible|301,3710,634x41
+list item|Toggle Agent Lane client — built-in Ctrl+X Ctrl+P|enabled,focusable,sensitive,visible|301,3751,634x41
+list item|Toggle File Browser server-first — built-in Ctrl+B|enabled,focusable,sensitive,visible|301,3792,634x41
+list item|Toggle JavaScript Line Comment server-first — @clay/javascript@0.1.0|enabled,focusable,sensitive,visible|301,3833,634x32
+list item|Toggle Markdown Comment server-first — @clay/markdown@0.1.0|enabled,focusable,sensitive,visible|301,3865,634x32
+list item|Toggle Markdown List server-first — @clay/markdown@0.1.0 Ctrl+Shift+8|enabled,focusable,sensitive,visible|301,3897,634x41
+list item|Toggle Markdown Preview server-first — @clay/markdown@0.1.0 Ctrl+Shift+M|enabled,focusable,sensitive,visible|301,3938,634x41
+list item|Toggle Rust Line Comment server-first — @clay/rust@0.1.0|enabled,focusable,sensitive,visible|301,3979,634x32
+list item|Toggle TypeScript Line Comment server-first — @clay/typescript@0.1.0|enabled,focusable,sensitive,visible|301,4011,634x32
+list item||enabled,sensitive,showing,visible|975,287,323x30

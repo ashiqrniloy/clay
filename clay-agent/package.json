@@ -1,0 +1,40 @@
+{
+  "name": "clay-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Clay-owned Node daemon hosting Prism 0.7.0 over stdio JSON-RPC.",
+  "bin": {
+    "clay-agent": "./dist/main.js"
+  },
+  "exports": {
+    ".": "./dist/host.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && bun test src --parallel",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@arnilo/prism": "0.7.0",
+    "@arnilo/prism-coding-tools": "0.7.0",
+    "@arnilo/prism-core": "0.7.0",
+    "@arnilo/prism-mcp": "0.7.0",
+    "@arnilo/prism-memory": "0.7.0",
+    "@arnilo/prism-providers": "0.7.0",
+    "@arnilo/prism-web-tools": "0.7.0",
+    "better-sqlite3": "13.0.3",
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  },
+  "trustedDependencies": [
+    "better-sqlite3"
+  ]
+}

@@ -1,3 +1,10 @@
 /target
 node_modules/
 /packages/markdown/node_modules/
+/code-reviews
+/frontend/dist/
+/src-tauri/target/
+/src-tauri/gen/schemas/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

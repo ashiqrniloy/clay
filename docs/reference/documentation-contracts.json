@@ -64,7 +64,7 @@
       "path": "docs/reference/packages/creating-packages.md",
       "markers": [
         "It does not execute package JavaScript",
-        "no package JavaScript runs in Masonry paint",
+        "no package JavaScript runs on the client hot path",
         "not through direct native widget access"
       ]
     }

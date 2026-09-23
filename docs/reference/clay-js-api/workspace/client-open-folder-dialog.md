@@ -4,7 +4,7 @@ kind: clay-js-api
 js_module: "clay:workspace"
 js_export: clientOpenFolderDialog
 js_facade: runtime/js/workspace.js::clientOpenFolderDialog
-backing_rust: src/client/file_dialog.rs::open_folder_dialog; src/main.rs::handle_client_ui_command; src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot
+backing_rust: src/client_commands.rs::EditorClientCommand; src-tauri/src/commands.rs::dialog_open_folder; src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot
 deno_op: op_clay_keybindings_bind_key
 deno_op_path: src/server/ops/keybindings.rs::op_clay_keybindings_bind_key
 name: clientOpenFolderDialog
@@ -39,7 +39,7 @@ Authority: `client-ui-command-id`. Runtime path: `configuration-bindKey-to-clien
 
 ## When to use
 
-Use this API from `~/.config/clay/init.js` when a user wants a key binding for selecting a workspace folder.
+Use this API from `~/.clay/init.js` when a user wants a key binding for selecting a workspace folder.
 
 ## JavaScript usage
 
@@ -59,14 +59,14 @@ bindKey("Ctrl+Shift+O", "workspace.clientOpenFolderDialog", { scope: "editor" })
 ## Example
 
 ```ts
-// ~/.config/clay/init.js
+// ~/.clay/init.js
 import { bindKey } from "clay:keybindings";
 import { clientOpenFolderDialog } from "clay:workspace";
 
 bindKey("Ctrl+Shift+O", clientOpenFolderDialog(), { scope: "editor" });
 ```
 
-On Linux, Clay uses the xdg-desktop-portal FileChooser over D-Bus with `directory=true`. On Windows, Clay uses COM `IFileOpenDialog` with `FOS_PICKFOLDERS`. On macOS, Clay uses `NSOpenPanel` in directory-chooser mode. Other platforms report a sanitized unsupported diagnostic instead of panicking. Cancellation is a non-error no-op.
+On Linux, Clay uses the xdg-desktop-portal FileChooser over D-Bus through the Tauri `dialog_open_folder` command (`ashpd`, `directory=true`), with one dialog of each kind in flight via per-dialog busy locks. Windows and macOS native pickers are part of the long-term platform targets and are not implemented by the current desktop bridge; they will be added at the same Tauri command seam. Where no portal response is available the command fails with a sanitized `file dialog failed` diagnostic instead of panicking. Cancellation is a non-error no-op.
 
 ## Options
 
@@ -104,7 +104,7 @@ Use `workspace.clientOpenFolderDialog` as a documented command ID for `bindKey`.
 
 - JS facade: `runtime/js/workspace.js::clientOpenFolderDialog`
 - Deno op used for binding: `src/server/ops/keybindings.rs::op_clay_keybindings_bind_key` (`op_clay_keybindings_bind_key`)
-- Backing Rust/current owner: `src/client/file_dialog.rs::open_folder_dialog`; `src/main.rs::handle_client_ui_command`; `src/server/connection.rs::ClientMessage::AddSelectedWorkspaceRoot`
+- Backing Rust/current owner: `src-tauri/src/commands.rs::dialog_open_folder`; `src/client/behavior.rs::ClientBehaviorState::route_key`; `src/server/connection/workspace.rs::ClientMessage::AddSelectedWorkspaceRoot`
 
 ## Lookup metadata
 

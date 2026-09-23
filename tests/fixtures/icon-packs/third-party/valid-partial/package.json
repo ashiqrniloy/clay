@@ -1,0 +1,48 @@
+{
+  "name": "@vendor/partial-icons",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./dist/index.js", "./load": "./dist/load.js" },
+  "clay": {
+    "apiPrefix": "vendor",
+    "entry": "./dist/index.js",
+    "loadEntry": "./dist/load.js",
+    "permissions": [],
+    "modes": [],
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 900,
+      "hotPathPolicy": "inert geometry data parsed at load; no hot-path JS"
+    },
+    "contributions": {
+      "iconPack": {
+        "schemaVersion": 1,
+        "displayName": "Vendor Partial Icons",
+        "icons": [
+          {
+            "key": "vendor.custom-close",
+            "viewBox": [0.0, 0.0, 24.0, 24.0],
+            "paths": [{ "d": "M4,4L20,20" }]
+          },
+          {
+            "key": "vendor.custom-sparkle",
+            "viewBox": [0.0, 0.0, 24.0, 24.0],
+            "paths": [
+              { "d": "M12,2L14,9L21,10L15,14L17,21L12,17L7,21L9,14L3,10L10,9Z" },
+              { "d": "M2,2L6,6Z", "opacity": 0.2 }
+            ]
+          }
+        ]
+      }
+    },
+    "extensionPoints": [
+      {
+        "id": "vendor.icons",
+        "version": 1,
+        "operations": ["replace"],
+        "contributionKinds": ["iconPack"],
+        "summary": "Derive from this pack to override vendor icon geometry."
+      }
+    ]
+  }
+}

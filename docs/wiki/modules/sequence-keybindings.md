@@ -16,7 +16,7 @@ Rust capability was added (pinned by
   serialization)
 - `src/client/behavior.rs` — `ClientBehaviorState::route_key_sequence` (pure
   matcher), `ChordRouteOutcome`, `route_key` (single-stroke wrapper)
-- `src/editor/surface.rs` — `PendingChord` (mutable pending-chord state),
+- `src/editor/surface/command.rs` — `PendingChord` (mutable pending-chord state),
   the state machine inside `route_key_with_event`, `EditorKeyOutcome::consumed`
 - `src/masonry_pane_document.rs` — `local_key`: consumed-key handling and
   modal-menu containment order
@@ -36,8 +36,9 @@ Rust capability was added (pinned by
    any malformed stroke reject the whole bind (`keybindings.invalid_key`).
    `"Space"` is the literal space key in the grammar, so whitespace splitting
    is unambiguous. The result becomes `KeyBindingRule.sequence:
-   Vec<KeyStroke>` — already the archived protocol shape, so
-   `PROTOCOL_VERSION` stays 17 and the rkyv archive round-trips unchanged
+   Vec<KeyStroke>` — the archived keybinding shape stays unchanged; the
+   current protocol pin is 31 because later palette fields are additive, and
+   the rkyv archive round-trips unchanged
    (`multi_stroke_key_binding_rules_round_trip_the_archive_identically` in
    `tests/window_management_protocol.rs`). Parsing never runs on the
    keypress hot path; `key_sequence_string` serializes sequences for
@@ -78,12 +79,12 @@ green.
 ## Pending-chord state machine
 
 `PendingChord { strokes: Vec<KeyStroke>, started_at: std::time::Instant }`
-(`src/editor/surface.rs:219`) lives in `EditorSurface` because it is
+(`src/editor/surface/mod.rs:219`) lives in `EditorSurface` because it is
 mutable routing state that must survive across keystrokes, while
 `ClientBehaviorState::new` is reconstructed per keystroke from the manifest.
 It holds only already-validated strokes from the incoming event stream.
 
-Inside `route_key_with_event` (`src/editor/surface.rs`), after the Tab /
+Inside `route_key_with_event` (`src/editor/surface/mod.rs`), after the Tab /
 Escape special cases:
 
 - **Stale check:** if the pending chord's `started_at` is older than
@@ -101,7 +102,10 @@ The buffer grows one stroke per Pending outcome and is bounded by the
 longest bound sequence (`pending_chord_buffer_grows_one_stroke_per_pending_outcome`
 in `tests/editor_performance_invariants.rs`,
 `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence` in
-`src/editor/surface.rs`).
+`src/editor/surface/mod.rs`). Plan 089 adds a compact deterministic state-machine
+sweep: 128 fixed cases cover complete two-/three-stroke sequences, mismatch
+re-evaluation, and stale-timeout re-evaluation, asserting that every case
+clears pending state and never swallows more than its intended fallback text.
 
 **Why the consumed flag:** `finish_local_outcome` marks a key handled only
 when the outcome `changed`, so an unhandled pending stroke would bubble to
@@ -125,18 +129,18 @@ automatically because every bind publishes through `validate_manifest`.
 Cross-context prefixes and divergent rules sharing a common prefix stay
 valid: the pending-chord matcher resolves them by the next stroke. No
 default manifest contains prefix collisions — the two new defaults
-(`Ctrl+X Ctrl+P`, `Ctrl+X Ctrl+F`) both start with `Ctrl+X`, which no
-single-stroke default uses, and diverge at the second stroke
+(`Ctrl+X Ctrl+P`, `Ctrl+X Ctrl+O`, `Ctrl+X Ctrl+F`) all start with `Ctrl+X`,
+which no single-stroke default uses, and diverge at the second stroke
 (`default_keymaps_are_prefix_collision_free`).
 
 ## Defaults, budgets, and guards
 
 - **Sequence defaults** (`src/protocol/mod.rs`, `default_keymaps`):
-  `controlCenter.open` = `Ctrl+X Ctrl+P`, `controlCenter.openPath` =
-  `Ctrl+X Ctrl+F` (both `Global`, `ServerFirst`, command IDs and routing
-  policies unchanged; pre-24.5 the temporary defaults were `Ctrl+Shift+P` /
-  `Ctrl+Alt+P`). Built via the `KeyBindingRule::global_server_first_sequence`
-  constructor.
+  `shell.toggleAgentLane` = `Ctrl+X Ctrl+P`, `controlCenter.open` =
+  `Ctrl+X Ctrl+O`, and `controlCenter.openPath` = `Ctrl+X Ctrl+F` (all
+  `Global`; server-first for the server commands and client-UI for the lane;
+  command IDs and routing policies stay unchanged). Built via the
+  `KeyBindingRule::global_server_first_sequence` constructor where applicable.
 - **Advisory budgets** (`src/perf/budgets.rs`, Phase 21 promotion rule —
   no wall-clock CI gate): `COMMAND_CENTRE_OPEN_P95_BUDGET_MS = 50`,
   `COMMAND_CENTRE_FILTER_UPDATE_P95_BUDGET_MS = 4`,
@@ -157,7 +161,7 @@ single-stroke default uses, and diverge at the second stroke
 The built-in browse grant (path-mode traversal outside workspace roots,
 `controlCenter.openPath`) remains reachable only from the user-driven
 built-in path-mode surface: `open_command_centre_session` has exactly two
-call sites, both in `src/server/connection.rs` (command-intent dispatch and
+call sites, both in `src/server/connection/mod.rs` (command-intent dispatch and
 server-menu activation — user-driven client messages). Package code cannot
 reach it: `validate_package_command` rejects reserved/`clay.`-prefixed IDs
 (`is_package_owned_id`), `CommandRegistry::register_command` rejects
@@ -171,8 +175,9 @@ and authority record: `docs/development/performance.md` (Phase 24.5).
 ## Extension guidance
 
 - Bind any space-separated sequence: `bindKey("g g", "workspace.refresh")`
-  or `bindKey("Ctrl+X Ctrl+P", "controlCenter.open")`; single-stroke chords
-  keep the fast path (immediate dispatch, no pending hold).
+  or `bindKey("Ctrl+X Ctrl+O", "controlCenter.open")`; single-stroke chords
+  keep the fast path (immediate dispatch, no pending hold). The shipped
+  `Ctrl+X Ctrl+P` sequence toggles the per-tab agent lane.
 - A same-scope strict prefix is rejected at bind time
   (`keybindings.bind_failed`, diagnostic names the colliding rule) — bind
   the longer chord first or use divergent second strokes.
@@ -189,14 +194,15 @@ and authority record: `docs/development/performance.md` (Phase 24.5).
 - `src/client/behavior.rs`: `route_key_sequence_*` — single-stroke
   regression, two-stroke tracking, mismatch clearing, context precedence for
   exact matches and prefixes.
-- `src/editor/surface.rs`: `editor_pending_chord_consumes_strokes_and_dispatches_on_completion`,
+- `src/editor/surface/mod.rs`: `editor_pending_chord_consumes_strokes_and_dispatches_on_completion`,
   `editor_abandoned_chord_does_not_eat_the_next_key`,
   `editor_stale_pending_chord_cancels_on_the_next_key`,
+  `editor_generated_chord_sequences_preserve_prefix_mismatch_and_timeout_transitions`,
   `editor_pending_chord_buffer_never_exceeds_longest_bound_sequence`.
 - `src/behavior/manifest.rs`: `manifest_rejects_prefix_collisions_within_a_context`,
   `manifest_accepts_divergent_rules_sharing_a_common_prefix`,
   `manifest_accepts_prefix_collisions_across_contexts`.
-- `src/server/js_runtime.rs` (configuration): `configuration_bind_key_sequence_publishes_multi_stroke_rule`,
+- `src/server/js_runtime/mod.rs` (configuration): `configuration_bind_key_sequence_publishes_multi_stroke_rule`,
   `configuration_unbind_key_sequence_removes_only_the_matching_rule`,
   `configuration_bind_key_prefix_collision_is_rejected`.
 - `src/protocol/mod.rs`: `default_keymaps_are_prefix_collision_free`;

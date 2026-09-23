@@ -1,0 +1,52 @@
+{
+  "name": "@fixture/laneblocked",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./load.js",
+    "./parser.js": "./parser.js",
+    "./provider.js": "./provider.js"
+  },
+  "clay": {
+    "apiPrefix": "laneblocked",
+    "entry": "./load.js",
+    "loadEntry": "./load.js",
+    "modes": [
+      "laneblocked"
+    ],
+    "permissions": [
+      "completion-provider",
+      "mode-registration",
+      "parse-document"
+    ],
+    "contributions": {
+      "modePatterns": [
+        {
+          "mode": "laneblocked",
+          "displayName": "Lane Fixture (inline provider)",
+          "extensions": [
+            "lane"
+          ]
+        }
+      ],
+      "completionProviders": [
+        {
+          "id": "laneblocked.provider",
+          "priority": 0,
+          "timeoutMs": 2000,
+          "maxItems": 20,
+          "items": [
+            {
+              "label": "lane-declared",
+              "insertText": "lane-declared"
+            }
+          ]
+        }
+      ]
+    },
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 695
+    }
+  }
+}

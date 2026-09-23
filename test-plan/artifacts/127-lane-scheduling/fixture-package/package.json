@@ -1,0 +1,62 @@
+{
+  "name": "@fixture/lane",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./load.js",
+    "./parser.js": "./parser.js",
+    "./provider.js": "./provider.js"
+  },
+  "clay": {
+    "apiPrefix": "lane",
+    "entry": "./load.js",
+    "loadEntry": "./load.js",
+    "modes": [
+      "lane"
+    ],
+    "permissions": [
+      "completion-provider",
+      "mode-registration",
+      "parse-document"
+    ],
+    "contributions": {
+      "modePatterns": [
+        {
+          "mode": "lane",
+          "displayName": "Lane Fixture",
+          "extensions": [
+            "lane"
+          ],
+          "editorRules": {
+            "autocompleteTriggers": [
+              {
+                "trigger": "."
+              }
+            ]
+          }
+        }
+      ],
+      "completionProviders": [
+        {
+          "id": "lane.provider",
+          "priority": 0,
+          "timeoutMs": 2000,
+          "maxItems": 20,
+          "items": [
+            {
+              "label": "lane-declared",
+              "insertText": "lane-declared"
+            }
+          ],
+          "triggerCharacters": [
+            "."
+          ]
+        }
+      ]
+    },
+    "docs": "./docs/index.md",
+    "performance": {
+      "estimatedManifestBytes": 642
+    }
+  }
+}

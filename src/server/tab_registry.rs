@@ -34,6 +34,13 @@ use crate::protocol::{ClientId, TabEntry, TabId, TabRegistrySnapshot, WorkspaceR
 struct RegistryEntry {
     entry: TabEntry,
     last_activity: Instant,
+    /// Plan 118 task 35: the tab's agent type (the directory name of its
+    /// per-agent config root under the Clay data root's `agents/`). Kept
+    /// outside the protocol `TabEntry` on purpose: the client owns the
+    /// display identity it set, and the server needs the value only to
+    /// resolve that agent's config root and session. Validated by the
+    /// caller, which is the only place that knows the config root.
+    agent_type: Option<String>,
 }
 
 /// Server-authoritative tab registry (in-memory).
@@ -74,6 +81,45 @@ impl TabRegistry {
             .map(|row| row.entry.clone())
     }
 
+    /// The tab's agent type (plan 118 task 35), or `None` while the tab has
+    /// no agent (or names one that no longer resolves — the setter refuses
+    /// those, so a stale value cannot linger).
+    pub(crate) fn agent_type(&self, tab_id: TabId) -> Option<String> {
+        self.tabs
+            .iter()
+            .find(|row| row.entry.tab_id == tab_id)
+            .and_then(|row| row.agent_type.clone())
+    }
+
+    /// Set (or clear) the tab's agent type. Only the tab's bound connection
+    /// may change it. A no-op change (same value) does not bump the revision,
+    /// so the client is not asked to reconcile what it already shows.
+    pub(crate) fn set_agent_type(
+        &mut self,
+        tab_id: TabId,
+        client_id: ClientId,
+        agent_type: Option<&str>,
+    ) -> bool {
+        let next = agent_type
+            .map(str::trim)
+            .filter(|agent| !agent.is_empty())
+            .map(str::to_string);
+        let Some(row) = self
+            .tabs
+            .iter_mut()
+            .find(|row| row.entry.tab_id == tab_id && row.entry.client_id == client_id)
+        else {
+            return false;
+        };
+        row.last_activity = Instant::now();
+        if row.agent_type == next {
+            return true;
+        }
+        row.agent_type = next;
+        self.revision += 1;
+        true
+    }
+
     pub(crate) fn tab_for_client(&self, client_id: ClientId) -> Option<TabId> {
         self.tabs
             .iter()
@@ -100,6 +146,7 @@ impl TabRegistry {
                 workspace_root,
             },
             last_activity: Instant::now(),
+            agent_type: None,
         });
         self.active = Some(tab_id);
         self.revision += 1;
@@ -323,6 +370,34 @@ mod tests {
         assert_eq!(snapshot.tabs[1].tab_id, second);
         assert_eq!(snapshot.tabs[1].client_id, 2);
         assert_eq!(snapshot.active, Some(second));
+    }
+
+    #[test]
+    fn agent_type_binds_to_the_tabs_connection_only() {
+        let mut registry = TabRegistry::new();
+        let tab = registry.create_tab(1, 10, "/tmp/alpha".to_string());
+        assert_eq!(registry.agent_type(tab), None, "a fresh tab has no agent");
+
+        // Only the tab's own connection may set it.
+        assert!(!registry.set_agent_type(tab, 2, Some("reviewer")));
+        assert_eq!(registry.agent_type(tab), None);
+        assert!(registry.set_agent_type(tab, 1, Some("reviewer")));
+        assert_eq!(registry.agent_type(tab).as_deref(), Some("reviewer"));
+
+        // A no-op change does not bump the revision (nothing to reconcile).
+        let revision = registry.snapshot().revision;
+        assert!(registry.set_agent_type(tab, 1, Some("reviewer")));
+        assert_eq!(registry.snapshot().revision, revision);
+
+        // Clearing detaches the agent; whitespace-only names read as cleared.
+        assert!(registry.set_agent_type(tab, 1, Some("  ")));
+        assert_eq!(registry.agent_type(tab), None);
+        assert!(registry.set_agent_type(tab, 1, Some("reviewer")));
+        assert!(registry.set_agent_type(tab, 1, None));
+        assert_eq!(registry.agent_type(tab), None);
+
+        // Unknown tabs are rejected, never created.
+        assert!(!registry.set_agent_type(999, 1, Some("reviewer")));
     }
 
     #[test]

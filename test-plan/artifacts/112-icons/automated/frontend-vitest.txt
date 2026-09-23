@@ -1,0 +1,92 @@
+
+> clay-frontend@0.1.0 test
+> vitest run --run
+
+ DEPRECATED  "environmentMatchGlobs" is deprecated. Use `test.projects` to define different configurations instead.
+
+ RUN  v3.2.7 /home/arn/Projects/clay/frontend
+
+ ✓ src/editor/extensions/extensions.test.ts (6 tests) 381ms
+ ✓ src/editor/extensions/controller.test.ts (10 tests) 790ms
+   ✓ editor projection boundary > drops stale decoration versions and requests only the visible byte range  348ms
+ ✓ src/editor/extensions/render-patch.test.ts (16 tests) 1026ms
+   ✓ atomic viewport render patches > bounds retained spans across 100 consecutive viewport patches  395ms
+ ✓ src/sdui/registry.test.tsx (5 tests) 567ms
+   ✓ package component registry > preserves keyed input and disclosure state across server property updates  365ms
+stderr | src/test/settings-panel-choices.test.tsx > SettingsPanel design-system selection UX (plan 110 task 10) > tracks a design-system switch without remounting the panel
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+ ✓ src/test/settings-panel-choices.test.tsx (4 tests) 715ms
+   ✓ SettingsPanel design-system selection UX (plan 110 task 10) > renders theme and design-system dropdowns from the server snapshot  407ms
+ ✓ src/command-centre/CommandCentre.test.tsx (3 tests) 797ms
+   ✓ CommandCentre > renders one modal list and forwards query, movement, activation, and cancel  406ms
+stderr | src/test/editor.test.tsx > editor lifecycle > migrated action row invokes exact handlers and keeps Open as text (plan 112 T8)
+TypeError: textRange(...).getClientRects is not a function
+    at TextTile.coordsIn [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:2094:51[90m)[39m
+    at LineTile.coordsIn [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:2007:27[90m)[39m
+    at DocView.coordsAt [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:3256:21[90m)[39m
+    at EditorView.coordsAtPos [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:8526:29[90m)[39m
+    at RectangleMarker.forRange [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:9293:28[90m)[39m
+    at Object.markers [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:9560:51[90m)[39m
+    at LayerView.measure [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:9450:27[90m)[39m
+    at [90mfile:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:8182:34
+    at Array.map (<anonymous>)
+    at EditorView.measure [90m(file:///home/arn/Projects/clay/frontend/[39mnode_modules/[4m@codemirror/view[24m/dist/index.js:8180:42[90m)[39m
+
+ ✓ src/test/shell.test.tsx (6 tests) 785ms
+   ✓ app shell landmarks > renders deterministic fixture states in development builds only  338ms
+ ✓ src/test/design-system-conformance.test.tsx (9 tests) 1054ms
+   ✓ UI Design System Conformance & Replacement Invariants > proves switching design systems preserves DOM structure, input state, and interactive controls without remounting  989ms
+ ✓ src/test/editor.test.tsx (7 tests) 969ms
+ ✓ src/test/components.test.tsx (16 tests) 1086ms
+ ✓ src/shell/WorkspacePanes.test.tsx (2 tests) 883ms
+   ✓ WorkspacePanes coding agent launch > launches the Coding Agent surface from the empty-tab landing  826ms
+ ✓ src/settings/SettingsPanel.test.tsx (2 tests) 1194ms
+   ✓ SettingsPanel > sends one complete bounded typography transaction  790ms
+   ✓ SettingsPanel > disables apply for invalid profile bounds  403ms
+ ✓ src/editor/sync/session.test.ts (16 tests) 410ms
+ ✓ src/test/design-system-consumption.test.ts (12 tests) 103ms
+ ✓ src/shell/workspace-controller.test.ts (17 tests) 25ms
+ ✓ src/test/design-system-adapter.test.ts (20 tests) 21ms
+ ✓ src/test/theme-adapter.test.ts (10 tests) 17ms
+ ✓ src/editor/extensions/completion.test.ts (1 test) 475ms
+   ✓ completion projection > round-trips a request and expands inert snippets locally  474ms
+ ✓ src/test/icon-store.test.ts (6 tests) 8ms
+stdout | src/agent/transcript-lifecycle.test.ts > transcript lifecycle (plan 109 I5) > mid-run steer appears as a user-kind entry without losing in-flight text
+SNAPHOOK {"incoming":[["clay-entry-0","user","start"],["clay-entry-1","user","steer: focus tests"]],"live":[["clay-entry-0","user","list files then load the skill"],["clay-entry-1","assistant","checking"],["clay-tool-c1","tool","glob {\"pattern\":\"**/*.rs\"} -> src/main.rs, src/lib.rs"],["clay-tool-c2","tool","load_skill {\"name\":\"rust-review\"} -> Loaded skill"],["clay-entry-2","assistant","12 tokens"],["clay-text-run-1","assistant","partial"]],"inFlight":["clay-tool-c1","clay-tool-c2","clay-text-run-1"]}
+
+ ✓ src/agent/transcript-lifecycle.test.ts (3 tests) 227ms
+ ✓ src/test/core-baseline-hierarchy.test.ts (6 tests) 6ms
+ ✓ src/editor/performance.test.ts (4 tests) 14ms
+ ✓ src/shell/split-tree.test.ts (7 tests) 9ms
+ ✓ src/agent/transport.test.ts (9 tests) 187ms
+ ✓ src/editor/sync/operations.test.ts (4 tests) 8ms
+ ✓ src/test/bridge.test.ts (7 tests) 4ms
+ ✓ src/shell/tab-store.test.ts (3 tests) 5ms
+ ✓ src/sdui/state.test.ts (2 tests) 3ms
+ ✓ src/test/connection.test.ts (4 tests) 3ms
+ ✓ src/__tests__/design-system-adapter.negative-outline-offset.test.ts (2 tests) 2ms
+ ✓ src/chat/ChatPanel.test.tsx (3 tests) 290ms
+ ✓ src/test/performance.test.tsx (3 tests) 26ms
+ ✓ src/sdui/renderer.test.tsx (2 tests) 174ms
+ ✓ src/test/icons.test.tsx (17 tests) 408ms
+ ✓ src/coding-agent/CodingAgentPanel.test.tsx (21 tests) 3483ms
+   ✓ CodingAgentPanel > renders the 50/50 split with transcript, tabs, status row, and strip  525ms
+   ✓ CodingAgentPanel > shows the full content of a selected card in Session Info (plan 109 I10)  361ms
+   ✓ CodingAgentPanel > Back from Session Info restores the tab the selection came from (plan 109 I10)  302ms
+ ✓ src/editor/position-map.test.ts (10 tests) 5120ms
+   ✓ incremental position index > equals a fresh rebuild after random edit sequences  4221ms
+   ✓ incremental position index > keeps a 1 MiB single line editable with reported conversion cost  830ms
+ ✓ src/editor/extensions/performance.test.ts (5 tests) 6245ms
+   ✓ editor performance invariants (Plan 099) > keeps 200 repeated 1 MiB edits on the shared index without rebuilding it  503ms
+   ✓ editor performance invariants (Plan 099) > retains a constant-size projection across 100 sliding viewport patches  5008ms
+   ✓ editor performance invariants (Plan 099) > keeps a 50 MiB document a single Text with no undo history  704ms
+
+ Test Files  37 passed (37)
+      Tests  280 passed (280)
+   Start at  18:47:13
+   Duration  7.85s (transform 2.40s, setup 3.63s, collect 15.22s, tests 27.52s, environment 21.05s, prepare 2.72s)
+

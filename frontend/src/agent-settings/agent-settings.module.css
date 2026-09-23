@@ -1,0 +1,115 @@
+/* Agent settings tab (plan 117 + plan 118 composition): the coding agent's
+ * Settings tab body. The tab frame, its strip and its close affordance belong
+ * to the inspector, so this file paints only the listing inside it.
+ *
+ * One column: a caption, then hairline-separated file rows. The row is a
+ * `list.default.row` (the same row language as the rest of the app's lists),
+ * so hover/focus/press come from the shipped recipe rather than from a bespoke
+ * button look. Layout is host-owned; every colour, radius, border and duration
+ * is a recipe value or a theme role. */
+
+.body {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The approved page caps its column at 760px; inside an inspector there is less
+ * room than that, so the cap only matters if this body is ever hosted wider. */
+.column {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-sm, 12px);
+  padding: var(--clay-spacing-md, 16px);
+}
+
+.caption {
+  color: var(--clay-text-muted);
+  line-height: 1.6;
+}
+
+.mono {
+  font-family: var(--clay-font-monospace);
+}
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fileRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--clay-spacing-2xs, 4px);
+  width: 100%;
+  text-align: left;
+  padding: var(--clay-ds-list-default-row-rest-padding);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--clay-text-body-size);
+
+  border: 0;
+  border-radius: var(--clay-ds-list-default-row-rest-border-radius);
+  background: var(--clay-ds-list-default-row-rest-background-color);
+  color: var(--clay-ds-list-default-row-rest-text-color);
+  transition:
+    background-color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing),
+    color var(--clay-ds-list-default-row-rest-transition-duration)
+      var(--clay-ds-list-default-row-rest-transition-timing);
+}
+
+.fileRow:hover {
+  background: var(--clay-ds-list-default-row-hover-background-color);
+  color: var(--clay-ds-list-default-row-hover-text-color);
+}
+
+.fileRow:focus-visible {
+  outline: var(--clay-ds-list-default-row-focus-outline-width)
+    var(--clay-ds-list-default-row-focus-outline-style)
+    var(--clay-ds-list-default-row-focus-outline-color);
+  outline-offset: var(--clay-ds-list-default-row-focus-outline-offset);
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--clay-font-monospace);
+  font-size: var(--clay-text-detail-size);
+}
+
+.fileMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--clay-spacing-sm, 12px);
+}
+
+/* A designed empty state, not an empty box (DESIGN.md §12). */
+.empty {
+  display: grid;
+  gap: var(--clay-ds-empty-default-root-rest-gap);
+  padding: var(--clay-ds-empty-default-root-rest-padding);
+  background: var(--clay-ds-empty-default-root-rest-background-color);
+  color: var(--clay-ds-empty-default-root-rest-text-color);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: var(--clay-text-body-size);
+  font-weight: 500;
+  color: var(--clay-text-primary);
+}
+
+.emptyText {
+  margin: 0;
+  max-width: 48ch;
+  font-size: var(--clay-text-detail-size);
+  line-height: 1.6;
+}

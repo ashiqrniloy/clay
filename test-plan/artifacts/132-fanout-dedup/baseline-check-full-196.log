@@ -1,0 +1,710 @@
+full check: waiting for serial lock target/.clay-full-check.lock (concurrent full runs queue here)
+full check: acquired target/.clay-full-check.lock
+== [audit] cargo audit
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1251 security advisories (from /home/arn/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning Cargo.lock for vulnerabilities (605 crate dependencies)
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+
+warning: 9 allowed warnings found
+== [fmt] cargo fmt --check
+== [check] cargo check --all-targets
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+    Checking stable_deref_trait v1.2.1
+   Compiling shlex v1.3.0
+    Checking writeable v0.6.3
+    Checking litemap v0.8.2
+   Compiling zmij v1.0.21
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.17.0
+    Checking memchr v2.8.0
+    Checking pin-project-lite v0.2.17
+    Checking utf8_iter v1.0.4
+   Compiling find-msvc-tools v0.1.9
+    Checking smallvec v1.15.1
+   Compiling libc v0.2.186
+    Checking cfg-if v1.0.4
+   Compiling tree-sitter-language v0.1.7
+   Compiling autocfg v1.5.0
+   Compiling libm v0.2.16
+   Compiling icu_normalizer_data v2.2.0
+   Compiling icu_properties_data v2.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling cc v1.2.61
+   Compiling winnow v1.0.2
+   Compiling serde_json v1.0.149
+    Checking scopeguard v1.2.0
+    Checking futures-core v0.3.32
+   Compiling glob v0.3.3
+    Checking itoa v1.0.18
+   Compiling num-traits v0.2.19
+    Checking lock_api v0.4.14
+   Compiling prettyplease v0.2.37
+   Compiling icu_locale_data v2.2.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling clang-sys v1.8.1
+   Compiling minimal-lexical v0.2.1
+   Compiling bitflags v2.11.1
+    Checking percent-encoding v2.3.2
+    Checking bytes v1.11.1
+   Compiling syn v2.0.117
+   Compiling regex-syntax v0.8.10
+   Compiling either v1.15.0
+   Compiling crc32fast v1.5.0
+   Compiling thiserror v2.0.18
+   Compiling rustix v0.38.44
+   Compiling icu_calendar_data v2.2.0
+   Compiling nom v7.1.3
+    Checking form_urlencoded v1.2.2
+    Checking core_maths v0.1.1
+   Compiling libloading v0.8.9
+   Compiling bindgen v0.72.1
+   Compiling linux-raw-sys v0.4.15
+    Checking futures-io v0.3.32
+    Checking errno v0.3.14
+    Checking socket2 v0.6.3
+    Checking mio v1.2.0
+    Checking signal-hook-registry v1.4.8
+   Compiling itertools v0.13.0
+   Compiling strck v1.0.0
+    Checking parking_lot v0.12.5
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling rustc-hash v2.1.2
+    Checking futures-sink v0.3.32
+   Compiling home v0.5.12
+   Compiling log v0.4.29
+   Compiling adler2 v2.0.1
+    Checking futures-channel v0.3.32
+   Compiling fslock v0.2.1
+   Compiling gzip-header v1.1.0
+   Compiling miniz_oxide v0.8.9
+    Checking aho-corasick v1.1.4
+    Checking slab v0.4.12
+   Compiling paste v1.0.15
+    Checking ixdtf v0.6.5
+    Checking parking v2.2.1
+   Compiling radium v0.7.0
+    Checking futures-task v0.3.32
+   Compiling heck v0.5.0
+    Checking rand_core v0.6.4
+   Compiling regex-automata v0.4.14
+   Compiling endi v1.1.1
+    Checking tap v1.0.1
+    Checking indexmap v2.14.0
+    Checking uuid v1.23.1
+    Checking diplomat-runtime v0.15.1
+    Checking wyz v0.5.1
+    Checking rand v0.8.6
+    Checking event-listener v5.4.2
+    Checking num-integer v0.1.46
+    Checking simdutf8 v0.1.5
+   Compiling cexpr v0.6.0
+    Checking outref v0.5.2
+   Compiling crossbeam-utils v0.8.21
+   Compiling anyhow v1.0.104
+    Checking funty v2.0.0
+    Checking vsimd v0.8.0
+   Compiling rustix v1.1.4
+    Checking once_cell v1.21.4
+    Checking num-bigint v0.4.6
+    Checking event-listener-strategy v0.5.4
+    Checking tracing-core v0.1.36
+   Compiling tree-sitter-rust v0.24.2
+   Compiling tree-sitter-javascript v0.25.0
+    Checking bitvec v1.0.1
+   Compiling tree-sitter-typescript v0.23.2
+   Compiling which v6.0.3
+    Checking base64-simd v0.8.0
+   Compiling tree-sitter-md-025 v0.5.6
+   Compiling toml_edit v0.25.11+spec-1.1.0
+    Checking if_chain v1.0.3
+   Compiling crossbeam-epoch v0.9.20
+    Checking unicode-id-start v1.4.0
+    Checking data-encoding v2.11.0
+    Checking streaming-iterator v0.1.9
+    Checking bit-vec v0.8.0
+    Checking linux-raw-sys v0.12.1
+    Checking arrayvec v0.7.6
+   Compiling stringcase v0.4.0
+   Compiling zerocopy v0.8.48
+    Checking fastrand v2.4.1
+    Checking polycool v0.4.0
+    Checking bit-set v0.8.0
+    Checking futures-lite v2.6.1
+   Compiling regex v1.12.3
+    Checking async-broadcast v0.7.2
+   Compiling proc-macro-crate v3.5.0
+    Checking ordered-stream v0.2.0
+    Checking hex v0.4.3
+    Checking az v1.3.0
+   Compiling tree-sitter v0.25.10
+   Compiling clay v0.1.0 (/home/arn/Projects/clay)
+    Checking deno_core_icudata v0.77.0
+    Checking cooked-waker v5.0.0
+    Checking static_assertions v1.1.0
+    Checking str_indices v0.4.4
+    Checking inventory v0.3.24
+    Checking kurbo v0.13.1
+   Compiling rayon-core v1.13.0
+    Checking anstyle v1.0.14
+    Checking crop v0.4.3
+    Checking plotters-backend v0.3.7
+    Checking clap_lex v1.1.0
+    Checking ciborium-io v0.2.2
+    Checking crossbeam-deque v0.8.6
+   Compiling synstructure v0.13.2
+    Checking plotters-svg v0.3.7
+    Checking clap_builder v4.6.0
+    Checking same-file v1.0.6
+    Checking cast v0.3.0
+    Checking walkdir v2.5.0
+    Checking plotters v0.3.7
+    Checking anes v0.1.6
+    Checking oorandom v11.1.5
+    Checking rayon v1.12.0
+   Compiling serde_derive v1.0.228
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.5
+   Compiling tokio-macros v2.7.0
+   Compiling enumflags2_derive v0.7.12
+   Compiling thiserror-impl v2.0.18
+   Compiling futures-macro v0.3.32
+   Compiling ptr_meta_derive v0.3.1
+   Compiling deno_error_macro v0.7.1
+   Compiling strum_macros v0.27.2
+    Checking calendrical_calculations v0.2.4
+    Checking tokio v1.52.2
+   Compiling bytecheck_derive v0.8.2
+    Checking ptr_meta v0.3.1
+    Checking rancor v0.1.1
+   Compiling sys_traits_macros v0.1.0
+   Compiling tracing-attributes v0.1.31
+   Compiling capacity_builder_macros v0.3.0
+   Compiling pin-project-internal v1.1.12
+   Compiling syn-match v0.3.1
+   Compiling munge_macro v0.4.7
+    Checking sys_traits v0.1.27
+    Checking zerofrom v0.1.7
+    Checking capacity_builder v0.5.0
+    Checking futures-util v0.3.32
+    Checking yoke v0.8.2
+   Compiling async-trait v0.1.89
+    Checking bytecheck v0.8.2
+    Checking zerovec v0.11.6
+    Checking zerotrie v0.2.4
+    Checking rend v0.5.3
+    Checking munge v0.4.7
+   Compiling rkyv_derive v0.8.17
+   Compiling boxed_error v0.2.3
+   Compiling serde_repr v0.1.20
+   Compiling zerocopy-derive v0.8.48
+   Compiling async-recursion v1.1.1
+    Checking clap v4.6.1
+    Checking criterion-plot v0.6.0
+    Checking pin-project v1.1.12
+    Checking tracing v0.1.44
+    Checking potential_utf v0.1.5
+    Checking tinystr v0.8.3
+   Compiling strum v0.27.2
+    Checking icu_collections v2.2.0
+    Checking resb v0.1.2
+    Checking icu_locale_core v2.2.0
+   Compiling deno_ops v0.276.0
+   Compiling zvariant_utils v3.3.1
+   Compiling diplomat_core v0.15.0
+   Compiling enumflags2 v0.7.12
+    Checking debugid v0.8.0
+    Checking bincode v1.3.3
+    Checking tinytemplate v1.2.1
+    Checking icu_provider v2.2.0
+    Checking zoneinfo64 v0.3.0
+   Compiling zvariant_derive v5.11.0
+    Checking timezone_provider v0.2.3
+    Checking icu_normalizer v2.2.0
+    Checking icu_properties v2.2.0
+    Checking icu_locale v2.2.0
+    Checking futures-executor v0.3.32
+    Checking futures v0.3.32
+   Compiling zvariant v5.11.0
+    Checking icu_calendar v2.2.1
+   Compiling diplomat v0.15.0
+    Checking deno_unsync v0.4.4
+    Checking idna_adapter v1.2.2
+    Checking rkyv v0.8.17
+    Checking idna v1.1.0
+   Compiling v8 v147.4.0
+    Checking url v2.5.8
+    Checking deno_error v0.7.1
+    Checking sourcemap v9.3.2
+    Checking temporal_rs v0.2.3
+    Checking wasm_dep_analyzer v0.4.0
+    Checking deno_path_util v0.6.4
+    Checking zbus_names v4.3.2
+    Checking temporal_capi v0.2.3
+    Checking half v2.7.1
+   Compiling zbus_macros v5.15.0
+    Checking ciborium-ll v0.2.2
+    Checking ciborium v0.2.2
+    Checking criterion v0.7.0
+    Checking zbus v5.15.0
+    Checking serde_v8 v0.309.0
+    Checking deno_core v0.400.0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.83s
+== [clippy] cargo clippy --all-targets -- -D warnings
+   Compiling clay v0.1.0 (/home/arn/Projects/clay)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 30.80s
+== [test] cargo test --all-targets --quiet
+
+running 1411 tests
+....................................................................................... 87/1411
+....................................................................................... 174/1411
+....................................................................................... 261/1411
+....................................................................................... 348/1411
+....................................................................................... 435/1411
+....................................................................................... 522/1411
+...............................................................................Initialized empty Git repository in /tmp/clay-git-cache-explicit-refresh-1789945330256023471/.git/
+[main (root-commit) b5810c5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+....Initialized empty Git repository in /tmp/clay-git-discovery-parent-1789945330290393516/.git/
+.Initialized empty Git repository in /tmp/clay-git-discovery-detached-1789945330294855041/.git/
+... 609/1411
+[main (root-commit) b5810c5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+HEAD is now at b5810c5 initial
+..Initialized empty Git repository in /tmp/clay-git-discovery-repo-1789945330322351554/.git/
+..[main (root-commit) b5810c5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+.Initialized empty Git repository in /tmp/clay-git-discovery-workspace-roots-1789945330338469967/.git/
+............................................................................Initialized empty Git repository in /tmp/clay-git-facade-1789945330715415769/repo/.git/
+.[main (root-commit) b5810c5] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+..... 696/1411
+..............................Initialized empty Git repository in /tmp/clay-git-package-load-1789945331353441462/repo/.git/
+[main (root-commit) bbd82d2] initial
+ 1 file changed, 1 insertion(+)
+ create mode 100644 tracked.txt
+......................................................... 783/1411
+.....................i................................................................. 870/1411
+....................................................................................... 957/1411
+....................................................................................... 1044/1411
+....................................................................................... 1131/1411
+....................................................................................... 1218/1411
+....................................................................................... 1305/1411
+....................................................................................... 1392/1411
+...................
+test result: ok. 1410 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 11.60s
+
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 62 tests
+..............................................................
+test result: ok. 62 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+
+running 227 tests
+....................................................................................... 87/227
+....................................................................................... 174/227
+.....................................................
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.03s
+
+
+running 75 tests
+...........................................................................
+test result: ok. 75 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 49.58s
+
+
+running 152 tests
+....................................................................................... 87/152
+.................................................................
+test result: ok. 152 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s
+
+Gnuplot not found, using plotters backend
+Testing protocol_codec_payloads/hello_roundtrip
+Success
+Testing protocol_codec_payloads/client_edit/16
+Success
+Testing protocol_codec_payloads/client_edit/1024
+Success
+Testing protocol_codec_payloads/client_edit/16384
+Success
+Testing protocol_codec_payloads/initial_document_64k
+Success
+
+Testing client_edit_queue_pressure/1
+Success
+Testing client_edit_queue_pressure/64
+Success
+Testing client_edit_queue_pressure/256
+Success
+
+Testing server_document_acknowledgements/1
+Success
+Testing server_document_acknowledgements/16
+Success
+Testing server_document_acknowledgements/128
+Success
+
+Testing server_stale_edit_rejections/1
+Success
+Testing server_stale_edit_rejections/16
+Success
+Testing server_stale_edit_rejections/128
+Success
+
+== [bench-compile] cargo bench --no-run
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling stable_deref_trait v1.2.1
+   Compiling shlex v1.3.0
+   Compiling writeable v0.6.3
+   Compiling zmij v1.0.21
+   Compiling equivalent v1.0.2
+   Compiling hashbrown v0.17.0
+   Compiling litemap v0.8.2
+   Compiling memchr v2.8.0
+   Compiling pin-project-lite v0.2.17
+   Compiling find-msvc-tools v0.1.9
+   Compiling utf8_iter v1.0.4
+   Compiling libc v0.2.186
+   Compiling smallvec v1.15.1
+   Compiling cfg-if v1.0.4
+   Compiling tree-sitter-language v0.1.7
+   Compiling icu_properties_data v2.2.0
+   Compiling cc v1.2.61
+   Compiling icu_normalizer_data v2.2.0
+   Compiling libm v0.2.16
+   Compiling autocfg v1.5.0
+   Compiling parking_lot_core v0.9.12
+   Compiling winnow v1.0.2
+   Compiling glob v0.3.3
+   Compiling itoa v1.0.18
+   Compiling serde_json v1.0.149
+   Compiling futures-core v0.3.32
+   Compiling num-traits v0.2.19
+   Compiling scopeguard v1.2.0
+   Compiling lock_api v0.4.14
+   Compiling clang-sys v1.8.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling thiserror v2.0.18
+   Compiling icu_locale_data v2.2.0
+   Compiling syn v2.0.117
+   Compiling prettyplease v0.2.37
+   Compiling either v1.15.0
+   Compiling bitflags v2.11.1
+   Compiling regex-syntax v0.8.10
+   Compiling rustix v0.38.44
+   Compiling minimal-lexical v0.2.1
+   Compiling icu_calendar_data v2.2.0
+   Compiling percent-encoding v2.3.2
+   Compiling crc32fast v1.5.0
+   Compiling bytes v1.11.1
+   Compiling errno v0.3.14
+   Compiling mio v1.2.0
+   Compiling socket2 v0.6.3
+   Compiling core_maths v0.1.1
+   Compiling signal-hook-registry v1.4.8
+   Compiling nom v7.1.3
+   Compiling form_urlencoded v1.2.2
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling parking_lot v0.12.5
+   Compiling libloading v0.8.9
+   Compiling linux-raw-sys v0.4.15
+   Compiling futures-io v0.3.32
+   Compiling bindgen v0.72.1
+   Compiling itertools v0.13.0
+   Compiling strck v1.0.0
+   Compiling adler2 v2.0.1
+   Compiling rustc-hash v2.1.2
+   Compiling futures-sink v0.3.32
+   Compiling log v0.4.29
+   Compiling home v0.5.12
+   Compiling futures-channel v0.3.32
+   Compiling regex-automata v0.4.14
+   Compiling miniz_oxide v0.8.9
+   Compiling gzip-header v1.1.0
+   Compiling fslock v0.2.1
+   Compiling aho-corasick v1.1.4
+   Compiling indexmap v2.14.0
+   Compiling ixdtf v0.6.5
+   Compiling paste v1.0.15
+   Compiling futures-task v0.3.32
+   Compiling parking v2.2.1
+   Compiling slab v0.4.12
+   Compiling radium v0.7.0
+   Compiling uuid v1.23.1
+   Compiling cexpr v0.6.0
+   Compiling tap v1.0.1
+   Compiling rand_core v0.6.4
+   Compiling diplomat-runtime v0.15.1
+   Compiling endi v1.1.1
+   Compiling toml_edit v0.25.11+spec-1.1.0
+   Compiling heck v0.5.0
+   Compiling rand v0.8.6
+   Compiling which v6.0.3
+   Compiling wyz v0.5.1
+   Compiling event-listener v5.4.2
+   Compiling num-integer v0.1.46
+   Compiling once_cell v1.21.4
+   Compiling funty v2.0.0
+   Compiling proc-macro-crate v3.5.0
+   Compiling regex v1.12.3
+   Compiling crossbeam-utils v0.8.21
+   Compiling vsimd v0.8.0
+   Compiling rustix v1.1.4
+   Compiling tree-sitter v0.25.10
+   Compiling simdutf8 v0.1.5
+   Compiling outref v0.5.2
+   Compiling anyhow v1.0.104
+   Compiling bitvec v1.0.1
+   Compiling num-bigint v0.4.6
+   Compiling event-listener-strategy v0.5.4
+   Compiling tracing-core v0.1.36
+   Compiling tree-sitter-md-025 v0.5.6
+   Compiling tree-sitter-typescript v0.23.2
+   Compiling base64-simd v0.8.0
+   Compiling tree-sitter-rust v0.24.2
+   Compiling tree-sitter-javascript v0.25.0
+   Compiling stringcase v0.4.0
+   Compiling synstructure v0.13.2
+   Compiling fastrand v2.4.1
+   Compiling zerocopy v0.8.48
+   Compiling linux-raw-sys v0.12.1
+   Compiling if_chain v1.0.3
+   Compiling streaming-iterator v0.1.9
+   Compiling bit-vec v0.8.0
+   Compiling data-encoding v2.11.0
+   Compiling crossbeam-epoch v0.9.20
+   Compiling unicode-id-start v1.4.0
+   Compiling arrayvec v0.7.6
+   Compiling bit-set v0.8.0
+   Compiling futures-lite v2.6.1
+   Compiling polycool v0.4.0
+   Compiling serde_derive v1.0.228
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.5
+   Compiling enumflags2_derive v0.7.12
+   Compiling zerofrom v0.1.7
+   Compiling tokio-macros v2.7.0
+   Compiling yoke v0.8.2
+   Compiling thiserror-impl v2.0.18
+   Compiling deno_error_macro v0.7.1
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling calendrical_calculations v0.2.4
+   Compiling tokio v1.52.2
+   Compiling ptr_meta_derive v0.3.1
+   Compiling futures-macro v0.3.32
+   Compiling bytecheck_derive v0.8.2
+   Compiling sys_traits_macros v0.1.0
+   Compiling ptr_meta v0.3.1
+   Compiling rancor v0.1.1
+   Compiling strum_macros v0.27.2
+   Compiling sys_traits v0.1.27
+   Compiling tracing-attributes v0.1.31
+   Compiling syn-match v0.3.1
+   Compiling bytecheck v0.8.2
+   Compiling potential_utf v0.1.5
+   Compiling tinystr v0.8.3
+   Compiling futures-util v0.3.32
+   Compiling icu_collections v2.2.0
+   Compiling resb v0.1.2
+   Compiling icu_locale_core v2.2.0
+   Compiling pin-project-internal v1.1.12
+   Compiling munge_macro v0.4.7
+   Compiling capacity_builder_macros v0.3.0
+   Compiling tracing v0.1.44
+   Compiling zvariant_utils v3.3.1
+   Compiling enumflags2 v0.7.12
+   Compiling diplomat_core v0.15.0
+   Compiling debugid v0.8.0
+   Compiling capacity_builder v0.5.0
+   Compiling munge v0.4.7
+   Compiling bincode v1.3.3
+   Compiling rend v0.5.3
+   Compiling zvariant_derive v5.11.0
+   Compiling icu_provider v2.2.0
+   Compiling zoneinfo64 v0.3.0
+   Compiling strum v0.27.2
+   Compiling deno_ops v0.276.0
+   Compiling pin-project v1.1.12
+   Compiling boxed_error v0.2.3
+   Compiling icu_properties v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_locale v2.2.0
+   Compiling timezone_provider v0.2.3
+   Compiling v8 v147.4.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling diplomat v0.15.0
+   Compiling zvariant v5.11.0
+   Compiling futures-executor v0.3.32
+   Compiling icu_calendar v2.2.1
+   Compiling url v2.5.8
+   Compiling futures v0.3.32
+   Compiling zerocopy-derive v0.8.48
+   Compiling async-trait v0.1.89
+   Compiling rkyv_derive v0.8.17
+   Compiling deno_error v0.7.1
+   Compiling temporal_rs v0.2.3
+   Compiling deno_path_util v0.6.4
+   Compiling wasm_dep_analyzer v0.4.0
+   Compiling deno_unsync v0.4.4
+   Compiling sourcemap v9.3.2
+   Compiling serde_repr v0.1.20
+   Compiling async-recursion v1.1.1
+   Compiling zbus_names v4.3.2
+   Compiling async-broadcast v0.7.2
+   Compiling clay v0.1.0 (/home/arn/Projects/clay)
+   Compiling ordered-stream v0.2.0
+   Compiling static_assertions v1.1.0
+   Compiling deno_core_icudata v0.77.0
+   Compiling inventory v0.3.24
+   Compiling temporal_capi v0.2.3
+   Compiling str_indices v0.4.4
+   Compiling zbus_macros v5.15.0
+   Compiling cooked-waker v5.0.0
+   Compiling az v1.3.0
+   Compiling hex v0.4.3
+   Compiling crop v0.4.3
+   Compiling rkyv v0.8.17
+   Compiling kurbo v0.13.1
+   Compiling rayon-core v1.13.0
+   Compiling crossbeam-deque v0.8.6
+   Compiling anstyle v1.0.14
+   Compiling plotters-backend v0.3.7
+   Compiling clap_lex v1.1.0
+   Compiling ciborium-io v0.2.2
+   Compiling clap_builder v4.6.0
+   Compiling plotters-svg v0.3.7
+   Compiling same-file v1.0.6
+   Compiling zbus v5.15.0
+   Compiling cast v0.3.0
+   Compiling walkdir v2.5.0
+   Compiling plotters v0.3.7
+   Compiling tinytemplate v1.2.1
+   Compiling serde_v8 v0.309.0
+   Compiling rayon v1.12.0
+   Compiling deno_core v0.400.0
+   Compiling anes v0.1.6
+   Compiling criterion-plot v0.6.0
+   Compiling oorandom v11.1.5
+   Compiling clap v4.6.1
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling criterion v0.7.0
+    Finished `bench` profile [optimized] target(s) in 1m 46s
+  Executable benches src/lib.rs (target/release/deps/clay-f8cf2532024fffae)
+  Executable benches src/main.rs (target/release/deps/clay-6b461e20e77d8d1b)
+  Executable benches src/bin/clay-server.rs (target/release/deps/clay_server-5838042e858116c7)
+  Executable benches src/bin/update-doc-registry.rs (target/release/deps/update_doc_registry-0a7086bab1bb1e44)
+  Executable benches/protocol_server_baselines.rs (target/release/deps/protocol_server_baselines-e3abb9182ec51262)
+== [bindings] scripts/check-bindings.sh
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.35s
+
+webview bindings up to date
+full check PASSED
+EXIT=0 ELAPSED=389s

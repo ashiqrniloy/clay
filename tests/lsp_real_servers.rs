@@ -34,7 +34,10 @@ fn marksman_available() -> bool {
 
 fn run_node_tests(files: &[&str]) {
     let mut command = Command::new("node");
-    command.arg("--test");
+    command
+        .arg("--import")
+        .arg("./tests/fixtures/lsp/register-lsp-shared.mjs")
+        .arg("--test");
     for file in files {
         command.arg(file);
     }
