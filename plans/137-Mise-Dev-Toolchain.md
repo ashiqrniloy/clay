@@ -217,12 +217,19 @@
       pass / 1 skip / 0 fail) — exit 0 throughout, confirming downstream
       steps work on mise-provided node/npm with no separate installs.
     - CI-run evidence: branch pushed and PR opened —
-      https://github.com/ashiqrniloy/clay/pull/1. Green run:
+      https://github.com/ashiqrniloy/clay/pull/1. First green run:
       https://github.com/ashiqrniloy/clay/actions/runs/35924092903 on
       `e8ccb7b` (linux job: mise provisioning, frontend gates,
       clay-agent tests, package-smoke, `scripts/check.sh full`). The first
       run (`35922880660`) failed on a stale `performance_budgets`
-      npm-command doc expectation, fixed in `e8ccb7b`.
+      npm-command doc expectation, fixed in `e8ccb7b`. A later run hit a
+      pre-existing flake (`agent_protocol::knowledge_set_options_forwards_to_daemon`,
+      `Spawn(ExecutableFileBusy)`): `temp_dir` derived uniqueness from
+      wall-clock nanoseconds, so two threads could share a directory and
+      one could exec the mock daemon while the other was still writing it.
+      Fixed with a per-process `AtomicU64` counter (`6081588`). Final green
+      run: https://github.com/ashiqrniloy/clay/actions/runs/35927325961
+      on `6081588`.
 
 - [x] Docs: mise-first setup
   - Acceptance Criteria:
